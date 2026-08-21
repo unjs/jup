@@ -5,6 +5,11 @@
  * is no config file, no user profile, no registry of registries.
  */
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { parseEnv } from "node:util";
+import { messages } from "./errors.ts";
+
 /** §11 — every variable the tool reads, so the whole block is read in one pass. */
 export const ENV_VARS = [
   "COREPACK_ENABLE_PROJECT_SPEC",
@@ -25,6 +30,16 @@ export const ENV_VARS = [
 ] as const;
 
 /**
+ * §03.2 — the prefix filter is the entire sandbox against a hostile repository.
+ * Keys without it (`HTTP_PROXY`, `PATH`, `NODE_OPTIONS`, …) are dropped before
+ * anything is merged.
+ */
+export const ENV_FILE_PREFIX = "COREPACK_";
+
+/** §03.2 — the file looked for when `COREPACK_ENV_FILE` is unset. */
+export const DEFAULT_ENV_FILE_NAME = ".corepack.env";
+
+/**
  * §03.2 + §14.5 — variables an env file may never supply.
  *
  * `COREPACK_ENV_FILE` is chicken-and-egg; `COREPACK_ENABLE_DOWNLOAD_PROMPT`'s
@@ -43,9 +58,27 @@ export const ENV_FILE_INELIGIBLE = new Set([
   "COREPACK_NPM_PASSWORD",
 ]);
 
+/**
+ * Warned-about `<path>\0<NAME>` pairs.
+ *
+ * §14.5 asks for one warning per offending variable. Only the closest env file
+ * is ever loaded (§03.2), so a run applies at most one file and keying by path
+ * as well as name costs nothing while keeping repeated applications of *the same*
+ * file quiet.
+ */
+const warnedIneligible = new Set<string>();
+
 /** dotenv-style parse, matching `node:util`'s `parseEnv` semantics. */
 export function parseEnvFile(content: string): Record<string, string> {
-  throw new Error(`TODO(T4): parseEnvFile(${content.length} chars)`);
+  const parsed = parseEnv(content);
+  const vars: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const key of Object.keys(parsed)) {
+    const value = parsed[key];
+    if (typeof value === "string") {
+      vars[key] = value;
+    }
+  }
+  return vars;
 }
 
 /**
@@ -58,7 +91,24 @@ export function parseEnvFile(content: string): Record<string, string> {
 export function loadEnvFileFrom(
   dir: string,
 ): { vars: Record<string, string>; path: string } | null {
-  throw new Error(`TODO(T4): loadEnvFileFrom(${dir})`);
+  const configured = process.env.COREPACK_ENV_FILE;
+  if (configured === "0") {
+    return null;
+  }
+
+  const path = resolve(dir, configured ?? DEFAULT_ENV_FILE_NAME);
+
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+
+  return { vars: parseEnvFile(content), path };
 }
 
 /**
@@ -67,19 +117,44 @@ export function loadEnvFileFrom(
  * and assign the result to `process.env` for the remainder of the run.
  */
 export function applyEnvFile(vars: Record<string, string>, path: string): void {
-  throw new Error(`TODO(T4): applyEnvFile(${path})`);
+  const eligible: Record<string, string> = {};
+
+  for (const name of Object.keys(vars)) {
+    // §03.2 security note: the prefix filter runs *before* anything is merged.
+    if (!name.startsWith(ENV_FILE_PREFIX)) {
+      continue;
+    }
+
+    if (!isEnvFileEligible(name)) {
+      // §14.5 — warn once per variable, on stderr, then drop it.
+      const seen = `${path}\0${name}`;
+      if (!warnedIneligible.has(seen)) {
+        warnedIneligible.add(seen);
+        console.warn(messages.ignoringEnvVar(name, path));
+      }
+      continue;
+    }
+
+    const value = vars[name];
+    if (value !== undefined) {
+      eligible[name] = value;
+    }
+  }
+
+  // §11.6 — the real process environment always wins over the file.
+  process.env = { ...eligible, ...process.env };
 }
 
 export function isEnvFileEligible(name: string): boolean {
-  throw new Error(`TODO(T4): isEnvFileEligible(${name})`);
+  return name.startsWith(ENV_FILE_PREFIX) && !ENV_FILE_INELIGIBLE.has(name);
 }
 
 /** `true` only for the exact string `"1"`, matching the spec's value tables. */
 export function envFlag(name: string): boolean {
-  throw new Error(`TODO(T4): envFlag(${name})`);
+  return process.env[name] === "1";
 }
 
 /** `true` only for the exact string `"0"`. */
 export function envDisabled(name: string): boolean {
-  throw new Error(`TODO(T4): envDisabled(${name})`);
+  return process.env[name] === "0";
 }
