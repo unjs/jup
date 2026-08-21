@@ -30,20 +30,22 @@ export const TRUST_KEYS: TrustStore = {
 };
 
 /**
- * §15.10 seam — trust is looked up by registry origin, never by the literal
- * string `npm`. Callers pass a registry URL; only its origin is significant.
+ * §06.3 step 2 — the embedded key list, unconditionally.
+ *
+ * The store is *keyed* by origin as a §15.10 seam, but phase 1 must not select
+ * by it. §06.3 reads `<embedded config>.keys.npm` with no origin involved, and
+ * §06.6's threat table depends on that: a compromised mirror serving unpinned
+ * versions is defended precisely because npm's signature travels with the
+ * package and the mirror cannot forge it. Selecting by origin instead returned
+ * an empty list for every custom registry, so signature verification hard-failed
+ * on exactly the deployments the defence exists for.
+ *
+ * §15.10 makes trust per-origin *and* adds a soft-fail for unknown origins; the
+ * two arrive together or not at all.
  */
 export function getTrustedKeys(
-  registry: string = DEFAULT_REGISTRY,
+  _registry: string = DEFAULT_REGISTRY,
   store: TrustStore = TRUST_KEYS,
 ): TrustedKey[] {
-  return store[originOf(registry)] ?? [];
-}
-
-function originOf(registry: string): string {
-  try {
-    return new URL(registry).origin;
-  } catch {
-    return registry;
-  }
+  return Object.values(store).flat();
 }

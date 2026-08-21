@@ -35,6 +35,10 @@ beforeAll(async () => {
       binPaths: ["bin/yarn.js"],
       packageName: "@yarnpkg/cli-dist",
     }),
+    // A real mirror carries npm's dist-tags. §05.2 rewrite 1 sends the *tag*
+    // lookup here too, not just the download, so without these `yarn@latest`
+    // behind a mirror has nowhere to resolve `latest` from.
+    { distTags: { latest: "4.9.9", stable: "4.9.9" } },
   );
 
   for (const version of ["2.1.0", "2.4.3", "4.9.9"]) {

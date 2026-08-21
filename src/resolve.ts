@@ -21,7 +21,13 @@ import {
   satisfiesWithPrereleases,
 } from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "./store.ts";
-import type { Descriptor, LazyLocator, Locator } from "./types.ts";
+import type {
+  Descriptor,
+  LazyLocator,
+  Locator,
+  PackageManagerSpec,
+  RegistrySpec,
+} from "./types.ts";
 
 export interface ResolveOptions {
   allowTags?: boolean;
@@ -38,6 +44,28 @@ export interface ResolveOptions {
  * query fans out over every band **in parallel** and unions, because a range
  * like `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry.
  */
+/**
+ * §05.2 rewrite 1 — with a custom npm registry configured, a band's
+ * `npmRegistry` replaces its `registry` **everywhere**, not only on the download
+ * path.
+ *
+ * This is what makes Yarn Berry usable behind a corporate mirror at all:
+ * repo.yarnpkg.com is not an npm registry and cannot be mirrored, so §02.5 gives
+ * Berry an `@yarnpkg/cli-dist` fallback. Consulting it only when downloading
+ * meant `yarn@latest` still resolved its tag from the public internet — which
+ * fails outright behind a firewall, and leaks traffic the user asked to keep
+ * internal everywhere else.
+ */
+function registryFor(spec: PackageManagerSpec): RegistrySpec {
+  return hasRegistryOverride() && spec.npmRegistry !== undefined ? spec.npmRegistry : spec.registry;
+}
+
+/** Whether the user pointed us at a registry other than the built-in default. */
+function hasRegistryOverride(): boolean {
+  const configured = process.env.COREPACK_NPM_REGISTRY;
+  return configured !== undefined && configured !== "";
+}
+
 export async function resolveDescriptor(
   descriptor: Descriptor,
   options?: ResolveOptions,
@@ -74,10 +102,9 @@ export async function resolveDescriptor(
     // §02.3 — dist-tags are a property of the newest distribution channel, so
     // they always resolve against the **last** range entry's registry, never a
     // per-version one. This is why `yarn@latest` consults repo.yarnpkg.com even
-    // though `yarn@1.22.22` would come from npm. (`spec.npmRegistry` is a
-    // download-path substitution, §07.3, and deliberately not consulted here.)
+    // though `yarn@1.22.22` would come from npm.
     const lastEntry = definition.ranges[definition.ranges.length - 1]!;
-    const tags = await fetchAvailableTags(lastEntry[1].registry);
+    const tags = await fetchAvailableTags(registryFor(lastEntry[1]));
     if (!Object.hasOwn(tags, range)) {
       throw new UsageError(messages.tagNotFound(range));
     }
@@ -114,7 +141,7 @@ export async function resolveDescriptor(
   // from *implicit* resolution unless the range itself names one.
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {
-      const versions = await fetchAvailableVersions(spec.registry);
+      const versions = await fetchAvailableVersions(registryFor(spec));
       return versions.filter((version) => satisfiesWithPrereleases(version, range));
     }),
   );

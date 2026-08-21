@@ -193,10 +193,21 @@ describe("trust store (§02.6, §14.4)", () => {
     }
   });
 
-  it("looks keys up by origin, tolerating a path or a trailing slash", () => {
-    expect(getTrustedKeys()).toBe(TRUST_KEYS[DEFAULT_REGISTRY]);
-    expect(getTrustedKeys("https://registry.npmjs.org/")).toHaveLength(1);
-    expect(getTrustedKeys("https://registry.npmjs.org/pnpm")).toHaveLength(1);
-    expect(getTrustedKeys("https://npm.internal.example")).toEqual([]);
+  it("returns the embedded keys for every registry, not just the default (§06.3)", () => {
+    // §06.3 step 2 reads the embedded list unconditionally, and §06.6's threat
+    // model depends on it: npm's signature travels with the package, so a
+    // compromised *mirror* cannot forge it. Selecting keys by origin instead
+    // returns nothing for a custom registry, which turns that defence into a
+    // hard failure on exactly the deployments it exists for.
+    //
+    // The store stays keyed by origin as the §15.10 seam — but §15.10 pairs
+    // per-origin trust with a soft-fail for unknown origins, and the two arrive
+    // together or not at all.
+    const embedded = TRUST_KEYS[DEFAULT_REGISTRY]!;
+
+    expect(getTrustedKeys()).toEqual(embedded);
+    expect(getTrustedKeys("https://registry.npmjs.org/")).toEqual(embedded);
+    expect(getTrustedKeys("https://npm.internal.example")).toEqual(embedded);
+    expect(getTrustedKeys("https://artifactory.corp/api/npm/npm-remote/")).toEqual(embedded);
   });
 });

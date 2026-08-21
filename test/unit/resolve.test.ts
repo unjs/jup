@@ -144,11 +144,27 @@ afterEach(async () => {
 });
 
 /** Both bands of the `yarn` definition, mocked. */
+/**
+ * The Berry band as an npm package.
+ *
+ * §05.2 rewrite 1: with COREPACK_NPM_REGISTRY set, a band's `npmRegistry`
+ * replaces its `registry` for tag and version lookups too, not just for the
+ * download — so Berry is asked for as `@yarnpkg/cli-dist` on the mirror rather
+ * than as repo.yarnpkg.com's tag document. The mirror therefore has to serve it.
+ */
+const CLI_DIST_PACKUMENT = {
+  // Mirrors BERRY_TAGS.tags exactly, so swapping the source does not also swap
+  // which versions exist — the prerelease stays a dist-tag target only.
+  versions: { "2.0.0": {}, "4.0.0": {}, "4.9.0": {} },
+  "dist-tags": { latest: "4.9.0", stable: "4.9.0", canary: "4.10.0-rc.1" },
+};
+
 async function startYarnServers(): Promise<{ npm: TestServer; berry: TestServer }> {
   const npm = await startServer({
     "/yarn": YARN_PACKUMENT,
     "/yarn/latest": { version: "1.22.9", dist: { shasum: "deadbeef" } },
     "/pnpm": { versions: { "10.0.0": {} }, "dist-tags": { latest: "10.0.0" } },
+    "/@yarnpkg/cli-dist": CLI_DIST_PACKUMENT,
   });
   const berry = await startServer({ "/tags": BERRY_TAGS });
 
@@ -156,6 +172,13 @@ async function startYarnServers(): Promise<{ npm: TestServer; berry: TestServer 
   BERRY_REGISTRY.url = `${berry.origin}/tags`;
 
   return { npm, berry };
+}
+
+/** The same two servers with no mirror configured, so Berry keeps its own registry. */
+async function startYarnServersWithoutMirror(): Promise<{ npm: TestServer; berry: TestServer }> {
+  const servers = await startYarnServers();
+  delete process.env.COREPACK_NPM_REGISTRY;
+  return servers;
 }
 
 /** A cached install: the directory, plus the `.corepack` marker §07.2 stats. */
@@ -256,7 +279,7 @@ describe("resolveDescriptor step 3 — tags", () => {
   });
 
   it("resolves against the LAST range entry's registry, not the first (§02.3)", async () => {
-    const { npm, berry } = await startYarnServers();
+    const { npm, berry } = await startYarnServersWithoutMirror();
 
     // `yarn@latest` must be Berry's 4.9.0, from repo.yarnpkg.com's tag
     // document — not npm's `yarn` dist-tag, which is Classic's 1.22.9.
@@ -268,9 +291,27 @@ describe("resolveDescriptor step 3 — tags", () => {
     expect(npm.requests).toEqual([]);
   });
 
+  it("asks the mirror for @yarnpkg/cli-dist instead, once one is configured (§05.2)", async () => {
+    // §05.2 rewrite 1. repo.yarnpkg.com is not an npm registry and cannot be
+    // mirrored, so a configured mirror switches Berry to its npm package — for
+    // the *tag lookup*, not only for the download. Without this, `yarn@latest`
+    // behind a corporate mirror still reaches the public internet: it fails
+    // outright behind a firewall, and leaks traffic everywhere else.
+    const { npm, berry } = await startYarnServers();
+
+    await expect(
+      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+    ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
+
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist"]);
+    expect(berry.requests).toEqual([]);
+  });
+
   it("names the last band's registry URL even when the network is off", async () => {
     // The table's real URL, so the assertion is about the *table*, not the mock.
-    await startYarnServers();
+    // No mirror: with one configured, §05.2 would swap Berry's tag document for
+    // the @yarnpkg/cli-dist packument and the message would name that instead.
+    await startYarnServersWithoutMirror();
     BERRY_REGISTRY.url = BERRY_REGISTRY_URL;
     process.env.COREPACK_ENABLE_NETWORK = "0";
 
@@ -306,9 +347,10 @@ describe("resolveDescriptor step 3 — tags", () => {
       resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
     ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
 
-    // The tag lookup is unavoidable; the *version* lookup is not.
-    expect(berry.requests).toEqual(["/tags"]);
-    expect(npm.requests).toEqual([]);
+    // The tag lookup is unavoidable; the *version* lookup is not. With a mirror
+    // configured, §05.2 sends the tag lookup to @yarnpkg/cli-dist.
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist"]);
+    expect(berry.requests).toEqual([]);
   });
 });
 
@@ -441,8 +483,9 @@ describe("resolveDescriptor step 6 — range query", () => {
       name: "yarn",
       reference: "4.9.0",
     });
-    expect(npm.requests).toEqual(["/yarn"]);
-    expect(berry.requests).toEqual(["/tags"]);
+    // Both bands are queried; with a mirror configured both live on it (§05.2).
+    expect([...npm.requests].sort()).toEqual(["/@yarnpkg/cli-dist", "/yarn"]);
+    expect(berry.requests).toEqual([]);
   });
 
   it("takes the highest match across the union, not the last band's highest", async () => {
@@ -453,8 +496,8 @@ describe("resolveDescriptor step 6 — range query", () => {
       name: "yarn",
       reference: "1.22.9",
     });
-    expect(npm.requests).toEqual(["/yarn"]);
-    expect(berry.requests).toEqual(["/tags"]);
+    expect([...npm.requests].sort()).toEqual(["/@yarnpkg/cli-dist", "/yarn"]);
+    expect(berry.requests).toEqual([]);
   });
 
   it("queries the bands in parallel", async () => {
@@ -467,7 +510,10 @@ describe("resolveDescriptor step 6 — range query", () => {
       }, 100);
     };
 
-    const npm = await startServer({ "/yarn": delayed(YARN_PACKUMENT) });
+    const npm = await startServer({
+      "/yarn": delayed(YARN_PACKUMENT),
+      "/@yarnpkg/cli-dist": delayed(CLI_DIST_PACKUMENT),
+    });
     const berry = await startServer({ "/tags": delayed(BERRY_TAGS) });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
     BERRY_REGISTRY.url = `${berry.origin}/tags`;
@@ -483,6 +529,7 @@ describe("resolveDescriptor step 6 — range query", () => {
   it("dedupes versions offered by more than one band", async () => {
     const npm = await startServer({
       "/yarn": { versions: { "4.9.0": {}, "1.22.9": {} }, "dist-tags": {} },
+      "/@yarnpkg/cli-dist": CLI_DIST_PACKUMENT,
     });
     const berry = await startServer({ "/tags": BERRY_TAGS });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
@@ -498,8 +545,8 @@ describe("resolveDescriptor step 6 — range query", () => {
     const { npm, berry } = await startYarnServers();
 
     await expect(resolveDescriptor({ name: "yarn", range: "^99.0.0" })).resolves.toBeNull();
-    expect(npm.requests).toEqual(["/yarn"]);
-    expect(berry.requests).toEqual(["/tags"]);
+    expect([...npm.requests].sort()).toEqual(["/@yarnpkg/cli-dist", "/yarn"]);
+    expect(berry.requests).toEqual([]);
 
     // The message the caller then formats.
     expect(messages.failedToResolve("^99.0.0", "yarn")).toBe(
@@ -508,7 +555,13 @@ describe("resolveDescriptor step 6 — range query", () => {
   });
 
   it("matches a prerelease band member under lenient satisfaction (§04.2)", async () => {
-    const npm = await startServer({ "/yarn": { versions: {}, "dist-tags": {} } });
+    const npm = await startServer({
+      "/yarn": { versions: {}, "dist-tags": {} },
+      "/@yarnpkg/cli-dist": {
+        versions: { "4.10.0-rc.1": {}, "4.9.0": {} },
+        "dist-tags": {},
+      },
+    });
     const berry = await startServer({
       "/tags": { aliases: {}, tags: ["4.10.0-rc.1", "4.9.0"] },
     });
