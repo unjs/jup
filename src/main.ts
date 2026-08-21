@@ -3,7 +3,48 @@
  * presentation (§08.4, §12.1).
  */
 
-import type { Invocation } from "./types.ts";
+import { dirname } from "node:path";
+import {
+  getDefinition,
+  getPackageManagerFor,
+  getSpecFor,
+  isSupportedPackageManager,
+} from "./config/table.ts";
+import { envDisabled, envFlag } from "./env.ts";
+import { messages, UsageError } from "./errors.ts";
+import { execPackageManager } from "./exec.ts";
+import { ensureInstalled } from "./install.ts";
+import { discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
+import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
+import { parse } from "./semver.ts";
+import type { Descriptor, Invocation, LazyLocator, Locator, SpecResult } from "./types.ts";
+
+/** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
+const ARG0_RE = /^([^@]*)(?:@(.*))?$/;
+
+/** §03.4 — the `source` reported for anything the user typed on the command line. */
+const CLI_SOURCE = "CLI arguments";
+
+/**
+ * §12.1 — the usage line printed under a management-mode `Usage Error:`.
+ *
+ * Keyed by the command word, so `corepack use yarn@1` gets `$ corepack use
+ * <pattern>` rather than the whole synopsis. Anything unrecognised falls back to
+ * the generic line, which is what an unknown command would have printed anyway.
+ */
+const USAGE_LINES: Record<string, string> = {
+  cache: "$ corepack cache clean",
+  disable: "$ corepack disable [--install-directory <path>] ...",
+  enable: "$ corepack enable [--install-directory <path>] ...",
+  hydrate: "$ corepack hydrate [--activate] <file>",
+  install: "$ corepack install [-g,--global] [--cache-only] ...",
+  pack: "$ corepack pack [--json] [-o,--output <path>] ...",
+  prepare: "$ corepack prepare [--activate] [--all] [-o,--output <path>] ...",
+  up: "$ corepack up",
+  use: "$ corepack use <pattern>",
+};
+
+const GENERIC_USAGE_LINE = "$ corepack <command>";
 
 /**
  * §01.2 — match `arg0` against `/^([^@]*)(?:@(.*))?$/`.
@@ -16,7 +57,34 @@ import type { Invocation } from "./types.ts";
  * The `[^@]*` is deliberate: `@scope/pkg@1.0.0` never matches as a name.
  */
 export function classifyInvocation(argv: string[]): Invocation {
-  throw new Error(`TODO(T16): classifyInvocation(${argv.join(" ")})`);
+  const arg0 = argv[0];
+
+  // No arguments at all is the CLI's business (`--help`), not the proxy's.
+  if (arg0 === undefined || arg0 === "") {
+    return { mode: "management", args: argv };
+  }
+
+  const match = ARG0_RE.exec(arg0);
+  // The regex cannot fail — both groups are optional — but the type says it can.
+  const binaryName = match?.[1] ?? arg0;
+  const rawVersion = match?.[2];
+
+  const known = getPackageManagerFor(binaryName) !== undefined;
+  // `rawVersion !== undefined` means the argument contained an `@`, even when
+  // nothing followed it: `corepack foo@` is a proxy invocation for an unknown
+  // package manager, exactly as corepack's `packageManager == null &&
+  // binaryVersion == null` test decides.
+  if (!known && rawVersion === undefined) {
+    return { mode: "management", args: argv };
+  }
+
+  // Corepack's `binaryVersion || null`: a trailing `@` with nothing after it is
+  // not a version override, so `corepack yarn@` behaves exactly like `yarn`.
+  const invocation: Invocation = { mode: "proxy", binaryName, args: argv.slice(1) };
+  if (rawVersion !== undefined && rawVersion !== "") {
+    invocation.binaryVersion = rawVersion;
+  }
+  return invocation;
 }
 
 /**
@@ -27,12 +95,92 @@ export function classifyInvocation(argv: string[]): Invocation {
  * project must not be an error.
  */
 export function isTransparentCommand(binaryName: string, args: string[]): boolean {
-  throw new Error(`TODO(T16): isTransparentCommand(${binaryName})`);
+  const name = getPackageManagerFor(binaryName);
+  if (name === undefined) return false;
+
+  // The prefixes belong to the package manager the *binary* resolves to, which
+  // is why `pnpx` (a pnpm binary) matches pnpm's `["pnpx"]` prefix.
+  const definition = getDefinition(name);
+  if (definition === undefined) return false;
+
+  for (const prefix of definition.transparent.commands) {
+    if (prefix[0] !== binaryName) continue;
+    // `every` over the *leading* segments only; extra arguments are the
+    // command's own and are ignored (`yarn dlx foo` is still `yarn dlx`).
+    if (prefix.slice(1).every((segment, index) => segment === args[index])) return true;
+  }
+  return false;
 }
 
 /** §01.3 — the hot path: classify, resolve, ensure installed, hand over. */
-export function runProxy(invocation: Extract<Invocation, { mode: "proxy" }>): Promise<number> {
-  throw new Error(`TODO(T16): runProxy(${invocation.binaryName})`);
+export async function runProxy(
+  invocation: Extract<Invocation, { mode: "proxy" }>,
+): Promise<number> {
+  const { binaryName, binaryVersion, args } = invocation;
+
+  // Step 1–2. Everything here is a pure table lookup; the *reference* stays a
+  // thunk, because forcing it reads `lastKnownGood.json` and may hit the
+  // network — which the §01.3 budget forbids on a warm, pinned run.
+  const name = getPackageManagerFor(binaryName);
+  const transparent = name !== undefined && isTransparentCommand(binaryName, args);
+  const requestedName = name ?? binaryName;
+  const fallback: LazyLocator =
+    name === undefined
+      ? {
+          name: binaryName,
+          // An unknown binary has no default to fall back to. Reaching for one
+          // is precisely §12.2's name-only "unsupported specification" case.
+          reference: () => Promise.reject(new UsageError(messages.unsupportedSpec(binaryName))),
+        }
+      : getFallbackLocator(name, { transparent });
+
+  // Step 3 — one `package.json` read plus at most one `.corepack.env` open per
+  // directory walked. The env file it loads is applied to `process.env` here,
+  // before anything reads a `COREPACK_*` variable below.
+  const cwd = process.cwd();
+  const specResult = discoverProjectSpec(cwd);
+
+  // §03.6 — auto-pin runs *before* reconciliation, and only here: it is a proxy
+  // -mode-only behaviour, so `reconcile` deliberately leaves it to this caller.
+  if (
+    specResult.type === "NoSpec" &&
+    envFlag("COREPACK_ENABLE_AUTO_PIN") &&
+    !envDisabled("COREPACK_ENABLE_PROJECT_SPEC")
+  ) {
+    await autoPin(specResult, fallback);
+  }
+
+  // Step 4 — reconcile. A `Found` spec whose name matches comes back as a plain
+  // descriptor, so the fallback thunk is never forced on the fast path.
+  const reconciled = reconcile(specResult, fallback, { requestedName, transparent, binaryVersion });
+  const descriptor = await materialise(reconciled);
+
+  // A descriptor naming something outside the table cannot be resolved. Routing
+  // it back through `parseSpec` reports §12.2's "unsupported specification"
+  // rather than §12.4's build-support assertion, and lets a URL reference for an
+  // unknown package manager through untouched (§04.1 step 1).
+  if (!isSupportedPackageManager(descriptor.name)) {
+    parseSpec(`${descriptor.name}@${descriptor.range}`, CLI_SOURCE, {
+      enforceExactVersion: false,
+    });
+  }
+
+  // Step 5 — resolution. For an exact pin this is a single `stat` of the store.
+  const locator = await resolveDescriptor(descriptor, { allowTags: true });
+  if (locator === null) {
+    throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
+  }
+
+  // Step 6 — one `.corepack` read on a hit; download, verify and promote on a miss.
+  const installSpec = await ensureInstalled(locator);
+
+  // Step 7 — hand over. Nothing after this point may write to the store: the
+  // package manager owns the process from here (§08.2).
+  execPackageManager(binaryName, installSpec, args, getSpecUrl(locator));
+
+  // The package manager sets the real exit code from its own module body, which
+  // runs strictly after this returns. Never wrap that in a catch (§08.4).
+  return 0;
 }
 
 /**
@@ -41,6 +189,131 @@ export function runProxy(invocation: Extract<Invocation, { mode: "proxy" }>): Pr
  * then the usage line. Anything else prints with a stack, because a stack trace
  * is the correct output for a bug.
  */
-export function runMain(argv: string[]): Promise<number> {
-  throw new Error(`TODO(T16): runMain(${argv.join(" ")})`);
+export async function runMain(argv: string[]): Promise<number> {
+  const invocation = classifyInvocation(argv);
+
+  try {
+    if (invocation.mode === "proxy") {
+      return await runProxy(invocation);
+    }
+    // Loaded lazily: the proxy path is the hot one and must not pay for the
+    // command surface it never touches (§16.3).
+    const { runManagementCommand } = await import("./cli.ts");
+    return await runManagementCommand(invocation.args);
+  } catch (error) {
+    return presentError(error, invocation);
+  }
+}
+
+/**
+ * §08.4's error table, isolated so both branches of §12.1 are testable without
+ * a process.
+ *
+ * Returns the exit code rather than exiting, so a caller that still has work to
+ * do keeps control.
+ */
+export function presentError(error: unknown, invocation: Invocation): number {
+  if (error instanceof UsageError) {
+    if (invocation.mode === "proxy") {
+      // Bare, on stderr, no stack: the user typed something the project forbids,
+      // and a stack would only bury the sentence that explains it.
+      process.stderr.write(`${error.message}\n`);
+      return 1;
+    }
+
+    // Management mode puts it on **stdout**, with the offending command's usage
+    // line underneath. The stream split between the two modes is test-asserted.
+    const command = invocation.args[0];
+    const usage =
+      command !== undefined && Object.hasOwn(USAGE_LINES, command)
+        ? USAGE_LINES[command]!
+        : GENERIC_USAGE_LINE;
+    process.stdout.write(`Usage Error: ${error.message}\n\n${usage}\n`);
+    return 1;
+  }
+
+  // Anything else is a bug — ours or the runtime's — and a stack trace is the
+  // correct output for a bug (corepack 0.31.0 regressed exactly this).
+  process.stderr.write(`${formatUnexpected(error)}\n`);
+  return 1;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Internals                                                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Force a lazy fallback into a concrete descriptor.
+ *
+ * This is the *only* place the fallback thunk is forced, which is what keeps the
+ * warm path free of `lastKnownGood.json` reads and network requests.
+ */
+async function materialise(value: Descriptor | LazyLocator): Promise<Descriptor> {
+  if ("range" in value) return value;
+  return { name: value.name, range: await value.reference() };
+}
+
+/**
+ * §03.6 — resolve, install, announce, pin. Only reached on `NoSpec`, only in
+ * proxy mode, only with `COREPACK_ENABLE_AUTO_PIN=1`.
+ *
+ * The install happens *before* the notice because it is what produces the hash:
+ * the pin this writes is hash-bearing, and therefore verifiable on every later
+ * run.
+ */
+async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<void> {
+  // The CLI's `binaryVersion` deliberately does not participate: corepack pins
+  // the project's *default*, then runs whatever the CLI asked for.
+  const descriptor = await materialise(fallback);
+
+  const locator = await resolveDescriptor(descriptor, { allowTags: true });
+  if (locator === null) {
+    throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
+  }
+
+  const installSpec = await ensureInstalled(locator);
+
+  // §03.6 — "installing yields the hash, so the written pin is hash-bearing".
+  // A download rewrites `locator.reference` itself; a cache hit does not, so the
+  // marker's recorded hash supplies the same suffix. Both paths therefore pin
+  // exactly the artifact that is on disk.
+  const reference = withHash(locator.reference, installSpec.hash);
+
+  process.stderr.write(
+    `${messages.autoPinNotice(locator.name, reference)}\n${messages.autoPinDocs()}\n\n`,
+  );
+
+  // §03.7 — the pin goes next to the manifest the walk selected, which in a
+  // monorepo is the root rather than the directory the user was standing in.
+  writePin(dirname(specResult.target), { name: locator.name, reference });
+}
+
+/** `1.22.22` + `sha512.abc` → `1.22.22+sha512.abc`; an existing suffix is kept. */
+function withHash(reference: string, hash: string): string {
+  const parsed = parse(reference);
+  if (parsed === null || parsed.build.length > 0) return reference;
+  return `${parsed.version}+${hash}`;
+}
+
+/**
+ * §08.1 — the package manager spec's **download URL**, with `{}` substituted.
+ *
+ * `exec.ts` needs the whole URL, not just its extension: a `bin` *list* resolves
+ * to `<location>/<basename of the URL path>`. A URL reference is its own spec
+ * URL, exactly as §07.3 treats it.
+ */
+function getSpecUrl(locator: Locator): string {
+  const parsed = parse(locator.reference);
+  if (parsed !== null && isSupportedPackageManager(locator.name)) {
+    return getSpecFor(locator.name, parsed.version).url.replace("{}", parsed.version);
+  }
+  return locator.reference;
+}
+
+/** Everything that is not a `UsageError` keeps its stack (§08.4). */
+function formatUnexpected(error: unknown): string {
+  if (error instanceof Error) {
+    return error.stack ?? `${error.name}: ${error.message}`;
+  }
+  return String(error);
 }
