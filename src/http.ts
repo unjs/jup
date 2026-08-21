@@ -90,6 +90,21 @@ export function credentialsFor(
     return { url, authorization: `Bearer ${token}` };
   }
 
+  // Credentials embedded in COREPACK_NPM_REGISTRY itself (§11.2 documents that
+  // it "may embed user:pass@") apply to every request to that origin — not just
+  // to URLs that happen to carry the userinfo themselves. Without this a private
+  // registry configured this way authenticates its metadata requests, which are
+  // built from the registry URL, and then fails the artifact download with a
+  // 401: `dist.tarball` is same-origin but carries no userinfo of its own.
+  //
+  // Ranked above the environment pair, mirroring §05.1's `url.username ||
+  // COREPACK_NPM_USERNAME`, and below the token, which §05.1 step 4 has
+  // overwrite Basic.
+  const registryUserinfo = userinfoOf(registryOrigin);
+  if (registryUserinfo !== undefined) {
+    return { url, authorization: registryUserinfo };
+  }
+
   const username = process.env.COREPACK_NPM_USERNAME;
   const password = process.env.COREPACK_NPM_PASSWORD;
   if (username !== undefined && password !== undefined) {
@@ -97,6 +112,18 @@ export function credentialsFor(
   }
 
   return { url };
+}
+
+/** The `Basic` header a registry URL's own `user:pass@` implies, if it has one. */
+function userinfoOf(registryUrl: string | undefined): string | undefined {
+  if (registryUrl === undefined) return undefined;
+  try {
+    const parsed = new URL(registryUrl);
+    if (parsed.username === "" && parsed.password === "") return undefined;
+    return basic(parsed.username, parsed.password);
+  } catch {
+    return undefined;
+  }
 }
 
 /**

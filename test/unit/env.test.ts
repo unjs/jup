@@ -6,6 +6,7 @@ import {
   applyEnvFile,
   DEFAULT_ENV_FILE_NAME,
   ENV_FILE_INELIGIBLE,
+  SECURITY_ONLY_FROM_ENVIRONMENT,
   envDisabled,
   envFlag,
   isEnvFileEligible,
@@ -154,8 +155,8 @@ describe("applyEnvFile", () => {
     expect(process.env.COREPACK_HOME).toBe("");
   });
 
-  // Tests 60, 61, 62 plus the two corepack already refuses.
-  describe.each([...ENV_FILE_INELIGIBLE])("%s", (name) => {
+  // Tests 60, 61, 62 — §14.5's five additions, each announced.
+  describe.each([...SECURITY_ONLY_FROM_ENVIRONMENT])("%s", (name) => {
     it("is ignored when it comes from a file, with a warning on stderr", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const path = join(dir, DEFAULT_ENV_FILE_NAME);
@@ -171,7 +172,24 @@ describe("applyEnvFile", () => {
     });
   });
 
-  it("drops every ineligible variable in one pass, warning once for each", () => {
+  // The two corepack already refuses are dropped without a word: conformance row
+  // 48 asserts stderr is empty when a project's env file tries to turn the
+  // download prompt on, and neither carries a security consequence to report.
+  describe.each([...ENV_FILE_INELIGIBLE].filter((n) => !SECURITY_ONLY_FROM_ENVIRONMENT.has(n)))(
+    "%s",
+    (name) => {
+      it("is ignored when it comes from a file, silently", () => {
+        const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+        applyEnvFile({ [name]: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
+
+        expect(process.env[name]).toBeUndefined();
+        expect(warn).not.toHaveBeenCalled();
+      });
+    },
+  );
+
+  it("drops every ineligible variable in one pass, warning once for each security one", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const path = join(dir, DEFAULT_ENV_FILE_NAME);
     const vars = Object.fromEntries([...ENV_FILE_INELIGIBLE].map((name) => [name, "1"]));
@@ -184,7 +202,7 @@ describe("applyEnvFile", () => {
       expect(process.env[name]).toBeUndefined();
     }
     expect(process.env.COREPACK_ENABLE_STRICT).toBe("0");
-    expect(warn).toHaveBeenCalledTimes(ENV_FILE_INELIGIBLE.size);
+    expect(warn).toHaveBeenCalledTimes(SECURITY_ONLY_FROM_ENVIRONMENT.size);
   });
 
   it("cannot re-enable env files through the file itself", () => {

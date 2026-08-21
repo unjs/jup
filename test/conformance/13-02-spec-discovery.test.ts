@@ -1,0 +1,170 @@
+/**
+ * §13.2 — spec parsing and discovery (rows 1–13).
+ *
+ * Every row runs the real entry point against a throwaway project and a
+ * throwaway store; the pinned package managers are hand-planted fakes, because
+ * what is under test here is discovery, not downloading.
+ */
+
+import { afterAll, describe, expect, it } from "vitest";
+import { DEFINITIONS } from "../../src/config/table.ts";
+import {
+  cleanupFixtures,
+  createFixture,
+  run,
+  seedPackageManager,
+  versionOf,
+} from "./_harness/index.ts";
+
+const YARN_DEFAULT = DEFINITIONS.yarn!.default;
+
+afterAll(cleanupFixtures);
+
+describe("§13.2 spec parsing and discovery", () => {
+  it("1: packageManager yarn@1.22.4 -> yarn --version prints 1.22.4", async () => {
+    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+    expect(result.stderr).toBe("");
+  });
+
+  it("2: packageManager yarn -> No version specified", async () => {
+    const fixture = createFixture({ packageManager: "yarn" });
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(
+      `No version specified for yarn in "packageManager" of package.json\n`,
+    );
+    expect(result.stdout).toBe("");
+  });
+
+  it("3: packageManager yarn@stable -> expected a semver version", async () => {
+    const fixture = createFixture({ packageManager: "yarn@stable" });
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("expected a semver version");
+    expect(result.stderr).toBe(
+      `Invalid package manager specification in package.json (yarn@stable); expected a semver version\n`,
+    );
+  });
+
+  it("4: packageManager yarn@^1.0.0 -> expected a semver version", async () => {
+    const fixture = createFixture({ packageManager: "yarn@^1.0.0" });
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("expected a semver version");
+  });
+
+  it("5: packageManager yarn@ -> No version specified", async () => {
+    const fixture = createFixture({ packageManager: "yarn@" });
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("No version specified");
+  });
+
+  it("6: a vendored manifest in node_modules/foo is ignored; the ancestor pin wins", async () => {
+    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+    fixture.write("node_modules/foo/package.json", `{"packageManager":"pnpm@4.11.6"}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      cwd: fixture.path("node_modules/foo"),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+  });
+
+  it("7: a vendored manifest in node_modules/@scope/foo is ignored; the ancestor pin wins", async () => {
+    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+    fixture.write("node_modules/@scope/foo/package.json", `{"packageManager":"pnpm@4.11.6"}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      cwd: fixture.path("node_modules/@scope/foo"),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+  });
+
+  it("8: the closest manifest wins — npm@6.14.2 in foo/ over yarn@1.22.4 at the root", async () => {
+    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+    fixture.write("foo/package.json", `{"packageManager":"npm@6.14.2"}\n`);
+    seedPackageManager(fixture.home, "npm", "6.14.2");
+
+    const result = await run(["npm", "--version"], { ...fixture, cwd: fixture.path("foo") });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.14.2\n");
+  });
+
+  it("9: no package.json anywhere -> exit 0 with the default version", async () => {
+    const fixture = createFixture();
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("10: an empty package.json -> exit 0 with the built-in default version", async () => {
+    const fixture = createFixture({});
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("11: invalid JSON -> Invalid package.json in <path>", async () => {
+    const fixture = createFixture(`{"packageManager": "yarn@1.22.4"`);
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(`Invalid package.json in package.json\n`);
+  });
+
+  it("12: a UTF-8 BOM does not stop the spec being parsed", async () => {
+    const fixture = createFixture(`﻿{"packageManager":"yarn@1.22.4"}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+  });
+
+  it("13: corepack use preserves the BOM in the rewritten manifest (§14.7)", async () => {
+    const fixture = createFixture(`﻿{\n  "name": "bom",\n  "packageManager": "yarn@1.0.0"\n}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    const result = await run(["use", "yarn@1.22.4"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    const written = fixture.read("package.json");
+    expect(written.startsWith("﻿")).toBe(true);
+    expect(written).toContain(`"packageManager": "yarn@1.22.4+sha512.seeded"`);
+    // The rewrite is surgical: key order and the rest of the file are untouched.
+    expect(written).toContain(`"name": "bom"`);
+  });
+});

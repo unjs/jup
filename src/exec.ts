@@ -6,7 +6,7 @@
  */
 
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 import { getPackageManagerFor } from "./config/table.ts";
 import { messages } from "./errors.ts";
 import type { InstallSpec } from "./types.ts";

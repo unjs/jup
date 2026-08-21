@@ -59,6 +59,24 @@ export const ENV_FILE_INELIGIBLE = new Set([
 ]);
 
 /**
+ * §14.5's additions: variables a project file must never supply because doing so
+ * is a security decision, not a preference. Corepack honours all of these from
+ * an env file, so a cloned repo can disable signature verification, point
+ * downloads at an arbitrary host, or pair a token with a hostile registry to
+ * exfiltrate it.
+ *
+ * These are the ones worth telling the user about; the other two entries in
+ * {@link ENV_FILE_INELIGIBLE} are refused silently, as corepack refuses them.
+ */
+export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set([
+  "COREPACK_INTEGRITY_KEYS",
+  "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
+  "COREPACK_NPM_TOKEN",
+  "COREPACK_NPM_USERNAME",
+  "COREPACK_NPM_PASSWORD",
+]);
+
+/**
  * Warned-about `<path>\0<NAME>` pairs.
  *
  * §14.5 asks for one warning per offending variable. Only the closest env file
@@ -126,11 +144,17 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     }
 
     if (!isEnvFileEligible(name)) {
-      // §14.5 — warn once per variable, on stderr, then drop it.
-      const seen = `${path}\0${name}`;
-      if (!warnedIneligible.has(seen)) {
-        warnedIneligible.add(seen);
-        console.warn(messages.ignoringEnvVar(name, path));
+      // Warn only for the five §14.5 adds. Corepack already refuses
+      // COREPACK_ENV_FILE and COREPACK_ENABLE_DOWNLOAD_PROMPT silently, and
+      // conformance row 48 asserts stderr is empty when a project's env file
+      // tries to turn the download prompt on — so announcing those two would
+      // break a row while telling the user nothing they can act on.
+      if (SECURITY_ONLY_FROM_ENVIRONMENT.has(name)) {
+        const seen = `${path}\0${name}`;
+        if (!warnedIneligible.has(seen)) {
+          warnedIneligible.add(seen);
+          console.warn(messages.ignoringEnvVar(name, path));
+        }
       }
       continue;
     }

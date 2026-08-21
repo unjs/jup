@@ -1,0 +1,220 @@
+/**
+ * §13.10 — `use` and `up` (rows 105–116).
+ */
+
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  cleanupFixtures,
+  createFixture,
+  MockRegistry,
+  packageManagerTarball,
+  pmScript,
+  run,
+} from "./_harness/index.ts";
+
+const registry = new MockRegistry();
+
+function trusted(extra?: Record<string, string | undefined>): Record<string, string | undefined> {
+  return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), ...extra };
+}
+
+function pinOf(fixture: { json(relative: string): unknown }): string | undefined {
+  return (fixture.json("package.json") as { packageManager?: string }).packageManager;
+}
+
+beforeAll(async () => {
+  await registry.start();
+
+  registry.publish("yarn", "1.22.4", packageManagerTarball("yarn", "1.22.4"), {
+    distTags: { latest: "1.22.4" },
+  });
+  registry.publish(
+    "@yarnpkg/cli-dist",
+    "4.9.9",
+    packageManagerTarball("yarn", "4.9.9", {
+      binPaths: ["bin/yarn.js"],
+      packageName: "@yarnpkg/cli-dist",
+    }),
+  );
+
+  for (const version of ["2.1.0", "2.4.3", "4.9.9"]) {
+    registry.publishFile(
+      `/${version}/packages/yarnpkg-cli/bin/yarn.js`,
+      pmScript("yarn", version),
+      "application/javascript",
+    );
+  }
+  registry.publishFile(
+    "/tags",
+    JSON.stringify({
+      aliases: { latest: "4.9.9", stable: "4.9.9" },
+      tags: ["2.1.0", "2.4.3", "4.9.9"],
+    }),
+    "application/json",
+  );
+});
+
+afterAll(async () => {
+  cleanupFixtures();
+  await registry.stop();
+});
+
+beforeEach(() => registry.reset());
+
+describe("§13.10 use / up", () => {
+  it("105: use yarn@1.22.4 prints the banner, pins a sha512 reference and runs yarn", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("Installing yarn@1.22.4 in the project...\n\nyarn@1.22.4 install\n");
+    expect(result.stderr).toBe("");
+    expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\.[\da-f]{128}$/);
+  });
+
+  it("106: use in an empty directory creates package.json", async () => {
+    const fixture = createFixture();
+
+    const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(fixture.exists("package.json")).toBe(true);
+    expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\./);
+  });
+
+  it("107: use from a subfolder updates the ancestor manifest", async () => {
+    const fixture = createFixture({ name: "root" });
+    fixture.write("sub/keep.txt", "");
+
+    const result = await run(["use", "yarn@1.22.4"], {
+      ...fixture,
+      cwd: fixture.path("sub"),
+      registry,
+      env: trusted(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\./);
+    expect(fixture.exists("sub/package.json")).toBe(false);
+  });
+
+  it("108: use yarn@latest over a mirror resolves through @yarnpkg/cli-dist", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const result = await run(["use", "yarn@latest"], {
+      ...fixture,
+      registry,
+      env: trusted({ COREPACK_NPM_REGISTRY: registry.origin }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^yarn@4\.9\.9\+sha512\./);
+    expect(registry.requests.map((request) => request.path)).toContain(
+      "/@yarnpkg/cli-dist/-/cli-dist-4.9.9.tgz",
+    );
+  });
+
+  it("109: use overwrites a malformed existing packageManager field", async () => {
+    for (const malformed of ["yarn@^1", "yarn", "yarn@", 42, null]) {
+      const fixture = createFixture({ packageManager: malformed });
+
+      const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
+
+      expect(result.exitCode, JSON.stringify(malformed)).toBe(0);
+      expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\./);
+    }
+  });
+
+  it("110: a devEngines mismatch surfaces after the banner, on stdout", async () => {
+    const fixture = createFixture({
+      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+    });
+
+    const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
+    expect(result.stdout).toContain("Usage Error:");
+    expect(result.stdout).toContain("$ corepack use <pattern>");
+    expect(result.stderr).toBe("");
+  });
+
+  it("111: up bumps to the highest release of the pinned major", async () => {
+    const fixture = createFixture({ packageManager: "yarn@2.1.0" });
+
+    const result = await run(["up"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+  });
+
+  it("112: up follows a devEngines range across a major boundary", async () => {
+    const fixture = createFixture({
+      packageManager: "yarn@1.1.0",
+      devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x", onFail: "warn" } },
+    });
+
+    const result = await run(["up"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+  });
+
+  it("113: the same holds with onFail: ignore", async () => {
+    const fixture = createFixture({
+      packageManager: "yarn@1.1.0",
+      devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x", onFail: "ignore" } },
+    });
+
+    const result = await run(["up"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+  });
+
+  it("114: up on a devEngines-only project creates the packageManager field", async () => {
+    const fixture = createFixture({
+      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+    });
+
+    const result = await run(["up"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+  });
+
+  it("115: up refuses a non-semver pin", async () => {
+    const fixture = createFixture({ packageManager: "yarn@stable" });
+
+    const result = await run(["up"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Usage Error: The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
+    );
+  });
+
+  it("116: use and up preserve tab indentation and CRLF line endings", async () => {
+    const original = `{\r\n\t"name": "crlf",\r\n\t"packageManager": "yarn@1.0.0"\r\n}\r\n`;
+
+    const used = createFixture(original);
+    expect(
+      (await run(["use", "yarn@1.22.4"], { ...used, registry, env: trusted() })).exitCode,
+    ).toBe(0);
+    const afterUse = used.read("package.json");
+    expect(afterUse).toMatch(
+      /^\{\r\n\t"name": "crlf",\r\n\t"packageManager": "yarn@1\.22\.4\+sha512\.[\da-f]{128}"\r\n\}\r\n$/,
+    );
+    expect(afterUse.replaceAll("\r\n", "")).not.toContain("\n");
+
+    const upped = createFixture(
+      `{\r\n\t"name": "crlf",\r\n\t"packageManager": "yarn@2.1.0"\r\n}\r\n`,
+    );
+    expect((await run(["up"], { ...upped, registry, env: trusted() })).exitCode).toBe(0);
+    const afterUp = upped.read("package.json");
+    expect(afterUp).toMatch(
+      /^\{\r\n\t"name": "crlf",\r\n\t"packageManager": "yarn@2\.4\.3\+sha512\.[\da-f]{128}"\r\n\}\r\n$/,
+    );
+  });
+});
