@@ -1,0 +1,547 @@
+# Implementation Plan — Phase 1 (§01–§14)
+
+**Non-normative.** The contract is `.agents/01-16`. This file is the work breakdown:
+what to build, in what order, with what interfaces, and which conformance tests prove
+each piece.
+
+## Ground rules for this implementation
+
+| Decision           | Value                                                                                                                                                                                                                                                                                                                                                                |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Language / runtime | TypeScript, ESM, Node ≥ 22.18 (native type stripping, so tests can run `node src/main.ts` with no loader)                                                                                                                                                                                                                                                            |
+| Dependencies       | **Zero runtime deps.** Prefer **native web APIs** (`fetch`, `Response`, `ReadableStream`, `URL`, `AbortSignal.timeout`, `crypto.subtle`, `TextDecoder`) wherever they cover the need; fall back to Node built-ins (`node:fs`, `node:path`, `node:crypto`, `node:zlib`, `node:util`, `node:os`) only where no web API exists. Dev deps stay as the template has them. |
+| Naming             | **Byte-compatible `COREPACK_*`.** Env vars, `COREPACK_HOME`, store layout (`<home>/v1`, `lastKnownGood.json`, `.corepack`), `.corepack.env`, and every user-facing string in §12 are reproduced verbatim, including `corepack` in usage lines.                                                                                                                       |
+| Scope              | §01–§14 + tests 1–147. §15 is phase 2; where §15 changes an interface cheaply, the seam is noted per task so phase 2 is additive rather than a rewrite.                                                                                                                                                                                                              |
+| §14.14 exception   | **Not applied.** The "to pack" messages stay verbatim per §12.9, because the naming decision prioritises byte-compatibility. Every other §14 divergence is in scope.                                                                                                                                                                                                 |
+| Execution model    | In-process (§08.2), the reference model — it is available to us and it is the fast one. `exec.ts` keeps a spawn path behind the same interface for §15.28 native artifacts later.                                                                                                                                                                                    |
+| Shims              | Generated JS stub files (§10.1), not §14.15 symlink dispatch: Node `realpath`s the entry module, so `argv[0]` sniffing is unavailable. §14.15/§15.14 are explicitly native-only and out of reach here.                                                                                                                                                               |
+| Imports            | Explicit `.ts` extensions (`import { x } from "./semver.ts"`), matching the template's `allowImportingTsExtensions`.                                                                                                                                                                                                                                                 |
+
+### Fast-path budget in a JS host
+
+§16.1's 5 ms is unreachable — Node's own startup dominates. The budget still binds as a
+**correctness** requirement, and test 96 asserts it: a warm exact-pin run makes zero
+network requests, zero `lastKnownGood.json` reads, and no `opendir` of the store. Every
+task below that could violate it says so.
+
+---
+
+## Module layout
+
+```
+src/
+  main.ts          argv classification, dispatch, top-level error presentation   §01.2, §08.4, §12.1
+  types.ts         Descriptor, Locator, InstallSpec, specs, result types         §02
+  errors.ts        UsageError, message builders                                  §12
+  semver.ts        parse/compare/ranges/two satisfaction modes                   §04.2
+  json.ts          order-preserving scanner + surgical string-span edit          §16.4
+  env.ts           dotenv parse, COREPACK_ filter, eligibility filter            §03.2, §11, §14.5
+  manifest.ts      discovery walk, parseSpec, devEngines, writePin               §03
+  http.ts          GET client, proxy, auth, redirects, timeouts                  §05.1, §14.6, §14.8
+  registry.ts      npm + url registry protocols                                  §05.2, §05.3
+  integrity.ts     hashes, SRI, ECDSA verify, trust store, expiry                §06
+  tar.ts           gzip+tar reader (safety rules) and writer (`pack`)            §07.4, §07.10
+  store.ts         paths, marker, temp, atomic promote, LKG, bin resolution      §07
+  resolve.ts       descriptor → locator, cache probe, default version            §04
+  install.ts       url choice, streaming download, verify, promote               §06, §07
+  exec.ts          handover, argv/env rewrite, exit codes                        §08
+  cli.ts           management commands                                           §09
+  shims.ts         enable / disable                                              §10
+  config/
+    table.ts       embedded registry table, as static data                       §02.5, §14.20
+    keys.ts        embedded trust store                                          §02.6
+  index.ts         library surface (keeps the template's export)
+test/
+  _utils/          mock registry, fixtures, fake package managers, run() helper
+  unit/            per-module tests
+  conformance/     §13 tests 1–147, one file per §13.n section
+```
+
+Dependency direction is strictly downward, matching §16.10: `resolve` reaches the
+filesystem only through `store`; `store` speaks HTTP only through `install`/`http`.
+
+---
+
+## Wave 0 — contracts
+
+Single agent, must land before anything else. Everything after it is parallel.
+
+### T0 — Interface skeleton
+
+**Files:** `src/types.ts`, plus a stub for every module above exporting the exact
+signatures listed in the tasks below, each body `throw new Error("TODO")`.
+**Also:** set `package.json` `name`/`repository`/`bin`, `build.config.ts` entries,
+and a `test/_utils/run.ts` signature stub.
+**Why first:** ten agents write against these signatures concurrently. Any signature
+change after this point costs a merge conflict, so over-specify here.
+**Acceptance:** `pnpm typecheck` passes with every stub in place.
+
+---
+
+## Wave 1 — leaves (8 tasks, fully parallel)
+
+No task in this wave imports another. Each ships with its own unit tests.
+
+### T1 — `semver.ts` §04.2
+
+**Exports:** `parse`, `isValidVersion`, `isValidRange`, `compare`, `rcompare`, `lt`,
+`major`, `satisfies` (strict), `satisfiesWithPrereleases` (lenient).
+**Range grammar:** `||`, whitespace intersection, `^ ~ > >= < <= =`, exact, `*`,
+`x`/`X` wildcards, hyphen ranges.
+**Critical:** the two satisfaction modes MUST stay distinct (§04.2). Lenient strips the
+prerelease tag from _both_ the version and every comparator, then tests — this is not
+semver's `includePrerelease`. Build metadata is ignored in comparison, so
+`4.1.0+sha224.abc` compares equal to `4.1.0`. Every function returns `false`/`null`
+rather than throwing on malformed input.
+**Tests:** unit only in phase 1. Add a differential fuzz corpus against a reference
+semver (dev-only) per §16.8 — this is the subsystem most likely to diverge subtly.
+
+### T2 — `config/table.ts`, `config/keys.ts` §02.5, §02.6, §14.20
+
+**Exports:** `DEFINITIONS` (ordered), `getDefinition(name)`, `getSpecFor(name, version)`,
+`getBinariesFor(name)`, `getPackageManagerFor(binName)`, `SUPPORTED_NAMES`, `TRUST_KEYS`.
+**Critical:** `ranges` is an **ordered list of `[range, spec]` pairs**, matched in
+**reverse** — last declared wins (§02.3). Tag resolution always uses the **last**
+entry's registry. Static object literals, `as const`, no JSON parsing at startup.
+Transcribe npm/pnpm/yarn exactly as §02.5 gives them, including yarn's `default` being
+1.x while `transparent.default` is 4.x.
+**Phase-2 seam:** keep `TRUST_KEYS` behind an accessor keyed by registry origin
+internally, even though phase 1 only populates `https://registry.npmjs.org` (§15.10).
+
+### T3 — `errors.ts` §12
+
+**Exports:** `UsageError` (distinct class), and a message builder per §12 string.
+**Critical:** every string byte-exact — leading `! `, no trailing periods, the trailing
+space on `? Do you want to continue? [Y/n] `, `<JSON x>` meaning `JSON.stringify(x)`.
+`UsageError` vs `Error` is the presentation switch in §08.4/§12.1 and must not collapse.
+**Tests:** golden-file snapshot of every exported message with representative
+interpolations (§16.8 "byte-exact golden files").
+
+### T4 — `env.ts` §03.2, §11, §14.5
+
+**Exports:** `parseEnvFile(text)`, `loadEnvFileFrom(dir): {vars, path} | null`,
+`applyEnvFile(vars, path)`, `isEnvFileEligible(name)`, plus typed accessors for all 15
+variables in §11.
+**Critical:**
+
+- Parse with `node:util`'s `parseEnv` semantics.
+- Keep only `COREPACK_`-prefixed keys, **before** merging.
+- Merge as `{...fileVars, ...process.env}` — real environment wins — then assign to
+  `process.env`.
+- Never honour `COREPACK_ENV_FILE` or `COREPACK_ENABLE_DOWNLOAD_PROMPT` from a file.
+- **§14.5:** also refuse `COREPACK_INTEGRITY_KEYS`, `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`,
+  `COREPACK_NPM_TOKEN`, `COREPACK_NPM_USERNAME`, `COREPACK_NPM_PASSWORD`, warning once:
+  `! Ignoring <NAME> from <path>: this variable can only be set in the environment`
+- `COREPACK_ENV_FILE=0` disables loading entirely.
+  **Tests:** 52–62 (60/61/62 are the §14.5 additions).
+  **Budget:** one `open` attempt per walked directory, and only until a file is found.
+
+### T5 — `json.ts` §16.4, §14.7
+
+**Exports:** `parseManifest(text)` (tolerant read: BOM strip, empty → `{}`),
+`scanTopLevelKey(text, key)` → span, `setTopLevelString(text, key, value)`,
+`detectIndent(text)`, `detectEol(text)`, `hasBom(text)`.
+**Critical:** surgical text edit, not parse-and-reserialise. Preserve key order,
+indentation (first `/^[ \t]+/m` match, else two spaces), line endings (CRLF iff `\r\n`
+strictly outnumbers bare `\n`; platform EOL if the file had none), and — per **§14.7** —
+**re-emit the BOM** if the original had one. Insert the key after the opening brace when
+absent; handle the empty-object case. The scanner must respect string escapes and
+nesting so a nested `"packageManager"` is never mistaken for the top-level one.
+**Tests:** unit + 12, 13, 116.
+
+### T6 — `tar.ts` §07.4, §07.10
+
+**Exports:** `extract(stream, destDir, {strip: 1, filter?, limits})`,
+`create(cwd, paths, outPath)`, `listEntries(stream)`.
+**Reader:** ustar + GNU/PAX long names, gzip via `zlib.createGunzip`. Strip exactly one
+leading path component; drop entries with no leading component.
+**Safety rules — all nine of §07.4, non-negotiable:** reject absolute/drive/UNC paths;
+reject any normalised path escaping the root (message per §12.12: `Refusing to extract
+'<entry>': path escapes the extraction directory`); skip link entries; reject non
+file/dir types; never follow an existing symlink when creating (`O_NOFOLLOW`); mask mode
+to `mode & 0o777 & ~umask` with no setuid/setgid/sticky; cap inflated bytes (512 MiB),
+entry count (200 000), and expansion ratio; validate decoded PAX long names against
+rules 1–2; ignore unknown PAX headers.
+**Single-file filter:** extract only the entry whose post-strip path equals `binPath`,
+then rename `tmp/<binPath>` → `tmp/<basename>`, mapping `ENOENT` → `Cannot locate
+'<binPath>' in downloaded tarball` and `EEXIST`/`ENOTEMPTY` → delete src and continue.
+**Writer:** gzip tar rooted at a cwd, for `pack`.
+**Tests:** unit + 84, 85; add the §16.8 extractor fuzzer (traversal, symlink escape,
+absolute paths, long PAX names, expansion bombs).
+
+### T7 — `http.ts` §05.1, §14.6, §14.9
+
+**Exports:** `httpGet(url, opts): Promise<Response>`, `httpGetJson<T>(url, opts)`,
+`credentialsFor(url, registryOrigin)`, `assertSafeArtifactUrl(url, registry)`.
+**Built on native `fetch`.** `Response.body` is a web `ReadableStream`, which is what the
+download pipeline tees (§16.5); `AbortSignal.timeout` covers the timeouts; `fetch`
+already follows redirects and already strips `Authorization` on a cross-origin hop, which
+is exactly §14.6's requirement.
+**Proxy support (§14.8/§15.6) is deferred to phase 2** — it is the one thing `fetch`
+cannot do without a dispatcher. Keep it behind a single injectable transport option so
+adding it later touches one file. Test 71/72 move to phase 2 with it.
+**Critical:**
+
+- `COREPACK_ENABLE_NETWORK=0` → `Network access disabled by the environment; can't reach
+<url>` (the registry layer has its own distinct message — see T10).
+- **§14.6 unified credential rule:** userinfo → Basic, stripped from the URL before the
+  request; else different origin than the registry → **no credentials**; else
+  `COREPACK_NPM_TOKEN` present → Bearer; else both username and password present →
+  Basic; else none.
+- Format every error message from the **stripped** URL. Never emit `authorization` or
+  userinfo in error text.
+- Redirects: `redirect: "follow"` — verify by test that `Authorization` does not survive
+  a cross-origin hop rather than assuming it.
+- Cancel/drain the body before throwing on non-2xx so the connection stays reusable.
+- `AbortSignal.timeout(30_000)`, surfaced as the transport-failure message.
+- **§14.9 URL validation helper:** the URL must parse, scheme exactly `https:` (or
+  `http:` only when the configured registry is itself `http:`), and host must equal the
+  configured registry's host unless opted in.
+  **Tests:** 63–70 (70 is the §14.6 addition), 83. Tests 71–72 defer with proxy support.
+  **Phase-2 seam:** proxy dispatcher, retry/backoff, and CA/strict-ssl all hang off the
+  same options object, defaulted off in phase 1 (§15.4, §15.5, §15.6).
+
+### T8 — `integrity.ts` §06, §14.4, §14.11, §14.12
+
+**Exports:** `hashStream(stream, algo)`, `hashFile(path, algo)`, `parseSri(s)`,
+`compareDigest(a, b)`, `verifySignature({signatures, integrity, packageName, version})`,
+`shouldSkipIntegrityCheck()`, `expectedHashFromIntegrity(integrity)`.
+**Critical:**
+
+- Signed payload is exactly `<packageName>@<version>:<integrity>`, UTF-8, no whitespace,
+  `integrity` including its `sha512-` prefix.
+- Walk trusted keys **in order**; for each, find the first signature with a matching
+  `keyid`; stop at the first trusted key with a match. Errors per §06.3 verbatim.
+- Key material is a bare base64 DER SPKI; wrap in PEM armour for
+  `crypto.createVerify("SHA256").verify(...)`. Signature is base64 of DER `(r,s)`.
+  Validate the parsed curve is P-256 and reject others.
+- **§14.4:** honour `expires`. Exclude expired keys from selection; if only an expired
+  key matches, error `The package was signed with an expired key (<keyid>, expired
+<expires>)`. If no unexpired key matches but the signature is otherwise valid, an
+  implementation MAY accept with a loud warning — never silently.
+- **§14.11:** `crypto.timingSafeEqual` for digest comparison; explicit algorithm
+  allowlist (`sha1`, `sha224`, `sha256`, `sha384`, `sha512`) with
+  `Unsupported hash algorithm '<algo>' in the packageManager field` for anything else;
+  warn on `sha1`/`md5` pins.
+- **§14.12:** parse SRI as `<algo>-<base64>` — never `slice(7)` — and reject unsupported
+  SRI algorithms.
+- `shouldSkipIntegrityCheck()` is true for exactly `""` and `"0"`.
+  **Tests:** 73–82.
+
+### T9 — `test/_utils/` harness §13.1, §16.8
+
+Runs in wave 1 because most later tests block on it.
+**Deliverables:**
+
+- `registry-mock.ts`: local server implementing `GET /<pkg>`, `GET /<pkg>/<version>`,
+  `GET /<pkg>/-/<pkg>-<version>.tgz`, scoped names, dist-tags, on-the-fly ECDSA signing
+  over `<name>@<version>:<integrity>`, `401` on bad auth, a url-type tags document, a
+  `CONNECT` proxy mode, and deliberately-broken modes: `invalid_signature`,
+  `invalid_integrity`, `no_dist`, `no_signatures`, `slow`, `flaky`.
+- `tarball.ts`: build npm-shaped tarballs (`package/` prefix) in memory.
+- `fake-pm.ts`: seed `<store>/<name>/<version>/` with a hand-written `.corepack` and a
+  trivial entry script — this is how the execution tests avoid the network.
+- `fixtures.ts`: fresh `COREPACK_HOME`, temp project dirs, clean env (strip every
+  `COREPACK_*`, `DEBUG`, `FORCE_COLOR`; set `COREPACK_DEFAULT_TO_LATEST=0` unless the
+  test is about default lookup).
+- `run.ts`: spawn `node src/main.ts <args>` (native type stripping), returning
+  `{exitCode, signal, stdout, stderr}`, with TTY and stdin-pipe variants for 138–140.
+
+---
+
+## Wave 2 — mid layer (4 tasks, parallel)
+
+### T10 — `manifest.ts` §03 — _deps: T1, T3, T4, T5_
+
+**Exports:** `discoverProjectSpec(cwd, {envOnly?})` →
+`NoProject | NoSpec | Found`, `parseSpec(raw, source, {enforceExactVersion})`,
+`reconcile(result, fallback, {transparent, binaryVersion, requestedName})`,
+`writePin(cwd, info)`.
+**Critical:**
+
+- The walk: skip directories matching the `node_modules` package regex (last segment
+  pair only); load the env file before the manifest, only until one is found; stop only
+  on a `packageManager` key; record the _last_ manifest seen. Reproduce the monorepo
+  consequence documented in §03.1.
+- `getSpec` is **lazy** — `use` must not fail on a malformed existing field (test 109).
+- devEngines validation in §03.3's exact order, with the two unconditional warnings and
+  `warnOrThrow` defaulting to **error** while unrecognised `onFail` degrades to a warning.
+- `parseSpec` step-by-step per §03.4, including `name` being the substring before the
+  _first_ `@`, so `@scope/pkg@1.0.0` yields an empty name and hits the unsupported-name
+  error.
+- `writePin` per §03.7: re-run discovery, devEngines cross-check via `warnOrThrow`,
+  `previousPackageManager` fallback chain ending in the literal `unknown`, formatting
+  preservation through T5, and creating `<cwd>/package.json` in the `NoProject` case.
+  **Tests:** 1–13, 22–37, 105–110, 116, 142–143.
+  **Phase-2 seam:** the walk's stop condition and the write target are what §15.25/§15.26/
+  §15.27 change; keep both as single named predicates.
+
+### T11 — `registry.ts` §05.2, §05.3 — _deps: T2, T3, T7_
+
+**Exports:** `getRegistryUrl()`, `fetchAvailableVersions(spec)`,
+`fetchAvailableTags(spec)`, `fetchLatestStableVersion(spec)`,
+`fetchTarballURLAndSignature(spec, version)`.
+**Critical:**
+
+- Strip **all** trailing slashes from `COREPACK_NPM_REGISTRY`; a doubled slash 404s on
+  real mirrors.
+- Send `Accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8`
+  and parse **both** response shapes.
+- Insert `{package}` **without** percent-encoding, so `@yarnpkg/cli-dist` appears
+  literally.
+- The registry layer's own network-disabled message names the _registry_:
+  `Network access disabled by the environment; can't reach npm repository <registryUrl>`
+  — distinct from T7's, and both are asserted.
+- url-type registries: `fields.tags` → tag map, `fields.versions` → array **or** object
+  keys (accept both), latest stable reads `.stable`, **not** `.latest`.
+- npm latest-stable reference: `<version>+sha512.<hex(base64decode(integrity.slice(7)))>`
+  via T8's proper SRI parse, else `<version>+sha1.<dist.shasum>`. Wrap any failure in the
+  §04.5 message verbatim — both env var names in it are asserted, as is the absence of
+  `COREPACK_INTEGRITY_CHECK`/`COREPACK_USE_LATEST`.
+- Validate `dist.tarball` through T7's §14.9 helper, not `startsWith("http")`.
+  **Tests:** 63–64, 83, plus support for 49–50, 102–103.
+
+### T12 — `store.ts` §07, §14.1, §14.3 — _deps: T3, T6_
+
+**Exports:** `getHomeFolder()`, `getInstallFolder()`, `getVersionDir(locator)`,
+`readMarker(dir)`, `writeMarker(dir, spec)`, `createTempDir()`, `promote(tmp, dest)`,
+`findInstalledVersion(name, range)`, `readLastKnownGood()`, `writeLastKnownGood(lkg)`,
+`resolveBin(...)`, `cacheClean()`.
+**Critical:**
+
+- Home resolution chain **in §07.1's exact order**, including `XDG_CACHE_HOME` before
+  `LOCALAPPDATA` on every platform. (§15.13 narrows this later; phase 1 reproduces it.)
+- Version directory = plain semver with the build suffix removed; URL references use
+  `encodeURIComponent(url without fragment)`.
+- `.corepack` marker is the entire warm path: read → parse → done. `ENOENT` proceeds to
+  download; any other error propagates.
+- **§14.1:** when the descriptor is an exact version, `stat` the marker directly — do
+  **not** `opendir` the store. The directory scan is for genuine ranges only. This is
+  test 96 and the single hottest path in the tool.
+- **§14.2:** the range cache probe uses `satisfiesWithPrereleases`, matching the rest of
+  the pipeline; skip dot-entries; ties keep the later entry.
+- Temp dirs live **inside** `<installFolder>` so the promoting rename never crosses a
+  filesystem. Rename is the commit point; `EEXIST`/`ENOTEMPTY` (and win32 `EPERM` onto a
+  directory) mean we lost a benign race — `rm -rf` the temp and continue as a winner.
+  Windows: retry 5× with `100·2^i` ms backoff. **No lockfile, ever** (§07.5, §16.6).
+- **§14.3:** `lastKnownGood.json` writes go to a temp file in the same directory and
+  rename over. Reads stay maximally forgiving — every failure mode yields `{}`, non-string
+  entries are dropped. `EROFS` on write is swallowed silently.
+- `resolveBin` per §07.7: the `isValidBinList` (single file) vs `isValidBinSpec`
+  (tarball) discrimination is load-bearing for Yarn Berry via a custom registry.
+- Error tolerance per §07.8, especially the `EACCES` temp-dir message verbatim.
+  **Tests:** 86–96, 104.
+
+### T13 — `exec.ts` §08, §14.13 — _deps: T2, T3_
+
+**Exports:** `execPackageManager(binName, installSpec, args)`.
+**Critical:**
+
+- Resolve `binPath` per §08.1; **§14.13:** when `bin` came from a downloaded
+  `package.json` rather than the table, resolve the joined path and verify it stays
+  inside `<location>`, erroring with §12.12's message otherwise (test 141).
+- In-process handover: set `process.env.COREPACK_ROOT`, `process.argv = [execPath,
+binPath, ...args]`, `process.execArgv = []`, then schedule the load on `nextTick` so
+  our frames leave the stack.
+- Load via `import(pathToFileURL(binPath))` — this handles both CJS and ESM entry points
+  (test 135) and leaves `require.main` undefined for CJS, which is what pnpm's
+  self-detection expects.
+- **Do not wrap the load in a catch that rewrites the exit code.** An uncaught error must
+  reset a pending code to 1 (test 133) while a `beforeExit` hook's code must survive
+  (test 134). This is the corepack 0.18.1 regression; guard it with all three of 132–134.
+- stdio untouched; stdin passed through and never speculatively consumed (§08.6).
+- `PATH` unmodified in phase 1 (§15.32 changes this).
+  **Tests:** 132–141.
+  **Phase-2 seam:** keep a `spawn` implementation behind the same signature for §15.28.
+
+---
+
+## Wave 3 — pipeline (2 tasks)
+
+### T14 — `resolve.ts` §04 — _deps: T1, T2, T11, T12_
+
+**Exports:** `resolveDescriptor(descriptor, {allowTags, useCache})`,
+`getDefaultVersion(name)`, `getFallbackLocator(name, {transparent})`,
+`bumpLastKnownGood(locator)`.
+**Critical:** §04.1's six steps **in order**, including step 4 (cache probe) preceding
+step 5 (exact passthrough), tags resolving against the **last** range entry's registry,
+and step 6 querying every band **in parallel** and unioning.
+
+- The fallback locator is a **lazy** thunk (§02.1). Materialising it eagerly is the
+  single easiest way to break offline operation and test 96.
+- `getDefaultVersion`: LKG hit returns with **no network**; `COREPACK_DEFAULT_TO_LATEST=0`
+  returns the compiled-in default with no network; otherwise fetch and record, swallowing
+  record failures.
+- Transparent commands with a `transparent.default` skip `getDefaultVersion` entirely —
+  no LKG read, no network. (§15.33 later makes this a floor rather than an override.)
+- §04.7 auto-bump: same major **and** strictly greater, and only when an entry already
+  exists.
+  **Tests:** 14–21, 97–104, 144–145.
+  **Budget:** every path that can return without I/O must actually return without I/O.
+
+### T15 — `install.ts` §06.1, §07.3–§07.6, §14.10 — _deps: T6, T7, T8, T11, T12_
+
+**Exports:** `ensureInstalled(locator, {cacheOnly?})` → `InstallSpec`.
+**Critical:**
+
+- Marker hit short-circuits before anything else (§07.2).
+- URL choice per §07.3, including the `npmRegistry`-instead-of-`registry` switch and
+  origin rewriting when `COREPACK_NPM_REGISTRY` is set. Use origin comparison, not
+  substring replacement, where it costs nothing — this is free §15.3 credit.
+- Download prompt (§05.5) before any **artifact** stream, never before metadata: notice
+  on stderr; confirm only when the value is `1`, stdin is a TTY, and `CI` is unset; any
+  input but `n`/`N` is yes. The default comes from the entry point (`0` for the tool's
+  own name, `1` for a shim), applied `??=` so a real env var wins.
+- **Stream once, tee to a digest** (§16.5): socket → tee → digest, and → gunzip → tar →
+  disk. Cap inflated bytes and entry count as you go, not afterwards.
+- **§14.10:** hash the **tarball stream** even in the `registry.bin` single-file path, and
+  compare it against the signed `dist.integrity` exactly as the full-extraction path
+  does. Continue to hash the extracted file separately when the user pinned a hash. This
+  closes the hole where anyone running Yarn Berry through a corporate mirror gets an
+  unverified binary.
+- Decision table §06.1 exactly: a user-supplied hash **overrides** signature verification
+  (tests 77, 78) — this is deliberate and must not be "fixed".
+- On any integrity failure: discard the temp folder, cache nothing, so a re-run fails
+  identically (test 79).
+- Post-install §07.6: rewrite the locator's reference to carry the **actual** digest,
+  then auto-bump LKG.
+  **Tests:** 45–50, 73–85, 86–96.
+
+---
+
+## Wave 4 — surface (3 tasks, parallel)
+
+### T16 — `main.ts` §01.2–§01.4, §03.5, §08.4, §12.1 — _deps: T10, T13, T14, T15_
+
+**Critical:**
+
+- Classify `arg0` with `/^([^@]*)(?:@(.*))?$/`. Known binary name → proxy; else an `@`
+  present → proxy with an unknown package manager (this is how `corepack foo@1.2.3`
+  reaches "Unsupported package manager specification" instead of "unknown command");
+  else management mode.
+- Transparent-command matching per §01.4: `prefix[0] === binaryName` and every remaining
+  segment equals the corresponding arg.
+- Reconciliation per §03.5, in order: `COREPACK_ENABLE_PROJECT_SPEC=0` short-circuits to
+  the fallback; `COREPACK_ENABLE_STRICT=0` forces `transparent = true`; then the
+  NoProject / NoSpec / Found switch; then the CLI `binaryVersion` override, which
+  replaces the range but **not** the name.
+- Auto-pin (§03.6) fires only on `NoSpec`, only in proxy mode, only with
+  `COREPACK_ENABLE_AUTO_PIN=1`, printing both `!` lines plus a blank line to stderr.
+- Top-level presentation (§08.4/§12.1): `UsageError` in proxy mode → bare message on
+  **stderr**, no stack; `UsageError` in management mode → `Usage Error: <msg>` on
+  **stdout**, blank line, usage line; any other error → stderr **with a stack**. Exit 1.
+  The stdout/stderr split between modes is test-asserted, and so is the fact that a
+  non-usage error keeps its stack.
+  **Tests:** 38–51, 146–147, and it gates most of 1–13.
+
+### T17 — `cli.ts` §09 — _deps: T10, T12, T14, T15, T6_
+
+Commands: `install`, `install -g|--global [--cache-only]`, `pack [--json] [-o]`, `up`,
+`use`, `cache clean|clear`, `--version`, `--help`, plus deprecated `hydrate`/`prepare`.
+**Critical:**
+
+- `resolvePatternsToDescriptors` (§09.1) with `lookup.range ?? lookup.getSpec()` — the
+  devEngines range is preferred over the exact pin, and that is what lets `up` cross a
+  major (test 112).
+- `up`'s **two-step** resolve, both with `useCache: false`, second targeting
+  `^<major>.0.0`.
+- `install -g` sets LKG **unconditionally**; `install` does **not** touch it; `pack`
+  **does**.
+- `use` prints the banner, writes the pin, then a blank line, then runs `commands.use` —
+  and a devEngines mismatch surfaces _after_ the banner is already on stdout (test 110).
+- Archive validation for `install -g <file>.tgz` per §07.10, using T6's extractor with
+  **no** relaxed safety for "our own" archives.
+- Output stream discipline per §09.11 — including that the package manager's own output
+  is never wrapped, prefixed, colourised, or buffered.
+- Deprecated commands keep their distinct message wording (`'corepack prepare'`,
+  the devEngines-free "no spec" string, `All done!`, bare-`--output` tolerance).
+  **Tests:** 86–95, 101–116, 142–147.
+
+### T18 — `shims.ts` §10, §14.16, §14.17, §14.18 — _deps: T2, T3_
+
+**Critical:**
+
+- POSIX: `lstat` (**not** `stat`, so a dangling symlink is seen as a symlink), relative
+  link target, idempotent — an already-correct symlink is not rewritten and its mtime is
+  unchanged (test 122).
+- Yarn Switch guard: any binary name containing `yarn` whose realpath matches
+  `/[\/\\]switch[\/\\]bin[\/\\]/` is skipped with the §12.9 message, exit **0**. POSIX
+  only; Windows `disable` removes without warning.
+- **§14.16:** refuse to clobber a regular file that is not one of our own shims, with
+  §12.12's message, and add `--force`. Yarn Switch then becomes one instance of the rule.
+- Windows: write `<B>`, `<B>.cmd`, `<B>.ps1` unconditionally, `0o755`, byte-exact per
+  §10.3 including the double spaces and the `PATHEXT` line.
+- **§14.17:** locate ourselves properly — `process.argv[1]`/`import.meta.url` first,
+  `PATH` lookup as fallback, and §12.12's clear error if both fail. `enable` realpaths
+  the directory; `disable` deliberately does not.
+- **§14.18:** map `EROFS`/`EACCES` to an actionable message naming `--install-directory`
+  and shell aliases, not a raw errno.
+- Default target set is every supported package manager **except npm** in phase 1;
+  §15.16 flips this later. Each name expands to its full binary set, so `disable yarn`
+  removes `yarnpkg` too.
+  **Tests:** 117–131 (121 is the §14.16 addition).
+
+---
+
+## Wave 5 — closeout
+
+### T19 — Conformance suite, tests 1–147
+
+One file per §13 section under `test/conformance/`, each row an individual `it()` named
+by its number so failures map back to the spec. Assertions on `(exitCode, stdout,
+stderr)` and on the resulting filesystem. Includes:
+
+- test **81**, the live staleness check against
+  `GET https://registry.npmjs.org/-/npm/v1/keys`, tagged so it can be excluded offline;
+- test **96**, the fast-path budget — assert zero mock-registry hits and, via an fs spy,
+  no `lastKnownGood.json` read and no store `opendir` on a warm exact-pin run;
+- test **94**, three concurrent cold installs of the same version all exiting 0.
+
+### T20 — Packaging and docs
+
+`package.json` (`name`, `bin`, `files`, `exports`), `build.config.ts` entries for the
+main entry plus the generated shim stubs, README rewrite (usage, the `COREPACK_*`
+compatibility statement, and an explicit list of where phase 1 diverges from corepack
+per §14), and a CI job wiring `pnpm test`.
+
+---
+
+## Dependency graph
+
+```
+T0 ─┬─ T1  semver ──────────────┬─ T10 manifest ─┬─ T16 main ─┬─ T19 conformance
+    ├─ T2  config ──────────────┼─ T11 registry ─┼─ T17 cli ──┤
+    ├─ T3  errors ──────────────┼─ T12 store ────┼─ T18 shims ┘
+    ├─ T4  env ─────────────────┼─ T13 exec ─────┤
+    ├─ T5  json ────────────────┤                │
+    ├─ T6  tar ─────────────────┼─ T14 resolve ──┤
+    ├─ T7  http ────────────────┼─ T15 install ──┘
+    ├─ T8  integrity ───────────┘
+    └─ T9  test harness ─────────────────────────────────────── T20 packaging
+```
+
+Wave 1 is eight independent agents. Wave 2 is four. Wave 3 is two (T15 depends on more
+than T14 but neither depends on the other). Wave 4 is three.
+
+## Highest-risk items
+
+1. **T13's exit-code semantics.** Three tests distinguish "throws", "sets a code", and
+   "sets a code in `beforeExit`", and the natural defensive `try/catch` breaks all three.
+2. **T1's two satisfaction modes.** A subtle divergence resolves the wrong version
+   silently. Worth the differential fuzzer even in phase 1.
+3. **T6's safety rules.** Attacker-controlled input, and the one place where writing our
+   own extractor is strictly more dangerous than corepack's vendored library.
+4. **The fast-path budget.** Easy to violate from any of T10, T12, or T14, and only test
+   96 catches it.
+5. **T5's surgical edit.** Parse-and-reserialise is the tempting shortcut and it silently
+   fails tests 12, 13, and 116.
+
+## Deferred to phase 2 (§15)
+
+`.npmrc` reading, per-package-manager registries, origin-rewriting, TLS CA/diagnostics,
+retries, key refresh and origin-keyed trust, the single verification tier, per-user shim
+directories, `shims.json` restore, npm shimming by default, `cache list`/`cache clean
+--all`, `.corepack.lock` ranges, prerelease exclusion, symmetric walk stop conditions,
+atomic multi-field pin writes, workspace-boundary write targets, native artifacts,
+`corepack info`, global-flag transparency, `PATH` prepending, and §15.35's sundries.
+Tests 148–207.

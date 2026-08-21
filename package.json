@@ -1,9 +1,20 @@
 {
-  "name": "packageName",
+  "name": "pipack",
   "version": "0.0.0",
-  "description": "",
+  "description": "A fast, small, zero-dependency package manager version manager.",
+  "keywords": [
+    "corepack",
+    "npm",
+    "package-manager",
+    "pnpm",
+    "version-manager",
+    "yarn"
+  ],
   "license": "MIT",
-  "repository": "unjs/packageName",
+  "repository": "pi0/pipack",
+  "bin": {
+    "pipack": "./dist/bin.mjs"
+  },
   "files": [
     "dist"
   ],
@@ -39,6 +50,9 @@
       "name": "pnpm",
       "version": "11.22.0"
     }
+  },
+  "engines": {
+    "node": ">=22.18.0"
   },
   "packageManager": "pnpm@11.22.0"
 }
