@@ -27,6 +27,32 @@ export class UsageError extends Error {
 
 const json = (value: unknown): string => JSON.stringify(value);
 
+/**
+ * Strip `user:pass@` from a URL before it reaches a message.
+ *
+ * §11.2 lets `COREPACK_NPM_REGISTRY` embed credentials, so any message that
+ * interpolates a registry or artifact URL is a potential disclosure — into CI
+ * logs, terminal scrollback, and pasted error reports. Redacting inside the
+ * builders rather than at each call site means a new message cannot leak by
+ * forgetting to opt in.
+ *
+ * The regex fallback matters: a URL too malformed for `new URL` is exactly the
+ * kind that ends up in an error message.
+ */
+export function redactUserinfo(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.username === "" && url.password === "") return raw;
+    url.username = "";
+    url.password = "";
+    return url.href;
+  } catch {
+    return raw.replace(/^([a-z][\d+.a-z-]*:\/\/)[^#/?]*@/i, "$1");
+  }
+}
+
+const url_ = redactUserinfo;
+
 /** §12.3 — prefix applied when a validation failure warns instead of throwing. */
 export const VALIDATION_WARNING_PREFIX = "! Corepack validation warning: ";
 
@@ -107,17 +133,17 @@ export const messages = {
   /* §12.6 — network ------------------------------------------------------- */
 
   networkDisabledUrl: (url: string) =>
-    `Network access disabled by the environment; can't reach ${url}`,
+    `Network access disabled by the environment; can't reach ${url_(url)}`,
 
   /** Distinct from the above: the npm-registry layer names the *registry*, not the URL. */
   networkDisabledRegistry: (registryUrl: string) =>
-    `Network access disabled by the environment; can't reach npm repository ${registryUrl}`,
+    `Network access disabled by the environment; can't reach npm repository ${url_(registryUrl)}`,
 
   requestFailed: (url: string) =>
-    `Error when performing the request to ${url}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
+    `Error when performing the request to ${url_(url)}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
 
   badStatus: (status: number, url: string) =>
-    `Server answered with HTTP ${status} when performing the request to ${url}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
+    `Server answered with HTTP ${status} when performing the request to ${url_(url)}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
 
   noValidTarball: (packageName: string, version: string) =>
     `${packageName}@${version} does not have a valid tarball.`,
@@ -194,7 +220,7 @@ export const messages = {
 
   allDone: () => `All done!`,
 
-  aboutToDownload: (url: string) => `! Corepack is about to download ${url}`,
+  aboutToDownload: (url: string) => `! Corepack is about to download ${url_(url)}`,
 
   /** Trailing space, no newline. */
   downloadPrompt: () => `? Do you want to continue? [Y/n] `,
@@ -222,7 +248,7 @@ export const messages = {
     `Refusing to extract '${entry}': path escapes the extraction directory`,
 
   refusingToDownload: (host: string, registry: string) =>
-    `Refusing to download from ${host}: it does not match the configured registry ${registry}`,
+    `Refusing to download from ${url_(host)}: it does not match the configured registry ${url_(registry)}`,
 
   binEscapes: (binPath: string, name: string, version: string) =>
     `The bin path '${binPath}' declared by ${name}@${version} escapes its installation directory`,
@@ -238,7 +264,7 @@ export const messages = {
    * into a hard failure.
    */
   unverifiableIntegrity: (registry: string, packageName: string, version: string) =>
-    `! ${registry} publishes no integrity digest for ${packageName}@${version}; falling back to its unsigned shasum`,
+    `! ${url_(registry)} publishes no integrity digest for ${packageName}@${version}; falling back to its unsigned shasum`,
 
   /* §14.5 — env-file eligibility ------------------------------------------ */
 

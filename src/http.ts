@@ -12,7 +12,7 @@
 
 import { Buffer } from "node:buffer";
 import { envDisabled, envFlag } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
+import { messages, redactUserinfo, UsageError } from "./errors.ts";
 
 /** §05.1 — the reference implementation imposes none; we suggest 30 s. */
 const DEFAULT_TIMEOUT = 30_000;
@@ -281,22 +281,4 @@ function originOf(registry: string | undefined): string | undefined {
   // Opaque origins ("null") compare equal to each other; that must not be
   // mistaken for a match.
   return origin === "null" ? undefined : origin;
-}
-
-/**
- * Last line of defence for error text built from a string we could not parse
- * into a URL — the parsed paths all go through {@link credentialsFor}.
- */
-function redactUserinfo(raw: string): string {
-  try {
-    const url = new URL(raw);
-    if (url.username === "" && url.password === "") {
-      return raw;
-    }
-    url.username = "";
-    url.password = "";
-    return url.href;
-  } catch {
-    return raw.replace(/^([a-z][\d+.a-z-]*:\/\/)[^#/?]*@/i, "$1");
-  }
 }

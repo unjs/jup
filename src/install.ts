@@ -385,6 +385,19 @@ function assertDigest(expected: string, actual: string): void {
 /* -------------------------------------------------------------------------- */
 
 /** §07.4 — a `.js` artifact is written verbatim under its own basename. */
+/**
+ * §07.4 rule 7 applies here too.
+ *
+ * The `.tgz` path bounds its output inside the extractor; the single-file path
+ * had no cap at all, so a source that controls the served `.js` could write
+ * until the disk filled. The exposure is narrow — the only non-opt-in `.js`
+ * source is Yarn Berry from repo.yarnpkg.com, which §15.11 leaves at the
+ * TLS-only tier, and an adversary there already controls the code we are about
+ * to execute — but a counter costs nothing and the cap should not depend on
+ * which branch of the download the artifact took.
+ */
+const MAX_SINGLE_FILE_BYTES = 512 * 1024 * 1024;
+
 async function writeStreamToFile(
   stream: ReadableStream<Uint8Array>,
   target: string,
@@ -393,11 +406,20 @@ async function writeStreamToFile(
   const handle = await open(target, "wx");
   try {
     const reader = stream.getReader();
+    let written = 0;
     try {
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
-        if (value) await handle.write(value);
+        if (value) {
+          written += value.byteLength;
+          if (written > MAX_SINGLE_FILE_BYTES) {
+            throw new Error(
+              `Refusing to download: the artifact exceeds the ${MAX_SINGLE_FILE_BYTES} byte limit`,
+            );
+          }
+          await handle.write(value);
+        }
       }
     } finally {
       reader.releaseLock();

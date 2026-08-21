@@ -8,7 +8,7 @@
 
 import { DEFAULT_REGISTRY } from "./config/keys.ts";
 import { envDisabled } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
+import { messages, redactUserinfo, UsageError } from "./errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck, verifySignature } from "./integrity.ts";
 import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "./types.ts";
@@ -116,7 +116,7 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
     const version = asString(metadata?.version);
     if (version === undefined) {
       throw new Error(
-        `${spec.package} metadata from ${registryUrl} has no "version" field; this registry may not be npm-compatible`,
+        `${spec.package} metadata from ${redactUserinfo(registryUrl)} has no "version" field; this registry may not be npm-compatible`,
       );
     }
 
@@ -149,7 +149,7 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
 
     if (shasum === undefined) {
       throw new Error(
-        `${spec.package}@${version} metadata from ${registryUrl} has neither "dist.integrity" nor "dist.shasum"`,
+        `${spec.package}@${version} metadata from ${redactUserinfo(registryUrl)} has neither "dist.integrity" nor "dist.shasum"`,
       );
     }
 
@@ -257,7 +257,7 @@ function requireDist(
   const dist = asRecord(metadata?.dist);
   if (dist === undefined) {
     throw new Error(
-      `${packageName}@${version} metadata from ${registryUrl} has no "dist" section; this registry may not be npm-compatible`,
+      `${packageName}@${version} metadata from ${redactUserinfo(registryUrl)} has no "dist" section; this registry may not be npm-compatible`,
     );
   }
   return dist;
