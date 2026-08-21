@@ -10,7 +10,7 @@ import {
   shouldSkipIntegrityCheck,
   verifySignature,
 } from "../../src/integrity.ts";
-import type { TrustedKey } from "../../src/types.ts";
+import type { RegistrySignature, TrustedKey } from "../../src/types.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Helpers — real keys, real signatures, no fixtures                           */
@@ -64,7 +64,7 @@ const VERSION = "4.14.1";
 const INTEGRITY = `sha512-${Buffer.alloc(64, 7).toString("base64")}`;
 const PAYLOAD = `${PACKAGE}@${VERSION}:${INTEGRITY}`;
 
-function verify(signatures: { keyid: string; sig: string }[] | undefined): void {
+function verify(signatures: RegistrySignature[] | undefined): void {
   verifySignature({
     signatures,
     integrity: INTEGRITY,
@@ -143,6 +143,37 @@ describe("verifySignature — §06.3", () => {
     expect(() => verify([{ keyid: npm.keyid, sig: "" }])).toThrow(
       "The package was not signed by any trusted keys:",
     );
+  });
+
+  /*
+   * Entries reach §06.3 exactly as the registry sent them, so a malformed one
+   * must take step 4's branch (and appear in its diagnostic) rather than being
+   * dropped — dropping them all reported step 1 instead — or crashing.
+   */
+  it("rejects an entry with no keyid, reporting it in the diagnostic", () => {
+    const npm = makeKeypair("SHA256:npm-primary");
+    useTrustStore([trustedKey(npm)]);
+
+    let thrown: unknown;
+    try {
+      verify([{ sig: signPayload(npm, PAYLOAD) }]);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(UsageError);
+    expect((thrown as Error).message).toContain("The package was not signed by any trusted keys:");
+    expect((thrown as Error).message).not.toContain("No compatible signature found");
+  });
+
+  it("survives a null entry in the signatures array", () => {
+    const npm = makeKeypair("SHA256:npm-primary");
+    useTrustStore([trustedKey(npm)]);
+
+    // A packument is untrusted input: `null` in the array is malformed data,
+    // not a reason to throw a `TypeError` with a stack.
+    const signatures = [null, { keyid: npm.keyid, sig: signPayload(npm, PAYLOAD) }];
+    expect(() => verify(signatures as unknown as RegistrySignature[])).not.toThrow();
   });
 
   it("rejects a mismatched keypair (test 75)", () => {

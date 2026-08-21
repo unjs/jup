@@ -6,7 +6,7 @@
  * enough" (§07.2). Both are asserted here against real processes.
  */
 
-import { chmodSync, existsSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -62,6 +62,27 @@ describe("§13.8 store, cache and offline", () => {
     expect(result.stdout).toBe("Adding yarn@2.2.2 to the cache...\n");
     expect(result.stderr).toBe("");
     expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
+  });
+
+  it("86: corepack install leaves lastKnownGood.json untouched", async () => {
+    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+    // Same major and strictly below 2.2.2, so §04.7's guarded bump would fire —
+    // §09.2 says this command does not touch the file, and being specific it
+    // wins over §04.7's general rule.
+    const lastKnownGood = join(fixture.home, "lastKnownGood.json");
+    writeFileSync(lastKnownGood, `${JSON.stringify({ yarn: "2.0.0" }, undefined, 2)}\n`);
+
+    const result = await run(["install"], {
+      ...fixture,
+      registry,
+      // The harness pins this to `0`, which would disable §04.7's bump on its
+      // own; the point here is that `install` leaves the file alone even when
+      // the bump is enabled.
+      env: trusted({ COREPACK_DEFAULT_TO_LATEST: undefined }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(lastKnownGood, "utf8"))).toEqual({ yarn: "2.0.0" });
   });
 
   it("87: the cached version then runs with COREPACK_ENABLE_NETWORK=0", async () => {

@@ -61,10 +61,21 @@ function pinTarget(result: SpecResult): string {
  *
  * `envOnly` loads the env file and stops at the first one found, never reading
  * manifests: for commands given an explicit package-manager pattern on the CLI.
+ *
+ * `projectSpecFlag` lets the caller honour `COREPACK_ENABLE_PROJECT_SPEC=0`
+ * (§03.5, §11.1: "never look at the project at all"). It degrades the walk to
+ * `envOnly` the moment the flag is seen, so a broken manifest cannot defeat the
+ * escape hatch users reach for *because* their manifest is broken. It is opt-in
+ * because corepack consults that variable only on the proxy path — `use`, `up`,
+ * `install` and `pack` load the spec regardless of it.
  */
-export function discoverProjectSpec(cwd: string, options?: { envOnly?: boolean }): SpecResult {
+export function discoverProjectSpec(
+  cwd: string,
+  options?: { envOnly?: boolean; projectSpecFlag?: boolean },
+): SpecResult {
   const initialCwd = resolve(cwd);
-  const envOnly = options?.envOnly === true;
+  let envOnly = options?.envOnly === true;
+  const projectSpecFlag = options?.projectSpecFlag === true;
 
   let currentDir = "";
   let nextDir = initialCwd;
@@ -95,6 +106,17 @@ export function discoverProjectSpec(cwd: string, options?: { envOnly?: boolean }
       }
     }
 
+    // §03.5 / §11.1 — with the project spec disabled the manifest must not be
+    // read at all, let alone parsed or devEngines-validated. The test lives here,
+    // *after* the env-file step, because `.corepack.env` is allowed to be what
+    // sets the variable (§03.2); corepack returns before any walk and so cannot
+    // honour an env file at all. From this point the walk is exactly `envOnly`:
+    // it keeps climbing for an env file and records no manifest, so the result is
+    // `NoProject` and §03.5 falls back.
+    if (projectSpecFlag && envDisabled("COREPACK_ENABLE_PROJECT_SPEC")) {
+      envOnly = true;
+    }
+
     if (envOnly) {
       continue;
     }
@@ -119,7 +141,11 @@ export function discoverProjectSpec(cwd: string, options?: { envOnly?: boolean }
       data = undefined;
     }
     if (typeof data !== "object" || data === null) {
-      throw new UsageError(messages.invalidPackageJson(relative(initialCwd, target)));
+      // §03.1 — "relative to `d`", the directory being examined, not to the
+      // initial cwd: the path always renders as the bare `package.json`, however
+      // far up the walk the broken manifest was found. (`source` below *is*
+      // relative to the initial cwd — the two are deliberately different.)
+      throw new UsageError(messages.invalidPackageJson(relative(currentDir, target)));
     }
 
     // Recorded unconditionally, which is what makes the *outermost* manifest the
@@ -127,7 +153,10 @@ export function discoverProjectSpec(cwd: string, options?: { envOnly?: boolean }
     selection = { data: data as Manifest, target };
   }
 
-  if (selection === undefined) {
+  // A manifest read *before* the env file that disables the project spec was
+  // found is still discarded here: §11.1 says "entirely", and that includes the
+  // eager devEngines validation below.
+  if (selection === undefined || (projectSpecFlag && envDisabled("COREPACK_ENABLE_PROJECT_SPEC"))) {
     return { type: "NoProject", target: join(initialCwd, MANIFEST_NAME), envFilePath };
   }
 
@@ -343,10 +372,17 @@ export function writePin(
   const target = pinTarget(lookup);
   const range = lookup.type === "Found" ? lookup.range : undefined;
 
-  // 2 — the version being pinned must satisfy any declared devEngines range.
-  if (range !== undefined && !satisfies(info.reference, range.range)) {
+  // 2 — the package manager being pinned must be the one `devEngines` declares,
+  // *and* its version must satisfy the declared range. Checking only the version
+  // lets `use pnpm@6.6.2` succeed in a project whose devEngines say `yarn@6.x`,
+  // writing a pin that then fails §03.3's name check on every subsequent run —
+  // permanently, since nothing but a hand edit can undo it.
+  if (
+    range !== undefined &&
+    (info.name !== range.name || !satisfies(info.reference, range.range))
+  ) {
     warnOrThrow(
-      messages.devEnginesPinMismatch(info.name, info.reference, range.range),
+      messages.devEnginesPinMismatch(info.name, info.reference, range.name, range.range),
       range.onFail,
     );
   }

@@ -414,6 +414,44 @@ describe("§07.4 rules 8 and 9 — long names and unknown PAX records", () => {
     await extract(gzipStream([global, { name: "package/ok.js", body: "ok" }]), dest, { strip: 1 });
     expect(await readFile(join(dest, "ok.js"), "utf8")).toBe("ok");
   });
+
+  /*
+   * A POSIX-conformant pax writer may put the real length in a `size` record and
+   * leave the ustar header field at 0. Reading the body at one size while
+   * skipping the block padding computed from the other leaves the reader
+   * mid-block, and the *next* header then fails its checksum.
+   */
+  it("stays block-aligned when a PAX size record overrides the header", async () => {
+    const body = "x".repeat(600); // Two data blocks, 424 bytes of padding.
+    const entries = [
+      pax([`size=${body.length}`]),
+      { name: "package/big.js", body, size: 0 },
+      { name: "package/after.js", body: "after" },
+    ];
+
+    await extract(gzipStream(entries), dest, { strip: 1 });
+
+    expect(await readFile(join(dest, "big.js"), "utf8")).toBe(body);
+    // The entry after the misaligned one is the real assertion.
+    expect(await readFile(join(dest, "after.js"), "utf8")).toBe("after");
+
+    const listed = await listEntries(gzipStream(entries));
+    expect(listed.map((entry) => entry.path)).toEqual(["package/big.js", "package/after.js"]);
+    expect(listed[0]!.size).toBe(body.length);
+  });
+
+  it("ignores a PAX size record that is not a safe integer", async () => {
+    const entries = [
+      pax([`size=99999999999999999999`]),
+      { name: "package/ok.js", body: "ok" },
+      { name: "package/after.js", body: "after" },
+    ];
+
+    await extract(gzipStream(entries), dest, { strip: 1 });
+
+    expect(await readFile(join(dest, "ok.js"), "utf8")).toBe("ok");
+    expect(await readFile(join(dest, "after.js"), "utf8")).toBe("after");
+  });
 });
 
 /* -------------------------------------------------------------------------- */

@@ -101,8 +101,14 @@ export const messages = {
   devEnginesVersionMismatch: (packageManager: unknown, name: unknown, version: unknown) =>
     `"packageManager" field is set to ${json(packageManager)} which does not match the value defined in "devEngines.packageManager" for ${json(name)} of ${json(version)}`,
 
-  devEnginesPinMismatch: (name: string, reference: string, range: string) =>
-    `The requested version of ${name}@${reference} does not match the devEngines specification (${name}@${range})`,
+  /**
+   * §12.3 — the two name slots are **independent**: the first names what is about
+   * to be pinned, the second what `devEngines.packageManager` declared. Passing
+   * one name for both makes the cross-name form (`use pnpm@…` in a project whose
+   * devEngines say `yarn`) unprintable.
+   */
+  devEnginesPinMismatch: (name: string, reference: string, rangeName: string, range: string) =>
+    `The requested version of ${name}@${reference} does not match the devEngines specification (${rangeName}@${range})`,
 
   /* §12.4 — resolution ---------------------------------------------------- */
 

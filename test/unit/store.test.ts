@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   opendirSync,
@@ -14,6 +15,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../../src/errors.ts";
 import {
+  bumpLastKnownGood,
   cacheClean,
   createTempDir,
   findInstalledVersion,
@@ -577,5 +579,91 @@ describe("cacheClean — §07.9 (test 95)", () => {
     seedInstall("yarn", "2.2.2");
     cacheClean();
     expect(() => cacheClean()).not.toThrow();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.7 — the last-known-good auto-bump (tests 97–100)
+ *
+ * The bump lives in `store` because both callers — `resolve`'s §04 pipeline and
+ * `install`'s §07.6 promotion — sit above it in §16.10's layering. These tests
+ * moved here with it; they were previously written against a second, unimported
+ * copy in `resolve`, so nothing they asserted was ever reached at runtime.
+ * ------------------------------------------------------------------ */
+
+describe("bumpLastKnownGood (§04.7)", () => {
+  beforeEach(() => {
+    // The ambient environment must not decide whether the bump runs.
+    vi.stubEnv("COREPACK_DEFAULT_TO_LATEST", undefined);
+  });
+
+  function seedLastKnownGood(entries: Record<string, string>): void {
+    writeFileSync(join(home, "lastKnownGood.json"), `${JSON.stringify(entries, null, 2)}\n`);
+  }
+
+  function readLastKnownGoodFile(): Record<string, string> | null {
+    const path = join(home, "lastKnownGood.json");
+    if (!existsSync(path)) return null;
+    return JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
+  }
+
+  it("advances within the same major (test 97)", () => {
+    seedLastKnownGood({ yarn: "1.0.0" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4+sha1.deadbeef" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4+sha1.deadbeef" });
+  });
+
+  it("leaves a different major alone (test 99)", () => {
+    seedLastKnownGood({ yarn: "1.22.4" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "2.2.2" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4" });
+  });
+
+  it("never moves downward", () => {
+    seedLastKnownGood({ yarn: "1.22.4" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.10.0" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4" });
+  });
+
+  it("does not write when only the build suffix differs", () => {
+    seedLastKnownGood({ yarn: "1.22.4+sha1.aaaa" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4+sha1.bbbb" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4+sha1.aaaa" });
+  });
+
+  it("writes nothing when there is no existing entry (test 100)", () => {
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toBeNull();
+
+    seedLastKnownGood({ pnpm: "10.0.0" });
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toEqual({ pnpm: "10.0.0" });
+  });
+
+  it("does nothing when COREPACK_DEFAULT_TO_LATEST=0", () => {
+    seedLastKnownGood({ yarn: "1.0.0" });
+    vi.stubEnv("COREPACK_DEFAULT_TO_LATEST", "0");
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.0.0" });
+  });
+
+  it("ignores URL references and unknown names", () => {
+    seedLastKnownGood({ yarn: "1.0.0", cutlery: "1.0.0" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "https://example.com/yarn.js" });
+    bumpLastKnownGood({ name: "cutlery", reference: "2.0.0" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.0.0", cutlery: "1.0.0" });
+  });
+
+  it("ignores an unparseable recorded entry", () => {
+    seedLastKnownGood({ yarn: "not-a-version" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "not-a-version" });
   });
 });

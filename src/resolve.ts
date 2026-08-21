@@ -12,14 +12,7 @@ import {
   fetchAvailableVersions,
   fetchLatestStableVersion,
 } from "./registry.ts";
-import {
-  isValidRange,
-  isValidVersion,
-  lt,
-  major,
-  rcompare,
-  satisfiesWithPrereleases,
-} from "./semver.ts";
+import { isValidRange, isValidVersion, rcompare, satisfiesWithPrereleases } from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "./store.ts";
 import type {
   Descriptor,
@@ -220,40 +213,4 @@ export function getFallbackLocator(name: string, options: { transparent: boolean
   }
 
   return { name, reference: () => getDefaultVersion(name) };
-}
-
-/**
- * §04.7 — advance the recorded default after a successful install, but only
- * within the same major and only strictly upward. If there is no existing entry,
- * nothing is written.
- */
-export function bumpLastKnownGood(locator: Locator): void {
-  if (envDisabled("COREPACK_DEFAULT_TO_LATEST")) {
-    return;
-  }
-
-  // "Supported (non-URL)": an unknown name has no default to advance, and a URL
-  // reference is not a version at all.
-  if (!isSupportedPackageManager(locator.name) || !isValidVersion(locator.reference)) {
-    return;
-  }
-
-  const lkg = readLastKnownGood();
-  const current = lkg[locator.name];
-
-  // The entry is only ever *created* by §04.5 step 3 or by `install -g`. A
-  // one-off `corepack yarn@4.9.0 …` must not silently become the global default.
-  if (current === undefined || !isValidVersion(current)) {
-    return;
-  }
-
-  // Major bumps are never automatic, and the comparison ignores build metadata,
-  // so re-installing the same version with a different hash suffix writes
-  // nothing.
-  if (major(current) !== major(locator.reference) || !lt(current, locator.reference)) {
-    return;
-  }
-
-  lkg[locator.name] = locator.reference;
-  writeLastKnownGood(lkg);
 }

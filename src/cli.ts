@@ -16,9 +16,8 @@
 
 import { createReadStream, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
+import { basename, join, relative, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
-import { fileURLToPath } from "node:url";
 import { getSpecFor, isSupportedPackageManager, SUPPORTED_NAMES } from "./config/table.ts";
 import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
@@ -303,10 +302,16 @@ export async function cmdInstall(args: string[]): Promise<number> {
   const locator = await resolveOrThrow(descriptor!, { allowTags: true });
 
   out(`${messages.addingToCache(locator.name, locator.reference)}\n`);
-  await ensureInstalled(locator);
+  // `cacheOnly` suppresses §04.7's guarded last-known-good bump.
+  //
+  // The spec contradicts itself here: §04.7 bumps after *any* successful install
+  // of a supported version (and corepack does bump on this path), while §09.2
+  // says `install` "does not touch `lastKnownGood.json` — the global default is
+  // unchanged". §09.2 is the specific, command-scoped statement, so it wins over
+  // the general rule: warming a Docker layer must not silently repoint the
+  // machine's default.
+  await ensureInstalled(locator, { cacheOnly: true });
 
-  // Deliberately nothing else: the global default is unchanged, so warming a
-  // Docker layer cannot silently repoint the machine's default (§09.2).
   return 0;
 }
 
@@ -369,19 +374,33 @@ async function readArchiveEntries(
   format: "pack" | "prepare",
 ): Promise<Map<string, Set<string>>> {
   const found = new Map<string, Set<string>>();
-  let hasShortEntries = false;
+  let hasInvalidEntries = false;
 
   for (const entry of await listEntries(fileStream(filePath))) {
     const segments = entry.path.split("/");
     if (segments[segments.length - 1] !== MARKER_NAME) continue;
 
     if (segments.length < 3) {
-      hasShortEntries = true;
+      hasInvalidEntries = true;
       continue;
     }
 
     const name = segments[0]!;
     const reference = segments[1]!;
+
+    // §07.10's algorithm records `segments[0]` and `segments[1]` verbatim, and
+    // neither it nor corepack validates them — but they are then used as path
+    // components *and* written to `lastKnownGood.json`. `<name>/./.corepack`
+    // survives the extractor (`join` folds the `.` away), so `promote` operates
+    // on `<name>` and the recorded default becomes the literal `"."`, which
+    // every later spec-less run classifies as a dist-tag and takes to the
+    // network. `cache clean` spares that file by design, so only a hand edit
+    // undoes it. Treat an implausible segment exactly like a short entry: this
+    // archive did not come from `pack`.
+    if (!isPlausibleSegment(name) || !isPlausibleSegment(reference)) {
+      hasInvalidEntries = true;
+      continue;
+    }
     let references = found.get(name);
     if (references === undefined) {
       references = new Set();
@@ -390,7 +409,7 @@ async function readArchiveEntries(
     references.add(reference);
   }
 
-  if (hasShortEntries || found.size === 0) {
+  if (hasInvalidEntries || found.size === 0) {
     throw new UsageError(messages.invalidArchiveFormat(format));
   }
 
@@ -401,6 +420,22 @@ async function readArchiveEntries(
   }
 
   return found;
+}
+
+/**
+ * A single path component that can stand for a package manager name or a store
+ * reference: non-empty, not a relative-path marker, and carrying nothing a path
+ * join could reinterpret. (`..` is already caught by the extractor; `.` is not,
+ * because it simply disappears.)
+ */
+function isPlausibleSegment(segment: string): boolean {
+  return (
+    segment.length > 0 &&
+    segment !== "." &&
+    segment !== ".." &&
+    !segment.includes("\\") &&
+    !segment.includes("\0")
+  );
 }
 
 /**
@@ -516,10 +551,11 @@ async function pinToProject(locator: Locator): Promise<number> {
 
   const parsed = parse(reference);
   // A URL reference has no table band, so it has no `commands.use` either.
-  const useCommand =
+  const tableSpec =
     parsed === null || !isSupportedPackageManager(locator.name)
       ? undefined
-      : getSpecFor(locator.name, parsed.version).commands?.use;
+      : getSpecFor(locator.name, parsed.version);
+  const useCommand = tableSpec?.commands?.use;
 
   if (useCommand === undefined || useCommand.length === 0) return 0;
 
@@ -535,6 +571,8 @@ async function pinToProject(locator: Locator): Promise<number> {
     spec,
     useCommand.slice(1),
     getSpecUrl(locator.name, parsed!.version),
+    // §08.1 — `installSpec.bin ?? spec.bin`; the marker may predate `bin`.
+    tableSpec?.bin,
   );
 
   return 0;

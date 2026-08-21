@@ -109,6 +109,56 @@ describe("§13.5 environment variables", () => {
     expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
   });
 
+  it("41: COREPACK_ENABLE_PROJECT_SPEC=0 survives a manifest that cannot be parsed", async () => {
+    // §03.5 / §11.1: "never look at the project at all", "entirely". The escape
+    // hatch users reach for *because* their manifest is broken must not be
+    // defeated by the broken manifest.
+    const fixture = createFixture("{ this is not json");
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { COREPACK_ENABLE_PROJECT_SPEC: "0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("41: COREPACK_ENABLE_PROJECT_SPEC=0 skips devEngines validation too", async () => {
+    const fixture = createFixture({
+      packageManager: "yarn@1.0.0",
+      // `onFail` defaults to error, so this mismatch fails the run outright
+      // while the project is being looked at.
+      devEngines: { packageManager: { name: "pnpm", version: "10.x" } },
+    });
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const strict = await run(["yarn", "--version"], fixture);
+    expect(strict.exitCode).toBe(1);
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { COREPACK_ENABLE_PROJECT_SPEC: "0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("41: a .corepack.env may still be what sets the variable", async () => {
+    const fixture = createFixture("{ this is not json");
+    fixture.write(".corepack.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+  });
+
   it("42: a transparent command runs in a foreign project", async () => {
     const fixture = createFixture({ packageManager: "npm@6.14.2" });
     seedPackageManager(fixture.home, "yarn", YARN_TRANSPARENT);

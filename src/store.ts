@@ -19,8 +19,9 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { getSpecFor, isSupportedPackageManager } from "./config/table.ts";
+import { envDisabled } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
-import { compare, isValidVersion, parse, satisfiesWithPrereleases } from "./semver.ts";
+import { compare, isValidVersion, lt, major, parse, satisfiesWithPrereleases } from "./semver.ts";
 import type { BinList, BinSpec, CorepackMarker, InstallSpec, Locator } from "./types.ts";
 
 /** §07.2 — the file whose presence means "this install is complete and valid". */
@@ -310,6 +311,47 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
     if (errorCode(error) !== undefined) return;
     throw error;
   }
+}
+
+/**
+ * §04.7 — advance the recorded default after a successful install, but only
+ * within the same major and only strictly upward. If there is no existing entry,
+ * nothing is written.
+ *
+ * It lives here, next to the two accessors it is built from, because both of its
+ * callers (`resolve`'s §04 pipeline and `install`'s §07.6 promotion) sit *above*
+ * `store` in the layering of §16.10 — putting it in either one would force an
+ * upward import from the other.
+ */
+export function bumpLastKnownGood(locator: Locator): void {
+  if (envDisabled("COREPACK_DEFAULT_TO_LATEST")) {
+    return;
+  }
+
+  // "Supported (non-URL)": an unknown name has no default to advance, and a URL
+  // reference is not a version at all.
+  if (!isSupportedPackageManager(locator.name) || !isValidVersion(locator.reference)) {
+    return;
+  }
+
+  const lkg = readLastKnownGood();
+  const current = lkg[locator.name];
+
+  // The entry is only ever *created* by §04.5 step 3 or by `install -g`. A
+  // one-off `corepack yarn@4.9.0 …` must not silently become the global default.
+  if (current === undefined || !isValidVersion(current)) {
+    return;
+  }
+
+  // Major bumps are never automatic, and the comparison ignores build metadata,
+  // so re-installing the same version with a different hash suffix writes
+  // nothing.
+  if (major(current) !== major(locator.reference) || !lt(current, locator.reference)) {
+    return;
+  }
+
+  lkg[locator.name] = locator.reference;
+  writeLastKnownGood(lkg);
 }
 
 function isValidBinList(value: unknown): value is BinList {

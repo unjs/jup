@@ -22,16 +22,15 @@ import {
   verifySignature,
 } from "./integrity.ts";
 import { applyRegistryOverride, fetchTarballURLAndSignature, getRegistryUrl } from "./registry.ts";
-import { lt, parse } from "./semver.ts";
+import { parse } from "./semver.ts";
 import {
+  bumpLastKnownGood,
   createTempDir,
   getInstallFolder,
   getVersionDir,
   promote,
-  readLastKnownGood,
   readMarker,
   resolveBin,
-  writeLastKnownGood,
   writeMarker,
 } from "./store.ts";
 import { extract } from "./tar.ts";
@@ -191,9 +190,10 @@ export async function ensureInstalled(
     promote(tmp, location);
 
     // §04.7 — only ever within the same major, only when an entry already
-    // exists, and never when the caller only wanted the cache warmed.
+    // exists, and never when the caller only wanted the cache warmed. The guards
+    // live in `store.bumpLastKnownGood`; `isKnown` only spares it the read.
     if (isKnown && options?.cacheOnly !== true) {
-      bumpLastKnownGood(locator, version!);
+      bumpLastKnownGood(locator);
     }
 
     return { location, bin, hash };
@@ -427,30 +427,6 @@ async function writeStreamToFile(
   } finally {
     await handle.close();
   }
-}
-
-/**
- * §04.7 — installing `yarn@4.9.0` over a `4.1.0` default advances it; installing
- * `yarn@5.0.0` does not. A missing entry is never created here: that is §04.5
- * step 3's job, or `install -g`'s.
- */
-function bumpLastKnownGood(locator: Locator, version: string): void {
-  if (process.env.COREPACK_DEFAULT_TO_LATEST === "0") return;
-
-  const lkg = readLastKnownGood();
-  const current = lkg[locator.name];
-  if (current === undefined) return;
-
-  const currentParsed = parse(current);
-  if (currentParsed === null) return;
-
-  const installed = parse(version);
-  if (installed === null) return;
-  if (currentParsed.major !== installed.major) return;
-  if (!lt(currentParsed.version, installed.version)) return;
-
-  lkg[locator.name] = locator.reference;
-  writeLastKnownGood(lkg);
 }
 
 /** One chunk from stdin, then stdin is released again (§08.6). */

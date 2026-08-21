@@ -263,17 +263,25 @@ function requireDist(
   return dist;
 }
 
-/** `undefined` rather than a half-typed array, so `verifySignature` can report it. */
+/**
+ * `undefined` rather than a half-typed array, so `verifySignature` can report it.
+ *
+ * §06.3 branches on the *array*, not on its usable entries: an empty or absent
+ * array is step 1's `No compatible signature found in package metadata`, while a
+ * non-empty array none of whose entries matches a trusted key is step 4's
+ * `The package was not signed by any trusted keys: …` — a `UsageError` that
+ * prints the offending entries for the user to inspect. Dropping entries that
+ * carry no `keyid` (and collapsing an emptied list to `undefined`) reported the
+ * step-1 bug-shaped error instead, with a stack trace and none of the diagnostic.
+ * Entries are therefore passed through untouched; a missing `keyid` simply never
+ * matches a trusted key, whose own keyid is always a string.
+ */
 function readSignatures(dist: Record<string, unknown>): RegistrySignature[] | undefined {
   const { signatures } = dist;
-  if (!Array.isArray(signatures)) {
+  if (!Array.isArray(signatures) || signatures.length === 0) {
     return undefined;
   }
-  const entries = signatures.filter((entry): entry is RegistrySignature => {
-    const record = asRecord(entry);
-    return record !== undefined && typeof record.keyid === "string";
-  });
-  return entries.length === 0 ? undefined : entries;
+  return signatures as RegistrySignature[];
 }
 
 /** §05.3 — an array of versions, or an object whose keys are versions. */

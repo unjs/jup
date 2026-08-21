@@ -144,6 +144,28 @@ describe("§13.10 use / up", () => {
     expect(result.stderr).toBe("");
   });
 
+  it("110: use refuses a package manager the devEngines field does not name", async () => {
+    // The *version* satisfies the declared range; only the name is wrong. Left
+    // unchecked, this writes a pin that §03.3's name check then rejects on every
+    // later run, with nothing but a hand edit to undo it.
+    const fixture = createFixture({
+      devEngines: { packageManager: { name: "pnpm", version: "1.x" } },
+    });
+
+    const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("Usage Error:");
+    // §12.3's two name slots are independent: the requested one, then the
+    // declared one.
+    expect(result.stdout).toMatch(
+      /The requested version of yarn@1\.22\.4\+sha512\.[\da-f]+ does not match the devEngines specification \(pnpm@1\.x\)/,
+    );
+    expect(result.stderr).toBe("");
+    // The pin was never written.
+    expect(pinOf(fixture)).toBeUndefined();
+  });
+
   it("111: up bumps to the highest release of the pinned major", async () => {
     const fixture = createFixture({ packageManager: "yarn@2.1.0" });
 

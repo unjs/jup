@@ -214,7 +214,15 @@ export function verifySignature(input: {
   let expired: { key: TrustedKey; signature: RegistrySignature; expires: string } | undefined;
 
   for (const key of trustedKeys) {
-    const signature = signatures.find((candidate) => candidate.keyid === key.keyid);
+    // A registry-supplied entry may be any JSON value at all, so the comparison
+    // must not assume an object: a `null` in the array is a malformed packument,
+    // not a crash.
+    const signature = signatures.find(
+      (candidate) =>
+        typeof candidate === "object" &&
+        candidate !== null &&
+        (candidate as RegistrySignature).keyid === key.keyid,
+    );
     if (!signature) {
       continue;
     }
@@ -251,7 +259,9 @@ export function verifySignature(input: {
     throw new UsageError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
   }
 
-  if (!selected.signature.sig) {
+  // §06.3 step 4 — "the matched signature has no `.sig`". A non-string `sig` is
+  // the same thing: unusable, and reported rather than fed to the decoder.
+  if (typeof selected.signature.sig !== "string" || selected.signature.sig === "") {
     throw new UsageError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
   }
 
@@ -308,7 +318,7 @@ function verifyEcdsaP256(key: TrustedKey, signature: RegistrySignature, payload:
       "sha256",
       Buffer.from(payload, "utf8"),
       { key: publicKey, dsaEncoding: "der" },
-      Buffer.from(signature.sig, "base64"),
+      Buffer.from(signature.sig ?? "", "base64"),
     );
   } catch {
     // A malformed signature is a mismatch, not a crash.

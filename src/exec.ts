@@ -9,7 +9,7 @@ import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getPackageManagerFor } from "./config/table.ts";
 import { messages } from "./errors.ts";
-import type { InstallSpec } from "./types.ts";
+import type { BinList, BinSpec, InstallSpec } from "./types.ts";
 import { getOwnRoot as resolveOwnRoot } from "./self.ts";
 
 /**
@@ -55,19 +55,31 @@ function urlPathname(specUrl: string): string {
  * verify it stays inside `<location>`. The marker file (§07.2) does not record
  * which of the two sources its `bin` came from, so the check is unconditional —
  * the embedded table's own values never escape, so nothing legitimate is lost.
+ *
+ * `fallbackBin` is §08.1's `installSpec.bin ?? spec.bin`: the embedded table's
+ * `bin` for this locator. Markers written by older corepack releases carry no
+ * `bin` at all, and §07.1 requires the store to stay compatible with them, so
+ * without the fallback a run the spec says must succeed dies on a `TypeError`
+ * instead.
  */
-export function resolveBinPath(binName: string, spec: InstallSpec, specUrl: string): string {
+export function resolveBinPath(
+  binName: string,
+  spec: InstallSpec,
+  specUrl: string,
+  fallbackBin?: BinSpec | BinList,
+): string {
   const location = resolve(spec.location);
+  const bin = spec.bin ?? fallbackBin;
 
   let declared: string | undefined;
-  if (Array.isArray(spec.bin)) {
-    if (spec.bin.includes(binName)) {
+  if (Array.isArray(bin)) {
+    if (bin.includes(binName)) {
       const pathname = urlPathname(specUrl);
       // Dispatch on the URL path's extension, exactly as the download did (§07.4).
       if (extname(pathname) === ".js") declared = basename(pathname);
     }
-  } else if (Object.hasOwn(spec.bin, binName)) {
-    declared = spec.bin[binName];
+  } else if (bin !== undefined && Object.hasOwn(bin, binName)) {
+    declared = bin[binName];
   }
 
   if (declared === undefined) throw new Error(messages.assertUnableToLocateBinPath(binName));
@@ -112,8 +124,9 @@ export function execPackageManager(
   spec: InstallSpec,
   args: string[],
   specUrl: string,
+  fallbackBin?: BinSpec | BinList,
 ): void {
-  const binPath = resolveBinPath(binName, spec, specUrl);
+  const binPath = resolveBinPath(binName, spec, specUrl, fallbackBin);
 
   // §08.7 — the only variable we add. Package managers use it purely as an "am I
   // running under a version manager?" flag. `PATH` is deliberately left alone in

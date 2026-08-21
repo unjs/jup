@@ -6,12 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFINITIONS } from "../../src/config/table.ts";
 import { messages } from "../../src/errors.ts";
-import {
-  bumpLastKnownGood,
-  getDefaultVersion,
-  getFallbackLocator,
-  resolveDescriptor,
-} from "../../src/resolve.ts";
+import { getDefaultVersion, getFallbackLocator, resolveDescriptor } from "../../src/resolve.ts";
 import type { UrlRegistrySpec } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *
@@ -707,71 +702,5 @@ describe("getFallbackLocator (§02.1)", () => {
     const locator = getFallbackLocator("cutlery", { transparent: true });
     const error = await rejection(locator.reference());
     expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
-  });
-});
-
-/* ------------------------------------------------------------------ *
- * §04.7 — the last-known-good auto-bump (tests 97–100)
- * ------------------------------------------------------------------ */
-
-describe("bumpLastKnownGood (§04.7)", () => {
-  it("advances within the same major (test 97)", () => {
-    seedLastKnownGood({ yarn: "1.0.0" });
-
-    bumpLastKnownGood({ name: "yarn", reference: "1.22.4+sha1.deadbeef" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4+sha1.deadbeef" });
-  });
-
-  it("leaves a different major alone (test 99)", () => {
-    seedLastKnownGood({ yarn: "1.22.4" });
-
-    bumpLastKnownGood({ name: "yarn", reference: "2.2.2" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4" });
-  });
-
-  it("never moves downward", () => {
-    seedLastKnownGood({ yarn: "1.22.4" });
-
-    bumpLastKnownGood({ name: "yarn", reference: "1.10.0" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4" });
-  });
-
-  it("does not write when only the build suffix differs", () => {
-    seedLastKnownGood({ yarn: "1.22.4+sha1.aaaa" });
-
-    bumpLastKnownGood({ name: "yarn", reference: "1.22.4+sha1.bbbb" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4+sha1.aaaa" });
-  });
-
-  it("writes nothing when there is no existing entry (test 100)", () => {
-    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
-    expect(readLastKnownGoodFile()).toBeNull();
-
-    seedLastKnownGood({ pnpm: "10.0.0" });
-    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
-    expect(readLastKnownGoodFile()).toEqual({ pnpm: "10.0.0" });
-  });
-
-  it("does nothing when COREPACK_DEFAULT_TO_LATEST=0", () => {
-    seedLastKnownGood({ yarn: "1.0.0" });
-    process.env.COREPACK_DEFAULT_TO_LATEST = "0";
-
-    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.0.0" });
-  });
-
-  it("ignores URL references and unknown names", () => {
-    seedLastKnownGood({ yarn: "1.0.0", cutlery: "1.0.0" });
-
-    bumpLastKnownGood({ name: "yarn", reference: "https://example.com/yarn.js" });
-    bumpLastKnownGood({ name: "cutlery", reference: "2.0.0" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.0.0", cutlery: "1.0.0" });
-  });
-
-  it("ignores an unparseable recorded entry", () => {
-    seedLastKnownGood({ yarn: "not-a-version" });
-
-    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "not-a-version" });
   });
 });

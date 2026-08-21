@@ -441,7 +441,11 @@ async function walk(
       const typeflag = String.fromCodePoint(header[156] ?? 0);
       let size = decodeNumber(header, 124, 12);
       if (!Number.isInteger(size) || size < 0) throw new Error(`Invalid tar header`);
-      const padding = (BLOCK_SIZE - (size % BLOCK_SIZE)) % BLOCK_SIZE;
+      // `padding` is always applied to the size actually used to read the body,
+      // never to the header's copy of it: a PAX `size` record overrides the
+      // header below, and a POSIX-conformant writer may leave the ustar field at
+      // 0 when it does. Padding one to a block boundary while reading the other
+      // leaves the stream mid-block, and the *next* header fails its checksum.
 
       if (typeflag === "L" || typeflag === "K") {
         // GNU long name / long link name: the body names the *next* entry.
@@ -449,7 +453,7 @@ async function walk(
         const value = Buffer.from(await body.collect())
           .toString("utf8")
           .replaceAll("\0", "");
-        await reader.skip(padding);
+        await reader.skip(padding(size));
         if (typeflag === "L") longName = value;
         continue;
       }
@@ -457,13 +461,13 @@ async function walk(
       if (typeflag === "x" || typeflag === "X") {
         const body = new EntryBody(reader, size);
         pax = parsePax(await body.collect());
-        await reader.skip(padding);
+        await reader.skip(padding(size));
         continue;
       }
 
       if (typeflag === "g") {
         // Global extended headers are ignored wholesale (rule 9).
-        await reader.skip(size + padding);
+        await reader.skip(size + padding(size));
         continue;
       }
 
@@ -473,8 +477,14 @@ async function walk(
       if (longName !== undefined) name = longName;
       const paxPath = pax?.get("path");
       if (paxPath !== undefined) name = paxPath;
+      // A PAX `size` record supersedes the header field entirely — including for
+      // the block padding applied below, which is why that `skip` is deferred.
+      // An unparseable or unsafe value is ignored rather than trusted (rule 9).
       const paxSize = pax?.get("size");
-      if (paxSize !== undefined && /^\d+$/.test(paxSize)) size = Number.parseInt(paxSize, 10);
+      if (paxSize !== undefined && /^\d+$/.test(paxSize)) {
+        const parsed = Number.parseInt(paxSize, 10);
+        if (Number.isSafeInteger(parsed)) size = parsed;
+      }
       longName = undefined;
       pax = undefined;
 
@@ -489,7 +499,7 @@ async function walk(
         body,
       );
       await body.drain();
-      await reader.skip(padding);
+      await reader.skip(padding(size));
     }
   } finally {
     await reader.dispose();

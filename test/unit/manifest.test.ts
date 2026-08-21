@@ -273,14 +273,17 @@ describe("the upward walk — §03.1", () => {
   });
 
   // Test 11.
-  it("rejects invalid JSON, naming the path relative to the initial cwd", () => {
+  it("rejects invalid JSON, naming the path relative to the directory examined", () => {
     write("package.json", "{ this is not json");
     expectUsageError(() => discoverProjectSpec(root), messages.invalidPackageJson("package.json"));
 
+    // §03.1 says "relative to `d`" — the directory the walk is standing in when
+    // it reads the file, not the initial cwd — so a malformed manifest two
+    // levels up is still named `package.json`, never `../../package.json`.
     const nested = dir("packages/app");
     expectUsageError(
       () => discoverProjectSpec(nested),
-      messages.invalidPackageJson(join("..", "..", "package.json")),
+      messages.invalidPackageJson("package.json"),
     );
   });
 
@@ -372,6 +375,60 @@ describe("the upward walk — §03.1", () => {
       const result = discoverProjectSpec(dir("deep/nested"), { envOnly: true });
       expect(result.type).toBe("NoProject");
       expect(result.envFilePath).toBeUndefined();
+    });
+  });
+
+  /* §03.5 / §11.1 — "never look at the project at all". */
+  describe("COREPACK_ENABLE_PROJECT_SPEC=0 with projectSpecFlag", () => {
+    it("does not parse a malformed manifest", () => {
+      write("package.json", "{ this is not json");
+      process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
+
+      const result = discoverProjectSpec(root, { projectSpecFlag: true });
+      expect(result.type).toBe("NoProject");
+    });
+
+    it("does not validate devEngines, whatever onFail says", () => {
+      manifest(".", {
+        packageManager: "pnpm@10.0.0",
+        devEngines: { packageManager: { name: "yarn", version: "1.x", onFail: "error" } },
+      });
+      process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
+
+      const result = discoverProjectSpec(root, { projectSpecFlag: true });
+      expect(result.type).toBe("NoProject");
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it("still loads the env file, which is what may set the variable", () => {
+      write("package.json", "{ this is not json");
+      write(".corepack.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
+
+      const result = discoverProjectSpec(root, { projectSpecFlag: true });
+      expect(result.type).toBe("NoProject");
+      expect(result.envFilePath).toBe(join(root, ".corepack.env"));
+      expect(process.env.COREPACK_ENABLE_PROJECT_SPEC).toBe("0");
+    });
+
+    it("discards a manifest read before a parent env file disabled the spec", () => {
+      // `sub` is read first (no `packageManager`, so the walk continues); the
+      // env file that disables the spec only turns up one directory later.
+      manifest("sub", {});
+      manifest(".", { packageManager: "pnpm@10.0.0" });
+      write(".corepack.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
+
+      const result = discoverProjectSpec(join(root, "sub"), { projectSpecFlag: true });
+      expect(result.type).toBe("NoProject");
+    });
+
+    it("is opt-in: without the option the manifest is still read", () => {
+      write("package.json", "{ this is not json");
+      process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
+
+      expectUsageError(
+        () => discoverProjectSpec(root),
+        messages.invalidPackageJson("package.json"),
+      );
     });
   });
 });
@@ -817,7 +874,7 @@ describe("writePin — §03.7", () => {
 
     expectUsageError(
       () => writePin(root, { name: "yarn", reference: "1.22.4" }),
-      messages.devEnginesPinMismatch("yarn", "1.22.4", "2.x"),
+      messages.devEnginesPinMismatch("yarn", "1.22.4", "yarn", "2.x"),
     );
     // Nothing was written.
     expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
@@ -843,5 +900,44 @@ describe("writePin — §03.7", () => {
     manifest(".", { devEngines: { packageManager: { name: "yarn", version: "1.x" } } });
 
     expect(() => writePin(root, { name: "yarn", reference: "1.22.4+sha1.abc" })).not.toThrow();
+  });
+
+  // §03.3/§03.7 — the *name* is checked too, not only the version. Without it,
+  // pinning pnpm in a yarn-declaring project succeeds and every later run then
+  // fails §03.3's name check, with nothing but a hand edit to undo it.
+  it("throws when the pinned name differs from the devEngines name", () => {
+    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "6.x" } } });
+
+    expectUsageError(
+      // The version satisfies the range: only the name is wrong.
+      () => writePin(root, { name: "pnpm", reference: "6.6.2" }),
+      messages.devEnginesPinMismatch("pnpm", "6.6.2", "yarn", "6.x"),
+    );
+    // Nothing was written: the manifest still has no `packageManager` field.
+    expect(
+      JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager,
+    ).toBeUndefined();
+  });
+
+  // §12.3's two name slots are independent, so the rendered message names both
+  // the requested package manager and the declared one.
+  it("names both package managers in the mismatch message", () => {
+    expect(messages.devEnginesPinMismatch("pnpm", "6.6.2", "yarn", "6.x")).toBe(
+      "The requested version of pnpm@6.6.2 does not match the devEngines specification (yarn@6.x)",
+    );
+  });
+
+  it("routes a name mismatch through onFail like any other violation", () => {
+    manifest(".", {
+      devEngines: { packageManager: { name: "yarn", version: "6.x", onFail: "warn" } },
+    });
+
+    writePin(root, { name: "pnpm", reference: "6.6.2" });
+    expect(warn).toHaveBeenCalledWith(
+      `${VALIDATION_WARNING_PREFIX}${messages.devEnginesPinMismatch("pnpm", "6.6.2", "yarn", "6.x")}`,
+    );
+    expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
+      "pnpm@6.6.2",
+    );
   });
 });

@@ -415,6 +415,36 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     expect(await fetchLatestStableVersion(npm("pnpm"))).toBe(`9.1.0+sha512.${hex}`);
   });
 
+  /*
+   * §06.3 branches on the array, not on its usable entries. A signature with no
+   * `keyid` is step 4 — `The package was not signed by any trusted keys`, a
+   * `UsageError` that shows the user what the registry actually sent — not step
+   * 1's `No compatible signature found in package metadata`, which is an
+   * internal assertion printed with a stack.
+   */
+  it("takes the trusted-keys branch when no signature carries a keyid", async () => {
+    const pair = keypair();
+    const { sri } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      "/pnpm/latest": {
+        name: "pnpm",
+        version: "9.1.0",
+        dist: { integrity: sri, signatures: [{ sig: "AAAA" }] },
+      },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+
+    const error = await rejection(fetchLatestStableVersion(npm("pnpm")));
+    const cause = error.cause as Error;
+
+    expect(cause).toBeInstanceOf(UsageError);
+    expect(cause.message).not.toBe(messages.noCompatibleSignature());
+    expect(cause.message.startsWith("The package was not signed by any trusted keys: ")).toBe(true);
+    // The entry the registry sent reaches the diagnostic the user reads.
+    expect(cause.message).toContain(`"sig": "AAAA"`);
+  });
+
   it("wraps a verification failure in the §04.5 message, keeping the cause", async () => {
     const pair = keypair();
     const { sri } = sriFor("tarball bytes", "sha512");
@@ -554,6 +584,28 @@ describe("fetchTarballURLAndSignature (§07.3)", () => {
 
     const error = await rejection(fetchTarballURLAndSignature(npm("pnpm"), "9.1.0"));
     expect(error.message).toBe(messages.refusingToDownload("evil.example.com", server.origin));
+  });
+
+  it("passes signature entries through untouched, keyid or no keyid", async () => {
+    const routes: Record<string, Route> = {};
+    const server = await startServer(routes);
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+
+    routes["/pnpm/9.1.0"] = {
+      version: "9.1.0",
+      dist: {
+        tarball: `${server.origin}/pnpm/-/pnpm-9.1.0.tgz`,
+        // §06.3 needs every entry, including the unusable ones: they are what
+        // its step-4 diagnostic prints.
+        signatures: [{ sig: "no-keyid" }, { keyid: "SHA256:x", sig: "sig" }],
+      },
+    };
+
+    const result = await fetchTarballURLAndSignature(npm("pnpm"), "9.1.0");
+    expect(result.signatures).toStrictEqual([
+      { sig: "no-keyid" },
+      { keyid: "SHA256:x", sig: "sig" },
+    ]);
   });
 
   it("returns undefined signatures instead of crashing when they are stripped (§15.7)", async () => {

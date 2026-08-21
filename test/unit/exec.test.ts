@@ -121,6 +121,47 @@ describe("resolveBinPath — §08.1", () => {
       messages.assertUnableToLocateBinPath("constructor"),
     );
   });
+
+  /*
+   * §08.1's first line is `bin := installSpec.bin ?? spec.bin`. Markers written
+   * by older corepack releases carry no `bin`, and §07.1 requires the store to
+   * stay compatible with them.
+   */
+  describe("a marker without a bin (§08.1's `?? spec.bin`)", () => {
+    it("falls back to the table spec's bin map", () => {
+      const spec = { location: join(root, "map", "yarn", "1.0.0"), hash: "" };
+      expect(resolveBinPath("yarn", spec, TGZ_URL, { yarn: "./bin/yarn.js" })).toBe(
+        join(spec.location, "bin", "yarn.js"),
+      );
+    });
+
+    it("falls back to the table spec's bin list", () => {
+      const spec = { location: join(root, "list", "yarn", "4.0.0"), hash: "" };
+      expect(resolveBinPath("yarn", spec, YARN_URL, ["yarn", "yarnpkg"])).toBe(
+        join(spec.location, "yarn.js"),
+      );
+    });
+
+    it("asserts rather than crashing when there is no fallback either", () => {
+      const spec = { location: join(root, "map", "yarn", "1.0.0"), hash: "" };
+      // Not a `TypeError` from reading a property of `undefined`: §12.8's
+      // assertion, which says which bin could not be located.
+      expect(() => resolveBinPath("yarn", spec, TGZ_URL)).toThrow(
+        messages.assertUnableToLocateBinPath("yarn"),
+      );
+    });
+
+    it("prefers the marker's own bin when it has one", () => {
+      const spec = {
+        location: join(root, "map", "yarn", "1.0.0"),
+        bin: { yarn: "./bin/yarn.js" },
+        hash: "",
+      };
+      expect(resolveBinPath("yarn", spec, TGZ_URL, { yarn: "./other.js" })).toBe(
+        join(spec.location, "bin", "yarn.js"),
+      );
+    });
+  });
 });
 
 describe("execPackageManager — §08.4 exit codes", () => {

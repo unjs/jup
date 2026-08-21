@@ -42,14 +42,16 @@ export type BinList = string[];
 /** §07.2 — the parsed `.corepack` marker plus the directory it was found in. */
 export interface InstallSpec {
   location: string;
-  bin: BinSpec | BinList;
+  /** Optional: a marker written by an older corepack may not carry one (§08.1). */
+  bin?: BinSpec | BinList;
   hash: string;
 }
 
 /** §07.2 — the on-disk shape of the `.corepack` marker file. */
 export interface CorepackMarker {
   locator: Locator;
-  bin: BinSpec | BinList;
+  /** Optional: markers written by older corepack releases omit it (§08.1). */
+  bin?: BinSpec | BinList;
   hash: string;
 }
 
@@ -151,10 +153,16 @@ export interface TrustedKey {
  */
 export type TrustStore = Record<string, TrustedKey[]>;
 
-/** One `dist.signatures` entry from an npm packument. */
+/**
+ * One `dist.signatures` entry from an npm packument.
+ *
+ * Both fields are optional: the array reaches §06.3 exactly as the registry sent
+ * it (an entry missing its `keyid` must take step 4's branch and appear in the
+ * diagnostic, not be silently dropped), so neither field can be assumed present.
+ */
 export interface RegistrySignature {
-  keyid: string;
-  sig: string;
+  keyid?: string;
+  sig?: string;
 }
 
 /* -------------------------------------------------------------------------- */

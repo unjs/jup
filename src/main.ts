@@ -17,7 +17,14 @@ import { ensureInstalled } from "./install.ts";
 import { discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
 import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
 import { parse } from "./semver.ts";
-import type { Descriptor, Invocation, LazyLocator, Locator, SpecResult } from "./types.ts";
+import type {
+  Descriptor,
+  Invocation,
+  LazyLocator,
+  Locator,
+  PackageManagerSpec,
+  SpecResult,
+} from "./types.ts";
 import { GENERIC_USAGE_LINE, USAGE_LINES } from "./usage.ts";
 
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
@@ -118,7 +125,11 @@ export async function runProxy(
   // directory walked. The env file it loads is applied to `process.env` here,
   // before anything reads a `COREPACK_*` variable below.
   const cwd = process.cwd();
-  const specResult = discoverProjectSpec(cwd);
+  // `projectSpecFlag` — §03.5's "never look at the project at all" has to mean
+  // the manifest is never parsed either, or a malformed `package.json` still
+  // fails the very run `COREPACK_ENABLE_PROJECT_SPEC=0` was set to rescue. The
+  // walk still happens, because the env file it loads is what may set the flag.
+  const specResult = discoverProjectSpec(cwd, { projectSpecFlag: true });
 
   // §03.6 — auto-pin runs *before* reconciliation, and only here: it is a proxy
   // -mode-only behaviour, so `reconcile` deliberately leaves it to this caller.
@@ -156,7 +167,15 @@ export async function runProxy(
 
   // Step 7 — hand over. Nothing after this point may write to the store: the
   // package manager owns the process from here (§08.2).
-  execPackageManager(binaryName, installSpec, args, getSpecUrl(locator));
+  // §08.1 — `installSpec.bin ?? spec.bin`: a marker written by an older corepack
+  // carries no `bin`, and the embedded table's entry is what stands in for it.
+  execPackageManager(
+    binaryName,
+    installSpec,
+    args,
+    getSpecUrl(locator),
+    getTableSpec(locator)?.bin,
+  );
 
   // The package manager sets the real exit code from its own module body, which
   // runs strictly after this returns. Never wrap that in a catch (§08.4).
@@ -284,10 +303,21 @@ function withHash(reference: string, hash: string): string {
  */
 function getSpecUrl(locator: Locator): string {
   const parsed = parse(locator.reference);
-  if (parsed !== null && isSupportedPackageManager(locator.name)) {
-    return getSpecFor(locator.name, parsed.version).url.replace("{}", parsed.version);
+  const spec = getTableSpec(locator);
+  if (spec !== undefined) {
+    return spec.url.replace("{}", parsed!.version);
   }
   return locator.reference;
+}
+
+/**
+ * The embedded table's spec for this locator, or `undefined` when there is none
+ * — an unknown package manager, or a URL reference, which is its own spec.
+ */
+function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
+  const parsed = parse(locator.reference);
+  if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
+  return getSpecFor(locator.name, parsed.version);
 }
 
 /** Everything that is not a `UsageError` keeps its stack (§08.4). */
