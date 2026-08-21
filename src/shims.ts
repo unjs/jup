@@ -26,6 +26,7 @@ import { delimiter, dirname, join, relative, resolve as resolvePath } from "node
 import { fileURLToPath } from "node:url";
 import { DEFINITIONS, getBinariesFor } from "./config/table.ts";
 import { messages, UsageError } from "./errors.ts";
+import { findEntryModule } from "./self.ts";
 
 /** Our own binary name — what the §10.4 `PATH` lookup searches for. */
 const TOOL_NAME = "pipack";
@@ -127,9 +128,15 @@ export function targetBinaries(names: string[]): string[] {
 /* Locating ourselves — §10.4, §14.17                                         */
 /* -------------------------------------------------------------------------- */
 
-/** The folder holding this module: `src/` when run from source, `dist/` when built. */
+/**
+ * The folder holding the library entry: `src/` from source, `dist/` from a build.
+ *
+ * Found by walking up rather than by taking this module's own directory — a
+ * bundler may emit chunks into a subdirectory (obuild uses `dist/_chunks/`), in
+ * which case this file's neighbour is not the entry.
+ */
 export function resolveDistFolder(): string {
-  return dirname(fileURLToPath(import.meta.url));
+  return findEntryModule(import.meta.url)?.directory ?? dirname(fileURLToPath(import.meta.url));
 }
 
 function isExecutableFile(file: string): boolean {

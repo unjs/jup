@@ -10,18 +10,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { getPackageManagerFor } from "./config/table.ts";
 import { messages } from "./errors.ts";
 import type { InstallSpec } from "./types.ts";
+import { getOwnRoot as resolveOwnRoot } from "./self.ts";
 
 /**
  * §08.7 — the directory containing our own installation root.
  *
- * Corepack resolves its own `package.json` and takes its directory; we can do the
- * same with pure path arithmetic, which keeps the handover free of filesystem I/O
- * (§16.3). Both layouts this module ever lives in are one level below the package
- * root — `<root>/src/exec.ts` when run from source, `<root>/dist/index.mjs` once
- * bundled — so the root is always two `dirname`s up from this file.
+ * Corepack resolves its own `package.json` and takes its directory. Two fixed
+ * `dirname`s would be cheaper, but they give the wrong answer once bundled: the
+ * chunk lands in `dist/_chunks/`, so the root would come out as `dist/`. The walk
+ * is cached, so handover still costs no repeat I/O (§16.3).
  */
+let ownRoot: string | undefined;
 function getOwnRoot(): string {
-  return dirname(dirname(fileURLToPath(import.meta.url)));
+  ownRoot ??= resolveOwnRoot(import.meta.url);
+  return ownRoot;
 }
 
 /**
