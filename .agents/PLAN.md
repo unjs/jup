@@ -545,3 +545,23 @@ directories, `shims.json` restore, npm shimming by default, `cache list`/`cache 
 atomic multi-field pin writes, workspace-boundary write targets, native artifacts,
 `corepack info`, global-flag transparency, `PATH` prepending, and §15.35's sundries.
 Tests 148–207.
+
+---
+
+## Wave 6 — audit (T21)
+
+Runs **after** the implementation is complete and the conformance suite is green, not
+before: an audit of stubs finds nothing, and an audit of code that is about to change is
+wasted. Four independent auditors, each with one lens and no knowledge of the others'
+findings, then a pass applying what survives:
+
+| Lens | Looks for |
+|---|---|
+| **Correctness** | Divergence from §01–§14, missed edge cases, conformance rows the suite asserts loosely, error-path behaviour, the two spec conflicts already found (§06.5 vs test 82; SHOULD vs MUST generally) |
+| **Speed** | Violations of §01.3's fast-path budget and §16.3's syscall list — eager LKG reads, store `opendir` on an exact pin, JSON DOM parsing on the warm path, allocations in argv classification |
+| **Security** | §07.4 extraction rules, §14.6 credential scoping, §14.5 env-file eligibility, §14.9/§14.13 URL and bin-path confinement, §06 verification ordering, TOCTOU around the store |
+| **Simplicity** | Duplication across modules, abstractions that earn nothing, dead options, places where the spec's shape was copied more literally than it needed to be |
+
+Each auditor reports findings ranked by severity with a concrete failure scenario;
+findings are verified before anything is applied, since a plausible-sounding finding that
+is actually correct behaviour (§14.21 lists six of those) must not be "fixed".
