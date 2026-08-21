@@ -5,45 +5,186 @@
  * table says which one fires when, and two of its consequences must **not** be
  * accidentally "fixed": a user-supplied hash overrides signature verification,
  * and that is intended.
+ *
+ * Crypto choice: `node:crypto` throughout rather than `crypto.subtle`.
+ * `verifySignature` is synchronous and `subtle.verify` is not; `subtle` also
+ * only accepts IEEE-P1363 `r‖s` signatures, while npm publishes DER-encoded
+ * `(r, s)` (§06.3), and it exposes no way to read back the curve of an imported
+ * key. `node:crypto` handles all three directly. On the hashing side `sha1` and
+ * `sha224` — both of which appear in real `packageManager` pins (§06.2) — have
+ * no WebCrypto equivalent at all, and `createHash` is the only streaming digest
+ * available, so hashing is `node:crypto` too.
  */
 
-import type { RegistrySignature, TrustedKey } from "./types.ts";
+import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
+import { createReadStream } from "node:fs";
+import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "./config/keys.ts";
+import { messages, UsageError } from "./errors.ts";
+import type { RegistrySignature, TrustedKey, TrustStore } from "./types.ts";
 
 /** §14.11 — explicit allowlist; anything else is a clear error, not a crash. */
 export const SUPPORTED_HASH_ALGOS = ["sha1", "sha224", "sha256", "sha384", "sha512"] as const;
 
 export type HashAlgo = (typeof SUPPORTED_HASH_ALGOS)[number];
 
+/** Digest sizes, used to reject SRI strings whose payload cannot be what it claims. */
+const DIGEST_BYTES: Record<HashAlgo, number> = {
+  sha1: 20,
+  sha224: 28,
+  sha256: 32,
+  sha384: 48,
+  sha512: 64,
+};
+
+/** §14.11 — a pin is not rejected for being weak, but it is called out once. */
+const WEAK_HASH_ALGOS = new Set(["sha1", "md5"]);
+
+const warnedWeakAlgos = new Set<string>();
+
+/**
+ * §14.4 — the clock-skew escape hatch, deliberately closed.
+ *
+ * §14.4 permits accepting an otherwise-valid signature from an expired key with
+ * a loud warning, on the grounds that a wrong system clock would otherwise
+ * reject good keys. It is only a SHOULD, and §13's test 82 requires that a trust
+ * store whose *only* matching key is expired fails with `expiredKey` — a valid
+ * signature is exactly what that test presents. Leniency would also make expiry
+ * unenforceable in the common case, since the registry usually offers a single
+ * key. So the strict branch is the shipped behaviour; the lenient branch below
+ * stays implemented and one flag flip away, and it can never fire silently.
+ */
+const ACCEPT_EXPIRED_KEY_WITH_WARNING: boolean = false;
+
 export function assertSupportedAlgo(algo: string): HashAlgo {
-  throw new Error(`TODO(T8): assertSupportedAlgo(${algo})`);
+  const normalized = algo.toLowerCase();
+  if (!(SUPPORTED_HASH_ALGOS as readonly string[]).includes(normalized)) {
+    throw new UsageError(messages.unsupportedHashAlgo(algo));
+  }
+  if (WEAK_HASH_ALGOS.has(normalized) && !warnedWeakAlgos.has(normalized)) {
+    warnedWeakAlgos.add(normalized);
+    console.warn(
+      `! Corepack integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
+    );
+  }
+  return normalized as HashAlgo;
 }
 
 /** Hex digest of a stream, computed as it flows (§16.5). */
-export function hashStream(stream: ReadableStream<Uint8Array>, algo: string): Promise<string> {
-  throw new Error(`TODO(T8): hashStream(${algo})`);
+export async function hashStream(
+  stream: ReadableStream<Uint8Array>,
+  algo: string,
+): Promise<string> {
+  const hash = createHash(assertSupportedAlgo(algo));
+  const reader = stream.getReader();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      if (value) {
+        hash.update(value);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return hash.digest("hex");
 }
 
-export function hashFile(path: string, algo: string): Promise<string> {
-  throw new Error(`TODO(T8): hashFile(${path}, ${algo})`);
+export async function hashFile(path: string, algo: string): Promise<string> {
+  const hash = createHash(assertSupportedAlgo(algo));
+  for await (const chunk of createReadStream(path)) {
+    hash.update(chunk as Uint8Array);
+  }
+  return hash.digest("hex");
 }
 
-/** §14.12 — parse `<algo>-<base64>` properly; never `slice(7)`. */
+/**
+ * §14.12 — parse `<algo>-<base64>` properly; never `slice(7)`.
+ *
+ * Corepack assumes the SRI algorithm is always `sha512`, so a registry that
+ * answers `sha256-…` yields a silently wrong expected digest. Real SRI strings
+ * may carry several space-separated entries and `?opt` suffixes; the first
+ * entry wins, and an algorithm outside the allowlist is an error rather than a
+ * guess.
+ */
 export function parseSri(integrity: string): { algo: HashAlgo; hex: string } {
-  throw new Error(`TODO(T8): parseSri(${integrity})`);
+  const entry = integrity.trim().split(/\s+/)[0] ?? "";
+  const dash = entry.indexOf("-");
+  if (dash <= 0) {
+    throw new UsageError(messages.unsupportedHashAlgo(entry));
+  }
+
+  const algo = assertSupportedAlgo(entry.slice(0, dash));
+  const base64 = entry.slice(dash + 1).split("?")[0] ?? "";
+  const digest = Buffer.from(base64, "base64");
+
+  if (digest.length !== DIGEST_BYTES[algo]) {
+    throw new UsageError(messages.unsupportedHashAlgo(entry));
+  }
+
+  return { algo, hex: digest.toString("hex") };
+}
+
+/** §06.3 — the expected hex digest carried by a (verified) SRI string. */
+export function expectedHashFromIntegrity(integrity: string): string {
+  return parseSri(integrity).hex;
 }
 
 /** §14.11 — constant-time. */
 export function compareDigest(expected: string, actual: string): boolean {
-  throw new Error(`TODO(T8): compareDigest(${expected}, ${actual})`);
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(actual, "utf8");
+  if (a.length !== b.length) {
+    // Lengths are public (they follow from the algorithm), but the *contents*
+    // must not leak through an early return, so still do one comparison.
+    timingSafeEqual(a, a);
+    return false;
+  }
+  return timingSafeEqual(a, b);
 }
 
 /** §06.4 — true for exactly `""` and `"0"`. Any other value replaces the trust store. */
 export function shouldSkipIntegrityCheck(): boolean {
-  throw new Error(`TODO(T8): shouldSkipIntegrityCheck()`);
+  const raw = process.env.COREPACK_INTEGRITY_KEYS;
+  return raw === "" || raw === "0";
 }
 
+/**
+ * §06.4, §15.10 — the trust store in force for one registry origin.
+ *
+ * `COREPACK_INTEGRITY_KEYS` **replaces** the embedded store (it never merges).
+ * Both shapes are accepted: corepack's legacy `{"npm": [...]}`, which predates
+ * per-origin trust and therefore applies to whichever registry is being used,
+ * and the origin-keyed `{"https://registry.npmjs.org": [...]}` of §02.6.
+ * Malformed JSON throws here, at verification time, not at startup (§06.4).
+ *
+ * Note the env var is ineligible in `.corepack.env` (§14.5); `env.ts` drops it
+ * before it can reach `process.env`, so reading it here is safe.
+ */
 export function getTrustedKeys(registryOrigin?: string): TrustedKey[] {
-  throw new Error(`TODO(T8): getTrustedKeys(${registryOrigin})`);
+  const raw = process.env.COREPACK_INTEGRITY_KEYS;
+
+  // `""` / `"0"` disable verification outright; callers gate on
+  // `shouldSkipIntegrityCheck()`, and neither value is a trust store, so fall
+  // back to the embedded one rather than parsing them as JSON.
+  if (raw === undefined || shouldSkipIntegrityCheck()) {
+    return getEmbeddedTrustedKeys(registryOrigin ?? DEFAULT_REGISTRY);
+  }
+
+  const parsed: unknown = JSON.parse(raw);
+  if (parsed === null || typeof parsed !== "object") {
+    return [];
+  }
+
+  const store = parsed as Record<string, unknown>;
+  const legacy = store.npm;
+  if (Array.isArray(legacy)) {
+    return legacy as TrustedKey[];
+  }
+
+  return getEmbeddedTrustedKeys(registryOrigin ?? DEFAULT_REGISTRY, store as TrustStore);
 }
 
 /**
@@ -61,5 +202,116 @@ export function verifySignature(input: {
   version: string;
   registryOrigin?: string;
 }): void {
-  throw new Error(`TODO(T8): verifySignature(${input.packageName}@${input.version})`);
+  const { signatures, integrity, packageName, version, registryOrigin } = input;
+
+  if (!Array.isArray(signatures) || signatures.length === 0) {
+    throw new Error(messages.noCompatibleSignature());
+  }
+
+  const trustedKeys = getTrustedKeys(registryOrigin);
+
+  let selected: { key: TrustedKey; signature: RegistrySignature } | undefined;
+  let expired: { key: TrustedKey; signature: RegistrySignature; expires: string } | undefined;
+
+  for (const key of trustedKeys) {
+    const signature = signatures.find((candidate) => candidate.keyid === key.keyid);
+    if (!signature) {
+      continue;
+    }
+    const expiresAt = expiryOf(key);
+    if (expiresAt !== undefined) {
+      // §14.4 — an expired key is not selectable, but remember the first one so
+      // the failure can name it instead of claiming nothing matched at all.
+      expired ??= { key, signature, expires: expiresAt };
+      continue;
+    }
+    // §06.3 step 3: stop at the first trusted key that has a match, even if
+    // that match turns out to be unusable.
+    selected = { key, signature };
+    break;
+  }
+
+  // The signed statement: no whitespace, UTF-8, `integrity` including its
+  // `sha512-` prefix exactly as `dist.integrity` gave it.
+  const payload = `${packageName}@${version}:${integrity}`;
+
+  if (!selected) {
+    if (expired) {
+      if (
+        ACCEPT_EXPIRED_KEY_WITH_WARNING &&
+        verifyEcdsaP256(expired.key, expired.signature, payload)
+      ) {
+        console.warn(
+          `! Corepack integrity warning: accepting a signature made with the expired key ${expired.key.keyid} (expired ${expired.expires}); check your system clock`,
+        );
+        return;
+      }
+      throw new Error(messages.expiredKey(expired.key.keyid, expired.expires));
+    }
+    throw new UsageError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
+  }
+
+  if (!selected.signature.sig) {
+    throw new UsageError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
+  }
+
+  if (!verifyEcdsaP256(selected.key, selected.signature, payload)) {
+    throw new Error(messages.signatureMismatch());
+  }
+}
+
+/** `undefined` when the key is live; the ISO timestamp when it has expired. */
+function expiryOf(key: TrustedKey): string | undefined {
+  const { expires } = key;
+  if (typeof expires !== "string" || expires.length === 0) {
+    return undefined;
+  }
+  const at = Date.parse(expires);
+  // An unparseable timestamp is treated as "no expiry" rather than as an
+  // instant expiry: refusing every key over a malformed field would be a
+  // denial of service, and the ECDSA check is what actually carries the trust.
+  if (Number.isNaN(at) || at > Date.now()) {
+    return undefined;
+  }
+  return expires;
+}
+
+/**
+ * ECDSA-with-SHA-256 over a NIST P-256 key.
+ *
+ * `key.key` is a bare base64 DER SubjectPublicKeyInfo, so the PEM armour is put
+ * back on here. §06.3 notes that the reference implementation ignores
+ * `keytype`/`scheme` and takes the curve from the key material; targeting only
+ * P-256, this asserts the parsed curve rather than mis-verifying quietly.
+ */
+function verifyEcdsaP256(key: TrustedKey, signature: RegistrySignature, payload: string): boolean {
+  const pem = `-----BEGIN PUBLIC KEY-----\n${key.key}\n-----END PUBLIC KEY-----`;
+
+  let publicKey;
+  try {
+    publicKey = createPublicKey({ key: pem, format: "pem", type: "spki" });
+  } catch (error) {
+    throw new Error(`Invalid trusted key ${key.keyid}: ${(error as Error).message}`);
+  }
+
+  if (
+    publicKey.asymmetricKeyType !== "ec" ||
+    publicKey.asymmetricKeyDetails?.namedCurve !== "prime256v1"
+  ) {
+    throw new Error(`Unsupported trusted key ${key.keyid}: expected an ECDSA P-256 public key`);
+  }
+
+  // `dsaEncoding: "der"` is the default, but npm's signatures being DER `(r, s)`
+  // rather than a raw 64-byte `r‖s` is exactly the thing to be explicit about.
+  try {
+    return cryptoVerify(
+      "sha256",
+      Buffer.from(payload, "utf8"),
+      { key: publicKey, dsaEncoding: "der" },
+      Buffer.from(signature.sig, "base64"),
+    );
+  } catch {
+    // A malformed signature is a mismatch, not a crash.
+    return false;
+  }
 }
