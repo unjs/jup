@@ -46,6 +46,7 @@ const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
 
 export { USAGE_LINES } from "./usage.ts";
 import { HELP_TEXT } from "./usage.ts";
+import { getOwnRoot } from "./self.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Small shared helpers                                                        */
@@ -118,11 +119,13 @@ function fileStream(path: string): ReadableStream<Uint8Array> {
   return Readable.toWeb(createReadStream(path)) as unknown as ReadableStream<Uint8Array>;
 }
 
-/** The tool's own version (§09.9), read from the manifest next to our sources. */
+/** The tool's own version (§09.9), read from our own manifest. */
 function getOwnVersion(): string {
-  // Both layouts are one level below the package root — `<root>/src/cli.ts` from
-  // source, `<root>/dist/index.mjs` once bundled.
-  const root = dirname(dirname(fileURLToPath(import.meta.url)));
+  // Walks up to the nearest package.json rather than counting dirnames. Two
+  // fixed levels is right from `<root>/src/cli.ts` and wrong from
+  // `<root>/dist/_chunks/cli.mjs`, where a bundler puts this file — so the
+  // shipped package would answer `--version` with the 0.0.0 fallback forever.
+  const root = getOwnRoot(import.meta.url);
   try {
     const raw = readFileSync(join(root, "package.json"), "utf8");
     const data = JSON.parse(raw) as { version?: unknown };
