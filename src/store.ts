@@ -6,7 +6,35 @@
  * success**. There is no lockfile and must never be one (§07.5, §16.6).
  */
 
+import { randomBytes } from "node:crypto";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { getSpecFor, isSupportedPackageManager } from "./config/table.ts";
+import { messages, UsageError } from "./errors.ts";
+import { compare, isValidVersion, parse, satisfiesWithPrereleases } from "./semver.ts";
 import type { BinList, BinSpec, CorepackMarker, InstallSpec, Locator } from "./types.ts";
+
+/** §07.2 — the file whose presence means "this install is complete and valid". */
+export const MARKER_NAME = ".corepack";
+
+/** §04.4 — the global default map. Lives outside `v1`, so `cache clean` spares it. */
+export const LAST_KNOWN_GOOD_NAME = "lastKnownGood.json";
+
+/** §07.2 — the layout-version segment; bumping it abandons old caches wholesale. */
+export const LAYOUT_VERSION = "v1";
+
+function errorCode(error: unknown): string | undefined {
+  return (error as NodeJS.ErrnoException | undefined)?.code;
+}
 
 /**
  * §07.1 — `COREPACK_HOME`, else `XDG_CACHE_HOME`/`LOCALAPPDATA`/platform default,
@@ -15,15 +43,28 @@ import type { BinList, BinSpec, CorepackMarker, InstallSpec, Locator } from "./t
  * Note `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA` on every platform,
  * and `LOCALAPPDATA` is consulted on POSIX if set. Both are quirks of the
  * fallback chain rather than design, and both must be reproduced for cache
- * compatibility. (§15.13 narrows this later.)
+ * compatibility. (§15.13 narrows this later: in phase 2 `LOCALAPPDATA` becomes
+ * Windows-only, which is the one place this spec breaks store-location
+ * compatibility with corepack — see #673.)
+ *
+ * Nullish coalescing, not truthiness: an explicitly empty `COREPACK_HOME` is
+ * honoured verbatim, exactly as corepack honours it.
  */
 export function getHomeFolder(): string {
-  throw new Error(`TODO(T12): getHomeFolder()`);
+  const home = process.env.COREPACK_HOME;
+  if (home !== undefined) return home;
+
+  const cacheRoot =
+    process.env.XDG_CACHE_HOME ??
+    process.env.LOCALAPPDATA ??
+    join(homedir(), process.platform === "win32" ? join("AppData", "Local") : ".cache");
+
+  return join(cacheRoot, "node", "corepack");
 }
 
 /** `<home>/v1` — a layout-version segment. Incrementing it abandons old caches wholesale. */
 export function getInstallFolder(): string {
-  throw new Error(`TODO(T12): getInstallFolder()`);
+  return join(getHomeFolder(), LAYOUT_VERSION);
 }
 
 /**
@@ -32,7 +73,20 @@ export function getInstallFolder(): string {
  * `encodeURIComponent(url without fragment)`.
  */
 export function getVersionDir(locator: Locator): string {
-  throw new Error(`TODO(T12): getVersionDir(${locator.name}@${locator.reference})`);
+  const parsed = parse(locator.reference);
+  if (parsed !== null) return parsed.version;
+
+  // A URL reference: the fragment carries the hash (§02.1), so it is stripped
+  // before encoding. The result is one filesystem-safe path segment.
+  if (URL.canParse(locator.reference)) {
+    const url = new URL(locator.reference);
+    const href = url.hash ? url.href.slice(0, url.href.length - url.hash.length) : url.href;
+    return encodeURIComponent(href);
+  }
+
+  // Neither a version nor a URL. Unreachable through §04, but encoding keeps a
+  // stray reference from escaping its directory.
+  return encodeURIComponent(locator.reference);
 }
 
 /**
@@ -41,16 +95,69 @@ export function getVersionDir(locator: Locator): string {
  * proceeds to download, any other error propagates.
  */
 export function readMarker(dir: string): CorepackMarker | null {
-  throw new Error(`TODO(T12): readMarker(${dir})`);
+  let text: string;
+  try {
+    text = readFileSync(join(dir, MARKER_NAME), "utf8");
+  } catch (error) {
+    if (errorCode(error) === "ENOENT") return null;
+    throw error;
+  }
+
+  // A truncated or corrupt marker is a broken install, not a cache miss:
+  // propagate rather than silently re-downloading over it.
+  return JSON.parse(text) as CorepackMarker;
 }
 
 export function writeMarker(dir: string, marker: CorepackMarker): void {
-  throw new Error(`TODO(T12): writeMarker(${dir})`);
+  writeFileSync(join(dir, MARKER_NAME), JSON.stringify(marker), "utf8");
+}
+
+/**
+ * `mkdir -p`, mapping the one filesystem failure users actually hit to §12.8's
+ * message. `target` names the directory reported to the user (§07.8).
+ */
+function ensureDir(dir: string, target: string): void {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (error) {
+    if (errorCode(error) === "EACCES") {
+      throw new UsageError(messages.failedToCreateCacheDir(target));
+    }
+    throw error;
+  }
 }
 
 /** Temp dirs live **inside** the install folder so the promoting rename never crosses a filesystem. */
 export function createTempDir(): string {
-  throw new Error(`TODO(T12): createTempDir()`);
+  const installFolder = getInstallFolder();
+  ensureDir(installFolder, installFolder);
+
+  // The name only has to be unique; `EEXIST` simply means "draw again".
+  for (;;) {
+    const dir = join(installFolder, `corepack-${process.pid}-${randomBytes(4).toString("hex")}`);
+    try {
+      mkdirSync(dir);
+      return dir;
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "EEXIST") continue;
+      if (code === "EACCES") throw new UsageError(messages.failedToCreateCacheDir(installFolder));
+      throw error;
+    }
+  }
+}
+
+/** Synchronous sleep — the Windows rename retry is on a synchronous path. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -60,7 +167,37 @@ export function createTempDir(): string {
  * `100 * 2^i` ms backoff.
  */
 export function promote(tmp: string, dest: string): void {
-  throw new Error(`TODO(T12): promote(${tmp}, ${dest})`);
+  ensureDir(dirname(dest), getInstallFolder());
+
+  const isWindows = process.platform === "win32";
+  const attempts = isWindows ? 5 : 1;
+
+  for (let i = 0; i < attempts; i++) {
+    try {
+      renameSync(tmp, dest);
+      return;
+    } catch (error) {
+      const code = errorCode(error);
+
+      // Lost a benign race: the winner's tree is content-identical to ours.
+      if (
+        code === "EEXIST" ||
+        code === "ENOTEMPTY" ||
+        (isWindows && code === "EPERM" && isDirectory(dest))
+      ) {
+        rmSync(tmp, { recursive: true, force: true });
+        return;
+      }
+
+      // Windows antivirus holds newly-written files open; back off and retry.
+      if (isWindows && i < attempts - 1 && (code === "EPERM" || code === "ENOENT")) {
+        sleepSync(100 * 2 ** i);
+        continue;
+      }
+
+      throw error;
+    }
+  }
 }
 
 /**
@@ -72,7 +209,49 @@ export function promote(tmp: string, dest: string): void {
  * the rest of the pipeline.
  */
 export function findInstalledVersion(name: string, range: string): string | null {
-  throw new Error(`TODO(T12): findInstalledVersion(${name}, ${range})`);
+  const installFolder = getInstallFolder();
+
+  // §14.1 — the hottest path in the tool: an exactly-pinned `packageManager`
+  // field. The answer is trivially the version itself, so one `stat` replaces an
+  // `opendir` plus a semver parse per installed version. The build suffix is
+  // dropped because the directory name never carries one (§07.2), and the marker
+  // hands the real hash back to the caller.
+  if (isValidVersion(range)) {
+    const version = parse(range)!.version;
+    try {
+      statSync(join(installFolder, name, version, MARKER_NAME));
+      return version;
+    } catch (error) {
+      const code = errorCode(error);
+      if (code === "ENOENT" || code === "ENOTDIR") return null;
+      throw error;
+    }
+  }
+
+  let entries: string[];
+  try {
+    entries = readdirSync(join(installFolder, name));
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return null;
+    throw error;
+  }
+
+  let best: string | null = null;
+  for (const entry of entries) {
+    // macOS drops `.DS_Store` into every directory it displays.
+    if (entry.startsWith(".")) continue;
+
+    // §14.2 — prerelease-tolerant, matching every other range test in the
+    // pipeline. Strict `range.test` here makes a prerelease install re-hit the
+    // network on every single run.
+    if (!satisfiesWithPrereleases(entry, range)) continue;
+
+    // `!== 1` accepts a tie, so the later directory entry wins.
+    if (best === null || compare(best, entry) !== 1) best = entry;
+  }
+
+  return best;
 }
 
 /**
@@ -80,12 +259,70 @@ export function findInstalledVersion(name: string, range: string): string | null
  * erroring, and entries whose value is not a string are dropped.
  */
 export function readLastKnownGood(): Record<string, string> {
-  throw new Error(`TODO(T12): readLastKnownGood()`);
+  let text: string;
+  try {
+    text = readFileSync(join(getHomeFolder(), LAST_KNOWN_GOOD_NAME), "utf8");
+  } catch {
+    // Missing, unreadable, a directory — all of it is bookkeeping, and §07.8
+    // requires bookkeeping to degrade rather than block.
+    return {};
+  }
+
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return {};
+  }
+
+  // Falsy or non-object. Arrays deliberately pass, as they do in corepack
+  // (`typeof [] === "object"`); their numeric keys are harmless.
+  if (!data || typeof data !== "object") return {};
+
+  const lkg: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === "string") lkg[key] = value;
+  }
+  return lkg;
 }
 
 /** §14.3 — write to a temp file in the same directory and rename over. `EROFS` is swallowed. */
 export function writeLastKnownGood(lkg: Record<string, string>): void {
-  throw new Error(`TODO(T12): writeLastKnownGood()`);
+  const home = getHomeFolder();
+  const target = join(home, LAST_KNOWN_GOOD_NAME);
+  const content = `${JSON.stringify(lkg, null, 2)}\n`;
+
+  let tmp: string | undefined;
+  try {
+    mkdirSync(home, { recursive: true });
+
+    // Same directory, so the rename is atomic: a concurrent reader sees either
+    // the old file or the new one, never a truncated interleaving (§14.3).
+    tmp = `${target}.${process.pid}-${randomBytes(4).toString("hex")}`;
+    writeFileSync(tmp, content, "utf8");
+    renameSync(tmp, target);
+  } catch (error) {
+    if (tmp !== undefined) rmSync(tmp, { force: true });
+
+    // §07.8 / §16.7 — a read-only or unwritable store (`EROFS`, `EACCES`, a
+    // deleted home) must never fail a run or print anything. Anything without an
+    // errno is a bug in this module and still propagates.
+    if (errorCode(error) !== undefined) return;
+    throw error;
+  }
+}
+
+function isValidBinList(value: unknown): value is BinList {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function isValidBinSpec(value: unknown): value is BinSpec {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
 }
 
 /**
@@ -99,12 +336,34 @@ export function resolveBin(
   locator: Locator,
   isSingleFile: boolean,
 ): BinSpec | BinList {
-  throw new Error(`TODO(T12): resolveBin(${tmpDir})`);
+  const parsed = parse(locator.reference);
+  const tableBin =
+    parsed !== null && isSupportedPackageManager(locator.name)
+      ? getSpecFor(locator.name, parsed.version).bin
+      : undefined;
+
+  if (isSingleFile) {
+    if (isValidBinList(tableBin)) return tableBin;
+    return [locator.name];
+  }
+
+  if (isValidBinSpec(tableBin)) return tableBin;
+
+  const manifest = JSON.parse(readFileSync(join(tmpDir, "package.json"), "utf8")) as {
+    name?: unknown;
+    bin?: unknown;
+  } | null;
+
+  const packageBin = manifest?.bin;
+  if (typeof packageBin === "string") return { [String(manifest?.name)]: packageBin };
+  if (isValidBinSpec(packageBin)) return packageBin;
+
+  throw new Error(messages.unableToLocateBin());
 }
 
 /** §07.9 — `rm -rf <home>/v1`, forced. `lastKnownGood.json` is **not** removed. */
 export function cacheClean(): void {
-  throw new Error(`TODO(T12): cacheClean()`);
+  rmSync(getInstallFolder(), { recursive: true, force: true });
 }
 
 export type { InstallSpec };
