@@ -20,10 +20,11 @@ runs it.
 pnpm install   # runs pnpm 11.1.2 — the version this project pinned, not whatever is installed
 ```
 
-> [!WARNING]
-> **Under construction.** The architecture and behaviour are fully specified in
-> [`.agents/`](./.agents/), and the modules are landing incrementally. Nothing below is
-> usable yet. See [Status](#status).
+> [!NOTE]
+> **Early, but it runs.** Every module specified in [`.agents/`](./.agents/) is
+> implemented and the CLI works end to end. What is not done yet is the full
+> conformance suite and a published release, so treat this as pre-1.0. See
+> [Status](#status).
 
 ## Why
 
@@ -179,18 +180,34 @@ The full list with rationale is in
 
 ## Status
 
-| Area                             | State                                    |
-| -------------------------------- | ---------------------------------------- |
-| Specification (`.agents/`)       | Complete — 16 normative documents        |
-| Data model, errors, scaffolding  | Landed                                   |
-| semver, config table, env, JSON, tar, HTTP, integrity | In progress         |
-| Discovery, resolution, store, execution | Not started                       |
-| CLI, shims                       | Not started                              |
-| Conformance suite (147 tests)    | Not started                              |
+Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is implemented:
 
-Phase 1 targets the behavioural contract in `.agents/01`–`.agents/14`. Phase 2 adds
-`.agents/15`'s gaps: `.npmrc` support, semver ranges in the pin, proxy support, `pipack
-info`, key rotation, and more.
+| Area | State |
+| --- | --- |
+| Specification (`.agents/`) | Complete — 16 normative documents |
+| semver, JSON, env files, tar, HTTP, integrity | Done |
+| Discovery, resolution, store, install, execution | Done |
+| Proxy pipeline, management commands, shims | Done |
+| Unit tests | 615 passing |
+| Conformance suite (§13, tests 1–147) | In progress |
+| Published release | Not yet |
+
+Some numbers, measured rather than hoped for:
+
+- **22 kB** min+gzipped, **zero** runtime dependencies.
+- **~37 ms** for a warm proxy invocation of an exactly-pinned project — essentially
+  Node's own startup, which is the floor for a JavaScript host.
+- A warm run makes **zero** network requests and does not read the recorded default,
+  which is asserted by a test that patches `fetch` and `readFileSync` and fails if
+  either is touched.
+
+Not yet done, and deliberately so:
+
+- **Proxy support** (`HTTP_PROXY` and friends). `fetch` cannot do it without a custom
+  dispatcher, so it is deferred to phase 2 behind a single seam in `src/http.ts`.
+- **Everything in [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, semver
+  ranges in the pin, `pipack info`, signing-key rotation, per-package-manager
+  registries, native (non-JavaScript) package managers, and the rest.
 
 ## Development
 
