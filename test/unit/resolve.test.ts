@@ -1,0 +1,724 @@
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFINITIONS } from "../../src/config/table.ts";
+import { messages } from "../../src/errors.ts";
+import {
+  bumpLastKnownGood,
+  getDefaultVersion,
+  getFallbackLocator,
+  resolveDescriptor,
+} from "../../src/resolve.ts";
+import type { UrlRegistrySpec } from "../../src/types.ts";
+
+/* ------------------------------------------------------------------ *
+ * A real local server per test, as in registry.test.ts: the wire is the
+ * contract, and `requests` is what makes "zero network requests" an
+ * assertion rather than a hope.
+ * ------------------------------------------------------------------ */
+
+interface TestServer {
+  origin: string;
+  requests: string[];
+  close: () => Promise<void>;
+}
+
+type Route = unknown | ((response: ServerResponse) => void);
+
+const servers: TestServer[] = [];
+
+async function startServer(routes: Record<string, Route>): Promise<TestServer> {
+  const requests: string[] = [];
+
+  const handle = (request: IncomingMessage, response: ServerResponse): void => {
+    const url = request.url ?? "";
+    requests.push(url);
+
+    const route = Object.hasOwn(routes, url) ? routes[url] : undefined;
+    if (route === undefined) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(`{"error":"not found"}`);
+      return;
+    }
+    if (typeof route === "function") {
+      (route as (response: ServerResponse) => void)(response);
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify(route));
+  };
+
+  const server = createServer(handle);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as AddressInfo;
+
+  const instance: TestServer = {
+    origin: `http://127.0.0.1:${port}`,
+    requests,
+    close: () =>
+      new Promise<void>((resolve, reject) => {
+        server.closeAllConnections();
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+
+  servers.push(instance);
+  return instance;
+}
+
+/** The rejection itself, so `message` can be compared against `messages.*`. */
+async function rejection(promise: Promise<unknown>): Promise<Error> {
+  try {
+    await promise;
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error("expected the promise to reject");
+}
+
+/* ------------------------------------------------------------------ *
+ * Environment and store fixtures
+ * ------------------------------------------------------------------ */
+
+const ENV_KEYS = [
+  "COREPACK_HOME",
+  "COREPACK_NPM_REGISTRY",
+  "COREPACK_ENABLE_NETWORK",
+  "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
+  "COREPACK_DEFAULT_TO_LATEST",
+  "COREPACK_INTEGRITY_KEYS",
+  "XDG_CACHE_HOME",
+  "LOCALAPPDATA",
+] as const;
+
+/** Yarn Berry's tag document lives on a fixed host; point it at the mock. */
+const BERRY_REGISTRY = DEFINITIONS.yarn!.ranges.at(-1)![1].registry as UrlRegistrySpec;
+const BERRY_REGISTRY_URL = BERRY_REGISTRY.url;
+
+let saved: Record<string, string | undefined>;
+let home: string;
+
+/** The npm packument the mock serves for `yarn` — Yarn Classic only. */
+const YARN_PACKUMENT = {
+  versions: { "1.22.4": {}, "1.22.9": {} },
+  "dist-tags": { latest: "1.22.9" },
+};
+
+/** Yarn's tag document: `aliases` are the tags, `tags` are the versions (§05.3). */
+const BERRY_TAGS = {
+  aliases: { latest: "4.9.0", stable: "4.9.0", canary: "4.10.0-rc.1" },
+  tags: ["2.0.0", "4.0.0", "4.9.0"],
+};
+
+beforeEach(() => {
+  saved = {};
+  for (const key of ENV_KEYS) {
+    saved[key] = process.env[key];
+    delete process.env[key];
+  }
+
+  home = mkdtempSync(join(tmpdir(), "pipack-resolve-"));
+  process.env.COREPACK_HOME = home;
+  // Nothing here exercises signature verification; the registry mock serves a
+  // legacy `shasum`-only `dist`, which is the quietest shape.
+  process.env.COREPACK_INTEGRITY_KEYS = "0";
+});
+
+afterEach(async () => {
+  BERRY_REGISTRY.url = BERRY_REGISTRY_URL;
+
+  for (const key of ENV_KEYS) {
+    const value = saved[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+
+  rmSync(home, { recursive: true, force: true });
+  await Promise.all(servers.splice(0).map((server) => server.close()));
+});
+
+/** Both bands of the `yarn` definition, mocked. */
+async function startYarnServers(): Promise<{ npm: TestServer; berry: TestServer }> {
+  const npm = await startServer({
+    "/yarn": YARN_PACKUMENT,
+    "/yarn/latest": { version: "1.22.9", dist: { shasum: "deadbeef" } },
+    "/pnpm": { versions: { "10.0.0": {} }, "dist-tags": { latest: "10.0.0" } },
+  });
+  const berry = await startServer({ "/tags": BERRY_TAGS });
+
+  process.env.COREPACK_NPM_REGISTRY = npm.origin;
+  BERRY_REGISTRY.url = `${berry.origin}/tags`;
+
+  return { npm, berry };
+}
+
+/** A cached install: the directory, plus the `.corepack` marker §07.2 stats. */
+function seedInstalled(name: string, version: string): void {
+  const dir = join(home, "v1", name, version);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, ".corepack"), JSON.stringify({ locator: { name, reference: version } }));
+}
+
+function seedLastKnownGood(entries: Record<string, string>): void {
+  writeFileSync(join(home, "lastKnownGood.json"), `${JSON.stringify(entries, null, 2)}\n`);
+}
+
+function readLastKnownGoodFile(): Record<string, string> | null {
+  const path = join(home, "lastKnownGood.json");
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
+}
+
+/* ------------------------------------------------------------------ *
+ * §04.1 step 1 — URL references (tests 17, 18, 19)
+ * ------------------------------------------------------------------ */
+
+describe("resolveDescriptor step 1 — URL references", () => {
+  const url = "https://example.com/yarn-1.22.21.tgz";
+
+  it("refuses a URL for a known package manager (test 17)", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    const error = await rejection(resolveDescriptor({ name: "yarn", range: url }));
+    expect(error.message).toBe(messages.illegalUrl(`yarn@${url}`));
+    expect(error.message).toContain("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("passes it through with the opt-in (test 18)", async () => {
+    const { npm, berry } = await startYarnServers();
+    process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
+
+    // Untouched: no version parsing, no registry lookup, no cache probe.
+    await expect(resolveDescriptor({ name: "yarn", range: url })).resolves.toEqual({
+      name: "yarn",
+      reference: url,
+    });
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("passes a URL for an unknown name through, before the name check (test 19)", async () => {
+    process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
+
+    // Step 1 precedes step 2, so this never reaches `unsupportedByBuild`.
+    await expect(resolveDescriptor({ name: "cutlery", range: url })).resolves.toEqual({
+      name: "cutlery",
+      reference: url,
+    });
+  });
+
+  it("does not need the opt-in for an unknown name", async () => {
+    await expect(resolveDescriptor({ name: "cutlery", range: url })).resolves.toEqual({
+      name: "cutlery",
+      reference: url,
+    });
+  });
+
+  it("keeps a URL fragment, which carries the hash (§02.1)", async () => {
+    process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
+    const withHash = `${url}#sha1.abcdef`;
+
+    await expect(resolveDescriptor({ name: "yarn", range: withHash })).resolves.toEqual({
+      name: "yarn",
+      reference: withHash,
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.1 step 2 — unknown package manager
+ * ------------------------------------------------------------------ */
+
+describe("resolveDescriptor step 2 — unknown package manager", () => {
+  it("rejects a name the build does not know", async () => {
+    const error = await rejection(resolveDescriptor({ name: "cutlery", range: "1.0.0" }));
+    expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.1 step 3 — tags (§02.3, test 145)
+ * ------------------------------------------------------------------ */
+
+describe("resolveDescriptor step 3 — tags", () => {
+  it("refuses a tag when tags are not allowed, without any network", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    const error = await rejection(resolveDescriptor({ name: "yarn", range: "latest" }));
+    expect(error.message).toBe(messages.tagsNotAllowed());
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("resolves against the LAST range entry's registry, not the first (§02.3)", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    // `yarn@latest` must be Berry's 4.9.0, from repo.yarnpkg.com's tag
+    // document — not npm's `yarn` dist-tag, which is Classic's 1.22.9.
+    await expect(
+      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+    ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
+
+    expect(berry.requests).toEqual(["/tags"]);
+    expect(npm.requests).toEqual([]);
+  });
+
+  it("names the last band's registry URL even when the network is off", async () => {
+    // The table's real URL, so the assertion is about the *table*, not the mock.
+    await startYarnServers();
+    BERRY_REGISTRY.url = BERRY_REGISTRY_URL;
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+
+    const error = await rejection(
+      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+    );
+    expect(error.message).toBe(messages.networkDisabledUrl("https://repo.yarnpkg.com/tags"));
+  });
+
+  it("uses the npm dist-tags for an npm-typed last band", async () => {
+    const { npm } = await startYarnServers();
+
+    await expect(
+      resolveDescriptor({ name: "pnpm", range: "latest" }, { allowTags: true }),
+    ).resolves.toEqual({ name: "pnpm", reference: "10.0.0" });
+    expect(npm.requests).toEqual(["/pnpm"]);
+  });
+
+  it("reports an unknown tag (test 145)", async () => {
+    await startYarnServers();
+
+    const error = await rejection(
+      resolveDescriptor({ name: "yarn", range: "nightly" }, { allowTags: true }),
+    );
+    expect(error.message).toBe(messages.tagNotFound("nightly"));
+  });
+
+  it("probes the cache with the resolved version, not the tag", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedInstalled("yarn", "4.9.0");
+
+    await expect(
+      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+    ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
+
+    // The tag lookup is unavoidable; the *version* lookup is not.
+    expect(berry.requests).toEqual(["/tags"]);
+    expect(npm.requests).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.1 step 4 — the cache probe, and the §01.3 budget
+ * ------------------------------------------------------------------ */
+
+describe("resolveDescriptor step 4 — cache probe", () => {
+  it("answers a range from the cache with ZERO network requests (§01.3)", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedInstalled("yarn", "1.22.4");
+
+    await expect(resolveDescriptor({ name: "yarn", range: "^1.22.0" })).resolves.toEqual({
+      name: "yarn",
+      reference: "1.22.4",
+    });
+
+    // The budget assertion: a warm run does no I/O over the wire at all.
+    expect(npm.requests).toEqual([]);
+    expect(berry.requests).toEqual([]);
+  });
+
+  it("answers an exact pin from the cache with ZERO network requests (§14.1)", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedInstalled("yarn", "1.22.4");
+
+    await expect(resolveDescriptor({ name: "yarn", range: "1.22.4" })).resolves.toEqual({
+      name: "yarn",
+      reference: "1.22.4",
+    });
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("picks the highest cached version satisfying the range", async () => {
+    await startYarnServers();
+    seedInstalled("yarn", "1.22.4");
+    seedInstalled("yarn", "1.22.9");
+    seedInstalled("yarn", "4.9.0");
+
+    await expect(resolveDescriptor({ name: "yarn", range: "^1.0.0" })).resolves.toEqual({
+      name: "yarn",
+      reference: "1.22.9",
+    });
+  });
+
+  it("runs BEFORE the exact-version passthrough (step 4 precedes step 5)", async () => {
+    await startYarnServers();
+    seedInstalled("yarn", "1.22.4");
+
+    // The store never records a build suffix (§07.2), so a cache hit answers
+    // with the bare directory name. Were step 5 to run first, the hash-bearing
+    // reference would come back verbatim.
+    await expect(
+      resolveDescriptor({ name: "yarn", range: "1.22.4+sha224.0123456789ab" }),
+    ).resolves.toEqual({ name: "yarn", reference: "1.22.4" });
+  });
+
+  it("skips the cache when useCache is false, so `use`/`up` see the registry", async () => {
+    const { npm } = await startYarnServers();
+    seedInstalled("yarn", "1.22.4");
+
+    await expect(
+      resolveDescriptor({ name: "yarn", range: "^1.22.0" }, { useCache: false }),
+    ).resolves.toEqual({ name: "yarn", reference: "1.22.9" });
+    expect(npm.requests).toContain("/yarn");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.1 step 5 — exact versions
+ * ------------------------------------------------------------------ */
+
+describe("resolveDescriptor step 5 — exact versions", () => {
+  it("resolves an exact version with no network at all (test 14)", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    for (const [name, version] of [
+      ["yarn", "1.22.4"],
+      ["pnpm", "4.11.6"],
+      ["npm", "6.14.2"],
+    ] as const) {
+      await expect(resolveDescriptor({ name, range: version })).resolves.toEqual({
+        name,
+        reference: version,
+      });
+    }
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("returns a version that does not exist, unverified (§15.35j, phase 2)", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    // 1.99.99 is not in the packument; the 404 surfaces at download time.
+    await expect(resolveDescriptor({ name: "yarn", range: "1.99.99" })).resolves.toEqual({
+      name: "yarn",
+      reference: "1.99.99",
+    });
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("passes a pinned prerelease through (test 15)", async () => {
+    await startYarnServers();
+
+    await expect(resolveDescriptor({ name: "yarn", range: "2.0.0-rc.30" })).resolves.toEqual({
+      name: "yarn",
+      reference: "2.0.0-rc.30",
+    });
+  });
+
+  it("keeps the build suffix on an uncached exact pin (test 16)", async () => {
+    await startYarnServers();
+    const reference = "1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610";
+
+    await expect(resolveDescriptor({ name: "yarn", range: reference })).resolves.toEqual({
+      name: "yarn",
+      reference,
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.1 step 6 — the range query
+ * ------------------------------------------------------------------ */
+
+describe("resolveDescriptor step 6 — range query", () => {
+  it("unions every band, so a range spanning Classic and Berry sees both", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    await expect(resolveDescriptor({ name: "yarn", range: ">=1" })).resolves.toEqual({
+      name: "yarn",
+      reference: "4.9.0",
+    });
+    expect(npm.requests).toEqual(["/yarn"]);
+    expect(berry.requests).toEqual(["/tags"]);
+  });
+
+  it("takes the highest match across the union, not the last band's highest", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    // Only the npm band can satisfy this, but both bands are still queried.
+    await expect(resolveDescriptor({ name: "yarn", range: ">=1 <2" })).resolves.toEqual({
+      name: "yarn",
+      reference: "1.22.9",
+    });
+    expect(npm.requests).toEqual(["/yarn"]);
+    expect(berry.requests).toEqual(["/tags"]);
+  });
+
+  it("queries the bands in parallel", async () => {
+    const arrivals: number[] = [];
+    const delayed = (body: unknown) => (response: ServerResponse) => {
+      arrivals.push(Date.now());
+      setTimeout(() => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      }, 100);
+    };
+
+    const npm = await startServer({ "/yarn": delayed(YARN_PACKUMENT) });
+    const berry = await startServer({ "/tags": delayed(BERRY_TAGS) });
+    process.env.COREPACK_NPM_REGISTRY = npm.origin;
+    BERRY_REGISTRY.url = `${berry.origin}/tags`;
+
+    await resolveDescriptor({ name: "yarn", range: ">=1" });
+
+    expect(arrivals).toHaveLength(2);
+    // Serial fan-out would put the second arrival a full response delay after
+    // the first; parallel fan-out puts them within a millisecond or two.
+    expect(Math.abs(arrivals[1]! - arrivals[0]!)).toBeLessThan(50);
+  });
+
+  it("dedupes versions offered by more than one band", async () => {
+    const npm = await startServer({
+      "/yarn": { versions: { "4.9.0": {}, "1.22.9": {} }, "dist-tags": {} },
+    });
+    const berry = await startServer({ "/tags": BERRY_TAGS });
+    process.env.COREPACK_NPM_REGISTRY = npm.origin;
+    BERRY_REGISTRY.url = `${berry.origin}/tags`;
+
+    await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+      name: "yarn",
+      reference: "4.9.0",
+    });
+  });
+
+  it("returns null when nothing matches, so the caller can report §12.4 (test 144)", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    await expect(resolveDescriptor({ name: "yarn", range: "^99.0.0" })).resolves.toBeNull();
+    expect(npm.requests).toEqual(["/yarn"]);
+    expect(berry.requests).toEqual(["/tags"]);
+
+    // The message the caller then formats.
+    expect(messages.failedToResolve("^99.0.0", "yarn")).toBe(
+      `Failed to successfully resolve '^99.0.0' to a valid yarn release`,
+    );
+  });
+
+  it("matches a prerelease band member under lenient satisfaction (§04.2)", async () => {
+    const npm = await startServer({ "/yarn": { versions: {}, "dist-tags": {} } });
+    const berry = await startServer({
+      "/tags": { aliases: {}, tags: ["4.10.0-rc.1", "4.9.0"] },
+    });
+    process.env.COREPACK_NPM_REGISTRY = npm.origin;
+    BERRY_REGISTRY.url = `${berry.origin}/tags`;
+
+    // §15.24 (phase 2) will exclude prereleases from *implicit* resolution;
+    // phase 1 reproduces corepack, where the prerelease sorts highest.
+    await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+      name: "yarn",
+      reference: "4.10.0-rc.1",
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.5 — getDefaultVersion (tests 97–103)
+ * ------------------------------------------------------------------ */
+
+describe("getDefaultVersion (§04.5)", () => {
+  it("returns the last-known-good entry with NO network (test 101)", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedLastKnownGood({ yarn: "1.0.0" });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("returns the compiled-in default with NO network when DEFAULT_TO_LATEST=0", async () => {
+    const { npm, berry } = await startYarnServers();
+    process.env.COREPACK_DEFAULT_TO_LATEST = "0";
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe(DEFINITIONS.yarn!.default);
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+    // Nothing is recorded on this path.
+    expect(readLastKnownGoodFile()).toBeNull();
+  });
+
+  it("fetches the latest stable version and records it (test 103)", async () => {
+    const { npm } = await startYarnServers();
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.9+sha1.deadbeef" });
+  });
+
+  it("keeps the other entries when recording", async () => {
+    await startYarnServers();
+    seedLastKnownGood({ pnpm: "10.0.0" });
+
+    await getDefaultVersion("yarn");
+    expect(readLastKnownGoodFile()).toEqual({ pnpm: "10.0.0", yarn: "1.22.9+sha1.deadbeef" });
+  });
+
+  it("survives an unwritable home rather than failing the run", async () => {
+    const { npm } = await startYarnServers();
+    // A file where the home folder should be: `mkdir -p` fails with ENOTDIR.
+    const blocked = join(home, "blocked");
+    writeFileSync(blocked, "");
+    process.env.COREPACK_HOME = blocked;
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+  });
+
+  it("rejects an unknown package manager", async () => {
+    const error = await rejection(getDefaultVersion("cutlery"));
+    expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §02.1, §04.5 — the fallback locator's laziness
+ * ------------------------------------------------------------------ */
+
+describe("getFallbackLocator (§02.1)", () => {
+  it("is a thunk, and building it touches neither disk nor network", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    const locator = getFallbackLocator("yarn", { transparent: false });
+    expect(typeof locator.reference).toBe("function");
+    expect(locator.name).toBe("yarn");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("is NOT invoked when the project has a usable spec", async () => {
+    // Any request to this server means the fallback was materialised eagerly.
+    const npm = await startServer({});
+    const berry = await startServer({ "/tags": BERRY_TAGS });
+    process.env.COREPACK_NPM_REGISTRY = npm.origin;
+    BERRY_REGISTRY.url = `${berry.origin}/tags`;
+    seedLastKnownGood({ yarn: "1.0.0" });
+
+    // §01.3's step 2: the fallback is built *before* the project is inspected.
+    let invoked = false;
+    const built = getFallbackLocator("yarn", { transparent: false });
+    const locator = {
+      name: built.name,
+      reference: () => {
+        invoked = true;
+        return built.reference();
+      },
+    };
+
+    // Step 3/4 find a spec, so step 5 resolves that instead.
+    const resolved = await resolveDescriptor({ name: "yarn", range: "1.22.4" });
+
+    expect(resolved).toEqual({ name: "yarn", reference: "1.22.4" });
+    expect(invoked).toBe(false);
+    expect(typeof locator.reference).toBe("function");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("resolves to getDefaultVersion when it is finally called", async () => {
+    const { npm } = await startYarnServers();
+
+    const locator = getFallbackLocator("yarn", { transparent: false });
+    await expect(locator.reference()).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+  });
+
+  it("uses transparent.default without reading the LKG or the network", async () => {
+    const { npm, berry } = await startYarnServers();
+    // A recorded default that must NOT be consulted on this path (phase 1;
+    // §15.33 makes the literal a floor instead).
+    seedLastKnownGood({ yarn: "9.9.9" });
+
+    const locator = getFallbackLocator("yarn", { transparent: true });
+    await expect(locator.reference()).resolves.toBe(DEFINITIONS.yarn!.transparent.default);
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("falls back to getDefaultVersion when the definition declares no transparent.default", async () => {
+    await startYarnServers();
+    seedLastKnownGood({ pnpm: "10.1.0" });
+
+    expect(DEFINITIONS.pnpm!.transparent.default).toBeUndefined();
+    const locator = getFallbackLocator("pnpm", { transparent: true });
+    await expect(locator.reference()).resolves.toBe("10.1.0");
+  });
+
+  it("defers the unknown-name error to the thunk", async () => {
+    const locator = getFallbackLocator("cutlery", { transparent: true });
+    const error = await rejection(locator.reference());
+    expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §04.7 — the last-known-good auto-bump (tests 97–100)
+ * ------------------------------------------------------------------ */
+
+describe("bumpLastKnownGood (§04.7)", () => {
+  it("advances within the same major (test 97)", () => {
+    seedLastKnownGood({ yarn: "1.0.0" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4+sha1.deadbeef" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4+sha1.deadbeef" });
+  });
+
+  it("leaves a different major alone (test 99)", () => {
+    seedLastKnownGood({ yarn: "1.22.4" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "2.2.2" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4" });
+  });
+
+  it("never moves downward", () => {
+    seedLastKnownGood({ yarn: "1.22.4" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.10.0" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4" });
+  });
+
+  it("does not write when only the build suffix differs", () => {
+    seedLastKnownGood({ yarn: "1.22.4+sha1.aaaa" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4+sha1.bbbb" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.4+sha1.aaaa" });
+  });
+
+  it("writes nothing when there is no existing entry (test 100)", () => {
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toBeNull();
+
+    seedLastKnownGood({ pnpm: "10.0.0" });
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toEqual({ pnpm: "10.0.0" });
+  });
+
+  it("does nothing when COREPACK_DEFAULT_TO_LATEST=0", () => {
+    seedLastKnownGood({ yarn: "1.0.0" });
+    process.env.COREPACK_DEFAULT_TO_LATEST = "0";
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.0.0" });
+  });
+
+  it("ignores URL references and unknown names", () => {
+    seedLastKnownGood({ yarn: "1.0.0", cutlery: "1.0.0" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "https://example.com/yarn.js" });
+    bumpLastKnownGood({ name: "cutlery", reference: "2.0.0" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.0.0", cutlery: "1.0.0" });
+  });
+
+  it("ignores an unparseable recorded entry", () => {
+    seedLastKnownGood({ yarn: "not-a-version" });
+
+    bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "not-a-version" });
+  });
+});
