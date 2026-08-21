@@ -565,3 +565,62 @@ findings, then a pass applying what survives:
 Each auditor reports findings ranked by severity with a concrete failure scenario;
 findings are verified before anything is applied, since a plausible-sounding finding that
 is actually correct behaviour (§14.21 lists six of those) must not be "fixed".
+
+---
+
+## T21 results — what the four lenses found
+
+Run against a green suite (768 tests) after phase 1 was complete. Each lens was blind
+to the others; findings were verified before anything was applied, and two dissolved on
+inspection.
+
+### The pattern worth remembering
+
+**Three separate bugs came from counting `dirname` calls to locate ourselves**, and all
+three were invisible from source and real in the shipped package, because obuild emits
+chunks into `dist/_chunks/` — one level deeper than the arithmetic assumed:
+
+| Symptom | Found by |
+|---|---|
+| `enable` failed: "Assertion failed: The stub folder doesn't exist" | building and running `dist/` by hand |
+| `COREPACK_ROOT` pointed at `dist/` instead of the package root | the same |
+| `--version` answered `0.0.0` forever | the simplicity audit |
+
+All three now go through `src/self.ts`, which walks up. The lesson generalises: **a test
+that exercises only the source tree cannot catch a layout assumption**, and conformance
+row 146 passed throughout because this repo's own version is also `0.0.0`.
+
+### Findings applied
+
+| Lens | Finding | Severity |
+|---|---|---|
+| correctness | `npmRegistry` never substituted during *resolution*, so Yarn Berry resolved from the public internet despite a configured mirror | high |
+| correctness | Trust store keyed by origin ⇒ signature verification hard-failed for every custom registry | high |
+| security | Registry credentials printed verbatim to stderr, including on a **successful** run | medium |
+| simplicity | `--version` reported `0.0.0` from the shipped package | medium |
+| security | `.js` download path had no size cap while `.tgz` did | low |
+
+### Why the suite missed the two high-severity ones
+
+Both were invisible for structural reasons, not oversight:
+
+* The conformance harness rewrites **every** hardcoded host to one mock, so the mirror
+  and `repo.yarnpkg.com` were the same server — a test asserting "the mirror was used"
+  passed whether or not the substitution happened.
+* Every trust-store test either used the default registry or injected keys in the legacy
+  `{"npm": [...]}` shape, which is the one branch that ignores origin.
+
+A mock that collapses two sources into one cannot distinguish them. Worth remembering
+when building the phase-2 harness for §15.2's per-package-manager registries.
+
+### Deferred, with reasons
+
+* **Speed:** the proxy path eagerly loads the download/verify stack (~3.3 ms, 73 extra
+  native modules, ~36 KB of cold-path JS), and the manifest is parsed into a full DOM
+  (~460 allocations on a large manifest, against §16.1's <50 target). Both are real; the
+  normative §01.3 budget is otherwise met exactly, verified by strace.
+* **§14.8 proxy support** remains unimplemented — rows 71/72 skipped, openly declared.
+* Spec ambiguities left alone and documented in place: §07.4 rule 6's prose and formula
+  disagree on mode masking; row 84 promises a refusal for an escaping symlink that rule 3
+  says to skip silently; `isValidRange` accepts some malformed ranges node-semver rejects
+  (no practical impact — every real dist-tag is still correctly classified).
