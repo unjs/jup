@@ -230,6 +230,16 @@ export const messages = {
   unsupportedHashAlgo: (algo: string) =>
     `Unsupported hash algorithm '${algo}' in the packageManager field`,
 
+  /**
+   * §15.7-aligned — a registry that publishes no `dist.integrity` leaves nothing
+   * for the signature to cover, so the legacy `shasum` is all that is on offer.
+   * §04.5 documents that fallback branch; this makes taking it visible rather
+   * than a silent downgrade. Phase 2's `COREPACK_REQUIRE_SIGNATURES` turns it
+   * into a hard failure.
+   */
+  unverifiableIntegrity: (registry: string, packageName: string, version: string) =>
+    `! ${registry} publishes no integrity digest for ${packageName}@${version}; falling back to its unsigned shasum`,
+
   /* §14.5 — env-file eligibility ------------------------------------------ */
 
   ignoringEnvVar: (name: string, path: string) =>
