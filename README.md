@@ -22,9 +22,8 @@ pnpm install   # runs pnpm 11.1.2 — the version this project pinned, not whate
 
 > [!NOTE]
 > **Early, but it runs.** Every module specified in [`.agents/`](./.agents/) is
-> implemented and the CLI works end to end. What is not done yet is the full
-> conformance suite and a published release, so treat this as pre-1.0. See
-> [Status](#status).
+> implemented, the conformance suite passes, and the CLI works end to end. There is no
+> published release yet, so treat this as pre-1.0. See [Status](#status).
 
 ## Why
 
@@ -180,34 +179,51 @@ The full list with rationale is in
 
 ## Status
 
-Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is implemented:
+Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete:
 
 | Area | State |
 | --- | --- |
-| Specification (`.agents/`) | Complete — 16 normative documents |
-| semver, JSON, env files, tar, HTTP, integrity | Done |
-| Discovery, resolution, store, install, execution | Done |
-| Proxy pipeline, management commands, shims | Done |
-| Unit tests | 615 passing |
-| Conformance suite (§13, tests 1–147) | In progress |
+| Specification (`.agents/`) | 16 normative documents |
+| Implementation | 13 modules, zero runtime dependencies |
+| Conformance suite (§13, rows 1–147) | Passing — 5 rows skipped, each documenting why |
+| Unit tests | 794 passing |
+| Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
-Some numbers, measured rather than hoped for:
+Measured, not hoped for:
 
 - **22 kB** min+gzipped, **zero** runtime dependencies.
-- **~37 ms** for a warm proxy invocation of an exactly-pinned project — essentially
-  Node's own startup, which is the floor for a JavaScript host.
-- A warm run makes **zero** network requests and does not read the recorded default,
-  which is asserted by a test that patches `fetch` and `readFileSync` and fails if
-  either is touched.
+- **~38 ms** for a warm proxy invocation against **~22 ms** for bare Node — so ~16 ms of
+  actual work — and ~53 ms for corepack on the same machine.
+- A warm run makes **zero** network requests, never reads the recorded default, and never
+  scans the store. That is asserted by a test which patches `fetch` and `readFileSync`
+  and fails if either is touched, and was independently confirmed with `strace`.
 
-Not yet done, and deliberately so:
+Not done, deliberately:
 
 - **Proxy support** (`HTTP_PROXY` and friends). `fetch` cannot do it without a custom
-  dispatcher, so it is deferred to phase 2 behind a single seam in `src/http.ts`.
-- **Everything in [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, semver
-  ranges in the pin, `pipack info`, signing-key rotation, per-package-manager
-  registries, native (non-JavaScript) package managers, and the rest.
+  dispatcher, so it is deferred behind a single seam in `src/http.ts`. Conformance rows
+  71 and 72 are skipped until then.
+- **Everything in [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, semver ranges
+  in the pin, `pipack info`, signing-key rotation, per-package-manager registries, native
+  (non-JavaScript) package managers, and the rest.
+
+### What the audit found
+
+Four independent audits ran against a green suite. The findings worth knowing about, all
+fixed:
+
+- Yarn Berry **resolved from the public internet despite a configured mirror**, because
+  the `npmRegistry` substitution was applied only when downloading, not when resolving.
+- Signature verification **hard-failed for every custom npm registry**, because the trust
+  store was keyed by origin — breaking exactly the mirrored deployments that
+  verification exists to protect.
+- Registry credentials embedded in `COREPACK_NPM_REGISTRY` were **printed to stderr**,
+  including on a successful run.
+- `use` checked the `devEngines` version but not its name, so pinning the wrong package
+  manager **succeeded and left the project permanently unrunnable**.
+- `corepack install` silently repointed the machine-wide default, from the command
+  documented for warming a Docker layer.
 
 ## Development
 
