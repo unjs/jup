@@ -1,4 +1,4 @@
 {
   "$schema": "https://unpkg.com/oxfmt/configuration_schema.json",
-  "ignorePatterns": ["CHANGELOG.md", ".agents/**", "*.md"]
+  "ignorePatterns": ["CHANGELOG.md", ".agents/**", "*.md", "*.yaml", "*.yml"]
 }
