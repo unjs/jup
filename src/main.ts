@@ -18,33 +18,13 @@ import { discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.
 import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
 import { parse } from "./semver.ts";
 import type { Descriptor, Invocation, LazyLocator, Locator, SpecResult } from "./types.ts";
+import { GENERIC_USAGE_LINE, USAGE_LINES } from "./usage.ts";
 
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
 const ARG0_RE = /^([^@]*)(?:@(.*))?$/;
 
 /** §03.4 — the `source` reported for anything the user typed on the command line. */
 const CLI_SOURCE = "CLI arguments";
-
-/**
- * §12.1 — the usage line printed under a management-mode `Usage Error:`.
- *
- * Keyed by the command word, so `corepack use yarn@1` gets `$ corepack use
- * <pattern>` rather than the whole synopsis. Anything unrecognised falls back to
- * the generic line, which is what an unknown command would have printed anyway.
- */
-const USAGE_LINES: Record<string, string> = {
-  cache: "$ corepack cache clean",
-  disable: "$ corepack disable [--install-directory <path>] ...",
-  enable: "$ corepack enable [--install-directory <path>] ...",
-  hydrate: "$ corepack hydrate [--activate] <file>",
-  install: "$ corepack install [-g,--global] [--cache-only] ...",
-  pack: "$ corepack pack [--json] [-o,--output <path>] ...",
-  prepare: "$ corepack prepare [--activate] [--all] [-o,--output <path>] ...",
-  up: "$ corepack up",
-  use: "$ corepack use <pattern>",
-};
-
-const GENERIC_USAGE_LINE = "$ corepack <command>";
 
 /**
  * §01.2 — match `arg0` against `/^([^@]*)(?:@(.*))?$/`.
