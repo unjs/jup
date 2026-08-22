@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   compare,
+  isPrerelease,
   isValidRange,
   isValidVersion,
   lt,
   major,
   parse,
+  rangeNamesPrerelease,
   rcompare,
   satisfies,
   satisfiesWithPrereleases,
@@ -350,5 +352,52 @@ describe("satisfiesWithPrereleases (lenient — strips prereleases from both sid
     expect(satisfiesWithPrereleases("", "*")).toBe(false);
     expect(satisfiesWithPrereleases(undefined as unknown as string, "*")).toBe(false);
     expect(satisfiesWithPrereleases("1.2.3", "latest")).toBe(false);
+  });
+});
+
+describe("rangeNamesPrerelease / isPrerelease (§15.24)", () => {
+  it("answers true only when a comparator carries a prerelease tag", () => {
+    expect(rangeNamesPrerelease(">=4.0.0-rc.1")).toBe(true);
+    expect(rangeNamesPrerelease("^11.0.0-0")).toBe(true);
+    expect(rangeNamesPrerelease("1.x || >=2.0.0-alpha")).toBe(true);
+    expect(rangeNamesPrerelease("11.2.0-dev.1005")).toBe(true);
+    expect(rangeNamesPrerelease("2.0.0 - 3.0.0-rc.1")).toBe(true);
+  });
+
+  it("answers false for every range the embedded table and `up` produce", () => {
+    for (const range of [
+      "*",
+      "<6.0.0",
+      "6.x || 7.x || 8.x || 9.x || 10.x",
+      ">=11.0.0",
+      "<2.0.0",
+      ">=2.0.0",
+      "^4.0.0",
+      "1.2.3",
+      "1.2.x",
+    ]) {
+      expect(rangeNamesPrerelease(range), range).toBe(false);
+    }
+  });
+
+  it("is not fooled by the `matches nothing` comparator", () => {
+    // `>*` and `<*` expand to `<0.0.0-0`, which is structurally a comparator
+    // naming a prerelease. Reading it as one would re-open the gate §15.24 shuts.
+    expect(rangeNamesPrerelease(">*")).toBe(false);
+    expect(rangeNamesPrerelease("<*")).toBe(false);
+  });
+
+  it("answers false rather than throwing on malformed input", () => {
+    expect(rangeNamesPrerelease("not a range")).toBe(false);
+    expect(rangeNamesPrerelease("")).toBe(false);
+    expect(rangeNamesPrerelease("latest")).toBe(false);
+  });
+
+  it("classifies versions, ignoring build metadata", () => {
+    expect(isPrerelease("11.2.0-dev.1005")).toBe(true);
+    expect(isPrerelease("4.0.0-rc.1" + SHA224)).toBe(true);
+    expect(isPrerelease("11.1.2")).toBe(false);
+    expect(isPrerelease("1.22.22" + SHA1)).toBe(false);
+    expect(isPrerelease("not a version")).toBe(false);
   });
 });

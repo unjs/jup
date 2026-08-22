@@ -5,15 +5,16 @@
  * want?" It touches the filesystem only, never the network.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { isSupportedPackageManager } from "./config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "./errors.ts";
-import { parseManifest, scanTopLevelFields, setTopLevelString } from "./json.ts";
-import { isValidRange, isValidVersion, satisfies } from "./semver.ts";
+import { parseManifest, scanTopLevelFields, setNestedString, setTopLevelString } from "./json.ts";
+import { isValidRange, isValidVersion, parse, satisfies } from "./semver.ts";
 import type {
   Descriptor,
+  DevEnginesDeclaration,
   DevEnginesPackageManager,
   DevEnginesRange,
   LazyLocator,
@@ -35,35 +36,80 @@ export const CLI_SOURCE = "CLI arguments";
 const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
 
 /**
- * §03.1 — the walk's stop condition, isolated because §15.25 changes it.
+ * §15.27 — the extra field a *mutating* walk needs, and only a mutating walk.
  *
- * Today **only** a truthy `packageManager` halts the climb; a manifest carrying
- * just `devEngines.packageManager` (or `packageManager: null`) does not, and a
- * parent's spec silently wins. Phase 2 makes both fields symmetric stop
- * conditions — this predicate is the single place that has to change.
+ * `workspaces` on a real manifest is an array (sometimes a large one), and
+ * {@link scanTopLevelFields} allocates a value for every field it is asked for.
+ * The warm proxy path answers a two-field question (§16.3) and must keep
+ * answering exactly that, so the third field is requested only where the answer
+ * is used.
+ */
+const MUTATING_MANIFEST_FIELDS = [...MANIFEST_FIELDS, "workspaces"] as const;
+
+/** §15.27 — a directory containing this is a workspace root even with no `workspaces` field. */
+const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
+
+/**
+ * §03.1 as amended by §15.25 — the walk's stop condition.
+ *
+ * Corepack's loop condition is `!selection || !selection.data.packageManager`:
+ * a *truthiness* test on one field. Two consequences, both defects (#779):
+ *
+ * * a manifest declaring only `devEngines.packageManager` does not stop the
+ *   climb, so a parent's spec — or the global default — silently wins over the
+ *   nested project's own declaration;
+ * * `packageManager: null` reads as "absent" rather than as "declared and
+ *   invalid", so the walk sails past a manifest whose author plainly meant to
+ *   say something.
+ *
+ * Both fields are stop conditions here, and the test is **key presence**, not
+ * truthiness: a declared-but-invalid value stops the walk and is then reported
+ * by `parseSpec`, which is where an invalid value belongs.
  */
 function stopsWalk(data: Manifest | undefined): boolean {
-  // Matches the normative loop condition `!selection || !selection.data.packageManager`
-  // exactly: it is a truthiness test, not a key-presence test.
-  return data !== undefined && Boolean(data.packageManager);
+  if (data === undefined) return false;
+  if (Object.hasOwn(data, "packageManager")) return true;
+
+  const devEngines = data.devEngines;
+  return (
+    typeof devEngines === "object" &&
+    devEngines !== null &&
+    Object.hasOwn(devEngines, "packageManager") &&
+    devEngines.packageManager !== undefined &&
+    devEngines.packageManager !== null
+  );
 }
 
 /**
- * §03.7 — which file a project-mutating command rewrites, isolated because
- * §15.27 changes it (a `--here` flag, and preferring the workspace root).
+ * §15.27 — a workspace root, where a mutating walk must stop.
+ *
+ * #607: `corepack use` in a nested directory of a monorepo updates the *root*
+ * `package.json`, which corepack's author confirmed is intentional and agreed is
+ * surprising. Climbing to the workspace root is right — a monorepo pins its
+ * package manager once — but climbing *past* it is never right, and that is what
+ * happens today when some ancestor of the repository (a `$HOME/package.json`,
+ * §15.35k's other victim) happens to carry a pin.
+ *
+ * Both conventions count: `workspaces` in the manifest (npm, yarn, bun) and a
+ * `pnpm-workspace.yaml` beside it (pnpm).
  */
-function pinTarget(result: SpecResult): string {
-  return result.target;
+function isWorkspaceRoot(dir: string, data: Manifest): boolean {
+  if (Object.hasOwn(data, "workspaces") && data.workspaces !== undefined) return true;
+  return statSync(join(dir, PNPM_WORKSPACE_FILE), { throwIfNoEntry: false }) !== undefined;
 }
 
 /**
  * §03.1 — walk from `cwd` toward the root.
  *
  * At each directory: skip if it is a package dir inside `node_modules`; load the
- * env file if none has been loaded yet; read `package.json`. The walk stops only
- * on a manifest carrying a `packageManager` key, and the **last** manifest seen
- * is what gets recorded — which is why a monorepo with no pin anywhere yields
- * `NoSpec` targeting the *root*.
+ * env file if none has been loaded yet; read `package.json`. The walk stops on a
+ * manifest declaring either package-manager field ({@link stopsWalk}, §15.25),
+ * and the **last** manifest seen is what gets recorded — which is why a monorepo
+ * with no declaration anywhere yields `NoSpec` targeting the *root*.
+ *
+ * `mutating` adds §15.27's workspace-boundary stop condition and `here` confines
+ * the selection to `cwd`'s own manifest; both are for commands that are about to
+ * *write*, and neither affects what the proxy path reads.
  *
  * `envOnly` loads the env file and stops at the first one found, never reading
  * manifests: for commands given an explicit package-manager pattern on the CLI.
@@ -77,11 +123,14 @@ function pinTarget(result: SpecResult): string {
  */
 export function discoverProjectSpec(
   cwd: string,
-  options?: { envOnly?: boolean; projectSpecFlag?: boolean },
+  options?: { envOnly?: boolean; projectSpecFlag?: boolean; mutating?: boolean; here?: boolean },
 ): SpecResult {
   const initialCwd = resolve(cwd);
   let envOnly = options?.envOnly === true;
   const projectSpecFlag = options?.projectSpecFlag === true;
+  const mutating = options?.mutating === true;
+  const here = options?.here === true;
+  const fields = mutating ? MUTATING_MANIFEST_FIELDS : MANIFEST_FIELDS;
 
   let currentDir = "";
   let nextDir = initialCwd;
@@ -96,6 +145,14 @@ export function discoverProjectSpec(
   ) {
     currentDir = nextDir;
     nextDir = dirname(currentDir);
+
+    // §15.27 — `--here` mutates the manifest the user is standing in, full stop.
+    // The climb continues for the env file alone (which may carry the registry
+    // settings the resolution needs), so from the second directory on this is
+    // exactly `envOnly`.
+    if (here && currentDir !== initialCwd) {
+      envOnly = true;
+    }
 
     // Step 1 — a vendored dependency must never speak for its host, and that
     // includes its `.corepack.env`, so this runs before the env file is loaded.
@@ -145,7 +202,7 @@ export function discoverProjectSpec(
     // conservative and answers `null` for anything it cannot prove well-formed,
     // in which case the real parser decides — which is what keeps §03.1's
     // `Invalid package.json` firing on exactly the inputs it fired on before.
-    let data: unknown = scanTopLevelFields(content, MANIFEST_FIELDS);
+    let data: unknown = scanTopLevelFields(content, fields);
     if (data === null) {
       try {
         data = parseManifest(content);
@@ -165,6 +222,15 @@ export function discoverProjectSpec(
     // Recorded unconditionally, which is what makes the *outermost* manifest the
     // selection when nothing on the way up declares a `packageManager`.
     selection = { data: data as Manifest, target };
+
+    // §15.27 — a mutating walk stops at the workspace root even when that
+    // manifest declares no package manager at all. Non-mutating discovery keeps
+    // climbing, because *reading* a pin from further up is the documented
+    // monorepo behaviour (§03.1); it is only *writing* one past the repository
+    // that surprises people.
+    if (mutating && isWorkspaceRoot(currentDir, selection.data)) {
+      break;
+    }
   }
 
   // A manifest read *before* the env file that disables the project spec was
@@ -176,7 +242,7 @@ export function discoverProjectSpec(
 
   // devEngines validation is eager (a bad `onFail: "error"` must fail the run);
   // only `parseSpec` is deferred.
-  const { raw, range, hasPin } = readSpecFromManifest(selection.data, selection.target);
+  const { raw, range, hasPin, devEngines } = readSpecFromManifest(selection.data, selection.target);
   if (raw === undefined) {
     return { type: "NoSpec", target: selection.target, envFilePath };
   }
@@ -187,6 +253,7 @@ export function discoverProjectSpec(
     type: "Found",
     target: selection.target,
     range,
+    devEngines,
     hasPin,
     envFilePath,
     getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, opts),
@@ -261,7 +328,13 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
 export function readSpecFromManifest(
   manifest: unknown,
   manifestPath: string,
-): { raw: unknown; range?: { name: string; range: string; onFail?: string }; hasPin: boolean } {
+): {
+  raw: unknown;
+  range?: DevEnginesRange;
+  /** §15.26 — the declaration itself, present even when it names no version. */
+  devEngines?: DevEnginesDeclaration;
+  hasPin: boolean;
+} {
   void manifestPath; // Reserved: §15.25/§15.26 need it to report *which* file is at fault.
 
   const data = (manifest ?? {}) as Manifest;
@@ -300,10 +373,15 @@ export function readSpecFromManifest(
     }
   }
 
+  const failure = typeof onFail === "string" ? onFail : undefined;
   const range: DevEnginesRange | undefined =
-    typeof version === "string"
-      ? { name, range: version, onFail: typeof onFail === "string" ? onFail : undefined }
-      : undefined;
+    typeof version === "string" ? { name, range: version, onFail: failure } : undefined;
+
+  // §15.26 — reported whether or not a version was declared. A block naming only
+  // a package manager still says which one the project is for, and `writePin`
+  // has to honour that or it writes a pin §03.3 refuses to read.
+  const devEngines: DevEnginesDeclaration = { name, onFail: failure };
+  if (typeof version === "string") devEngines.version = version;
 
   if (pm !== undefined && pm !== null) {
     if (typeof pm !== "string" || !pm.startsWith(`${name}@`)) {
@@ -326,10 +404,10 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
     }
     // `packageManager` wins whenever it is present, even after a warning.
-    return { raw: pm, range, hasPin };
+    return { raw: pm, range, devEngines, hasPin };
   }
 
-  return { raw: `${name}@${version ?? "*"}`, range, hasPin };
+  return { raw: `${name}@${version ?? "*"}`, range, devEngines, hasPin };
 }
 
 /**
@@ -398,34 +476,55 @@ export function reconcile(
 }
 
 /**
- * §03.7 — write the pin, preserving indentation, line endings, key order, and
- * (per §14.7) the BOM. Returns the previous value for `COREPACK_MIGRATE_FROM`.
+ * §03.7, as amended by §15.26 and §15.27 — write the pin.
+ *
+ * Preserves indentation, line endings, key order, and (per §14.7) the BOM.
+ * Returns the previous value for `COREPACK_MIGRATE_FROM`, and the path actually
+ * modified so the caller can print it (§15.35l).
+ *
+ * **Which field gets written** is §15.26's whole subject, and the rule has three
+ * branches rather than one:
+ *
+ * | Manifest declares | Written |
+ * |---|---|
+ * | `packageManager` only, or neither | `packageManager` |
+ * | `devEngines.packageManager` for **this** package manager, no `packageManager` | `devEngines.packageManager.version` (+ `integrity`) |
+ * | both, for this package manager | `packageManager`; `devEngines` left alone |
+ *
+ * Row two is #874: `corepack use pnpm@latest` on a devEngines-only project
+ * writes a top-level `packageManager` that then conflicts with the declaration
+ * beside it — a hash-presence difference is enough — so the very next run fails
+ * §03.3. The fix is not to create the second field at all.
+ *
+ * Row three needs no `devEngines` update *because* nothing broke: the value
+ * being written already satisfies the declared range, which is exactly what the
+ * check above establishes, and rewriting `1.x || 2.x` into `2.4.3` would destroy
+ * the statement of intent that §09.4 relies on to carry `up` across a major.
+ * §15.26's post-write requirement — "validation MUST run against the state being
+ * written" — is met by the check being the same predicate §03.3 applies on read,
+ * with the same `onFail`.
+ *
+ * When the declared name is a *different* package manager, `devEngines` is not
+ * describing this pin at all: the mismatch is reported through `onFail` and,
+ * if that does not throw, the pin goes to `packageManager` where a reader can
+ * still see both statements.
  */
 export function writePin(
   cwd: string,
-  info: { name: string; reference: string },
+  info: { name: string; reference: string; hash?: string },
+  options?: { here?: boolean },
 ): { previousPackageManager: string; target: string } {
-  // 1 — re-run discovery: the file to edit is not necessarily in `cwd`.
-  const lookup = discoverProjectSpec(cwd);
-  const target = pinTarget(lookup);
+  // 1 — re-run discovery: the file to edit is not necessarily in `cwd`. §15.27's
+  // extra stop conditions apply here and only here, because this is the write.
+  const lookup = discoverProjectSpec(cwd, { mutating: true, here: options?.here === true });
+  const target = lookup.target;
+  const declared = lookup.type === "Found" ? lookup.devEngines : undefined;
   const range = lookup.type === "Found" ? lookup.range : undefined;
 
-  // 2 — the package manager being pinned must be the one `devEngines` declares,
-  // *and* its version must satisfy the declared range. Checking only the version
-  // lets `use pnpm@6.6.2` succeed in a project whose devEngines say `yarn@6.x`,
-  // writing a pin that then fails §03.3's name check on every subsequent run —
-  // permanently, since nothing but a hand edit can undo it.
-  if (
-    range !== undefined &&
-    (info.name !== range.name || !satisfies(info.reference, range.range))
-  ) {
-    warnOrThrow(
-      messages.devEnginesPinMismatch(info.name, info.reference, range.name, range.range),
-      range.onFail,
-    );
-  }
-
-  // 3 — a missing file is an empty document, so `NoProject` creates one.
+  // 3 — a missing file is an empty document, so `NoProject` creates one. It is
+  // read *before* the validation below because §15.26 requires that validation
+  // to run against the state being **written**, and what is about to be written
+  // depends on which fields the file already has.
   let content = "";
   if (lookup.type !== "NoProject") {
     try {
@@ -449,6 +548,45 @@ export function writePin(
     // far as the surgical edit allows; `setTopLevelString` re-validates below.
   }
 
+  const devEnginesTarget = devEnginesWriteTarget(data, declared, info);
+
+  // 2 — the package manager being pinned must be the one `devEngines` declares,
+  // *and* its version must satisfy the declared range. Checking only the version
+  // lets `use pnpm@6.6.2` succeed in a project whose devEngines say `yarn@6.x`,
+  // writing a pin that then fails §03.3's name check on every subsequent run —
+  // permanently, since nothing but a hand edit can undo it.
+  //
+  // §15.26 — the name half runs even when no version is declared. Corepack (and
+  // this implementation before now) only reached the check through the *range*,
+  // so `devEngines: {packageManager: {name: "yarn"}}` imposed nothing at all on
+  // `corepack use pnpm@6`, and the resulting manifest was one §03.3 rejects by
+  // default on every later run.
+  //
+  // The version half is skipped for exactly one shape — see
+  // {@link devEnginesWriteTarget} — because there is nothing left to violate
+  // once the declared value is the value being replaced. That is §15.26's
+  // "validation MUST run against the state being written, not the state on disk".
+  if (declared !== undefined && info.name !== declared.name) {
+    warnOrThrow(
+      messages.devEnginesPinMismatch(
+        info.name,
+        info.reference,
+        declared.name,
+        declared.version ?? "*",
+      ),
+      declared.onFail,
+    );
+  } else if (
+    range !== undefined &&
+    !devEnginesTarget.replacesDeclaredVersion &&
+    !satisfies(info.reference, range.range)
+  ) {
+    warnOrThrow(
+      messages.devEnginesPinMismatch(info.name, info.reference, range.name, range.range),
+      range.onFail,
+    );
+  }
+
   // 6 — what the package manager's own `use` command is told to migrate from.
   const previousPackageManager =
     typeof data.packageManager === "string"
@@ -459,7 +597,24 @@ export function writePin(
 
   // 5, 7, 8 — the rewrite preserves indentation, line endings, key order and the
   // BOM; the reference carries its freshly computed hash suffix.
-  const updated = setTopLevelString(content, "packageManager", `${info.name}@${info.reference}`);
+  //
+  // §15.26 — "a command that writes a pin MUST update **every** field that
+  // encodes it", so the two writes compose rather than choosing between each
+  // other. A `devEngines` write that could not be made surgically falls back to
+  // the top-level field: writing the pin somewhere is always better than writing
+  // it nowhere and reporting success.
+  let updated = content;
+  let wroteDevEngines = false;
+  if (devEnginesTarget.write) {
+    const next = writeIntoDevEngines(updated, info);
+    if (next !== null) {
+      updated = next;
+      wroteDevEngines = true;
+    }
+  }
+  if (!devEnginesTarget.exclusive || !wroteDevEngines) {
+    updated = setTopLevelString(updated, "packageManager", `${info.name}@${info.reference}`);
+  }
 
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
   writeFileSync(target, updated);
@@ -467,5 +622,118 @@ export function writePin(
   // `target` goes back to the caller because §15.23's `.corepack.lock` lives
   // beside *this* file, not beside the cwd — in a monorepo those differ, and a
   // resolution recorded next to the wrong manifest would never be found again.
+  // §15.27 also requires it to be *printed*, and printing is the caller's job.
   return { previousPackageManager, target };
+}
+
+/**
+ * §15.26 — which field (or fields) this pin belongs in.
+ *
+ * `devEngines.packageManager.version` is validated as a semver **range** (§03.3),
+ * and the distinction between a range and an exact version is the one that
+ * decides everything here:
+ *
+ * * an **exact** version is a *pin* — it says "this release" — so a mutating
+ *   command replaces it, and there is nothing left for the version check to
+ *   object to (`replacesDeclaredVersion`). This is #874's shape, where a
+ *   hash-presence difference between the two fields is enough to make the next
+ *   read fail;
+ * * a **range** is a *constraint* — it says "anything in here" — so it is
+ *   honoured, never overwritten. Collapsing `1.x || 2.x` into `2.4.3` would
+ *   destroy the declaration §09.4 relies on to carry `corepack up` across a
+ *   major boundary, and would silently narrow what the project accepts.
+ *
+ * `exclusive` is §15.26's second bullet: with no top-level `packageManager` the
+ * pin goes into `devEngines` and **no** `packageManager` is created. Creating
+ * one is what breaks #874.
+ */
+function devEnginesWriteTarget(
+  data: Manifest,
+  declared: DevEnginesDeclaration | undefined,
+  info: { name: string; reference: string },
+): { write: boolean; exclusive: boolean; replacesDeclaredVersion: boolean } {
+  const none = { write: false, exclusive: false, replacesDeclaredVersion: false };
+
+  // A declaration for a *different* package manager does not describe this pin;
+  // the mismatch is reported through `onFail` and the pin goes to the top level,
+  // where a reader can still see both statements.
+  if (declared === undefined || declared.name !== info.name) return none;
+  // A URL reference has no semver to record in a semver field.
+  if (parse(info.reference) === null) return none;
+
+  // A `packageManager` key that is present but not a string is a spec error the
+  // user is about to have overwritten — write it at the top level, as before.
+  const hasPin = typeof data.packageManager === "string";
+  const hasBrokenPin =
+    Object.hasOwn(data, "packageManager") && !hasPin && data.packageManager != null;
+  if (hasBrokenPin) return none;
+
+  const declaredExactVersion = declared.version !== undefined && isValidVersion(declared.version);
+
+  if (!hasPin) {
+    // §15.26 bullet 2 — the pin lives where the declaration already is.
+    return { write: true, exclusive: true, replacesDeclaredVersion: declaredExactVersion };
+  }
+
+  // Both fields. `packageManager` is the one §03.3 reads, so it is always
+  // written; `devEngines` is only rewritten when it was itself a pin.
+  return {
+    write: declaredExactVersion,
+    exclusive: false,
+    replacesDeclaredVersion: declaredExactVersion,
+  };
+}
+
+/**
+ * §15.26 — write the pin into `devEngines.packageManager`, or `null` if the
+ * surgical edit could not be made.
+ *
+ * The version written is the **plain** semver version and the digest goes to
+ * `integrity` beside it (§15.12's shape), because `devEngines.packageManager.version`
+ * is validated as a semver *range* by §03.3 and a `+sha512.…` suffix has no
+ * business in one. `integrity` is only written when a usable digest is
+ * available, and it is never left behind pointing at a version that has moved,
+ * because it is rewritten in the same edit as the version it describes.
+ */
+function writeIntoDevEngines(
+  content: string,
+  info: { name: string; reference: string; hash?: string },
+): string | null {
+  const version = parse(info.reference)?.version;
+  if (version === undefined) return null;
+
+  const withVersion = setNestedString(
+    content,
+    ["devEngines", "packageManager", "version"],
+    version,
+  );
+  if (withVersion === null) return null;
+
+  if (info.hash === undefined) return withVersion;
+  const integrity = integrityFromHash(info.hash);
+  if (integrity === undefined) return withVersion;
+
+  return (
+    setNestedString(withVersion, ["devEngines", "packageManager", "integrity"], integrity) ??
+    withVersion
+  );
+}
+
+/**
+ * `sha512.<hex>` -> `sha512-<base64>`, the SRI spelling `integrity` fields use.
+ *
+ * Duplicated rather than imported from `lockfile.ts` on purpose: `manifest.ts`
+ * is on the warm path and `lockfile.ts` is loaded only when a spec is a range,
+ * so importing it here would put it in every single invocation's module graph to
+ * serve a branch that only `use`/`up` reach.
+ */
+function integrityFromHash(hash: string): string | undefined {
+  const dot = hash.indexOf(".");
+  if (dot <= 0) return undefined;
+
+  const algo = hash.slice(0, dot).toLowerCase();
+  const hex = hash.slice(dot + 1);
+  if (!/^[a-z][\da-z]*$/.test(algo) || !/^(?:[\da-f]{2})+$/i.test(hex)) return undefined;
+
+  return `${algo}-${Buffer.from(hex, "hex").toString("base64")}`;
 }

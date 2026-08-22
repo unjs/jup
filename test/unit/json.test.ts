@@ -5,6 +5,7 @@ import {
   parseManifest,
   scanTopLevelFields,
   scanTopLevelKey,
+  setNestedString,
   setTopLevelString,
 } from "../../src/json.ts";
 
@@ -342,5 +343,94 @@ describe("scanTopLevelFields", () => {
     expect(scanTopLevelFields(deep, FIELDS)).toBeNull();
     // And the caller's fallback still reads it correctly.
     expect(parseManifest(deep)).toBeTypeOf("object");
+  });
+});
+
+describe("setNestedString — §15.26", () => {
+  const manifest = [
+    "{",
+    `  "name": "project",`,
+    `  "devEngines": {`,
+    `    "packageManager": {`,
+    `      "name": "pnpm",`,
+    `      "version": "^11.0.0"`,
+    "    }",
+    "  },",
+    `  "scripts": {`,
+    `    "build": "tsc"`,
+    "  }",
+    "}",
+    "",
+  ].join("\n");
+
+  const PATH = ["devEngines", "packageManager", "version"];
+
+  it("replaces a nested value, touching nothing else", () => {
+    const updated = setNestedString(manifest, PATH, "11.1.2")!;
+
+    expect(updated).toBe(manifest.replace(`"^11.0.0"`, `"11.1.2"`));
+    expect(JSON.parse(updated)).toMatchObject({
+      devEngines: { packageManager: { name: "pnpm", version: "11.1.2" } },
+    });
+  });
+
+  it("inserts an absent leaf at the enclosing object's own indentation", () => {
+    const updated = setNestedString(
+      manifest,
+      ["devEngines", "packageManager", "integrity"],
+      "sha512-abc",
+    )!;
+
+    // Six spaces, not the document's two: a member of `devEngines.packageManager`
+    // sits two levels in, and inheriting the top-level indent misaligns it.
+    expect(updated).toContain(`      "integrity": "sha512-abc",`);
+    expect(JSON.parse(updated)).toMatchObject({
+      devEngines: { packageManager: { name: "pnpm", integrity: "sha512-abc" } },
+    });
+  });
+
+  it("preserves tab indentation, CRLF line endings and a BOM", () => {
+    const original =
+      '\uFEFF{\r\n\t"devEngines": {\r\n\t\t"packageManager": {\r\n\t\t\t"version": "1.0.0"\r\n\t\t}\r\n\t}\r\n}\r\n';
+
+    const updated = setNestedString(original, PATH, "2.0.0")!;
+
+    expect(updated).toBe(original.replace(`"1.0.0"`, `"2.0.0"`));
+    expect(updated.startsWith("\uFEFF")).toBe(true);
+  });
+
+  it("delegates a single-segment path to setTopLevelString", () => {
+    expect(setNestedString(manifest, ["name"], "renamed")).toBe(
+      setTopLevelString(manifest, "name", "renamed"),
+    );
+  });
+
+  it("answers null rather than guessing when the path is not walkable", () => {
+    // A missing intermediate, an intermediate that is not an object, and a top
+    // level that is not an object at all.
+    expect(setNestedString(`{"name":"x"}`, PATH, "1.0.0")).toBeNull();
+    expect(setNestedString(`{"devEngines":42}`, PATH, "1.0.0")).toBeNull();
+    expect(setNestedString(`{"devEngines":{"packageManager":[]}}`, PATH, "1.0.0")).toBeNull();
+    expect(setNestedString(`[1,2,3]`, PATH, "1.0.0")).toBeNull();
+    expect(setNestedString(`{`, PATH, "1.0.0")).toBeNull();
+    expect(setNestedString(manifest, [], "1.0.0")).toBeNull();
+  });
+
+  it("re-parses its own output, so a bad edit never reaches disk", () => {
+    const updated = setNestedString(manifest, PATH, `a "quoted" \\ value`)!;
+    expect(JSON.parse(updated)).toMatchObject({
+      devEngines: { packageManager: { version: `a "quoted" \\ value` } },
+    });
+  });
+
+  it("handles an empty innermost object", () => {
+    const updated = setNestedString(
+      `{\n  "devEngines": {\n    "packageManager": {}\n  }\n}\n`,
+      PATH,
+      "1.0.0",
+    )!;
+    expect(JSON.parse(updated)).toEqual({
+      devEngines: { packageManager: { version: "1.0.0" } },
+    });
   });
 });

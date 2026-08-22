@@ -85,6 +85,9 @@ const ENV_KEYS = [
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_INTEGRITY_KEYS",
+  // §15.24's opt-in. Leaking it between rows would let one test silently decide
+  // what the next one resolves to — precisely the hazard §15.24 is about.
+  "COREPACK_ENABLE_PRERELEASES",
   "XDG_CACHE_HOME",
   "LOCALAPPDATA",
 ] as const;
@@ -549,25 +552,68 @@ describe("resolveDescriptor step 6 — range query", () => {
     );
   });
 
-  it("matches a prerelease band member under lenient satisfaction (§04.2)", async () => {
-    const npm = await startServer({
-      "/yarn": { versions: {}, "dist-tags": {} },
-      "/@yarnpkg/cli-dist": {
-        versions: { "4.10.0-rc.1": {}, "4.9.0": {} },
-        "dist-tags": {},
-      },
-    });
-    const berry = await startServer({
-      "/tags": { aliases: {}, tags: ["4.10.0-rc.1", "4.9.0"] },
-    });
-    process.env.COREPACK_NPM_REGISTRY = npm.origin;
-    BERRY_REGISTRY.url = `${berry.origin}/tags`;
+  // §15.24 redirected this row. It used to assert that `>=4` resolves to
+  // `4.10.0-rc.1` — corepack's behaviour, and the defect behind #473/#774. The
+  // *lenient satisfaction* it was really testing is still exercised, by the last
+  // case below: a range naming a prerelease still matches one.
+  describe("§15.24 — prereleases are excluded from implicit resolution", () => {
+    async function serveYarn(): Promise<void> {
+      const npm = await startServer({
+        "/yarn": { versions: {}, "dist-tags": {} },
+        "/@yarnpkg/cli-dist": {
+          versions: { "4.10.0-rc.1": {}, "4.9.0": {} },
+          "dist-tags": {},
+        },
+      });
+      const berry = await startServer({
+        "/tags": { aliases: {}, tags: ["4.10.0-rc.1", "4.9.0"] },
+      });
+      process.env.COREPACK_NPM_REGISTRY = npm.origin;
+      BERRY_REGISTRY.url = `${berry.origin}/tags`;
+    }
 
-    // §15.24 (phase 2) will exclude prereleases from *implicit* resolution;
-    // phase 1 reproduces corepack, where the prerelease sorts highest.
-    await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
-      name: "yarn",
-      reference: "4.10.0-rc.1",
+    it("takes the highest STABLE release for a plain range", async () => {
+      await serveYarn();
+
+      await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+        name: "yarn",
+        reference: "4.9.0",
+      });
+    });
+
+    it("takes the prerelease with COREPACK_ENABLE_PRERELEASES=1", async () => {
+      await serveYarn();
+      process.env.COREPACK_ENABLE_PRERELEASES = "1";
+
+      await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+        name: "yarn",
+        reference: "4.10.0-rc.1",
+      });
+    });
+
+    it("takes the prerelease when the range itself names one (§04.2 leniency)", async () => {
+      await serveYarn();
+
+      // The band lookup and the cache probe keep the lenient rule; what narrowed
+      // is the *candidate set*, and a range that names a prerelease re-admits it.
+      await expect(resolveDescriptor({ name: "yarn", range: ">=4.0.0-0" })).resolves.toEqual({
+        name: "yarn",
+        reference: "4.10.0-rc.1",
+      });
+    });
+
+    it("resolves to nothing rather than silently downgrading to a prerelease", async () => {
+      const npm = await startServer({
+        "/yarn": { versions: {}, "dist-tags": {} },
+        "/@yarnpkg/cli-dist": { versions: { "5.0.0-rc.1": {} }, "dist-tags": {} },
+      });
+      const berry = await startServer({ "/tags": { aliases: {}, tags: ["5.0.0-rc.1"] } });
+      process.env.COREPACK_NPM_REGISTRY = npm.origin;
+      BERRY_REGISTRY.url = `${berry.origin}/tags`;
+
+      // §15.24 says "discard", with no fallback: `Failed to successfully resolve`
+      // names a real problem, where installing a dev build silently does not.
+      await expect(resolveDescriptor({ name: "yarn", range: ">=5" })).resolves.toBeNull();
     });
   });
 });
@@ -678,15 +724,46 @@ describe("getFallbackLocator (§02.1)", () => {
     expect(npm.requests).toEqual(["/yarn/latest"]);
   });
 
-  it("uses transparent.default without reading the LKG or the network", async () => {
+  // §15.33 redirected this row: `transparent.default` used to be an
+  // unconditional override, and the row asserted that the recorded default was
+  // not even read. It is a **floor** now, so it is read — but still never over
+  // the network, which is the half of the original assertion that still holds.
+  it("uses transparent.default when nothing is recorded, with no network", async () => {
     const { npm, berry } = await startYarnServers();
-    // A recorded default that must NOT be consulted on this path (phase 1;
-    // §15.33 makes the literal a floor instead).
-    seedLastKnownGood({ yarn: "9.9.9" });
 
     const locator = getFallbackLocator("yarn", { transparent: true });
     await expect(locator.reference()).resolves.toBe(DEFINITIONS.yarn!.transparent.default);
     expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("prefers a recorded default from the same major line or newer (§15.33)", async () => {
+    const { npm, berry } = await startYarnServers();
+    // Row 199: `corepack install -g yarn@4.9.0` then `yarn dlx`. 4.9.0 is
+    // *older* than the table's 4.14.1, and the user still gets 4.9.0 — a
+    // literal version-wise floor would answer 4.14.1 and fail the row.
+    seedLastKnownGood({ yarn: "4.9.0" });
+
+    const locator = getFallbackLocator("yarn", { transparent: true });
+    await expect(locator.reference()).resolves.toBe("4.9.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("keeps the floor when the recorded default is from an older major (§15.33)", async () => {
+    await startYarnServers();
+    // #812 exactly: `yarn create` reaching for Yarn Classic, unsupported since
+    // 2020, because `install -g yarn@1.22.22` recorded it as the default.
+    seedLastKnownGood({ yarn: "1.22.22" });
+
+    const locator = getFallbackLocator("yarn", { transparent: true });
+    await expect(locator.reference()).resolves.toBe(DEFINITIONS.yarn!.transparent.default);
+  });
+
+  it("keeps the floor when the recorded default cannot be parsed (§15.33)", async () => {
+    await startYarnServers();
+    seedLastKnownGood({ yarn: "https://example.test/yarn.js" });
+
+    const locator = getFallbackLocator("yarn", { transparent: true });
+    await expect(locator.reference()).resolves.toBe(DEFINITIONS.yarn!.transparent.default);
   });
 
   it("falls back to getDefaultVersion when the definition declares no transparent.default", async () => {

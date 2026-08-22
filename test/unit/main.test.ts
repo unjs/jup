@@ -319,7 +319,7 @@ describe("presentError — §08.4, §12.1", () => {
 
     expect(code).toBe(1);
     expect(sink.err.join("")).toBe("");
-    expect(sink.out.join("")).toBe("Usage Error: boom\n\n$ corepack use <pattern>\n");
+    expect(sink.out.join("")).toBe("Usage Error: boom\n\n$ corepack use [--here] <pattern>\n");
   });
 
   it("keeps the stack for anything that is not a UsageError", () => {
@@ -434,10 +434,15 @@ describe("runProxy — auto-pin (tests 43, 44)", () => {
     const pinned = `${versionOf(YARN_DEFAULT)}+sha512.fake`;
     expect(manifest.packageManager).toBe(`yarn@${pinned}`);
 
-    // Verbatim, on stderr, followed by a blank line.
+    // Verbatim, on stderr, followed by a blank line — then §15.35l's line naming
+    // the manifest that was modified. Everything stays on stderr because this is
+    // proxy mode and stdout belongs to the package manager (§09.11).
     expect(result.stderr).toBe(
-      `${messages.autoPinNotice("yarn", pinned)}\n${messages.autoPinDocs()}\n\n`,
+      `${messages.autoPinNotice("yarn", pinned)}\n${messages.autoPinDocs()}\n\n` +
+        `${messages.updatedManifest(join(cwd, "package.json"), "yarn", pinned)}\n`,
     );
+    // stdout is the fake package manager's own output, unpolluted.
+    expect(result.stdout).toBe(`yarn@${versionOf(YARN_DEFAULT)} --version\n`);
     expect(result.stderr).toContain("! The local project doesn't define a 'packageManager' field");
     expect(result.stderr).toContain("https://nodejs.org/api/packages.html#packagemanager");
   });
@@ -657,6 +662,10 @@ const COLD_PATH_MODULES = [
   // when a request is about to go out, and `tls.ts` itself defers `node:tls`
   // until something is actually configured.
   "tls.ts",
+  // §15.1's `.npmrc` reader. A cache hit must not read a single `.npmrc`, and
+  // `strace` on the built binary confirms zero such syscalls — this list is what
+  // keeps it that way.
+  "npmrc.ts",
 ];
 
 /**

@@ -282,6 +282,9 @@ describe("isEnvFileEligible", () => {
     // it that was not already going to run. Asserted explicitly so a later edit
     // to ENV_FILE_INELIGIBLE cannot quietly withdraw it.
     expect(isEnvFileEligible("COREPACK_SHIM_DIRECTORY")).toBe(true);
+    // §15.24's opt-in: choosing to accept prereleases is a project's call, and
+    // it widens a candidate set rather than deciding who is trusted.
+    expect(isEnvFileEligible("COREPACK_ENABLE_PRERELEASES")).toBe(true);
 
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);

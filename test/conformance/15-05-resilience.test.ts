@@ -198,7 +198,11 @@ describe("§15.38 network resilience (§15.5)", () => {
       });
 
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("Server answered with HTTP 404");
+      // §15.35j redirected the message: a 404 on an artifact download is now
+      // reported as a nonexistent version. What this row is really about is the
+      // request count below — a 4xx is a verdict, not a hiccup, and retrying it
+      // only multiplies the wait.
+      expect(result.stderr).toContain("pnpm@6.6.2 does not exist in");
       expect(front.requests).toEqual(["/pnpm/6.6.2"]);
     } finally {
       await front.stop();

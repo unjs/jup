@@ -22,6 +22,12 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
   return (fixture.json("package.json") as { packageManager?: string }).packageManager;
 }
 
+/** §15.26 — the pin lives here for a project that declares only `devEngines`. */
+function devEnginesOf(fixture: { json(relative: string): unknown }): unknown {
+  return (fixture.json("package.json") as { devEngines?: { packageManager?: unknown } }).devEngines
+    ?.packageManager;
+}
+
 beforeAll(async () => {
   await registry.start();
 
@@ -72,7 +78,13 @@ describe("§13.10 use / up", () => {
     const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("Installing yarn@1.22.4 in the project...\n\nyarn@1.22.4 install\n");
+    // §15.35l added the middle line: every mutating command names the file it
+    // modified, which is the whole of #607 and costs one line of output.
+    expect(result.stdout).toBe(
+      `Installing yarn@1.22.4 in the project...\n` +
+        `Updated ${fixture.path("package.json")} to use ${pinOf(fixture)}\n` +
+        `\nyarn@1.22.4 install\n`,
+    );
     expect(result.stderr).toBe("");
     expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\.[\da-f]{128}$/);
   });
@@ -140,7 +152,7 @@ describe("§13.10 use / up", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
     expect(result.stdout).toContain("Usage Error:");
-    expect(result.stdout).toContain("$ corepack use <pattern>");
+    expect(result.stdout).toContain("$ corepack use [--here] <pattern>");
     expect(result.stderr).toBe("");
   });
 
@@ -199,7 +211,12 @@ describe("§13.10 use / up", () => {
     expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
-  it("114: up on a devEngines-only project creates the packageManager field", async () => {
+  // §15.26 redirected row 114. It used to require `up` to *create* a
+  // `packageManager` field beside the `devEngines` declaration — which is #874:
+  // the two then disagree (a hash-presence difference is enough) and the very
+  // next read fails §03.3. The pin is written where the declaration already is,
+  // and row 189 covers the same rule for `use`.
+  it("114: up on a devEngines-only project updates devEngines in place", async () => {
     const fixture = createFixture({
       devEngines: { packageManager: { name: "yarn", version: "2.x" } },
     });
@@ -207,7 +224,18 @@ describe("§13.10 use / up", () => {
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(pinOf(fixture)).toBeUndefined();
+    expect(devEnginesOf(fixture)).toEqual({
+      name: "yarn",
+      version: "2.4.3",
+      integrity: expect.stringMatching(/^sha512-[\d+/A-Za-z]+=*$/),
+    });
+
+    // §15.26's post-write requirement: the project it just edited re-reads
+    // cleanly, with no warning and no error.
+    const rerun = await run(["yarn", "--version"], { ...fixture, registry, env: trusted() });
+    expect(rerun.exitCode).toBe(0);
+    expect(rerun.stderr).toBe("");
   });
 
   it("115: up refuses a non-semver pin", async () => {

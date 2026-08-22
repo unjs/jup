@@ -25,10 +25,11 @@ import {
   SUPPORTED_NAMES,
 } from "./config/table.ts";
 import { isFrozenLockfile } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
+import { explainFetchFailure, messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
 import { ensureInstalled } from "./install.ts";
 import {
+  LOCKFILE_NAME,
   readResolution,
   removeResolution,
   resolutionKey,
@@ -37,7 +38,7 @@ import {
 } from "./lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, writePin } from "./manifest.ts";
 import { resolveDescriptor, type ResolveOptions } from "./resolve.ts";
-import { isValidRange, isValidVersion, major } from "./semver.ts";
+import { isValidRange, isValidVersion, major, parse } from "./semver.ts";
 import {
   cacheClean,
   createTempDir,
@@ -69,12 +70,40 @@ function out(text: string): void {
 }
 
 async function resolveOrThrow(descriptor: Descriptor, options: ResolveOptions): Promise<Locator> {
-  const locator = await resolveDescriptor(descriptor, options);
+  let locator: Locator | null;
+  try {
+    locator = await resolveDescriptor(descriptor, options);
+  } catch (error) {
+    // §15.19 — with the network off, "can't reach <url>" is the least useful
+    // thing to say; name the package manager and the command that seeds it.
+    throw explainFetchFailure(error, descriptor) ?? error;
+  }
   if (locator === null) {
     // The range the *user* wrote, not whatever a tag expanded to (§12.4).
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
   return locator;
+}
+
+/**
+ * `ensureInstalled`, with §15.19's and §15.35j's diagnostics attached.
+ *
+ * `range` is what the *user* wrote, so an airgapped failure names something they
+ * can paste back into `corepack install -g --cache-only`; the version comes from
+ * the locator, because that is the thing the registry says does not exist.
+ */
+async function installOrExplain(
+  locator: Locator,
+  range: string,
+  options?: { cacheOnly?: boolean },
+): Promise<InstallSpec> {
+  try {
+    return await ensureInstalled(locator, options);
+  } catch (error) {
+    const version = parse(locator.reference)?.version;
+    const what = { name: locator.name, range, ...(version === undefined ? {} : { version }) };
+    throw explainFetchFailure(error, what) ?? error;
+  }
 }
 
 /**
@@ -241,11 +270,16 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
  * declared `packageManager` range (which §15.23 refreshes in `.corepack.lock`)
  * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
  */
-function resolveProjectSpec(legacy: boolean): {
+function resolveProjectSpec(
+  legacy: boolean,
+  options?: { mutating?: boolean; here?: boolean },
+): {
   descriptor: Descriptor;
   lookup: Extract<SpecResult, { type: "Found" }>;
 } {
-  const lookup = discoverProjectSpec(process.cwd());
+  // §15.27 — a command that is about to *write* must read the spec from the file
+  // it will write, or `up` refreshes one manifest and pins another.
+  const lookup = discoverProjectSpec(process.cwd(), options);
   switch (lookup.type) {
     case "NoProject": {
       throw new UsageError(messages.couldntFindProject());
@@ -302,7 +336,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
   // unchanged". §09.2 is the specific, command-scoped statement, so it wins over
   // the general rule: warming a Docker layer must not silently repoint the
   // machine's default.
-  await ensureInstalled(locator, { cacheOnly: true });
+  await installOrExplain(locator, descriptor.range, { cacheOnly: true });
 
   return 0;
 }
@@ -341,7 +375,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
       }\n`,
     );
 
-    const spec = await ensureInstalled(locator, { cacheOnly });
+    const spec = await installOrExplain(locator, descriptor.range, { cacheOnly });
     if (!cacheOnly) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }
 
@@ -473,12 +507,14 @@ async function installFromArchive(
 
 /** §09.4 — the two-step resolve is what confines the update to the current major line. */
 export async function cmdUp(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, {});
+  const parsed = parseArgs(args, { booleans: ["--here"] });
   if (parsed.positionals.length > 0) {
     throw new UsageError(`The 'corepack up' command takes no arguments`);
   }
 
-  const { descriptor, lookup } = resolveProjectSpec(false);
+  // §15.27 — `--here` reads and writes `cwd`'s own manifest, ignoring the walk.
+  const here = hasFlag(parsed, "--here");
+  const { descriptor, lookup } = resolveProjectSpec(false, { mutating: true, here });
   const { name, range } = descriptor;
 
   if (!isValidVersion(range) && !isValidRange(range)) {
@@ -509,6 +545,8 @@ export async function cmdUp(args: string[]): Promise<number> {
     const dir = dirname(lookup.target);
     return applyToProject(refreshed, (reference, spec) => {
       writeResolution(dir, pin, { name: pin.name, reference }, spec.hash);
+      // §15.35l — the resolution file is what changed, so that is what is named.
+      out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
       // The field is unchanged, so that is what the package manager migrates from.
       return `${pin.name}@${pin.range}`;
     });
@@ -524,10 +562,20 @@ export async function cmdUp(args: string[]): Promise<number> {
   // spanning majors, step one has already crossed the boundary and this pins the
   // major it landed in.
   const line = major(resolved.reference);
-  const highest = await resolveDescriptor({ name, range: `^${line}.0.0` }, { useCache: false });
+  const target = { name, range: `^${line}.0.0` };
+  let highest: Locator | null;
+  try {
+    highest = await resolveDescriptor(target, { useCache: false });
+  } catch (error) {
+    // §15.19 — this second resolve is the one that reaches the registry for an
+    // exactly-pinned project, so leaving it unwrapped left `corepack up` on an
+    // airgapped machine reporting a URL instead of the seeding command. Found
+    // against the built binary; the source-level rows all resolve at step one.
+    throw explainFetchFailure(error, target) ?? error;
+  }
   if (highest === null) throw new UsageError(messages.upNoHighest(name, line));
 
-  return pinToProject(highest);
+  return pinToProject(highest, { here });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -536,7 +584,7 @@ export async function cmdUp(args: string[]): Promise<number> {
 
 /** §09.5 — writes the pin, then runs the package manager's `use` command. */
 export async function cmdUse(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, {});
+  const parsed = parseArgs(args, { booleans: ["--here"] });
   const [pattern, ...extra] = parsed.positionals;
   if (pattern === undefined) {
     throw new UsageError(`The 'corepack use' command requires a package manager pattern`);
@@ -550,7 +598,8 @@ export async function cmdUse(args: string[]): Promise<number> {
   // today, not what is lying around in the store.
   const resolved = await resolveOrThrow(descriptor, { allowTags: true, useCache: false });
 
-  return pinToProject(resolved);
+  // §15.27 — `--here` mutates `cwd`'s own manifest, creating it if absent.
+  return pinToProject(resolved, { here: hasFlag(parsed, "--here") });
 }
 
 /**
@@ -570,7 +619,7 @@ async function applyToProject(
 ): Promise<number> {
   out(`${messages.installingInProject(locator.name, locator.reference)}\n`);
 
-  const spec = await ensureInstalled(locator);
+  const spec = await installOrExplain(locator, locator.reference);
   const reference = referenceWithHash(locator.reference, spec.hash);
 
   // §03.7 — may throw a `UsageError` through `warnOrThrow`; the banner above is
@@ -604,12 +653,19 @@ async function applyToProject(
 }
 
 /** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */
-function pinToProject(locator: Locator): Promise<number> {
-  return applyToProject(locator, (reference) => {
-    const { previousPackageManager, target } = writePin(process.cwd(), {
-      name: locator.name,
-      reference,
-    });
+function pinToProject(locator: Locator, options?: { here?: boolean }): Promise<number> {
+  return applyToProject(locator, (reference, spec) => {
+    const { previousPackageManager, target } = writePin(
+      process.cwd(),
+      { name: locator.name, reference, hash: spec.hash },
+      options,
+    );
+
+    // §15.27, §15.35l — name the file. The whole "corepack edited a manifest I
+    // did not expect" class (#607) is a walk the user could not see, and this is
+    // the line that makes it visible; it prints *after* the write, so it can
+    // never claim a change that did not happen.
+    out(`${messages.updatedManifest(target, locator.name, reference)}\n`);
 
     // §15.23 — the field now names one exact version, so any resolution recorded
     // for the range it replaced answers a question nobody asks any more. Left
@@ -653,7 +709,7 @@ export async function cmdPack(args: string[]): Promise<number> {
     // machine consumer gets the output path and nothing else.
     if (!json) out(`${messages.addingToCache(locator.name, locator.reference)}\n`);
 
-    const spec = await ensureInstalled(locator);
+    const spec = await installOrExplain(locator, descriptor.range);
     locations.push(spec.location);
 
     // §09.6 — `pack` updates last-known-good as a side effect, intentionally:
@@ -721,20 +777,35 @@ export async function cmdCache(args: string[]): Promise<number> {
   // "yes, the recorded defaults too", and unlike the silent default it reports
   // what it removed, because a command that deletes things silently gives the
   // user no way to tell a successful clean from a no-op.
+  //
+  // §15.35l — and *both* forms report. "`cache clean` currently prints nothing;
+  // it MUST print `Removed <n> cached version(s) from <path>` (or `Nothing to
+  // remove`)": a command whose entire job is deletion gives the user no way to
+  // tell a successful clean from a no-op when it is silent, and `DEBUG=corepack`
+  // is a debugging aid rather than command output.
+  //
+  // The count is taken *before* the removal, because afterwards there is nothing
+  // left to count.
   const all = hasFlag(parsed, "--all");
+  const removed = listInstalled().length;
+
   if (!all) {
     cacheClean();
+    out(
+      `${removed === 0 ? messages.nothingToRemove() : messages.removedFromCache(removed, getInstallFolder())}\n`,
+    );
     return 0;
   }
 
-  const removed = listInstalled().length;
   const defaults = Object.keys(readLastKnownGood()).length;
   cacheClean({ all: true });
 
   out(
-    removed === 0 && defaults === 0
-      ? `Nothing to remove\n`
-      : `Removed ${removed} cached version(s) and ${defaults} recorded default(s) from ${getHomeFolder()}\n`,
+    `${
+      removed === 0 && defaults === 0
+        ? messages.nothingToRemove()
+        : messages.removedFromCacheAll(removed, defaults, getHomeFolder())
+    }\n`,
   );
   return 0;
 }
@@ -796,7 +867,7 @@ export async function cmdPrepare(args: string[]): Promise<number> {
       );
     }
 
-    const spec = await ensureInstalled(locator, { cacheOnly: !activate });
+    const spec = await installOrExplain(locator, descriptor.range, { cacheOnly: !activate });
     locations.push(spec.location);
     if (activate) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }

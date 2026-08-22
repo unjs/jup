@@ -179,9 +179,13 @@ describe("§13.5 environment variables", () => {
     expect(result.exitCode).toBe(0);
     const written = fixture.json("package.json") as { packageManager?: string };
     expect(written.packageManager).toMatch(/^yarn@/);
+    // §15.27/§15.35l added the last line: "it also covers the auto-pin case in
+    // §03.6". It stays on stderr because this is proxy mode and stdout belongs
+    // entirely to the package manager (§09.11).
     expect(result.stderr).toBe(
       `! The local project doesn't define a 'packageManager' field. Corepack will now add one referencing yarn@${written.packageManager!.slice("yarn@".length)}.\n` +
-        `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n`,
+        `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
+        `Updated ${fixture.path("package.json")} to use ${written.packageManager}\n`,
     );
   });
 
@@ -207,7 +211,12 @@ describe("§13.5 environment variables", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("Network access disabled by the environment");
+    // §15.19 redirected this row. §12.6's bare "can't reach <url>" named a
+    // tarball URL the user never typed and said nothing about how to fix it;
+    // row 178 requires the airgapped failure to name the package manager and
+    // the seeding command. "network access is disabled" survives inside it.
+    expect(result.stderr).toContain("network access is disabled");
+    expect(result.stderr).toContain("corepack install -g --cache-only yarn@1.22.4");
   });
 
   it("46: COREPACK_ENABLE_DOWNLOAD_PROMPT=1 prints exactly the download notice", async () => {

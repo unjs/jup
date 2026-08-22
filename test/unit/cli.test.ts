@@ -596,7 +596,13 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     await expect(runManagementCommand(["cache", "clear"])).resolves.toBe(0);
     expect(existsSync(join(home, "v1"))).toBe(false);
     expect(lastKnownGood()).toEqual({ yarn: "2.2.2" });
-    expect(stdout).toBe("");
+    // §15.35l redirected this assertion. It used to require `stdout === ""`,
+    // which is precisely #679's complaint: a command whose entire job is
+    // deletion left the user unable to tell a clean from a no-op. The two lines
+    // below are the first run (one version removed) and the second (nothing).
+    expect(stdout).toBe(
+      `Removed 1 cached version(s) from ${join(home, "v1")}\nNothing to remove\n`,
+    );
     expect(stderr).toBe("");
   });
 
@@ -616,7 +622,13 @@ describe("use (§09.5, tests 105-110)", () => {
 
     await expect(cmdUse(["yarn@1.22.4"])).resolves.toBe(0);
 
-    expect(stdout).toBe(`Installing yarn@1.22.4 in the project...\n\n`);
+    // §15.35l — the banner, then the path that was modified, then the blank
+    // line that separates our output from the package manager's (§09.5).
+    expect(stdout).toBe(
+      `Installing yarn@1.22.4 in the project...\n` +
+        `Updated ${join(project, "package.json")} to use yarn@${(readManifest().packageManager as string).slice("yarn@".length)}\n` +
+        `\n`,
+    );
     expect(stderr).toBe("");
     expect(readManifest().packageManager).toMatch(/^yarn@1\.22\.4\+sha512\./);
 
@@ -687,7 +699,7 @@ describe("use (§09.5, tests 105-110)", () => {
     // appends the `Usage Error:` block to the same stream (§12.1).
     expect(stdout).toBe(`Installing yarn@1.22.4 in the project...\n`);
     expect(stderr).toBe("");
-    expect(USAGE_LINES.use).toBe("$ corepack use <pattern>");
+    expect(USAGE_LINES.use).toBe("$ corepack use [--here] <pattern>");
     expect(readManifest().packageManager).toBeUndefined();
   });
 
@@ -720,7 +732,11 @@ describe("up (§09.4, tests 111-115)", () => {
 
     await expect(cmdUp([])).resolves.toBe(0);
 
-    expect(stdout).toBe(`Installing yarn@2.4.3 in the project...\n\n`);
+    expect(stdout).toBe(
+      `Installing yarn@2.4.3 in the project...\n` +
+        `Updated ${join(project, "package.json")} to use yarn@${(readManifest().packageManager as string).slice("yarn@".length)}\n` +
+        `\n`,
+    );
     expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
@@ -754,7 +770,11 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
-  it("creates a packageManager field for a devEngines-only project (test 114)", async () => {
+  // §15.26 redirected test 114. It used to assert that `up` on a devEngines-only
+  // project *creates* a `packageManager` field — which is #874 exactly: the new
+  // field then conflicts with the declaration beside it and the next read fails.
+  // The pin now goes where the declaration already is.
+  it("updates devEngines in place for a devEngines-only project (test 114)", async () => {
     mockYarnRegistry();
     await seed("yarn", "2.4.3");
     await manifest({
@@ -764,7 +784,14 @@ describe("up (§09.4, tests 111-115)", () => {
 
     await cmdUp([]);
 
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    const written = readManifest();
+    expect(written.packageManager).toBeUndefined();
+    // No `integrity`: this store entry is hand-planted with a placeholder digest
+    // that is not valid hex, and an unusable digest is recorded as none at all.
+    // Conformance row 189 covers the real thing, against downloaded bytes.
+    expect(written.devEngines).toEqual({
+      packageManager: { name: "yarn", version: "2.4.3" },
+    });
   });
 
   it("does not consult the cache, or it could never update anything", async () => {
@@ -892,7 +919,7 @@ describe("--version, --help and dispatch (§09.9, test 146)", () => {
     for (const args of [["--help"], ["-h"], ["help"], []]) {
       stdout = "";
       await expect(runManagementCommand(args)).resolves.toBe(0);
-      expect(stdout).toContain(`corepack use <name[@<version>]>`);
+      expect(stdout).toContain(`corepack use [--here] <name[@<version>]>`);
       expect(stdout).toContain(`corepack cache clean`);
       expect(stderr).toBe("");
     }

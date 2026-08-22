@@ -12,11 +12,12 @@ import {
   isSupportedPackageManager,
 } from "./config/table.ts";
 import { envDisabled, envFlag, isFrozenLockfile } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
+import { explainFetchFailure, messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
 import { readResolution, usesLockfile, writeResolution } from "./lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
 import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
+import { parse } from "./semver.ts";
 import { readInstalledSpec, referenceWithHash } from "./store.ts";
 import type {
   Descriptor,
@@ -165,13 +166,13 @@ export async function runProxy(
     throw new UsageError(messages.lockfileUnresolved(descriptor.name, descriptor.range));
   }
 
-  const locator = recorded ?? (await resolveDescriptor(descriptor, { allowTags: true }));
+  const locator = recorded ?? (await resolveOrExplain(descriptor));
   if (locator === null) {
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
   // Step 6 — one `.corepack` read on a hit; download, verify and promote on a miss.
-  const installSpec = await ensureInstalledLazily(locator);
+  const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
   // §15.23 — record only what we had to go and resolve. The hash comes from the
   // artifact that is now on disk, whether it was downloaded here or already in
@@ -265,12 +266,30 @@ export function presentError(error: unknown, invocation: Invocation): number {
  * way, exactly as §16.3 budgets — keeps that stack out of the process entirely
  * unless something actually has to be downloaded.
  */
-async function ensureInstalledLazily(locator: Locator): Promise<InstallSpec> {
+async function ensureInstalledLazily(locator: Locator, range: string): Promise<InstallSpec> {
   const installed = readInstalledSpec(locator);
   if (installed !== null) return installed;
 
   const { ensureInstalled } = await import("./install.ts");
-  return ensureInstalled(locator);
+  try {
+    return await ensureInstalled(locator);
+  } catch (error) {
+    // §15.19 / §15.35j — the download's own message names a URL the user never
+    // typed. `parse` is already on the warm path, so recovering the version
+    // costs nothing on the path that does not throw.
+    const version = parse(locator.reference)?.version;
+    const what = { name: locator.name, range, ...(version === undefined ? {} : { version }) };
+    throw explainFetchFailure(error, what) ?? error;
+  }
+}
+
+/** §15.19 — the same diagnostic around resolution, which is where a range fails. */
+async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null> {
+  try {
+    return await resolveDescriptor(descriptor, { allowTags: true });
+  } catch (error) {
+    throw explainFetchFailure(error, descriptor) ?? error;
+  }
 }
 
 /**
@@ -328,12 +347,12 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // the project's *default*, then runs whatever the CLI asked for.
   const descriptor = await materialise(fallback);
 
-  const locator = await resolveDescriptor(descriptor, { allowTags: true });
+  const locator = await resolveOrExplain(descriptor);
   if (locator === null) {
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
-  const installSpec = await ensureInstalledLazily(locator);
+  const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
   // §03.6 — "installing yields the hash, so the written pin is hash-bearing".
   // A download rewrites `locator.reference` itself; a cache hit does not, so the
@@ -347,7 +366,16 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
 
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
-  writePin(dirname(specResult.target), { name: locator.name, reference });
+  const { target } = writePin(dirname(specResult.target), {
+    name: locator.name,
+    reference,
+    hash: installSpec.hash,
+  });
+
+  // §15.27, §15.35l — "it also covers the auto-pin case in §03.6". On **stderr**:
+  // this is proxy mode, and stdout belongs entirely to the package manager
+  // (§09.11), so a line on it would corrupt `yarn --version | read`.
+  process.stderr.write(`${messages.updatedManifest(target, locator.name, reference)}\n`);
 }
 
 /** Everything that is not a `UsageError` keeps its stack (§08.4). */

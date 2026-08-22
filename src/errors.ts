@@ -222,6 +222,27 @@ export const messages = {
   lockfileUnresolved: (name: string, range: string) =>
     `${name}@${range} is not resolved in .corepack.lock and lockfile updates are disabled.`,
 
+  /**
+   * §15.35j — a version that was never published.
+   *
+   * §04.1 step 5 returns an exact version *without* asking whether it exists, so
+   * the first sign of a typo used to be {@link badStatus} naming a tarball URL
+   * the user never typed. This is the sentence that names what was asked for.
+   */
+  versionDoesNotExist: (name: string, version: string, registry: string) =>
+    `${name}@${version} does not exist in ${url_(registry)}. Run 'corepack info' to see the resolved spec and where it came from.`,
+
+  /**
+   * §15.19 — the airgapped diagnostic.
+   *
+   * Two open issues (#448, #414) report the documented `pack -o` →
+   * `install -g --cache-only` flow not working, with the missing steps found by
+   * trial and error in the threads. Naming the seeding command in the failure is
+   * the difference between a Dockerfile that can be fixed and one that cannot.
+   */
+  notInCacheOffline: (name: string, range: string) =>
+    `${name}@${range} is not in the cache and network access is disabled. Seed it with 'corepack install -g --cache-only ${name}@${range}', or run 'corepack pack ${name}@${range}' on a networked machine.`,
+
   /* §12.5 — project enforcement ------------------------------------------ */
 
   projectConfigured: (name: string, manifestPath: string) =>
@@ -370,6 +391,27 @@ export const messages = {
   autoPinDocs: () =>
     `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
 
+  /**
+   * §15.27, §15.35l — every mutating command names the file it touched.
+   *
+   * The single highest-value line in §15: the whole "corepack edited a file I
+   * did not expect" class (#607) is a walk that silently chose an ancestor, and
+   * one printed path retires it. It covers auto-pin (§03.6) too, where it goes
+   * to **stderr** because stdout belongs to the package manager (§09.11).
+   */
+  updatedManifest: (path: string, name: string, reference: string) =>
+    `Updated ${path} to use ${name}@${reference}`,
+
+  /** §15.35l — `cache clean` must distinguish a successful clean from a no-op. */
+  removedFromCache: (count: number, path: string) =>
+    `Removed ${count} cached version(s) from ${path}`,
+
+  /** §15.18 — the `--all` form, which also retires the recorded defaults. */
+  removedFromCacheAll: (versions: number, defaults: number, path: string) =>
+    `Removed ${versions} cached version(s) and ${defaults} recorded default(s) from ${path}`,
+
+  nothingToRemove: () => `Nothing to remove`,
+
   /* §12.12 — new in this spec --------------------------------------------- */
 
   expiredKey: (keyid: string, expires: string) =>
@@ -431,3 +473,74 @@ export const messages = {
   ignoringEnvVar: (name: string, path: string) =>
     `! Ignoring ${name} from ${path}: this variable can only be set in the environment`,
 } as const;
+
+/**
+ * The inverse of {@link messages.badStatus} — `{status, url}`, or `null`.
+ *
+ * §15.35j needs to recognise "the artifact was not there" and re-report it as
+ * "that version does not exist", and the only carrier the transport gives us is
+ * the rendered sentence: `http.ts` throws a plain `Error` and the proxy path
+ * must not import it to find out otherwise. Reading it back here keeps the
+ * pattern next to the template it inverts, and `test/unit/errors.test.ts`
+ * asserts the round trip so the two cannot drift apart.
+ */
+const BAD_STATUS_RE = new RegExp(
+  String.raw`^Server answered with HTTP (\d{3}) when performing the request to ` +
+    String.raw`(\S+); for troubleshooting help, see https://github\.com/nodejs/corepack#troubleshooting$`,
+);
+
+export function parseBadStatus(error: unknown): { status: number; url: string } | null {
+  if (!(error instanceof Error)) return null;
+
+  const match = BAD_STATUS_RE.exec(error.message);
+  if (match === null) return null;
+
+  return { status: Number(match[1]), url: match[2]! };
+}
+
+/** §12.6's two network-disabled sentences share this prefix; §15.19 keys off it. */
+const NETWORK_DISABLED_PREFIX = "Network access disabled by the environment;";
+
+/**
+ * §15.19, §15.35j — re-report a fetch failure as a sentence about what was asked
+ * for, or `null` to leave the original error alone.
+ *
+ * Two cases, and both exist because the transport's own message names a URL the
+ * user never typed:
+ *
+ * * **Network disabled.** The airgapped flow (#448, #414) fails with "can't
+ *   reach <url>", which says nothing about which package manager was missing or
+ *   how to seed it. §15.19 requires both.
+ * * **HTTP 404 on the artifact.** §04.1 step 5 hands back an exact version
+ *   without checking that it exists, so a typo'd pin surfaces as a bare
+ *   `Server answered with HTTP 404` (#204). §15.35j requires the version to be
+ *   named as nonexistent.
+ *
+ * Deliberately a `UsageError`: both are things the user asked for that cannot be
+ * done, so a stack trace would bury the sentence that explains them (§12.1).
+ */
+export function explainFetchFailure(
+  error: unknown,
+  what: { name: string; range: string; version?: string },
+): UsageError | null {
+  if (!(error instanceof Error)) return null;
+
+  if (error.message.startsWith(NETWORK_DISABLED_PREFIX)) {
+    return new UsageError(messages.notInCacheOffline(what.name, what.range));
+  }
+
+  const bad = parseBadStatus(error);
+  if (bad === null || bad.status !== 404 || what.version === undefined) return null;
+
+  // The origin actually contacted, which for Yarn Berry is not the npm registry
+  // and for a mirrored setup is not the public one either. Naming the URL's own
+  // origin is therefore both truthful and the answer to "where did it look?".
+  let registry = bad.url;
+  try {
+    registry = new URL(bad.url).origin;
+  } catch {
+    // A URL too malformed to parse is still better in the message than nothing.
+  }
+
+  return new UsageError(messages.versionDoesNotExist(what.name, what.version, registry));
+}

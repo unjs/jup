@@ -488,6 +488,9 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: pm,
       range: { name: "pnpm", range: "6.x", onFail: undefined },
+      // §15.26 — the declaration is reported alongside the Descriptor-shaped
+      // view of it, because `writePin` has to honour it even with no version.
+      devEngines: { name: "pnpm", version: "6.x", onFail: undefined },
       hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
@@ -499,6 +502,9 @@ describe("devEngines — §03.3", () => {
     expect(read({ packageManager: pm, devEngines: { packageManager: { name: "pnpm" } } })).toEqual({
       raw: pm,
       range: undefined,
+      // §15.26 — no version declared, but the *name* still is, and that alone
+      // constrains what `writePin` may write.
+      devEngines: { name: "pnpm", onFail: undefined },
       hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
@@ -586,6 +592,7 @@ describe("devEngines — §03.3", () => {
     expect(read(nameMismatch("ignore"))).toEqual({
       raw: "pnpm@6.6.2",
       range: undefined,
+      devEngines: { name: "yarn", onFail: "ignore" },
       hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
@@ -596,6 +603,7 @@ describe("devEngines — §03.3", () => {
     expect(read(nameMismatch("warn"))).toEqual({
       raw: "pnpm@6.6.2",
       range: undefined,
+      devEngines: { name: "yarn", onFail: "warn" },
       hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
@@ -611,6 +619,7 @@ describe("devEngines — §03.3", () => {
     expect(read(nameMismatch("explode"))).toEqual({
       raw: "pnpm@6.6.2",
       range: undefined,
+      devEngines: { name: "yarn", onFail: "explode" },
       hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
@@ -640,6 +649,7 @@ describe("devEngines — §03.3", () => {
     expect(read(versionMismatch("warn"))).toEqual({
       raw: "pnpm@6.6.2",
       range: { name: "pnpm", range: "10.x", onFail: "warn" },
+      devEngines: { name: "pnpm", version: "10.x", onFail: "warn" },
       hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${versionMismatchMessage}`);
@@ -665,6 +675,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: "pnpm@^11.0.0",
       range: { name: "pnpm", range: ">=11", onFail: undefined },
+      devEngines: { name: "pnpm", version: ">=11", onFail: undefined },
       hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
@@ -692,6 +703,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: "pnpm@6.6.2+sha1.11111",
       range: { name: "pnpm", range: "6.6.2+sha1.22222", onFail: undefined },
+      devEngines: { name: "pnpm", version: "6.6.2+sha1.22222", onFail: undefined },
       hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
@@ -1001,5 +1013,222 @@ describe("writePin — §03.7", () => {
     expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
       "pnpm@6.6.2",
     );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.25 — symmetric walk stop conditions
+ * ------------------------------------------------------------------ */
+
+describe("discoverProjectSpec — §15.25 stop conditions", () => {
+  it("stops on a devEngines-only manifest instead of climbing past it", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    manifest("nested", { devEngines: { packageManager: { name: "pnpm", version: "11.1.2" } } });
+
+    const result = discoverProjectSpec(join(root, "nested")) as Extract<
+      SpecResult,
+      { type: "Found" }
+    >;
+
+    expect(result.type).toBe("Found");
+    expect(result.target).toBe(join(root, "nested", "package.json"));
+    expect(result.getSpec({ requireVersion: true })).toEqual({ name: "pnpm", range: "11.1.2" });
+  });
+
+  it("treats a declared-but-invalid packageManager as a stop, not as absent", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    for (const value of [null, 42, ""]) {
+      manifest("nested", { packageManager: value });
+
+      const result = discoverProjectSpec(join(root, "nested")) as Extract<
+        SpecResult,
+        { type: "Found" }
+      >;
+
+      expect(result.type, JSON.stringify(value)).toBe("Found");
+      expect(result.target).toBe(join(root, "nested", "package.json"));
+    }
+  });
+
+  it("keeps climbing for a manifest that declares neither field", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    manifest("nested", { name: "nested" });
+
+    const result = discoverProjectSpec(join(root, "nested")) as Extract<
+      SpecResult,
+      { type: "Found" }
+    >;
+
+    expect(result.target).toBe(join(root, "package.json"));
+  });
+
+  it("keeps climbing for an empty or null devEngines.packageManager", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    for (const devEngines of [{}, { packageManager: null }]) {
+      manifest("nested", { devEngines });
+
+      expect(discoverProjectSpec(join(root, "nested")).target).toBe(join(root, "package.json"));
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.27 — write targets
+ * ------------------------------------------------------------------ */
+
+describe("discoverProjectSpec — §15.27 mutating walks", () => {
+  it("stops a mutating walk at a `workspaces` root", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    manifest("repo", { workspaces: ["packages/*"] });
+    dir("repo/packages/app");
+
+    const from = join(root, "repo/packages/app");
+    // Reading still climbs to the ancestor pin (§03.1); only writing stops.
+    expect(discoverProjectSpec(from).target).toBe(join(root, "package.json"));
+    expect(discoverProjectSpec(from, { mutating: true }).target).toBe(
+      join(root, "repo", "package.json"),
+    );
+  });
+
+  it("stops a mutating walk beside a pnpm-workspace.yaml", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    manifest("repo", { name: "repo" });
+    write("repo/pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+    dir("repo/packages/app");
+
+    expect(discoverProjectSpec(join(root, "repo/packages/app"), { mutating: true }).target).toBe(
+      join(root, "repo", "package.json"),
+    );
+  });
+
+  it("does not stop at a workspace file with no manifest beside it", () => {
+    // The boundary is a *selection*, so a stray marker in a directory with no
+    // `package.json` cannot strand the walk on a file that does not exist.
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    write("repo/pnpm-workspace.yaml", "packages: []\n");
+    dir("repo/packages/app");
+
+    expect(discoverProjectSpec(join(root, "repo/packages/app"), { mutating: true }).target).toBe(
+      join(root, "package.json"),
+    );
+  });
+
+  it("`here` selects the cwd's own manifest and nothing above it", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    manifest("nested", { name: "nested" });
+
+    const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
+
+    expect(result.type).toBe("NoSpec");
+    expect(result.target).toBe(join(root, "nested", "package.json"));
+  });
+
+  it("`here` still reports NoProject — and the right target — with no manifest", () => {
+    manifest(".", { packageManager: "yarn@1.22.4" });
+    dir("nested");
+
+    const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
+
+    expect(result.type).toBe("NoProject");
+    expect(result.target).toBe(join(root, "nested", "package.json"));
+  });
+
+  it("`here` still loads an ancestor's env file", () => {
+    // §03.2's walk is about configuration, not about which manifest to edit, so
+    // confining the write must not also cut off the registry settings.
+    write(".corepack.env", "COREPACK_ENABLE_PRERELEASES=1\n");
+    dir("nested");
+
+    const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
+
+    expect(result.envFilePath).toBe(join(root, ".corepack.env"));
+    expect(process.env.COREPACK_ENABLE_PRERELEASES).toBe("1");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.26 — one logical pin
+ * ------------------------------------------------------------------ */
+
+describe("writePin — §15.26", () => {
+  const read = () =>
+    JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      packageManager?: string;
+      devEngines?: { packageManager?: Record<string, unknown> };
+    };
+
+  it("writes into devEngines and creates no packageManager when only devEngines exists", () => {
+    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "^1.0.0" } } });
+
+    writePin(root, {
+      name: "yarn",
+      reference: "1.22.4+sha512.abcdef",
+      hash: "sha512.abcdef",
+    });
+
+    expect(read().packageManager).toBeUndefined();
+    expect(read().devEngines?.packageManager).toEqual({
+      name: "yarn",
+      version: "1.22.4",
+      integrity: "sha512-q83v",
+    });
+  });
+
+  it("updates both fields when devEngines names an exact version", () => {
+    manifest(".", {
+      packageManager: "yarn@1.22.0",
+      devEngines: { packageManager: { name: "yarn", version: "1.22.0" } },
+    });
+
+    writePin(root, { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" });
+
+    expect(read().packageManager).toBe("yarn@1.22.4+sha512.abcdef");
+    expect(read().devEngines?.packageManager).toMatchObject({ version: "1.22.4" });
+  });
+
+  it("leaves a declared range alone when both fields exist", () => {
+    manifest(".", {
+      packageManager: "yarn@1.1.0",
+      devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x" } },
+    });
+
+    writePin(root, { name: "yarn", reference: "2.4.3" });
+
+    expect(read().packageManager).toBe("yarn@2.4.3");
+    // §09.4 needs this range intact to carry the *next* `up` across a major.
+    expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.x || 2.x" });
+  });
+
+  it("checks the name even when devEngines declares no version", () => {
+    // The gap §15.26 closes here: `writePin` only ever reached the devEngines
+    // check through a declared *range*, so a name-only block imposed nothing and
+    // the resulting manifest was one §03.3 rejects by default on every run.
+    manifest(".", { devEngines: { packageManager: { name: "yarn" } } });
+
+    expectUsageError(
+      () => writePin(root, { name: "pnpm", reference: "11.1.2" }),
+      messages.devEnginesPinMismatch("pnpm", "11.1.2", "yarn", "*"),
+    );
+    expect(read().packageManager).toBeUndefined();
+  });
+
+  it("omits integrity when no usable digest is available", () => {
+    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "^1.0.0" } } });
+
+    writePin(root, { name: "yarn", reference: "1.22.4", hash: "sha512.not-hex" });
+
+    expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
+  });
+
+  it("reports the path it wrote, which is what the caller prints (§15.35l)", () => {
+    manifest(".", { name: "demo" });
+    dir("nested");
+
+    expect(writePin(join(root, "nested"), { name: "yarn", reference: "1.22.4" }).target).toBe(
+      join(root, "package.json"),
+    );
+    expect(
+      writePin(join(root, "nested"), { name: "yarn", reference: "1.22.4" }, { here: true }).target,
+    ).toBe(join(root, "nested", "package.json"));
   });
 });

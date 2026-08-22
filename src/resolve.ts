@@ -7,7 +7,15 @@
 import { getDefinition, isSupportedPackageManager } from "./config/table.ts";
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
-import { isValidRange, isValidVersion, rcompare, satisfiesWithPrereleases } from "./semver.ts";
+import {
+  isPrerelease,
+  isValidRange,
+  isValidVersion,
+  major,
+  rangeNamesPrerelease,
+  rcompare,
+  satisfiesWithPrereleases,
+} from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "./store.ts";
 import type {
   Descriptor,
@@ -137,15 +145,27 @@ export async function resolveDescriptor(
   // (repo.yarnpkg.com), so querying only the matching band would lose half the
   // candidates.
   //
-  // §15.24 (phase 2): `satisfiesWithPrereleases` strips the prerelease tag
-  // before testing, so a published `11.0.0-dev.1005` satisfies `*` and then
-  // sorts above every stable release. Phase 2 discards prerelease candidates
-  // from *implicit* resolution unless the range itself names one.
+  // §15.24 — `satisfiesWithPrereleases` strips the prerelease tag before
+  // testing, so a published `11.0.0-dev.1005` satisfies `*` and then sorts above
+  // every stable release: `corepack use pnpm` installs a dev build whenever one
+  // is the semver maximum. That lenient rule is right where it *classifies a
+  // version the user already chose* — the band lookup of §02.3, the cache probe
+  // of §14.2 — and wrong here, where nobody chose anything.
+  //
+  // So the leniency stays and the **candidate set** narrows instead: a
+  // prerelease is admitted only when the range names one, or when the user opted
+  // in. That keeps `yarn@4.0.0-rc.1` resolving (step 5 returns it before this
+  // code runs) and `>=4.0.0-rc.1` matching, while `*` no longer does.
+  const wantsPrereleases = envFlag("COREPACK_ENABLE_PRERELEASES") || rangeNamesPrerelease(range);
+
   const { fetchAvailableVersions } = await loadRegistry();
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {
       const versions = await fetchAvailableVersions(registryFor(spec));
-      return versions.filter((version) => satisfiesWithPrereleases(version, range));
+      return versions.filter(
+        (version) =>
+          satisfiesWithPrereleases(version, range) && (wantsPrereleases || !isPrerelease(version)),
+      );
     }),
   );
 
@@ -213,15 +233,47 @@ export function getFallbackLocator(name: string, options: { transparent: boolean
     : undefined;
 
   if (transparentDefault !== undefined) {
-    // §15.33 (phase 2): corepack's `transparent.default ?? defaultVersion` makes
-    // a compile-time constant unconditionally outrank the user's own recorded
-    // default, so `install -g yarn@4.9.0` still leaves `yarn dlx` on the table's
-    // pin. Phase 2 makes this literal a *floor*: use the last-known-good when
-    // one exists and is at least as new. Phase 1 reproduces the override, and
-    // that is exactly why this branch reads neither the LKG file nor the
-    // network.
-    return { name, reference: () => Promise.resolve(transparentDefault) };
+    // §15.33 — corepack's `definition.transparent.default ?? defaultVersion`
+    // makes a compile-time constant unconditionally outrank the user's own
+    // recorded default, so `corepack install -g yarn@4.9.0` still leaves
+    // `yarn dlx` on the table's pin with no way to override it (#202, #812).
+    // The literal is a **floor**, not an override.
+    return {
+      name,
+      reference: () => Promise.resolve(transparentFallback(name, transparentDefault)),
+    };
   }
 
   return { name, reference: () => getDefaultVersion(name) };
+}
+
+/**
+ * §15.33 — the recorded default, floored at `transparent.default`.
+ *
+ * **What "at least as new" means here is the major line, not the exact version**,
+ * and the two readings genuinely differ: §15.33's own example has a user record
+ * `yarn@4.9.0` against a table whose `transparent.default` is `4.14.1`, and row
+ * 199 requires `yarn dlx` to run `4.9.0`. A literal version-wise floor answers
+ * `4.14.1` there and fails the row. A major-wise floor satisfies both halves and
+ * — decisively — is what the driving issue actually asks for: #812 is
+ * `yarn create` reaching for Yarn **Classic** 1.22.22, unsupported since 2020,
+ * because the recorded default is from an older *major line* than the modern
+ * Yarn transparent commands need. Within the current line the user's own choice
+ * is respected; below it, the table's floor applies.
+ *
+ * No network on either branch. A recorded default is read (one `readFileSync`,
+ * still zero requests); with none, or with an unparseable one, the literal
+ * stands.
+ */
+function transparentFallback(name: string, transparentDefault: string): string {
+  const recorded = readLastKnownGood()[name];
+  if (recorded === undefined) return transparentDefault;
+
+  const recordedMajor = major(recorded);
+  const floorMajor = major(transparentDefault);
+  // `major` answers `NaN` for a reference it cannot parse — a URL, or a
+  // hand-edited `lastKnownGood.json`. Neither is comparable, so the floor wins.
+  if (Number.isNaN(recordedMajor) || Number.isNaN(floorMajor)) return transparentDefault;
+
+  return recordedMajor >= floorMajor ? recorded : transparentDefault;
 }

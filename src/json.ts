@@ -136,6 +136,77 @@ export function setTopLevelString(text: string, key: string, value: string): str
   return result;
 }
 
+/**
+ * The same surgical edit, one level down: `devEngines.packageManager.version`.
+ *
+ * §15.26 requires every field that encodes the pin to be updated together, and
+ * `devEngines.packageManager` is an object. Everything {@link setTopLevelString}
+ * preserves is preserved here too — key order, indentation, line endings, the
+ * BOM — because this walks to the innermost object's *text span* and then reuses
+ * the very same rewrite on it.
+ *
+ * Every intermediate key must already exist and hold an object; the leaf may be
+ * absent and is inserted. `null` is returned when the path cannot be walked, so
+ * a caller can fall back rather than corrupt a manifest it did not understand.
+ */
+export function setNestedString(
+  text: string,
+  path: readonly string[],
+  value: string,
+): string | null {
+  const leaf = path[path.length - 1];
+  if (leaf === undefined) return null;
+  if (path.length === 1) return setTopLevelString(text, leaf, value);
+
+  const prefix = text.startsWith(BOM) ? BOM : "";
+  const body = stripBom(text);
+
+  // Walk to the innermost object, carrying its span in the *original* text.
+  let start = 0;
+  let end = body.length;
+  for (let depth = 0; depth < path.length - 1; depth++) {
+    const span = scanTopLevelKey(body.slice(start, end), path[depth]!);
+    if (span === null) return null;
+    const nextStart = start + span.start;
+    const nextEnd = start + span.end;
+    // Only an object can be descended into; anything else is a different shape
+    // than the caller believed and must not be rewritten blind.
+    if (body.charCodeAt(skipWhitespace(body, nextStart)) !== CH_LBRACE) return null;
+    start = nextStart;
+    end = nextEnd;
+  }
+
+  const inner = body.slice(start, end);
+  // The insert branch indents against the object being edited, not the document:
+  // a member of `devEngines.packageManager` sits two levels in, and inheriting
+  // the top-level indent would visibly misalign it.
+  const format = detectFormat(body);
+  const nested = /\n([ \t]+)\S/.exec(inner)?.[1];
+  let rewritten: string;
+  try {
+    rewritten = rewriteBody(
+      inner,
+      leaf,
+      JSON.stringify(value),
+      nested === undefined ? format : { ...format, indent: nested },
+    );
+  } catch {
+    return null;
+  }
+
+  const result = prefix + body.slice(0, start) + rewritten + body.slice(end);
+
+  // §16.4 — validate by re-scanning our own output, exactly as the top-level
+  // form does. A surgical edit that produced something unparseable must never
+  // reach `writeFileSync`.
+  try {
+    if (JSON.parse(stripBom(result)) === null) return null;
+  } catch {
+    return null;
+  }
+  return result;
+}
+
 function rewriteBody(body: string, key: string, literal: string, format: ManifestFormat): string {
   const { indent, eol } = format;
 

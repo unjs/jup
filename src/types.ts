@@ -183,6 +183,23 @@ export interface DevEnginesRange {
 }
 
 /**
+ * §15.26 — the validated `devEngines.packageManager`, whether or not it names a
+ * version.
+ *
+ * {@link DevEnginesRange} is the Descriptor-shaped view and exists only when a
+ * `version` was declared, because §09.1 hands it straight to the resolver. This
+ * is the *declaration*, and the difference is load-bearing: a `devEngines` block
+ * carrying only a `name` still constrains what a pin may say, and a `writePin`
+ * that cannot see it will happily write a `packageManager` field that §03.3 then
+ * refuses to read on every later run.
+ */
+export interface DevEnginesDeclaration {
+  name: string;
+  version?: string;
+  onFail?: string;
+}
+
+/**
  * §03.4 — how strict `parseSpec` is about the version half of a spec.
  *
  * `requireVersion` is what used to be `enforceExactVersion`, and the change of
@@ -206,6 +223,8 @@ export type SpecResult =
       /** Lazy: parses and validates only when called, so `use` can overwrite a malformed field. */
       getSpec: (opts: ParseSpecOptions) => Descriptor;
       range?: DevEnginesRange;
+      /** §15.26 — the declared `devEngines.packageManager`, version or not. */
+      devEngines?: DevEnginesDeclaration;
       /**
        * Whether the manifest itself declares `packageManager`, as opposed to the
        * spec having been synthesised from `devEngines.packageManager` (§03.3).

@@ -504,3 +504,31 @@ export function satisfiesWithPrereleases(version: string, range: string): boolea
     ),
   );
 }
+
+/**
+ * §15.24 — whether the range itself names a prerelease.
+ *
+ * The implicit-resolution filter in §04.1 step 6 discards prerelease candidates,
+ * but a user who wrote `>=11.0.0-0` or `^4.0.0-rc.1` has asked for that band on
+ * purpose and must still get it. This answers "did they ask?", and it is
+ * deliberately a property of the *range* rather than of any candidate: the
+ * question is what the project declared, not what the registry happens to hold.
+ *
+ * {@link NONE} is excluded by identity. It is the expansion of `>*` and `<*` —
+ * a comparator no version satisfies — and it is spelled `<0.0.0-0`, so a
+ * structural test would read it as a range naming a prerelease and quietly
+ * re-open the very gate this closes.
+ */
+export function rangeNamesPrerelease(range: string): boolean {
+  const parsed = parseRange(range);
+  if (parsed === null) return false;
+
+  return parsed.some((set) =>
+    set.some((cmp) => cmp !== NONE && cmp.ver !== null && cmp.ver.prerelease.length > 0),
+  );
+}
+
+/** Whether a version string carries a prerelease tag. Malformed input is not one. */
+export function isPrerelease(version: string): boolean {
+  return (parse(version)?.prerelease.length ?? 0) > 0;
+}
