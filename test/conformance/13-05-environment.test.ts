@@ -39,6 +39,17 @@ beforeAll(async () => {
     versionOf(YARN_DEFAULT),
     packageManagerTarball("yarn", versionOf(YARN_DEFAULT)),
   );
+  // §15.33 bullet 2 moved yarn's compiled-in `default` onto the Berry line, and
+  // §05.3 routes Berry through `@yarnpkg/cli-dist` whenever an npm registry is
+  // configured — which is what row 49 is downloading over.
+  registry.publish(
+    "@yarnpkg/cli-dist",
+    versionOf(YARN_DEFAULT),
+    packageManagerTarball("yarn", versionOf(YARN_DEFAULT), {
+      binPaths: ["bin/yarn.js"],
+      packageName: "@yarnpkg/cli-dist",
+    }),
+  );
   registry.publish(
     "@yarnpkg/cli-dist",
     "3.0.0-rc.2",
@@ -289,12 +300,14 @@ describe("§13.5 environment variables", () => {
     // The notice — the whole of what this row is about — is printed before the
     // artifact stream opens. The run itself then fails on the hash: the
     // compiled-in default pins the digest of the *real* published yarn, which no
-    // mock can reproduce, so only the first stderr line is asserted here.
-    // (§14.11's weak-algorithm warning for the default's `sha1` pin shares the
-    // stream, so this is a line match rather than a whole-stream one.)
+    // mock can reproduce, so only this stderr line is asserted here. The tarball
+    // named is `@yarnpkg/cli-dist`'s because §05.3 switches Berry onto it over a
+    // configured npm registry, and §15.33 put the default on the Berry line.
     expect(result.stderr).toMatch(
       new RegExp(
-        `^! Corepack is about to download ${registry.origin}/yarn/-/yarn-1\\.\\d+\\.\\d+\\.tgz$`,
+        `^! Corepack is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-${versionOf(
+          YARN_DEFAULT,
+        ).replaceAll(".", String.raw`\.`)}\\.tgz$`,
         "m",
       ),
     );

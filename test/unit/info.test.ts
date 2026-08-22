@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
+import { DEFINITIONS } from "../../src/config/table.ts";
 import { UsageError } from "../../src/errors.ts";
 import {
   buildReport,
@@ -496,7 +497,7 @@ describe("buildReport — the store and the recorded defaults (§15.19, §15.30)
     expect(info.defaults.entries).toEqual({ yarn: "1.22.4" });
     const yarn = info.packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.recordedDefault).toBe("1.22.4");
-    expect(yarn.builtinDefault).toMatch(/^1\.22\./);
+    expect(yarn.builtinDefault).toBe(DEFINITIONS.yarn!.default);
     expect(info.packageManagers.find((entry) => entry.name === "pnpm")!.recordedDefault).toBeNull();
   });
 });

@@ -6,7 +6,8 @@
  */
 
 import { readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { isSupportedPackageManager } from "./config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "./errors.ts";
@@ -126,7 +127,15 @@ export function discoverProjectSpec(
   options?: { envOnly?: boolean; projectSpecFlag?: boolean; mutating?: boolean; here?: boolean },
 ): SpecResult {
   const initialCwd = resolve(cwd);
-  let envOnly = options?.envOnly === true;
+  // §15.35d — an external spec file replaces the manifest, so the walk climbs
+  // for the env file alone. Read before the walk begins, which is sound because
+  // §15.37 makes the variable env-file ineligible: nothing loaded on the way up
+  // can introduce it half-way. Degrading to `envOnly` is the point rather than
+  // an optimisation — #682 and #402 are vendored trees whose `package.json`
+  // cannot be edited, sometimes because it says the *wrong* thing, and a walk
+  // that still parsed it would fail on exactly the file being bypassed.
+  const specFile = externalSpecFile(initialCwd);
+  let envOnly = options?.envOnly === true || specFile !== undefined;
   const projectSpecFlag = options?.projectSpecFlag === true;
   const mutating = options?.mutating === true;
   const here = options?.here === true;
@@ -233,31 +242,91 @@ export function discoverProjectSpec(
     }
   }
 
+  const specDisabled = projectSpecFlag && envDisabled("COREPACK_ENABLE_PROJECT_SPEC");
+
+  // §15.35d — the external file is the project's declaration and outranks the
+  // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
+  // "never look at the project at all" covers a redirected spec too.
+  if (specFile !== undefined && !specDisabled) {
+    return describe(readExternalSpec(specFile), specFile, initialCwd, envFilePath);
+  }
+
   // A manifest read *before* the env file that disables the project spec was
   // found is still discarded here: §11.1 says "entirely", and that includes the
   // eager devEngines validation below.
-  if (selection === undefined || (projectSpecFlag && envDisabled("COREPACK_ENABLE_PROJECT_SPEC"))) {
+  if (selection === undefined || specDisabled) {
     return { type: "NoProject", target: join(initialCwd, MANIFEST_NAME), envFilePath };
   }
 
-  // devEngines validation is eager (a bad `onFail: "error"` must fail the run);
-  // only `parseSpec` is deferred.
-  const { raw, range, hasPin, devEngines } = readSpecFromManifest(selection.data, selection.target);
+  return describe(selection.data, selection.target, initialCwd, envFilePath);
+}
+
+/**
+ * The `SpecResult` for one already-read manifest — the walk's selection, or
+ * §15.35d's external file, which get identical treatment. devEngines validation
+ * is eager (a bad `onFail: "error"` must fail the run); `parseSpec` is deferred.
+ */
+function describe(
+  data: Manifest,
+  target: string,
+  initialCwd: string,
+  envFilePath: string | undefined,
+): SpecResult {
+  const { raw, range, hasPin, devEngines } = readSpecFromManifest(data, target);
   if (raw === undefined) {
-    return { type: "NoSpec", target: selection.target, envFilePath };
+    return { type: "NoSpec", target, envFilePath };
   }
 
   // Messages name the manifest relative to where the user was standing.
-  const source = relative(initialCwd, selection.target);
+  const source = relative(initialCwd, target);
   return {
     type: "Found",
-    target: selection.target,
+    target,
     range,
     devEngines,
     hasPin,
     envFilePath,
     getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, opts),
   };
+}
+
+/** §15.35d — `COREPACK_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
+function externalSpecFile(initialCwd: string): string | undefined {
+  const configured = process.env.COREPACK_SPEC_FILE;
+  return configured === undefined || configured === ""
+    ? undefined
+    : resolve(initialCwd, configured);
+}
+
+/**
+ * §15.35d — the spec file's contents, in `package.json` shape.
+ *
+ * A missing file is an error, not a fallback: quietly reverting to the manifest
+ * on a typo would run the package manager the variable was set to override.
+ * Everything else about it is a manifest — the same two fields, the same
+ * `devEngines` validation, the same errors naming the file at fault.
+ */
+function readExternalSpec(path: string): Manifest {
+  let content: string;
+  try {
+    content = readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      throw new UsageError(messages.specFileMissing(path));
+    }
+    throw error;
+  }
+
+  let data: unknown;
+  try {
+    data = parseManifest(content);
+  } catch {
+    data = undefined;
+  }
+  if (typeof data !== "object" || data === null) {
+    throw new UsageError(messages.invalidPackageJson(path));
+  }
+  return data as Manifest;
 }
 
 /**
@@ -528,6 +597,25 @@ export function warnOrThrow(message: string, onFail?: unknown): void {
   }
 }
 
+/**
+ * §15.35k — is the governing manifest at the home directory or above?
+ *
+ * #424: a `packageManager` field in `$HOME/package.json` silently governs every
+ * directory on the machine that has no manifest of its own. Anything at or
+ * above the home directory is by definition not one project's declaration.
+ *
+ * Path comparison, not `realpath`: this only decorates an error already being
+ * thrown, so a `stat` per mismatch is not worth a symlinked home directory.
+ */
+export function isOutsideProject(manifestPath: string): boolean {
+  const home = homedir();
+  if (home === "") return false;
+
+  const dir = dirname(resolve(manifestPath));
+  const target = resolve(home);
+  return target === dir || target.startsWith(dir + sep);
+}
+
 /** §03.5 — reconcile the discovered spec with the requested binary. */
 export function reconcile(
   result: SpecResult,
@@ -565,7 +653,9 @@ export function reconcile(
         if (transparent) {
           return withBinaryVersion(fallback);
         }
-        throw new UsageError(messages.projectConfigured(spec.name, result.target));
+        throw new UsageError(
+          messages.projectConfigured(spec.name, result.target, isOutsideProject(result.target)),
+        );
       }
       return withBinaryVersion(spec);
     }

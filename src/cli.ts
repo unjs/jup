@@ -843,8 +843,23 @@ export async function cmdCache(args: string[]): Promise<number> {
 /* §09.10 — deprecated commands                                                */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * §15.35c — a deprecated command names its replacement, on **stderr**, and then
+ * does its job.
+ *
+ * stderr rather than stdout for two reasons that agree: §09.11 puts warnings
+ * there, and `prepare --json` writes a document to stdout that a caller pipes
+ * into `jq`. "Never silently hide a command" cuts both ways — the command still
+ * works, and the notice never breaks what it prints.
+ */
+function deprecated(command: string, replacement: string): void {
+  process.stderr.write(`${messages.deprecatedCommand(command, replacement)}\n`);
+}
+
 /** §09.10 — deprecated, retained for compatibility. */
 export async function cmdHydrate(args: string[]): Promise<number> {
+  // The predecessor of `install -g <file>.tgz` (§09.10), which is what it names.
+  deprecated("hydrate", "install -g");
   const parsed = parseArgs(args, { booleans: ["--activate"] });
   const [file, ...extra] = parsed.positionals;
 
@@ -864,6 +879,10 @@ export async function cmdHydrate(args: string[]): Promise<number> {
 }
 
 export async function cmdPrepare(args: string[]): Promise<number> {
+  // §15.35c's sentence, verbatim. `pack` is `prepare`'s replacement for the
+  // archive half; `--activate` is `install -g`, but the spec names one command
+  // and this is the one it names.
+  deprecated("prepare", "pack");
   const parsed = parseArgs(args, {
     booleans: ["--activate", "--all", "--json"],
     optional: ["-o", "--output"],

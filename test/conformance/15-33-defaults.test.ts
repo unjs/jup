@@ -29,6 +29,7 @@ import {
 } from "./_harness/index.ts";
 
 const YARN_TRANSPARENT = DEFINITIONS.yarn!.transparent.default!;
+const YARN_DEFAULT = DEFINITIONS.yarn!.default;
 
 afterAll(cleanupFixtures);
 
@@ -119,5 +120,57 @@ describe("§15.33 transparent.default is a floor, not an override", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`yarn@${versionOf(YARN_TRANSPARENT)} dlx --help\n`);
+  });
+});
+
+/**
+ * §15.33 bullet 2 — the embedded `default` tracks the current supported major.
+ *
+ * #812: `yarn create` on a fresh machine downloaded Yarn Classic 1.22.22,
+ * unsupported since 2020, because that was corepack's compiled-in `default`.
+ * §14.21 records the 1.x/4.x asymmetry as deliberate; §15.33 overrules it by
+ * name — "a maintenance failure, not a compatibility guarantee" — and §15
+ * refines §14 where the two meet.
+ *
+ * These rows are about the *observable* default rather than the literal, which
+ * `test/unit/config.test.ts` pins separately. A test asserting only
+ * `yarn.default === yarn.transparent.default` would pass against a table that
+ * had drifted back to Classic in both fields.
+ */
+describe("§15.33 the compiled-in default tracks the supported major", () => {
+  it("a bare `yarn` in an unpinned project runs the modern line, not Classic", async () => {
+    const fixture = createFixture({});
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    // Network off: the answer comes from the table and the store, so the row
+    // cannot pass by quietly resolving `latest` over the wire.
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { COREPACK_ENABLE_NETWORK: "0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+    expect(result.stdout.startsWith("1.")).toBe(false);
+  });
+
+  it("`corepack install -g yarn` with nothing recorded lands on it too", async () => {
+    const fixture = createFixture({});
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const installed = await run(["install", "-g", `yarn@${versionOf(YARN_DEFAULT)}`], {
+      ...fixture,
+      env: { COREPACK_ENABLE_NETWORK: "0" },
+    });
+    expect(installed.exitCode).toBe(0);
+
+    // And the recorded default is now on the same line, so §15.33 bullet 1's
+    // floor is satisfied rather than overridden — the two bullets agree.
+    const result = await run(["yarn", "dlx", "--help"], {
+      ...fixture,
+      env: { COREPACK_ENABLE_NETWORK: "0" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`yarn@${versionOf(YARN_DEFAULT)} dlx --help\n`);
   });
 });

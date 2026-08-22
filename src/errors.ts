@@ -205,8 +205,13 @@ export const messages = {
   unsupportedByBuild: (name: string) =>
     `This package manager (${name}) isn't supported by this corepack build`,
 
-  noRangeBand: (reference: string, ranges: readonly string[]) =>
-    `Assertion failed: Specified resolution (${reference}) isn't supported by any of ${ranges.join(", ")}`,
+  /**
+   * §15.17 — a version no declared band covers. Corepack's equivalent is an
+   * assertion failure that kills the run; this is a debug-level note, because
+   * the run now succeeds by reading `bin` from the verified package.
+   */
+  binFromPackage: (name: string, version: string) =>
+    `${name}@${version} matches no declared range band; reading "bin" from the verified package. Add a range band for it.`,
 
   upNotSemver: () =>
     `The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
@@ -245,8 +250,18 @@ export const messages = {
 
   /* §12.5 — project enforcement ------------------------------------------ */
 
-  projectConfigured: (name: string, manifestPath: string) =>
-    `This project is configured to use ${name} because ${manifestPath} has a "packageManager" field`,
+  /**
+   * §12.5, with §15.35k's suffix: set when the governing manifest sits at the
+   * home directory or above, where a stray `packageManager` field governs
+   * *every* directory on the machine (#424). Without the clause the user is
+   * named a file they have no memory of creating and left to work out why.
+   */
+  projectConfigured: (name: string, manifestPath: string, outsideProject?: boolean) =>
+    `This project is configured to use ${name} because ${manifestPath} has a "packageManager" field${
+      outsideProject === true
+        ? ` (this manifest is outside any project — a stray "packageManager" field there affects every directory)`
+        : ""
+    }`,
 
   /* §12.6 — network ------------------------------------------------------- */
 
@@ -411,6 +426,24 @@ export const messages = {
     `Removed ${versions} cached version(s) and ${defaults} recorded default(s) from ${path}`,
 
   nothingToRemove: () => `Nothing to remove`,
+
+  /**
+   * §15.35c — a deprecated command names its replacement and still works.
+   *
+   * #624: corepack prints nothing, so `prepare` looks current in every CI log
+   * still using it. Verbatim for `prepare`; `hydrate` is the same sentence with
+   * its own replacement, since the rule is about deprecated commands at large.
+   */
+  deprecatedCommand: (command: string, replacement: string) =>
+    `'corepack ${command}' is deprecated; use 'corepack ${replacement}' instead.`,
+
+  /**
+   * §15.35d — `COREPACK_SPEC_FILE` names a file that is not there. Falling back
+   * to the manifest is the worst outcome available: the variable exists for
+   * trees whose manifest says the *wrong* thing, so ignoring a typo runs the
+   * package manager the file was pointed at to override.
+   */
+  specFileMissing: (path: string) => `COREPACK_SPEC_FILE points at ${path}, which does not exist`,
 
   /* §12.12 — new in this spec --------------------------------------------- */
 

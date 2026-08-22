@@ -17,12 +17,12 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { getSpecFor, isSupportedPackageManager } from "./config/table.ts";
+import { isSupportedPackageManager } from "./config/table.ts";
 import { envDisabled } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { compare, isValidVersion, lt, major, parse, satisfiesWithPrereleases } from "./semver.ts";
 import type { SemVer } from "./semver.ts";
-import type { BinList, BinSpec, CorepackMarker, InstallSpec, Locator } from "./types.ts";
+import type { CorepackMarker, InstallSpec, Locator } from "./types.ts";
 
 /** §07.2 — the file whose presence means "this install is complete and valid". */
 export const MARKER_NAME = ".corepack";
@@ -579,55 +579,6 @@ export function bumpLastKnownGood(locator: Locator): void {
 
   lkg[locator.name] = locator.reference;
   writeLastKnownGood(lkg);
-}
-
-function isValidBinList(value: unknown): value is BinList {
-  return Array.isArray(value) && value.length > 0;
-}
-
-function isValidBinSpec(value: unknown): value is BinSpec {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    Object.keys(value).length > 0
-  );
-}
-
-/**
- * §07.7 — the `isValidBinList` / `isValidBinSpec` discrimination is load-bearing:
- * Yarn Berry declares an array `bin`, but when fetched from a custom npm
- * registry it arrives as a *tarball*, so the array is ignored and the package's
- * own `bin` map is used.
- */
-export function resolveBin(
-  tmpDir: string,
-  locator: Locator,
-  isSingleFile: boolean,
-): BinSpec | BinList {
-  const parsed = parse(locator.reference);
-  const tableBin =
-    parsed !== null && isSupportedPackageManager(locator.name)
-      ? getSpecFor(locator.name, parsed.version).bin
-      : undefined;
-
-  if (isSingleFile) {
-    if (isValidBinList(tableBin)) return tableBin;
-    return [locator.name];
-  }
-
-  if (isValidBinSpec(tableBin)) return tableBin;
-
-  const manifest = JSON.parse(readFileSync(join(tmpDir, "package.json"), "utf8")) as {
-    name?: unknown;
-    bin?: unknown;
-  } | null;
-
-  const packageBin = manifest?.bin;
-  if (typeof packageBin === "string") return { [String(manifest?.name)]: packageBin };
-  if (isValidBinSpec(packageBin)) return packageBin;
-
-  throw new Error(messages.unableToLocateBin());
 }
 
 /**

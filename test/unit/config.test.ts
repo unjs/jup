@@ -6,6 +6,7 @@ import {
   getDefinition,
   getPackageManagerFor,
   getSpecFor,
+  hasRangeBand,
   isSupportedPackageManager,
   resolveSpecUrl,
   SUPPORTED_NAMES,
@@ -26,12 +27,37 @@ describe("registry table — shape (§02.5)", () => {
     expect(DEFINITIONS.pnpm!.default).toBe("11.1.2+sha1.ed39d701687311ce9345771c62376f9fe7286694");
   });
 
-  it("keeps yarn's default at 1.x while transparent.default is 4.x (§14.21)", () => {
+  /**
+   * §15.33 bullet 2 overrules §14.21's "deliberately not changed" and §02.5's
+   * literal: an embedded `default` MUST track the current supported major, and
+   * Yarn Classic 1.22.22 has been unsupported since 2020 (#812).
+   *
+   * The assertion is the *literal*, not `expect(yarn.default).toBe(
+   * yarn.transparent.default)` — the tautology would pass just as well against
+   * a table that had drifted back to Classic in both fields.
+   */
+  it("puts yarn's default on the supported major, hash-pinned (§15.33)", () => {
     const yarn = DEFINITIONS.yarn!;
-    expect(yarn.default).toBe("1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610");
-    expect(yarn.transparent.default).toBe(
-      "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113",
-    );
+    const supported = "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113";
+    expect(yarn.default).toBe(supported);
+    expect(yarn.transparent.default).toBe(supported);
+    // §14.21's asymmetry is gone, and the classic line is what it is gone *from*.
+    expect(yarn.default.startsWith("1.")).toBe(false);
+  });
+
+  /**
+   * §02.5, §15.11 — every compiled-in default carries a digest, in the
+   * `<version>+<algo>.<hex>` form §06.1 row 1 checks. A default that did not
+   * would be refused by `assertVerificationTier` on any machine without a
+   * `lastKnownGood.json`, i.e. every fresh install.
+   */
+  it("hash-pins every compiled-in default (§02.5)", () => {
+    for (const [name, definition] of Object.entries(DEFINITIONS)) {
+      for (const reference of [definition.default, definition.transparent.default]) {
+        if (reference === undefined) continue;
+        expect(reference, name).toMatch(/^\d+\.\d+\.\d+\+sha\d+\.[\da-f]+$/);
+      }
+    }
   });
 
   it("declares the transparent command prefixes", () => {
@@ -128,6 +154,54 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
 
   it("rejects an unknown package manager with a usage error", () => {
     expect(() => getSpecFor("bun", "1.0.0")).toThrow(/isn't supported by this corepack build/);
+  });
+});
+
+/**
+ * §15.17 — a version outside every declared band.
+ *
+ * Every band the table ships today is open-ended at one end, so no real version
+ * can escape them all; that is exactly why this path went unexercised, and why
+ * these tests close a band on a *copy* of pnpm's range list rather than waiting
+ * for the day a real one breaks.
+ */
+describe("getSpecFor / hasRangeBand — no matching band (§15.17)", () => {
+  const original = DEFINITIONS.pnpm!.ranges;
+
+  afterEach(() => {
+    DEFINITIONS.pnpm!.ranges = original;
+  });
+
+  /** pnpm's table with its newest band closed, i.e. the table on the day 12 ships. */
+  function closeTopBand(): void {
+    DEFINITIONS.pnpm!.ranges = original.map(([range, spec]) =>
+      range === ">=11.0.0" ? ([">=11.0.0 <12.0.0", spec] as const) : ([range, spec] as const),
+    ) as typeof original;
+  }
+
+  it("reports honestly whether a declared band covers the version", () => {
+    expect(hasRangeBand("pnpm", "11.1.2")).toBe(true);
+    expect(hasRangeBand("pnpm", "5.9.0")).toBe(true);
+    expect(hasRangeBand("bun", "1.0.0")).toBe(false);
+
+    closeTopBand();
+    expect(hasRangeBand("pnpm", "12.0.0")).toBe(false);
+    // …and the versions that *are* declared still are, so the answer is about
+    // this version rather than about the edit.
+    expect(hasRangeBand("pnpm", "11.1.2")).toBe(true);
+  });
+
+  it("falls forward to the newest band rather than throwing", () => {
+    closeTopBand();
+
+    // §04.1 already resolves dist-tags against the newest band, so its registry
+    // and URL template are the right guess for a version beyond the table.
+    const spec = getSpecFor("pnpm", "12.0.0");
+    expect(spec.url).toBe("https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz");
+    expect(spec.registry).toEqual({ type: "npm", package: "pnpm" });
+    // The `bin` is inherited too — and it is exactly the value `resolveBin`
+    // must *not* use, which is what `hasRangeBand` is for.
+    expect(spec.bin).toEqual({ pnpm: "./bin/pnpm.mjs", pnpx: "./bin/pnpx.mjs" });
   });
 });
 

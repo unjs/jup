@@ -29,10 +29,12 @@ import {
   readMarker,
   referenceWithHash,
   resolveInstallTarget,
-  resolveBin,
   writeLastKnownGood,
   writeMarker,
 } from "../../src/store.ts";
+// §15.17 moved `resolveBin` onto the cold path — it runs once per *install*,
+// never on a cache hit, and the warm chunk is measured in bytes (§16.3).
+import { resolveBin } from "../../src/install.ts";
 
 /**
  * `node:fs`'s ESM namespace is frozen, so `vi.spyOn` cannot touch it. The mock
@@ -727,6 +729,41 @@ describe("resolveBin — §07.7", () => {
     );
     expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toEqual({
       "@yarnpkg/cli-dist": "./bin/yarn.js",
+    });
+  });
+
+  it("tarball: §14.13 — a package `bin` that escapes the install is refused", () => {
+    // The values here come from a downloaded `package.json`, so §14.13 confines
+    // them before they reach the marker. `exec.resolveBinPath` checks again at
+    // the point of use, but failing here is what keeps the escaping path out of
+    // the store at all.
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ name: "@yarnpkg/cli-dist", bin: { yarn: "../../../../evil.js" } }),
+    );
+    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
+      "The bin path '../../../../evil.js' declared by yarn@4.1.0 escapes its installation directory",
+    );
+
+    // An absolute path is the same escape, spelled differently.
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ name: "@yarnpkg/cli-dist", bin: "/etc/passwd" }),
+    );
+    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
+      "escapes its installation directory",
+    );
+  });
+
+  it("tarball: a path that merely *looks* like an escape is kept (§14.13)", () => {
+    // The control: `..` inside the install is not an escape, and a check written
+    // as "does the string contain `..`" would refuse this one.
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ name: "@yarnpkg/cli-dist", bin: { yarn: "./bin/../bin/yarn.js" } }),
+    );
+    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toEqual({
+      yarn: "./bin/../bin/yarn.js",
     });
   });
 

@@ -102,6 +102,49 @@ describe("§15.7 / §15.8 registry metadata robustness", () => {
     expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
   });
 
+  it("159: a pinned hash is not subject to COREPACK_REQUIRE_SIGNATURES", async () => {
+    // §06.1 row 1 versus §15.7's last line, decided here rather than left to
+    // whichever the code happened to reach first — the audit found this path
+    // untested in *either* direction.
+    //
+    // The pinned-hash path wins. §14.21 records the reasoning as deliberate: an
+    // explicit hash is a stronger, user-chosen assertion than the registry's
+    // claim about itself, and §15.11 counts it as a full verification tier. The
+    // alternative is also incoherent in practice — on the default registry a
+    // pinned install makes no metadata request at all (§06.1 row 1 forbids the
+    // extra fetch), so honouring the variable here would refuse over a mirror
+    // and permit over npm for the very same `packageManager` field.
+    registry.mode = "no_signatures";
+    const fixture = createFixture({ packageManager: `pnpm@6.6.2+sha512.${hashOf(TARBALL)}` });
+
+    const result = await run(["pnpm", "--version"], {
+      ...fixture,
+      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+    // Permitted, but never silently: the soft-fail warning is still printed,
+    // because the metadata was fetched anyway to find the tarball URL.
+    expect(result.stderr).toContain("does not publish signatures");
+  });
+
+  it("159: and the pin is still what decides — a wrong hash fails", async () => {
+    // The control. Without it the row above would pass just as well against a
+    // build that ignored the hash too.
+    registry.mode = "no_signatures";
+    const fixture = createFixture({ packageManager: `pnpm@6.6.2+sha512.${"0".repeat(128)}` });
+
+    const result = await run(["pnpm", "--version"], {
+      ...fixture,
+      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("Mismatch hashes");
+    expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
+  });
+
   it("161: signatures absent from the version endpoint are read from the package root", async () => {
     registry.mode = "root_only_signatures";
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });

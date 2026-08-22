@@ -509,6 +509,14 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_ALLOW_UNVERIFIED")).toBe(false);
     expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_ALLOW_UNVERIFIED")).toBe(true);
 
+    // §15.35d / §15.37 — the same trap, and the same two assertions. The file
+    // named here supplies `packageManager` for the whole project, so a
+    // `.corepack.env` able to set it could run a package manager the manifest
+    // never names — a repository silently choosing its own tooling, which is
+    // precisely what §03.2's prefix sandbox exists to prevent.
+    expect(isEnvFileEligible("COREPACK_SPEC_FILE")).toBe(false);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_SPEC_FILE")).toBe(true);
+
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);
     }

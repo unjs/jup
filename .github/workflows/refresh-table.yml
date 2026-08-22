@@ -1,0 +1,42 @@
+# §16.9 — keep the embedded table (§02.5) and trust store (§02.6) current.
+#
+# §15.33 makes this a requirement rather than housekeeping: an embedded `default`
+# MUST track each package manager's current supported major, and corepack shipped
+# Yarn Classic 1.22.22 for six years past its support window because nothing was
+# watching.
+#
+# It opens a PR and never merges it. A bad `default` bricks every machine with no
+# `lastKnownGood.json` of its own, and Yarn Berry's digest rests on TLS alone
+# (repo.yarnpkg.com publishes no signatures), so a human comparing the proposed
+# version against the release notes is the only check that line gets.
+name: refresh-table
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch: {}
+permissions: { contents: write, pull-requests: write }
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - run: npm i -fg corepack && corepack enable
+      - uses: actions/setup-node@v6
+        with: { node-version: lts/*, cache: "pnpm" }
+      - run: pnpm install
+      - run: node scripts/refresh-table.mjs
+      # A refreshed default that does not pass the suite is not a refresh.
+      - run: pnpm typecheck && pnpm vitest run && pnpm run lint
+      - id: diff
+        run: git diff --quiet || echo "changed=1" >> "$GITHUB_OUTPUT"
+      - if: steps.diff.outputs.changed == '1'
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          branch="refresh-table/$(date -u +%Y-%m-%d)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git commit -am "chore: refresh the embedded table (§16.9)"
+          git push -u origin "$branch"
+          gh pr create --fill --title "chore: refresh the embedded table (§16.9)" --body \
+            "Automated by \`scripts/refresh-table.mjs\`. Do not merge without checking each proposed version against its own release notes — §16.9."

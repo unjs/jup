@@ -40,6 +40,7 @@ export const ENV_FILE_INELIGIBLE = new Set([
   "COREPACK_CAFILE",
   "COREPACK_STRICT_SSL",
   "COREPACK_ALLOW_UNVERIFIED",
+  "COREPACK_SPEC_FILE",
 ]);
 
 /**
@@ -72,6 +73,11 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set([
   // is the whole of what §15.11 refuses; the deny-list is what keeps the opt-out
   // a decision the person running the tool makes.
   "COREPACK_ALLOW_UNVERIFIED",
+  // §15.35d / §15.37 — the file that supplies the project spec. Eligibility is a
+  // *deny*-list, so a variable is project-settable until it is named here: a
+  // cloned repository whose `.corepack.env` set this could point the spec at a
+  // file of its own and run a package manager the manifest never names.
+  "COREPACK_SPEC_FILE",
 ]);
 
 /**

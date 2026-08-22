@@ -528,6 +528,7 @@ to want:
 | `COREPACK_NETWORK_TIMEOUT`          | Connect and idle timeout in milliseconds (default `30000`)        |
 | `COREPACK_NETWORK_RETRIES`          | Attempts per request, the first included (default `3`); `0` disables retrying |
 | `COREPACK_SHIM_DIRECTORY`           | Where `enable` installs shims and `disable` looks for them |
+| `COREPACK_SPEC_FILE`                | Read `packageManager` / `devEngines.packageManager` from this file instead of the project's `package.json` |
 | `XDG_BIN_HOME`                      | Per-user shim directory on Linux and BSD; not consulted on macOS or Windows |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
@@ -819,7 +820,29 @@ The full list with rationale is in
   `pipack install -g yarn@4.9.0`, `yarn dlx` runs 4.9.0; corepack keeps running the
   table's compiled-in pin with no way to change it ([#202]). A recorded default from an
   older *major line* does not shadow the floor, so `yarn create` cannot fall back to Yarn
-  Classic ([#812]).
+  Classic ([#812]). And the compiled-in `default` itself is now Yarn 4, not the Classic
+  1.22.22 corepack still ships: §15.33 requires an embedded default to track the current
+  supported major, which overrides §02.5's literal and §14.21's record of the 1.x/4.x
+  asymmetry as deliberate. `scripts/refresh-table.mjs` and a weekly workflow are what keep
+  it from rotting again — they verify npm's signature and the signed `dist.integrity`
+  before writing a digest, and open a PR rather than merging one.
+- **A version outside every range band still works.** Corepack hardcodes each package
+  manager's entry point and asserts out when a version matches no declared band, so a new
+  major needs a corepack release before anyone can install it ([#775]). Here the table's
+  `bin` is preferred where a band covers the version and read from the downloaded
+  `package.json` where none does — after the artifact has cleared verification, and with
+  every path confined to the install directory. `DEBUG=corepack` names the version, so the
+  missing band is still a maintenance signal.
+- **Deprecated commands say so.** `prepare` and `hydrate` still work and now print
+  `'corepack prepare' is deprecated; use 'corepack pack' instead.` on stderr ([#624]),
+  where it cannot corrupt `--json` output.
+- **A stray `packageManager` in `$HOME` is called out.** A field in `$HOME/package.json`
+  governs every directory on the machine that has no manifest of its own, and the error
+  used to name a file the user had no memory of creating ([#424]). It now adds
+  `(this manifest is outside any project — …)`.
+- **`COREPACK_SPEC_FILE` supplies the spec for a tree whose manifest cannot be edited**
+  ([#682], [#402]). It overrides the manifest — and the broken manifest is not even read,
+  which is the point — and it is deliberately not settable from `.corepack.env`.
 - **A package manager does not have to be JavaScript.** Corepack's most-upvoted open
   issue is Bun support ([#295], 146 👍), blocked by an architectural assumption rather
   than by effort: *"Corepack was written with assumption that package managers would be
@@ -849,7 +872,7 @@ The full list with rationale is in
   packument's `latest` with a key its own `/-/npm/v1/keys` marks
   `expires: 2025-01-29`; corepack ships that key and ignores expiry, so the signature is
   effectively unchecked. `COREPACK_DEFAULT_TO_LATEST=0` uses the table's hash-pinned
-  Yarn Classic instead, and `npm` and `pnpm` are unaffected.
+  Yarn 4 instead, and `npm` and `pnpm` are unaffected.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
 - **Digests are compared in constant time**, SRI strings are parsed properly rather than
@@ -860,6 +883,11 @@ The full list with rationale is in
 
 [#202]: https://github.com/nodejs/corepack/issues/202
 [#295]: https://github.com/nodejs/corepack/issues/295
+[#402]: https://github.com/nodejs/corepack/issues/402
+[#424]: https://github.com/nodejs/corepack/issues/424
+[#624]: https://github.com/nodejs/corepack/issues/624
+[#682]: https://github.com/nodejs/corepack/issues/682
+[#775]: https://github.com/nodejs/corepack/issues/775
 [#540]: https://github.com/nodejs/corepack/issues/540
 [#679]: https://github.com/nodejs/corepack/issues/679
 [#812]: https://github.com/nodejs/corepack/issues/812
@@ -875,8 +903,8 @@ what it found is listed below rather than summarised away.
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
 | Implementation | 33 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 346 passing, 3 skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 1195 passing |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 381 passing, 7 skipped (two Windows-only, one needs a real TTY, four await §15.35e) |
+| Unit tests | 1201 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
@@ -898,26 +926,30 @@ per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and p
 (§15.4–§15.6), registry-metadata tiering (§15.7, §15.8), shims and enablement (§15.13,
 §15.15, §15.16, §15.29), semver ranges in the pin with `.corepack.lock` (§15.23),
 prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
-`pipack info` (§15.30), stale and shadowed defaults (§15.33), native package-manager
-support (§15.28), one verification tier for every source with sidecar integrity
-(§15.11, §15.12), signing-key rotation and per-origin trust (§15.9, §15.10), global invocations and
-`PATH` (§15.31, §15.32), and parts of §15.14, §15.19 and §15.35.
+`pipack info` (§15.30), stale and shadowed defaults (§15.33, both bullets), bin paths from
+signed metadata (§15.17), native package-manager support (§15.28), one verification tier
+for every source with sidecar integrity (§15.11, §15.12), signing-key rotation and
+per-origin trust (§15.9, §15.10), global invocations and `PATH` (§15.31, §15.32), and most
+of §15.14, §15.19 and §15.35 — including the deprecation lines (§15.35c),
+`COREPACK_SPEC_FILE` (§15.35d) and the stray-`$HOME`-manifest suffix (§15.35k).
 
 Not done yet, from the audit:
 
 - **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
   the abbreviated packument the registry client requests does not carry.
-- Smaller: yarn's compiled-in `default` is still Classic 1.22.22 (§15.33 bullet 2);
-  `COREPACK_REQUIRE_SIGNATURES` is ignored on the pinned-hash path (§15.7); no deprecation
-  line on `hydrate`/`prepare` (§15.35c); no `outside any project` suffix (§15.35k); an
-  unmatched version band throws where §15.17 wants a fallback; `COREPACK_SPEC_FILE`
-  (§15.35d) does not exist.
 
-Eleven of §15.38's conformance rows have no test yet, and the audit records two places
-where an existing test proves less than its name suggests — §15.26's row asserts the
-implementation's own behaviour rather than the spec's, and §15.24's row 184 cannot detect
-the SHOULD it appears to cover, because its fixture's `latest` and stable maximum are the
-same version.
+One §15 question the audit raised was decided rather than implemented:
+`COREPACK_REQUIRE_SIGNATURES` does **not** apply on the pinned-hash path (§06.1 row 1). An
+explicit hash is a stronger, user-chosen assertion than the registry's claim about itself
+(§14.21), §15.11 counts it as a full verification tier, and the alternative is incoherent
+in practice — a pinned install over the default registry makes no metadata request at all,
+so honouring the variable would refuse over a mirror and permit over npm for the very same
+`packageManager` field. Both directions are now pinned by tests.
+
+The audit also records two places where an existing test proves less than its name
+suggests — §15.26's row asserts the implementation's own behaviour rather than the spec's,
+and §15.24's row 184 cannot detect the SHOULD it appears to cover, because its fixture's
+`latest` and stable maximum are the same version.
 
 [#412]: https://github.com/nodejs/corepack/issues/412
 [#690]: https://github.com/nodejs/corepack/issues/690

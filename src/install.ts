@@ -6,10 +6,12 @@
  * disk is full.
  */
 
+import { readFileSync } from "node:fs";
 import { open, rm } from "node:fs/promises";
-import { join, posix } from "node:path";
+import { join, posix, resolve, sep } from "node:path";
 import {
   getSpecFor,
+  hasRangeBand,
   isEmbeddedReference,
   isSupportedPackageManager,
   resolveSpecUrl,
@@ -43,12 +45,18 @@ import {
   type HashPin,
   promote,
   readHashPin,
-  resolveBin,
   resolveInstallTarget,
   writeMarker,
 } from "./store.ts";
 import { extract } from "./tar.ts";
-import type { InstallSpec, Locator, RegistrySignature, RegistrySpec } from "./types.ts";
+import type {
+  BinList,
+  BinSpec,
+  InstallSpec,
+  Locator,
+  RegistrySignature,
+  RegistrySpec,
+} from "./types.ts";
 
 /** §07.4 — the two artifact shapes the table can produce. */
 const TARBALL_EXT = ".tgz";
@@ -358,6 +366,125 @@ async function chooseSource(
   source.url = applyRegistryOverride(source.url, registryUrl);
 
   return source;
+}
+
+/* -------------------------------------------------------------------------- */
+/* §07.7, §15.17 — what goes in the marker's `bin`                             */
+/* -------------------------------------------------------------------------- */
+
+function isValidBinList(value: unknown): value is BinList {
+  return Array.isArray(value) && value.length > 0;
+}
+
+function isValidBinSpec(value: unknown): value is BinSpec {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+/**
+ * §07.7, §15.17 — where a completed install's `bin` comes from.
+ *
+ * Two independent reasons to read the downloaded `package.json` instead of the
+ * table, and keeping them apart is what makes the second safe:
+ *
+ * * §07.7's: the `isValidBinList` / `isValidBinSpec` discrimination. Yarn Berry
+ *   declares an array `bin`, but through a custom npm registry it arrives as a
+ *   *tarball*, so the array cannot describe it and the package's own map is used.
+ * * §15.17's: the resolved version matches no **declared** range band, so the
+ *   table's `bin` for it is the newest band's guess (§02.3's fall-forward). #775
+ *   is that guess outliving the layout it described — pnpm has moved its entry
+ *   point twice and a v12 alpha broke it again — and a hardcoded path is worth
+ *   nothing once it is wrong. The package's own `bin` is correct by
+ *   construction, and by the time this runs the artifact has cleared §15.11's
+ *   verification tier, so it is no more attacker-controlled than the code about
+ *   to be executed from the same tarball.
+ *
+ * Either way the values are confined per §14.13 before they reach the marker.
+ * `exec.resolveBinPath` checks again at the point of use — markers outlive this
+ * function, including ones written by other releases — but failing here is what
+ * keeps an escaping path out of the store in the first place.
+ */
+export function resolveBin(
+  tmpDir: string,
+  locator: Locator,
+  isSingleFile: boolean,
+): BinSpec | BinList {
+  const parsed = parse(locator.reference);
+  const known = parsed !== null && isSupportedPackageManager(locator.name);
+  // §15.17 point 1 — the table's `bin` is preferred, but only where a declared
+  // band actually covers the version.
+  const banded = known && hasRangeBand(locator.name, parsed.version);
+  const tableBin = banded ? getSpecFor(locator.name, parsed.version).bin : undefined;
+
+  // §15.17 point 3 — the maintenance signal. Debug-level: the run succeeds, and
+  // the person who needs to hear this is whoever maintains the table (§16.9).
+  if (known && !banded) debugNote(messages.binFromPackage(locator.name, parsed.version));
+
+  if (isSingleFile) {
+    // A single file has no `package.json` to consult, so an unbanded version
+    // falls back to the locator's own name — which is what the artifact is.
+    if (isValidBinList(tableBin)) return tableBin;
+    return [locator.name];
+  }
+
+  if (isValidBinSpec(tableBin)) return tableBin;
+
+  const manifest = JSON.parse(readFileSync(join(tmpDir, "package.json"), "utf8")) as {
+    name?: unknown;
+    bin?: unknown;
+  } | null;
+
+  const packageBin = manifest?.bin;
+  if (typeof packageBin === "string") {
+    return confine({ [String(manifest?.name)]: packageBin }, tmpDir, locator, parsed?.version);
+  }
+  if (isValidBinSpec(packageBin)) return confine(packageBin, tmpDir, locator, parsed?.version);
+
+  throw new Error(messages.unableToLocateBin());
+}
+
+/**
+ * §14.13 — every value of a package-supplied `bin` map stays inside the install.
+ *
+ * `"bin": {"yarn": "../../../../etc/…"}` is one `join` away from writing the
+ * tool's own handover at an attacker-chosen path. The check is one comparison,
+ * and it runs against the *temporary* extraction directory, which is where the
+ * install still is at this point; the layout is identical to the promoted one.
+ */
+function confine(
+  bin: BinSpec,
+  tmpDir: string,
+  locator: Locator,
+  version: string | undefined,
+): BinSpec {
+  const root = resolve(tmpDir);
+  for (const declared of Object.values(bin)) {
+    const target = resolve(root, declared);
+    if (target !== root && !target.startsWith(root + sep)) {
+      // The same sentence `exec.resolveBinPath` produces for the same path, so
+      // the two checks are indistinguishable to a caller reading stderr.
+      throw new Error(messages.binEscapes(declared, locator.name, version ?? locator.reference));
+    }
+  }
+  return bin;
+}
+
+/**
+ * A note for whoever maintains the embedded table, on corepack's own channel.
+ *
+ * `DEBUG=corepack` is what the reference implementation documents, and §15.35l
+ * is explicit that it is "a debugging aid, not a substitute for command output"
+ * — so this is the one place a message is allowed to be conditional on it.
+ */
+function debugNote(message: string): void {
+  const debug = process.env.DEBUG;
+  if (debug === "*" || (debug !== undefined && debug.includes("corepack"))) {
+    console.warn(`! ${message}`);
+  }
 }
 
 /* -------------------------------------------------------------------------- */

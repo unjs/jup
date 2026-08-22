@@ -79,10 +79,14 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   },
 
   yarn: {
-    // §02.5, §14.21: `default` is Yarn 1.x while `transparent.default` is Yarn 4.x.
-    // The asymmetry is intentional — bare `yarn` behaves like the classic global
-    // yarn, while `yarn dlx`, which classic yarn lacks, gets a modern release.
-    default: "1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610",
+    // §15.33 bullet 2 overrides §02.5's literal and §14.21's "deliberately not
+    // changed": an embedded `default` MUST track the current supported major,
+    // and Classic 1.22.22 has been unsupported since 2020 (#812). So `default`
+    // now equals `transparent.default` — the same release at the same digest,
+    // a pin this table already ships rather than a fresh unverified one.
+    // `scripts/refresh-table.mjs` (§16.9) is what stops both rotting; the fields
+    // stay separate because §15.33 bullet 1 floors only the transparent one.
+    default: "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113",
     fetchLatestFrom: { type: "npm", package: "yarn" },
     transparent: {
       default: "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113",
@@ -133,25 +137,42 @@ export function isSupportedPackageManager(name: string): boolean {
 }
 
 /**
- * §02.3 — reverse the ordered range list and return the first spec whose range
- * the version satisfies, using prerelease-tolerant satisfaction. No match is an
- * internal assertion failure, not a user error.
+ * §02.3 — reverse the ordered range list, first match wins, using
+ * prerelease-tolerant satisfaction. `undefined` when no band covers the version.
+ */
+function findBand(
+  definition: PackageManagerDefinition,
+  version: string,
+): PackageManagerSpec | undefined {
+  for (let i = definition.ranges.length - 1; i >= 0; i--) {
+    const entry = definition.ranges[i]!;
+    if (satisfiesWithPrereleases(version, entry[0])) return entry[1];
+  }
+  return undefined;
+}
+
+/**
+ * §02.3 — the spec governing this version.
+ *
+ * §15.17: a version outside every declared band falls forward to the **newest**
+ * band rather than throwing. That is the band §04.1 already resolves dist-tags
+ * against, so its registry and URL template describe wherever the project is
+ * heading. What must *not* be inherited is that band's `bin` — #775 is a
+ * hardcoded entry point outliving the layout it described — so
+ * {@link hasRangeBand} lets `install.resolveBin` tell "the table knows this
+ * version" from "the table is guessing".
  */
 export function getSpecFor(name: string, version: string): PackageManagerSpec {
   const definition = getDefinition(name);
   if (definition === undefined) throw new UsageError(messages.unsupportedByBuild(name));
 
-  for (let i = definition.ranges.length - 1; i >= 0; i--) {
-    const entry = definition.ranges[i]!;
-    if (satisfiesWithPrereleases(version, entry[0])) return entry[1];
-  }
+  return findBand(definition, version) ?? definition.ranges.at(-1)![1];
+}
 
-  throw new Error(
-    messages.noRangeBand(
-      version,
-      definition.ranges.map(([range]) => range),
-    ),
-  );
+/** §15.17 — does a *declared* band cover this version, or is {@link getSpecFor} guessing? */
+export function hasRangeBand(name: string, version: string): boolean {
+  const definition = getDefinition(name);
+  return definition !== undefined && findBand(definition, version) !== undefined;
 }
 
 /**
