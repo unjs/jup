@@ -13,7 +13,8 @@
   "license": "MIT",
   "repository": "pi0/pipack",
   "bin": {
-    "pipack": "./dist/bin.mjs"
+    "pipack": "./dist/bin.mjs",
+    "corepack": "./dist/bin.mjs"
   },
   "files": [
     "dist"

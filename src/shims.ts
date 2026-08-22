@@ -32,6 +32,15 @@ import { ENTRY_CANDIDATES, findEntryModule } from "./self.ts";
 const TOOL_NAME = "pipack";
 
 /**
+ * Names our own binary answers to, for the §10.4 self-directory gate.
+ *
+ * We ship a `corepack` alias so scripts that already call `corepack use` keep
+ * working, which means a directory holding only that alias is still a legitimate
+ * place for shims to live.
+ */
+const TOOL_ALIASES = [TOOL_NAME, "corepack"] as const;
+
+/**
  * §14.16 — how we recognise a stub we wrote. A regular file that does not carry
  * this marker is somebody else's binary and is never replaced without `--force`.
  */
@@ -146,11 +155,11 @@ function isExecutableFile(file: string): boolean {
 
 /** Does this directory hold our own binary — i.e. is it a place shims belong? */
 function holdsToolBinary(directory: string): boolean {
-  if (isExecutableFile(join(directory, TOOL_NAME))) return true;
+  if (TOOL_ALIASES.some((name) => isExecutableFile(join(directory, name)))) return true;
   if (process.platform !== "win32") return false;
-  return (
-    existsSync(join(directory, `${TOOL_NAME}.cmd`)) ||
-    existsSync(join(directory, `${TOOL_NAME}.exe`))
+  return TOOL_ALIASES.some(
+    (name) =>
+      existsSync(join(directory, `${name}.cmd`)) || existsSync(join(directory, `${name}.exe`)),
   );
 }
 

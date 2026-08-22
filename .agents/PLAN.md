@@ -624,3 +624,106 @@ when building the phase-2 harness for §15.2's per-package-manager registries.
   disagree on mode masking; row 84 promises a refusal for an escaping symlink that rule 3
   says to skip silently; `isValidRange` accepts some malformed ranges node-semver rejects
   (no practical impact — every real dist-tag is still correctly classified).
+
+---
+
+# Phase 2 — §15
+
+`.agents/README.md` makes §15 **normative**: a conforming implementation satisfies its
+MUSTs and passes tests 148–207. Phase 1 deliberately deferred it; this is the remainder.
+
+Ordered by value, not by section number. §15 cites the driving issue and its signal count
+for most items, and that signal is the ordering input — #295 (146👍), #95 (121👍), and
+#71 (34👍) are the three highest in corepack's tracker.
+
+## Wave A — the network layer (independent of everything else)
+
+### P1 — Proxy support §14.8, §15.6
+The one phase-1 MUST left unimplemented, and the reason conformance rows 71 and 72 are
+skipped. `fetch` cannot do it without a dispatcher, so this means a `CONNECT` tunnel and
+an absolute-form request path behind `HttpOptions.transport`, the seam already left for
+it. `NO_PROXY` must support `*`, bare hostnames, leading-dot suffixes, and `:port`.
+Honour `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` with **no** second opt-in flag — that
+second flag is the whole complaint behind #447 and #458.
+
+### P2 — Registry metadata robustness §15.7, §15.8
+Driven by #570 (9👍), #725, #808 — a raw `TypeError` when a private registry omits `dist`
+or `dist.signatures`, which Artifactory and Nexus do routinely. Phase 1 already avoids the
+crash; what remains is the three-outcome tiering: absent `dist` errors, absent
+`signatures` soft-fails with one warning, invalid `signatures` still hard-fails, plus
+`COREPACK_REQUIRE_SIGNATURES=1` and §15.8's package-root fallback.
+
+### P3 — TLS and network resilience §15.4, §15.5
+`COREPACK_CAFILE`, `COREPACK_STRICT_SSL`, classified TLS failures (a corporate
+interception proxy currently surfaces as an unexplained transport error), timeouts, and
+retries with backoff on idempotent GETs only.
+
+## Wave B — configuration the user already wrote
+
+### P4 — `.npmrc` subset §15.1
+#540 (25👍). A locked-down org configures one registry and expects every tool to honour
+it; corepack silently reaches the public registry instead. Read only the keys §15.1 lists,
+with its precedence chain — and its security constraints are the reason it is safe at all:
+auth entries are prefix-scoped by construction, and a **project-level** `.npmrc` may set
+`registry`/`@scope:registry` but never auth or TLS keys, because unlike npm we run *before*
+the user has decided to trust the repo.
+
+### P5 — Per-source registries §15.2, §15.3
+#753 (15👍), #872. `COREPACK_REGISTRY_<NAME>` so Yarn can be mirrored without also
+redirecting npm and pnpm. Phase 1 already rewrites by origin rather than substring, so
+§15.3 is largely satisfied — verify rather than reimplement.
+
+## Wave C — core semantics
+
+### P6 — Ranges in the pin, and `.corepack.lock` §15.23
+#95: **121👍, open since 2022**, second-highest in the tracker, and the reason pnpm removed
+corepack from its own documentation. The reconciliation §15.23 describes — ranges for
+humans, a recorded resolution for reproducibility — is the substantive design work in
+phase 2. A recorded resolution that still satisfies its range must resolve with **zero**
+network access, so the §01.3 budget extends to ranges.
+
+### P7 — The §15 defect cluster
+Each is a bug with a spec citation, and they are small enough to land together:
+§15.24 (a prerelease wins implicit resolution — recurs every release cycle, #473/#774, no
+maintainer response in two years), §15.25 (a `devEngines`-only manifest does not stop the
+walk), §15.26 (a mutating command can create the very mismatch §03.3 then rejects),
+§15.33 (`transparent.default` outranks the user's own recorded default), §15.35j (a
+nonexistent version surfaces as a bare 404), §15.35g (idempotent `use`).
+
+### P8 — Write targets and reporting §15.27, §15.35l, §15.19
+Stop at a workspace boundary, add `--here`, and **print the path every mutating command
+modified** — the one-line fix for the whole class of "corepack edited a file I did not
+expect" reports. Plus `cache clean --all` and `cache list`.
+
+## Wave D — surface
+
+### P9 — `corepack info` §15.30
+#180, #566, #686, #440, #679. The tracker's recurring shape is *"it resolved something
+surprising and I cannot see why"*; §15.30 lists five issues that one command would have
+diagnosed. Must make no network request and must not fail on an invalid project spec —
+reporting *why* it is invalid is the point.
+
+### P10 — Shims and enablement §15.13, §15.14, §15.15, §15.16, §15.29
+#71 is the highest-signal issue in the tracker (34👍, four years). Per-user shim directory
+by default, never require elevation, `LOCALAPPDATA` only on Windows, restore what `enable
+--force` displaced, shim npm by default with `--exclude npm`, and verify the shims
+actually won on `PATH` afterwards.
+
+### P11 — Native package managers §15.28
+#295 is the **most-upvoted issue in the tracker** (146👍). `{platform}`/`{arch}` in a URL
+template and `"exec": "native"` so a band's binaries run directly. This is architectural
+headroom, not a package-manager addition: §15.21 and §15.28 both require maintainer
+consent before anything is added to the table, and pnpm's maintainers have publicly
+disavowed corepack while Bun's have declined. Build the capability; add no entries.
+
+### P12 — One verification tier §15.11
+Closes §06.6's remaining rows: `repo.yarnpkg.com` currently has TLS only. Every artifact
+must clear a pinned hash, a verified registry signature, or a verified detached signature,
+with `COREPACK_ALLOW_UNVERIFIED=1` as the per-run opt-out. Sequenced last because it is a
+**breaking** change for anyone resolving Yarn Berry dynamically, and it wants the rest of
+phase 2 settled underneath it.
+
+## Not in scope, deliberately
+§15.34 records four requests corepack's maintainers declined and §15 **adopts** those
+rulings: no `corepack run`, no package-manager passthrough, no writing into another tool's
+lockfile, no monorepo task-runner pinning. Only `install --project` is accepted.
