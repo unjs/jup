@@ -963,7 +963,7 @@ should have been the *first* step of phase 2, not a check after it.
 
 Four sections nobody was assigned turned out satisfied incidentally; five were real gaps.
 
-## Ranked — all closed except one
+## Ranked — all closed
 
 | # | Gap | Landed |
 |---|---|---|
@@ -977,7 +977,7 @@ Four sections nobody was assigned turned out satisfied incidentally; five were r
 | 8 | §15.35k — the `outside any project` suffix | `74fa698` |
 | 9 | §15.17 — fall forward to the newest band, `bin` from the verified package | `74fa698` |
 | 10 | §15.35d — `COREPACK_SPEC_FILE`, on both deny-lists | `74fa698` |
-| — | §15.35e — `COREPACK_MINIMUM_RELEASE_AGE` | **the last one** |
+| 11 | §15.35e — `COREPACK_MINIMUM_RELEASE_AGE`, fail-closed on an undated source | `b3a56d1` |
 
 **§15.31 was worse here than in corepack, and that was our doing**: §15.16 made `enable`
 shim `npm` by default, which corepack never did, so `npm install -g …` inside a pinned
@@ -1000,8 +1000,8 @@ Recorded in full at the end of [`S15-AUDIT.md`](./S15-AUDIT.md).
 ## Conformance coverage — complete
 
 Recounted mechanically rather than by eye: every row of §13 (1–147) and §15.38 (148–207)
-has a test whose title names it. Four are visibly skipped for §15.35e, and that file's
-helper throws so a premature un-skip fails loudly instead of passing vacuously.
+has a test whose title names it. Nothing is skipped for a missing feature any more —
+the only remaining skips are platform-conditional (`skipIf` on Windows, root, or no TTY).
 
 ## Standing hazards for whoever is next
 
@@ -1013,3 +1013,16 @@ helper throws so a premature un-skip fails loudly instead of passing vacuously.
   during phase 3 silently downloaded real Yarn 4.14.1 and passed.
 * **A plan organised by value will miss requirements.** Phase 2 shipped twelve items and
   left eight §15 sections unassigned. Walk the spec first, then rank.
+
+## Where this ended
+
+Every `[required]` section of §15 is implemented, and every row of §13 (1–147) and §15.38
+(148–207) has a test. `.agents/S15-AUDIT.md` carries the section-by-section verdicts and
+the follow-ups that settled its open questions.
+
+The one decision left is not an engineering one: `package.json` is still at `0.0.0` and
+nothing has been published. Note that shipping is not a neutral act here — the package
+installs a `corepack` bin alias, and §15.33 moved yarn's compiled-in default from Classic
+1.x to Berry 4.x, so a bare `yarn` in an unpinned project behaves differently from
+corepack's. Both are deliberate and documented; both want a human to agree before a
+release carries them.
