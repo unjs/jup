@@ -903,7 +903,7 @@ what it found is listed below rather than summarised away.
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
 | Implementation | 33 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 381 passing, 7 skipped (two Windows-only, one needs a real TTY, four await §15.35e) |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 382 passing, 7 skipped — every row of both tables has a test |
 | Unit tests | 1201 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
@@ -946,10 +946,12 @@ in practice — a pinned install over the default registry makes no metadata req
 so honouring the variable would refuse over a mirror and permit over npm for the very same
 `packageManager` field. Both directions are now pinned by tests.
 
-The audit also records two places where an existing test proves less than its name
-suggests — §15.26's row asserts the implementation's own behaviour rather than the spec's,
-and §15.24's row 184 cannot detect the SHOULD it appears to cover, because its fixture's
-`latest` and stable maximum are the same version.
+Every row of both conformance tables now has a test: §13's 1–147 and §15.38's 148–207.
+The audit's two "this test proves less than its name suggests" findings are settled — one
+was a genuine conflict between §15.26 and §09.4, resolved by distinguishing a pin from a
+constraint, and the other is now a row that publishes a `latest` older than the stable
+maximum, so the decision not to honour §15.24's dist-tag SHOULD is asserted rather than
+invisible.
 
 [#412]: https://github.com/nodejs/corepack/issues/412
 [#690]: https://github.com/nodejs/corepack/issues/690

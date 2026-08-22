@@ -72,6 +72,43 @@ describe("§15.24 prereleases in implicit resolution", () => {
     expect(pinOf(fixture)).toMatch(/^pnpm@11\.1\.2\+sha512\./);
   });
 
+  it("184: takes the semver maximum, not `latest` — §15.24's SHOULD is not implemented", async () => {
+    // The §15 audit's finding about this row, made explicit rather than left as
+    // a blind spot: rows 184 above cannot tell "resolved via the `latest`
+    // dist-tag" from "took the stable semver maximum", because the fixture's
+    // `latest` *is* its stable maximum. This row separates them by publishing a
+    // `latest` that points at an older release than the stable maximum.
+    //
+    // §15.24 says a bare name SHOULD resolve via `latest`. It deliberately does
+    // not here: §04.1 step 6 unions candidates across *every* range band, while
+    // a dist-tag is resolved against the last band's registry only — so honouring
+    // the SHOULD for `yarn` would silently drop every Yarn Classic candidate.
+    // That trade is recorded in `.agents/PLAN.md`; this row is what makes
+    // changing the decision a deliberate act rather than an accident.
+    const scoped = new MockRegistry();
+    await scoped.start();
+    try {
+      for (const version of ["11.0.0", "11.1.2"]) {
+        scoped.publish("pnpm", version, packageManagerTarball("pnpm", version), {
+          distTags: { latest: "11.0.0" },
+        });
+      }
+
+      const fixture = createFixture({ name: "project" });
+      const result = await run(["use", "pnpm"], {
+        ...fixture,
+        registry: scoped,
+        env: { COREPACK_INTEGRITY_KEYS: scoped.trustStore(), CI: undefined },
+      });
+
+      expect(result.exitCode).toBe(0);
+      // 11.1.2, the semver maximum — *not* 11.0.0, which `latest` names.
+      expect(pinOf(fixture)).toMatch(/^pnpm@11\.1\.2\+sha512\./);
+    } finally {
+      await scoped.stop();
+    }
+  });
+
   it("185: COREPACK_ENABLE_PRERELEASES=1 opts back in", async () => {
     const fixture = createFixture({ name: "project" });
 

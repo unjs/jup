@@ -248,3 +248,51 @@ passes as-is, it is the cheapest row on the list.
 §15.26 (partial), §15.31, §15.32, §15.33 bullet 2, §15.34's accepted item, and
 §15.35c/d/e/f** — plus §15.22, which is a pre-release distribution to-do rather than
 code. `README.md:806` should also say rows 148–**207**, not 148–203.
+
+
+---
+
+# Follow-up: both open questions settled (2026-08-22)
+
+The audit closed with two rows it could not settle. Both are now decided, and the
+decisions are recorded in the tests themselves rather than here alone.
+
+## §15.26 / row 190 — settled: the spec is internally inconsistent, and the tests say so
+
+§15.26 says *"If `devEngines.packageManager` exists, its `version` … is updated alongside
+`packageManager`"*, without qualification. Applied literally to a **range**, that collapses
+`^11.0.0` into the version just chosen — and §09.4, with §13 rows 112 and 113, requires
+`corepack up` to follow a declared `devEngines` range **across a major boundary**. A
+collapsed range can never move again, so the two requirements cannot both hold.
+
+The implementation resolves it by distinguishing a **pin** from a **constraint**: an exact
+`devEngines…version` is a pin and is replaced (row 190's first case, which is what §15.26
+literally asks for); a *range* is a constraint and is honoured, never rewritten. That is
+the only reading under which §15.26 and §09.4 are simultaneously true, and it is the same
+pattern used five times in phase 1 for internal spec conflicts. `15-26-atomic-pin.test.ts`
+carries the reasoning at the row that depends on it. **Not a gap.**
+
+## §15.24 / row 184 — settled: the blind spot is now a recorded decision
+
+The audit was right that row 184 could not tell *"resolved via the `latest` dist-tag"* from
+*"took the stable semver maximum"*, because the fixture's `latest` **was** its stable
+maximum.
+
+A new row publishes a `latest` pointing at an *older* release than the stable maximum, and
+asserts we take the maximum — i.e. that §15.24's SHOULD is **not** implemented, on purpose.
+The reason is in the test: §04.1 step 6 unions candidates across every range band, while a
+dist-tag resolves against the last band's registry only, so honouring the SHOULD for `yarn`
+would silently drop every Yarn Classic candidate. Mutating the selection order fails the
+new row along with the rest of the file, so the decision is now load-bearing rather than
+invisible. **Decided, not implemented — and no longer a blind spot.**
+
+## Conformance coverage, recounted
+
+Every row in **both** tables now has a test whose title begins with the row number:
+
+* §13 rows 1–147 — no row without a test.
+* §15.38 rows 148–207 (60 rows) — no row without a test.
+
+Four of them are visibly skipped (§15.35e, `COREPACK_MINIMUM_RELEASE_AGE`), which is the
+point: the file states what blocks it, and its helper throws so a premature un-skip fails
+loudly instead of passing vacuously.
