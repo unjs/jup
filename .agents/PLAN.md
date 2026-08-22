@@ -653,7 +653,7 @@ crash; what remains is the three-outcome tiering: absent `dist` errors, absent
 `signatures` soft-fails with one warning, invalid `signatures` still hard-fails, plus
 `COREPACK_REQUIRE_SIGNATURES=1` and §15.8's package-root fallback.
 
-### P3 — TLS and network resilience §15.4, §15.5
+### P3 — TLS and network resilience §15.4, §15.5 — **done** (`ae9065b`)
 `COREPACK_CAFILE`, `COREPACK_STRICT_SSL`, classified TLS failures (a corporate
 interception proxy currently surfaces as an unexplained transport error), timeouts, and
 retries with backoff on idempotent GETs only.
@@ -702,13 +702,13 @@ expect" reports. Plus `cache clean --all` and `cache list`.
 
 ## Wave D — surface
 
-### P9 — `corepack info` §15.30
+### P9 — `corepack info` §15.30 — **done** (`6a5cbc9`)
 #180, #566, #686, #440, #679. The tracker's recurring shape is *"it resolved something
 surprising and I cannot see why"*; §15.30 lists five issues that one command would have
 diagnosed. Must make no network request and must not fail on an invalid project spec —
 reporting *why* it is invalid is the point.
 
-### P10 — Shims and enablement §15.13, §15.14, §15.15, §15.16, §15.29
+### P10 — Shims and enablement §15.13, §15.14, §15.15, §15.16, §15.29 — *in progress*
 #71 is the highest-signal issue in the tracker (34👍, four years). Per-user shim directory
 by default, never require elevation, `LOCALAPPDATA` only on Windows, restore what `enable
 --force` displaced, shim npm by default with `--exclude npm`, and verify the shims
@@ -743,3 +743,14 @@ phase 2 settled underneath it.
 §15.34 records four requests corepack's maintainers declined and §15 **adopts** those
 rulings: no `corepack run`, no package-manager passthrough, no writing into another tool's
 lockfile, no monorepo task-runner pinning. Only `install --project` is accepted.
+
+## Carried follow-ups
+
+* `COREPACK_SHIM_DIRECTORY` (§15.37, env-file **eligible**) still needs registering in
+  `src/env.ts`'s eligible list plus an assertion in `test/unit/env.test.ts` — P10 was
+  barred from that file by concurrency, so the wiring is owed once it lands.
+* `src/info.ts` should learn to report `COREPACK_CAFILE` / `COREPACK_STRICT_SSL`, and to
+  name a custom shim directory once `COREPACK_SHIM_DIRECTORY` exists.
+* §15.4's expired / not-yet-valid certificate branch is unit-tested by code path, not end
+  to end — the committed fixture is valid until 2126 and an expired cert needs a second
+  fixture.
