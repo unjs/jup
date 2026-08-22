@@ -680,7 +680,7 @@ redirecting npm and pnpm. Phase 1 already rewrites by origin rather than substri
 
 ## Wave C — core semantics
 
-### P6 — Ranges in the pin, and `.corepack.lock` §15.23
+### P6 — Ranges in the pin, and `.corepack.lock` §15.23 — **done** (`4392842`)
 #95: **121👍, open since 2022**, second-highest in the tracker, and the reason pnpm removed
 corepack from its own documentation. The reconciliation §15.23 describes — ranges for
 humans, a recorded resolution for reproducibility — is the substantive design work in
@@ -722,6 +722,17 @@ consent before anything is added to the table, and pnpm's maintainers have publi
 disavowed corepack while Bun's have declined. Build the capability; add no entries.
 
 ### P12 — One verification tier §15.11
+
+Add to its scope, found while tracing P6: **a cache hit never checks the marker's
+hash against the pin's digest.** §07.2 makes the store directory the plain semver
+version, so `pnpm@9.0.0+sha512.<A>` and `pnpm@9.0.0+sha512.<B>` share one
+directory and the second silently gets whatever the first installed — traced on
+the built binary, both run. That is what §07.2 prescribes (the marker's hash is
+*re-attached* to the locator, not compared), and it is corepack's behaviour too,
+so it is not a regression; but it is a reproducibility hole squarely inside
+§15.11's "every artifact clears a tier", and the fix belongs here rather than as
+a silent change to §07.
+
 Closes §06.6's remaining rows: `repo.yarnpkg.com` currently has TLS only. Every artifact
 must clear a pinned hash, a verified registry signature, or a verified detached signature,
 with `COREPACK_ALLOW_UNVERIFIED=1` as the per-run opt-out. Sequenced last because it is a
