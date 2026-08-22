@@ -16,3 +16,6 @@ tsconfig.tsbuildinfo
 /src/pnpx.js
 /src/yarn.js
 /src/yarnpkg.js
+
+# scriptc's generated program and its output binary (scripts/compile.mjs).
+/.scriptc/

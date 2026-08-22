@@ -27,6 +27,7 @@
   },
   "scripts": {
     "build": "obuild && node scripts/generate-shims.mjs",
+    "compile": "node scripts/compile.mjs",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
