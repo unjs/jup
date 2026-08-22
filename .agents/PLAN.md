@@ -807,3 +807,32 @@ name is lost. Worth doing as its own item; it changes the shim contract, not ena
   in. Row 184 does not require it.
 * **§15.12's `devEngines…integrity`** is now *written* by `use`/`up` but nothing reads it
   back. That enforcement is P12's.
+
+## Warm-path cost, measured after phase 2 (2026-08-22)
+
+Median of 21 spawns, machine under load from concurrent agents, so read the *ratios*:
+
+| | median | vs bare node |
+|---|---|---|
+| `node -e ""` | 22.8 ms | — |
+| `pipack pnpm --version` (cache hit) | 39.9 ms | +17.1 ms |
+| `corepack pnpm --version` (cache hit) | 56.7 ms | +33.9 ms |
+
+Still ~30% faster than corepack, and §16.1's `< 5 ms` target is explicitly scoped to *"a
+native single-binary implementation"*, so this is not a conformance failure. But our own
+share has grown from ~13 ms at the end of phase 1 to ~17 ms, and the cause is visible:
+
+* Importing the warm chunk alone costs **~12.8 ms**. The warm chain is `main2` →
+  `{env, errors, manifest, store, usage}`, about 73 kB of JS parsed on every invocation.
+* **`usage.mjs` is misnamed by the bundler**: obuild merged `exec.ts` (warm — it has
+  `execPackageManager`) with `resolve.ts` and the usage strings. So a *pinned, exact*
+  invocation — the whole point of the fast path — pays to parse `resolveDescriptor`,
+  `getFallbackLocator` and every usage line it will never touch.
+
+`COLD_PATH_MODULES` cannot catch this: `resolve.ts` genuinely *is* warm-reachable in the
+source graph (an unpinned project needs it), so the list is right and the chunking is
+what is wrong. A fix is to split the warm entry so `execPackageManager` comes from a
+module that does not pull `resolveDescriptor`, and to let the non-pinned branch reach it
+by dynamic import — the same trick already used for the socket stack in `proxy.ts`.
+
+Worth doing as its own item after P11/P12, with the benchmark re-run on a quiet machine.
