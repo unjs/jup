@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_REGISTRY, getTrustedKeys, TRUST_KEYS } from "../../src/config/keys.ts";
 import {
   DEFINITIONS,
@@ -7,9 +7,11 @@ import {
   getPackageManagerFor,
   getSpecFor,
   isSupportedPackageManager,
+  resolveSpecUrl,
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
-import type { BinSpec } from "../../src/types.ts";
+import { messages, UsageError } from "../../src/errors.ts";
+import type { BinSpec, PackageManagerSpec } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
   it("supports exactly npm, pnpm and yarn", () => {
@@ -209,5 +211,84 @@ describe("trust store (§02.6, §14.4)", () => {
     expect(getTrustedKeys("https://registry.npmjs.org/")).toEqual(embedded);
     expect(getTrustedKeys("https://npm.internal.example")).toEqual(embedded);
     expect(getTrustedKeys("https://artifactory.corp/api/npm/npm-remote/")).toEqual(embedded);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §15.28 — `{platform}` / `{arch}` URL templates                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * `process.platform` and `process.arch` are read-only properties on a real
+ * process, so the only way to reach the unsupported branches is to redefine them
+ * — and reaching them is the point: on every machine the suite actually runs on,
+ * both are supported and the error is dead code no row can touch.
+ */
+function pretendHost(platform: string, arch: string): void {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  Object.defineProperty(process, "arch", { value: arch, configurable: true });
+}
+
+const REAL_PLATFORM = process.platform;
+const REAL_ARCH = process.arch;
+
+describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
+  afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
+
+  const locator = { name: "bunny", reference: "1.0.0" };
+  const specFor = (url: string): PackageManagerSpec =>
+    ({ url, bin: { bunny: "./bin/bunny" }, registry: { type: "npm", package: "bunny" } }) as const;
+
+  it("substitutes every placeholder, including repeats", () => {
+    pretendHost("darwin", "arm64");
+    expect(
+      resolveSpecUrl(
+        specFor("https://example.com/{platform}/{arch}/bunny-{}-{platform}-{arch}.tgz"),
+        locator,
+        "1.0.0",
+      ),
+    ).toBe("https://example.com/darwin/arm64/bunny-1.0.0-darwin-arm64.tgz");
+  });
+
+  it("normalises the names a non-Node host would report", () => {
+    pretendHost("linux", "aarch64");
+    expect(resolveSpecUrl(specFor("https://e.com/{}-{arch}.tgz"), locator, "1.0.0")).toBe(
+      "https://e.com/1.0.0-arm64.tgz",
+    );
+    pretendHost("linux", "amd64");
+    expect(resolveSpecUrl(specFor("https://e.com/{}-{arch}.tgz"), locator, "1.0.0")).toBe(
+      "https://e.com/1.0.0-x64.tgz",
+    );
+  });
+
+  it("leaves a template without placeholders exactly as the table wrote it", () => {
+    pretendHost("sunos", "s390x");
+    // The unsupported host must not matter to a band that never asked: every
+    // entry in the shipped table is in this case, and none of them may start
+    // failing on an exotic platform because §15.28 exists.
+    expect(
+      resolveSpecUrl(specFor("https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz"), locator, "9.0.0"),
+    ).toBe("https://registry.npmjs.org/pnpm/-/pnpm-9.0.0.tgz");
+  });
+
+  it("names the unsupported platform rather than emitting a literal placeholder", () => {
+    pretendHost("freebsd", "x64");
+    const url = specFor("https://e.com/bunny-{}-{platform}-{arch}.tgz");
+
+    expect(() => resolveSpecUrl(url, locator, "1.0.0")).toThrow(UsageError);
+    expect(() => resolveSpecUrl(url, locator, "1.0.0")).toThrow(
+      messages.unsupportedPlatform("bunny", "1.0.0", "freebsd"),
+    );
+  });
+
+  it("names the unsupported architecture separately from the platform", () => {
+    pretendHost("linux", "ppc64");
+    const url = specFor("https://e.com/bunny-{}-{platform}-{arch}.tgz");
+
+    // The platform half resolved fine; saying "unsupported platform linux" would
+    // send the reader hunting for the wrong thing.
+    expect(() => resolveSpecUrl(url, locator, "1.0.0")).toThrow(
+      messages.unsupportedArch("bunny", "1.0.0", "ppc64"),
+    );
   });
 });

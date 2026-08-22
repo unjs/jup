@@ -164,6 +164,86 @@ export function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
   return getSpecFor(locator.name, parsed.version);
 }
 
+/* -------------------------------------------------------------------------- */
+/* §15.28 — per-platform URL templates                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * §15.28 — the normalised platform names `{platform}` resolves against.
+ *
+ * The spec fixes the vocabulary at `linux` / `darwin` / `win32`, which is also
+ * what Node reports, so on this host the table is very nearly an identity. It is
+ * written out anyway because it is the *allow-list*: a host outside it must
+ * produce the error below rather than a URL still carrying `{platform}`.
+ */
+const PLATFORMS: Record<string, string> = {
+  darwin: "darwin",
+  linux: "linux",
+  win32: "win32",
+};
+
+/**
+ * §15.28 — the same for `{arch}`: `x64` / `arm64`.
+ *
+ * The two aliases are there because a re-implementation in another language
+ * reads the machine name from `uname`, which spells the same two architectures
+ * `amd64` and `aarch64`. Accepting them costs one map entry and keeps the
+ * normalisation honest about what "normalised" means; it changes nothing on a
+ * Node host, which never reports either.
+ */
+const ARCHITECTURES: Record<string, string> = {
+  arm64: "arm64",
+  x64: "x64",
+  aarch64: "arm64",
+  amd64: "x64",
+};
+
+/**
+ * §15.28 — substitute `{}`, `{platform}` and `{arch}` into a band's `url`.
+ *
+ * `{}` is §02.4's version placeholder and is always substituted. The other two
+ * are opt-in per band, and the cheap `includes` guard is what keeps the common
+ * case — every entry in the table today — at exactly the one `replace` it used
+ * to be, on a path §16.3 counts.
+ *
+ * An unrecognised platform or architecture is an error naming *which* half was
+ * unrecognised. It is deliberately not a 404 later on: a URL that still contains
+ * the literal `{arch}` blames the registry for the host's own unsupportedness.
+ */
+export function resolveSpecUrl(
+  spec: PackageManagerSpec,
+  locator: Locator,
+  version: string,
+): string {
+  const url = spec.url.replace("{}", version);
+
+  const wantsPlatform = url.includes("{platform}");
+  const wantsArch = url.includes("{arch}");
+  if (!wantsPlatform && !wantsArch) return url;
+
+  let resolved = url;
+
+  if (wantsPlatform) {
+    const platform = PLATFORMS[process.platform];
+    if (platform === undefined) {
+      throw new UsageError(
+        messages.unsupportedPlatform(locator.name, locator.reference, process.platform),
+      );
+    }
+    resolved = resolved.replaceAll("{platform}", platform);
+  }
+
+  if (wantsArch) {
+    const arch = ARCHITECTURES[process.arch];
+    if (arch === undefined) {
+      throw new UsageError(messages.unsupportedArch(locator.name, locator.reference, process.arch));
+    }
+    resolved = resolved.replaceAll("{arch}", arch);
+  }
+
+  return resolved;
+}
+
 /**
  * §08.1 — the package manager spec's **download URL**, with `{}` substituted.
  *
@@ -174,7 +254,7 @@ export function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
 export function getSpecUrl(locator: Locator): string {
   const spec = getTableSpec(locator);
   if (spec === undefined) return locator.reference;
-  return spec.url.replace("{}", parse(locator.reference)!.version);
+  return resolveSpecUrl(spec, locator, parse(locator.reference)!.version);
 }
 
 /**

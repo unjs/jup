@@ -99,13 +99,14 @@ export function resolveBinPath(
 }
 
 /**
- * §08.2 — in-process handover.
+ * §08.2 — in-process handover, or §15.28's native handover.
  *
- * Rewrites the process state to look like a direct invocation, then loads the
- * entry module on `nextTick` so our frames leave any stack trace the package
- * manager prints. `process.argv[1]` is how Yarn locates itself; an undefined
- * `require.main` is how pnpm detects its own version; `execArgv` is cleared so
- * the package manager does not inherit our runtime flags.
+ * The JavaScript path rewrites the process state to look like a direct
+ * invocation, then loads the entry module on `nextTick` so our frames leave any
+ * stack trace the package manager prints. `process.argv[1]` is how Yarn locates
+ * itself; an undefined `require.main` is how pnpm detects its own version;
+ * `execArgv` is cleared so the package manager does not inherit our runtime
+ * flags.
  *
  * **Do not wrap the load in a catch that rewrites the exit code.** §08.4's
  * contract is exact: a synchronous `exitCode = 42` exits 42; setting 42 and then
@@ -118,6 +119,18 @@ export function resolveBinPath(
  * stdio is untouched and stdin is never speculatively consumed (§08.6): there is
  * only one process, so the package manager inherits the real handles, TTY-ness
  * and all.
+ *
+ * `execMode` is §15.28's per-band flag. `"native"` means the `bin` target is a
+ * real executable, so it is run **directly**: §08.3.1's JavaScript-runtime
+ * lookup is skipped entirely, which makes this the *cheaper* of the two paths
+ * rather than the more expensive one. The returned promise then settles with the
+ * child's exit code; see `native.ts` for how §08.4's and §08.5's observables are
+ * preserved across the process boundary.
+ *
+ * The return value is `0` on the JavaScript path because the package manager
+ * sets the real exit code from its own module body, which runs strictly after
+ * this returns (§08.4). Awaiting it is safe and changes nothing: `nextTick`
+ * drains ahead of the microtask queue either way.
  */
 export function execPackageManager(
   binName: string,
@@ -125,13 +138,22 @@ export function execPackageManager(
   args: string[],
   specUrl: string,
   fallbackBin?: BinSpec | BinList,
-): void {
+  execMode?: "js" | "native",
+): number | Promise<number> {
   const binPath = resolveBinPath(binName, spec, specUrl, fallbackBin);
 
-  // §08.7 — the only variable we add. Package managers use it purely as an "am I
-  // running under a version manager?" flag. `PATH` is deliberately left alone in
-  // phase 1; §15.32 will prepend `dirname(binPath)` to it here.
+  // §08.7 — the only variable we add, and it is added the same way for both
+  // models: a native child inherits `process.env` wholesale. Package managers
+  // use it purely as an "am I running under a version manager?" flag. `PATH` is
+  // deliberately left alone in phase 1; §15.32 will prepend `dirname(binPath)`
+  // to it here.
   process.env.COREPACK_ROOT = getOwnRoot();
+
+  if (execMode === "native") {
+    // Imported here and nowhere else: `node:child_process` must not enter the
+    // module graph of a JavaScript cache hit (§01.3, §16.3).
+    return import("./native.ts").then((native) => native.execNative(binPath, args));
+  }
 
   process.argv = [process.execPath, binPath, ...args];
   process.execArgv = [];
@@ -144,4 +166,6 @@ export function execPackageManager(
     // undefined for the CJS ones. The promise is deliberately left unhandled.
     void import(pathToFileURL(binPath).href);
   });
+
+  return 0;
 }

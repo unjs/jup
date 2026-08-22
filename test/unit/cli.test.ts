@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 // `process.argv` and imports the entry point on `nextTick`. Every assertion here
 // is about *what* would be run, so the handover itself is mocked out.
 vi.mock("../../src/exec.ts", () => ({
-  execPackageManager: vi.fn(),
+  // `0` mirrors the real JavaScript path (§08.4): the package manager sets the
+  // exit code from its own module body afterwards, so handover itself answers 0.
+  // §15.28's native path is the one that returns a promise of a real code.
+  execPackageManager: vi.fn(() => 0),
   resolveBinPath: vi.fn(),
 }));
 

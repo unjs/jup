@@ -102,6 +102,20 @@ export interface PackageManagerSpec {
   npmRegistry?: NpmRegistrySpec;
   /** argv to run after `corepack use` / `up`. */
   commands?: { use?: string[] };
+  /**
+   * §15.28 — how the `bin` targets are executed.
+   *
+   * Absent (or `"js"`) is §08.2's model: the entry point is JavaScript and is
+   * loaded into this process. `"native"` means the `bin` targets are real
+   * executables and are run **directly**, so §08.3.1's runtime lookup is skipped
+   * entirely — which makes a native package manager *faster* to hand over to
+   * than a JavaScript one, not slower.
+   *
+   * This is per **range entry**, not per package manager: a tool that ships JS
+   * up to some version and native after it is exactly the migration #295's
+   * thread describes, and a per-band flag expresses it without a code change.
+   */
+  exec?: "js" | "native";
 }
 
 /**

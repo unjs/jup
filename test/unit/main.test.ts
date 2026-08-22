@@ -666,6 +666,10 @@ const COLD_PATH_MODULES = [
   // `strace` on the built binary confirms zero such syscalls — this list is what
   // keeps it that way.
   "npmrc.ts",
+  // §15.28's native handover, and with it `node:child_process`. A JavaScript
+  // package manager is handed over to in-process (§08.2) and must not pay for
+  // the machinery that exists for the ones that are not JavaScript.
+  "native.ts",
 ];
 
 /**

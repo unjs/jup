@@ -8,7 +8,12 @@
 
 import { open, rm } from "node:fs/promises";
 import { join, posix } from "node:path";
-import { getSpecFor, isEmbeddedReference, isSupportedPackageManager } from "./config/table.ts";
+import {
+  getSpecFor,
+  isEmbeddedReference,
+  isSupportedPackageManager,
+  resolveSpecUrl,
+} from "./config/table.ts";
 import { envFlag, isCI } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { httpGet } from "./http.ts";
@@ -315,7 +320,10 @@ async function chooseSource(
   const registryUrl = getRegistryUrl({ name, packageName });
 
   const source: ArtifactSource = {
-    url: spec.url.replace("{}", version),
+    // §15.28 — `{}`, and optionally `{platform}` / `{arch}`. An unsupported host
+    // fails here, before any bytes move, rather than 404ing on a URL that still
+    // carries the placeholder.
+    url: resolveSpecUrl(spec, locator, version),
     registry,
     registryUrl,
   };

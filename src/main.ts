@@ -185,17 +185,21 @@ export async function runProxy(
   // package manager owns the process from here (§08.2).
   // §08.1 — `installSpec.bin ?? spec.bin`: a marker written by an older corepack
   // carries no `bin`, and the embedded table's entry is what stands in for it.
-  execPackageManager(
+  const tableSpec = getTableSpec(locator);
+
+  // On the JavaScript path this resolves with 0 immediately and the package
+  // manager sets the real exit code from its own module body, which runs
+  // strictly after this returns — never wrap that in a catch (§08.4). On
+  // §15.28's native path it is the child's own exit code, and awaiting it is the
+  // only way to have one.
+  return await execPackageManager(
     binaryName,
     installSpec,
     args,
     getSpecUrl(locator),
-    getTableSpec(locator)?.bin,
+    tableSpec?.bin,
+    tableSpec?.exec,
   );
-
-  // The package manager sets the real exit code from its own module body, which
-  // runs strictly after this returns. Never wrap that in a catch (§08.4).
-  return 0;
 }
 
 /**

@@ -8,7 +8,7 @@
  * lookup and says otherwise.
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { MockRegistry } from "./registry.ts";
@@ -39,6 +39,26 @@ export interface RunOptions {
   bin?: string;
   /** Inherit the parent's stdio instead of piping it (row 140's TTY case). */
   inheritStdio?: boolean;
+  /**
+   * Called with the spawned tool process, for rows that must signal **the tool
+   * itself** rather than wait for it (§08.5's forwarding requirement).
+   *
+   * The child of `run()` is in the test runner's process group, not its own, so
+   * a signal sent to this pid reaches the tool alone — which is exactly the
+   * "received directly, not via the group" case §08.5 requires forwarding for.
+   */
+  onSpawn?: (child: ChildProcess) => void;
+  /**
+   * Put the tool in a process group of its own, so a test can signal the
+   * **group** — `process.kill(-pid, …)` — the way a terminal signals its
+   * foreground group on Ctrl-C.
+   *
+   * Without this the tool shares the test runner's group and there is no group
+   * to signal but vitest's own. With it, §08.5's "do not create a new process
+   * group for the child" becomes observable: a package manager the tool
+   * detached would not be in the group that gets signalled.
+   */
+  detachedGroup?: boolean;
   timeout?: number;
 }
 
@@ -109,8 +129,11 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
     cwd: options.cwd,
     env,
     stdio: options.inheritStdio ? ["pipe", "inherit", "inherit"] : "pipe",
+    detached: options.detachedGroup === true,
     timeout: options.timeout ?? 30_000,
   });
+
+  options.onSpawn?.(child);
 
   let stdout = "";
   let stderr = "";

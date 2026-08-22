@@ -639,17 +639,18 @@ async function applyToProject(
   out(`\n`);
 
   // From here the package manager owns the process and its output is passed
-  // through untouched (§09.11).
-  execPackageManager(
+  // through untouched (§09.11). §15.28's native path is the one that has an exit
+  // code to hand back here; the JavaScript path answers 0 and sets the real one
+  // itself, later (§08.4).
+  return await execPackageManager(
     useCommand[0]!,
     spec,
     useCommand.slice(1),
     getSpecUrl(pinned),
     // §08.1 — `installSpec.bin ?? spec.bin`; the marker may predate `bin`.
     tableSpec?.bin,
+    tableSpec?.exec,
   );
-
-  return 0;
 }
 
 /** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */

@@ -468,6 +468,32 @@ export const messages = {
   unsignedRegistry: (registry: string, packageName: string, version: string) =>
     `! ${url_(registry)} does not publish signatures for ${packageName}@${version}; falling back to integrity-only verification`,
 
+  /* §15.28 — native package managers -------------------------------------- */
+
+  /**
+   * A `{platform}` placeholder this host cannot fill.
+   *
+   * The failure mode this exists to prevent is a URL that still carries the
+   * literal `{platform}`, which 404s and blames the registry. Name the host
+   * value that was not recognised, and the set that would have been.
+   */
+  unsupportedPlatform: (name: string, reference: string, platform: string) =>
+    `${name}@${reference} ships per-platform artifacts, and there is none for platform '${platform}' (supported: darwin, linux, win32)`,
+
+  /** The same for `{arch}`. Reported separately so the message names the half that failed. */
+  unsupportedArch: (name: string, reference: string, arch: string) =>
+    `${name}@${reference} ships per-platform artifacts, and there is none for architecture '${arch}' (supported: arm64, x64)`,
+
+  /**
+   * §15.28 — a native `bin` target that could not be executed at all.
+   *
+   * Distinct from a package manager that ran and failed: this is `spawn`
+   * refusing, which on POSIX is almost always `EACCES` (the executable bit did
+   * not survive extraction, §07.4 rule 6) or `ENOEXEC` (an artifact for the
+   * wrong platform).
+   */
+  cannotExecute: (binPath: string, reason: string) => `Unable to execute ${binPath}: ${reason}`,
+
   /* §14.5 — env-file eligibility ------------------------------------------ */
 
   ignoringEnvVar: (name: string, path: string) =>
