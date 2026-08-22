@@ -802,18 +802,21 @@ phase 2 ([`.agents/15`](./.agents/15-gaps.md)) apart from two items noted below:
 | Area | State |
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
-| Implementation | 30 modules, zero runtime dependencies |
+| Implementation | 32 modules, zero runtime dependencies |
 | Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 311 passing, 3 skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 1057 passing |
+| Unit tests | 1157 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
 Measured, not hoped for:
 
-- **39 kB** min+gzipped, **zero** runtime dependencies.
-- **~33 ms** for a warm proxy invocation against **~19 ms** for bare Node — so **~14 ms**
-  of actual work — and **~51 ms** for corepack on the same machine. (Best-of-41 spawns on
-  an idle machine; absolute timings on a loaded one are noise wider than the effect.)
+- **42 kB** min+gzipped, **zero** runtime dependencies.
+- **~28 ms** for a warm proxy invocation against **~19 ms** for bare Node — so **~9 ms**
+  of actual work — against **~51 ms** for corepack on the same machine. (Best of 150
+  spawns, interleaved in one loop; absolute timings taken minutes apart on a loaded
+  machine are noise wider than the effect, which we learned the hard way.)
+- A warm run loads **two** Node built-ins beyond what the measuring harness itself costs,
+  and a test fails if that reaches seven.
 - A warm run makes **zero** network requests, never reads the recorded default, and never
   scans the store. That is asserted by a test which patches `fetch` and `readFileSync`
   and fails if either is touched, and was independently confirmed with `strace`.
