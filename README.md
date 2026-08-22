@@ -859,8 +859,10 @@ The full list with rationale is in
 
 ## Status
 
-Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete, and so is
-phase 2 ([`.agents/15`](./.agents/15-gaps.md)) apart from one item noted below:
+Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete. Phase 2
+([`.agents/15`](./.agents/15-gaps.md)) is most of the way there; a section-by-section
+audit of all 38 requirements is in [`.agents/S15-AUDIT.md`](./.agents/S15-AUDIT.md), and
+what it found is listed below rather than summarised away.
 
 | Area | State |
 | --- | --- |
@@ -894,10 +896,31 @@ support (§15.28), one verification tier for every source with sidecar integrity
 (§15.11, §15.12), signing-key rotation and per-origin trust (§15.9, §15.10), and parts of
 §15.14, §15.19 and §15.35.
 
-Not done yet:
+Not done yet, from the audit:
 
+- **Global invocations still hit the project pin** (§15.31). `npm install -g <anything>`
+  inside a yarn- or pnpm-pinned project fails with the name-mismatch error, blocking the
+  tool's own documented upgrade path ([#690]). This is currently *worse* here than in
+  corepack, and by our own hand: shimming npm by default (§15.16) reaches users corepack's
+  version never did.
+- **The resolved package manager is not put on `PATH`** (§15.32), so a script that shells
+  out to `pnpm` gets a different one ([#412]).
 - **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
   the abbreviated packument the registry client requests does not carry.
+- Smaller: yarn's compiled-in `default` is still Classic 1.22.22 (§15.33 bullet 2);
+  `COREPACK_REQUIRE_SIGNATURES` is ignored on the pinned-hash path (§15.7); no deprecation
+  line on `hydrate`/`prepare` (§15.35c); no `outside any project` suffix (§15.35k); an
+  unmatched version band throws where §15.17 wants a fallback; `COREPACK_SPEC_FILE`
+  (§15.35d) does not exist.
+
+Thirteen of §15.38's conformance rows have no test yet, and the audit records two places
+where an existing test proves less than its name suggests — §15.26's row asserts the
+implementation's own behaviour rather than the spec's, and §15.24's row 184 cannot detect
+the SHOULD it appears to cover, because its fixture's `latest` and stable maximum are the
+same version.
+
+[#412]: https://github.com/nodejs/corepack/issues/412
+[#690]: https://github.com/nodejs/corepack/issues/690
 
 One limitation worth stating: a **native** package manager must currently ship as a
 `.tgz`. §07.4 dispatches on the URL path's extension and requires an unrecognised one to
