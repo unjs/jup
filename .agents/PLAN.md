@@ -940,3 +940,58 @@ chunk. It now also asserts a **byte ceiling** on that set's source (190 kB again
 176.9 kB today, which emits a 72.7 kB `warm.mjs`), because an exact module set says
 nothing about a module that doubles in size. Measured on the source, so it needs no
 build and names the file that grew.
+
+# Phase 3 — closing §15 properly
+
+Phase 2's twelve items (P1–P12) all landed, but that plan was organised **by value, not by
+walking §15**, so several `[required]` sections were never assigned to anyone. A full
+audit of all 38 sections against the source and tests is in
+[`S15-AUDIT.md`](./S15-AUDIT.md) (taken at `fed9e24`).
+
+That is a planning failure worth naming: "every item on my plan is done" was allowed to
+stand in for "the spec is satisfied", and the README said so for several hours. The audit
+should have been the *first* step of phase 2, not a check after it.
+
+## What it found
+
+**Done** (implemented *and* discriminatingly tested): 15.1–15.8, 15.11, 15.12, 15.13,
+15.15, 15.16, 15.18, 15.19, 15.20, 15.23, 15.24, 15.25, 15.27, 15.28, 15.29, 15.30,
+15.35a/b/g/h/i/j/l.
+
+**Partial**: 15.10, 15.14, 15.21, 15.26, 15.33, 15.34, 15.35f, 15.37.
+**Not done**: 15.9, 15.17, 15.22 (advisory), 15.31, 15.32, 15.35c, 15.35d, 15.35e.
+
+Four sections nobody was assigned turned out satisfied incidentally; five were real gaps.
+
+## Ranked, and who has them
+
+| # | Gap | State |
+|---|---|---|
+| 1 | **§15.31** global `-g`/`--global` must bypass the project pin | in flight |
+| 2 | **§15.32** prepend the resolved manager's dir to `PATH` | in flight |
+| 3 | **§15.9** trust-key refresh on keyid-miss | in flight |
+| 4 | **§15.10** custom-registry trust — keys for a private mirror currently widen to registry.npmjs.org | in flight |
+| 5 | §15.33 bullet 2 — yarn's `default` is still Classic 1.22.22, the exact value §15.33 calls a maintenance failure; no test locks it | open |
+| 6 | §15.7 — `COREPACK_REQUIRE_SIGNATURES` is silently ignored on the pinned-hash path, untested in either direction | open |
+| 7 | §15.35c — no deprecation/migration line (zero hits for `is deprecated`) | open |
+| 8 | §15.35k — no `outside any project` suffix | open |
+| 9 | §15.17 — `getSpecFor` throws where §15.17 wants a fallback; `noRangeBand` has zero test references | open |
+| 10 | §15.35d — `COREPACK_SPEC_FILE`; must be added to `ENV_FILE_INELIGIBLE` in the same change, since eligibility is a deny-list | open |
+
+**§15.31 is worse here than in corepack, and that is our doing**: §15.16 made `enable`
+shim `npm` by default, which corepack never did, so `npm install -g …` inside a pinned
+project now fails for users corepack's version never reached.
+
+## Two things the audit could not settle
+
+* **§15.26's proving test asserts the implementation's chosen behaviour**, so it proves
+  self-consistency rather than conformance with row 190's "both updated". Needs a ruling.
+* **§15.24's row 184 cannot detect the missing `latest`-dist-tag SHOULD**, because the
+  fixture's `latest` and its stable maximum are the same version. The row passes either
+  way — exactly the "test that cannot distinguish" failure this project keeps hitting.
+
+## Unasserted §15.38 rows
+
+The table runs to **207**, not 203. No test asserts: **162, 163, 164, 165, 166, 176, 180,
+197, 198, 201, 203, 205, 207**. (162–166 are what the in-flight §15.9/§15.10 work adds.)
+Row **207** needs no feature at all, only a test.
