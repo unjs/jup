@@ -6,13 +6,16 @@
  * timeouts; `fetch` follows redirects and drops `Authorization` on a
  * cross-origin hop, which is exactly what §14.6 requires.
  *
- * Proxy support (§14.8) is deferred — it is the one thing `fetch` cannot do
- * without a custom dispatcher. It hangs off {@link HttpOptions}.
+ * Proxy support (§14.8) is the one thing `fetch` cannot do on its own, so it
+ * arrives as a dispatcher behind {@link HttpOptions.transport}: `proxy.ts`
+ * decides, per request, whether the environment names a proxy for this URL, and
+ * only then does anything load a socket stack.
  */
 
 import { Buffer } from "node:buffer";
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, redactUserinfo, UsageError } from "./errors.ts";
+import { proxyFetch, proxyForUrl } from "./proxy.ts";
 
 /** §05.1 — the reference implementation imposes none; we suggest 30 s. */
 const DEFAULT_TIMEOUT = 30_000;
@@ -34,15 +37,12 @@ export interface HttpOptions {
   /** Connect + idle timeout in ms. Default 30_000. */
   timeout?: number;
   /**
-   * **Phase-2 seam — do not use yet.**
+   * The transport seam.
    *
-   * Proxy support (§05.1, §14.8), retry/backoff (§15.5) and custom CA /
-   * strict-ssl (§15.4) all hang off this one option: `fetch` cannot proxy
-   * without a custom dispatcher, so when those land they build the dispatcher,
-   * bind it, and hand the result in here. Everything else in this module stays
-   * as it is, which is the point — adding a proxy touches this file only.
-   *
-   * Phase 1 leaves it undefined and calls the global `fetch`.
+   * Left undefined — which every caller does — the transport is chosen per
+   * request: native `fetch` when no proxy applies (§05.1), and `proxy.ts`'s
+   * dispatcher when one does (§14.8). Retry/backoff (§15.5) and custom CA /
+   * strict-ssl (§15.4) hang off the same seam when they land.
    */
   transport?: typeof globalThis.fetch;
 }
@@ -220,7 +220,12 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
   }, timeout);
   timer.unref();
 
-  const transport = options.transport ?? globalThis.fetch;
+  // §14.8 — `HTTP_PROXY` and friends are honoured with no second opt-in flag,
+  // which is the whole divergence. The check is pure environment parsing and the
+  // answer is `undefined` for everyone who has no proxy configured, so the
+  // unproxied path is native `fetch`, byte for byte as it was.
+  const transport =
+    options.transport ?? (proxyForUrl(target) === undefined ? globalThis.fetch : proxyFetch);
 
   let response: Response;
   try {

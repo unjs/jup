@@ -86,6 +86,16 @@ async function deadOrigin(): Promise<string> {
 }
 
 const ENV_KEYS = [
+  // §14.8 — the proxy variables are live with no second opt-in, so a developer
+  // who has one configured must not have it applied to these fixtures.
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",

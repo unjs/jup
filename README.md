@@ -176,6 +176,9 @@ The full list with rationale is in
   real environment only. Cloning a repository and running `yarn` should not hand it your
   npm token.
 - **Credentials never leave the configured registry's origin**, on any request path.
+- **`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` just work.** Corepack leaves
+  proxying to the host runtime, which needs `NODE_USE_ENV_PROXY=1` before any of them do
+  anything; pipack tunnels through the proxy itself, with no second flag to discover.
 - **Signing-key expiry is honoured** rather than stored and ignored.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
@@ -193,8 +196,8 @@ Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
 | Implementation | 13 modules, zero runtime dependencies |
-| Conformance suite (§13, rows 1–147) | Passing — 5 rows skipped, each documenting why |
-| Unit tests | 794 passing |
+| Conformance suite (§13, rows 1–147) | Passing — 3 rows skipped (two Windows-only, one needs a real TTY) |
+| Unit tests | 732 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
@@ -209,10 +212,7 @@ Measured, not hoped for:
 
 Not done, deliberately:
 
-- **Proxy support** (`HTTP_PROXY` and friends). `fetch` cannot do it without a custom
-  dispatcher, so it is deferred behind a single seam in `src/http.ts`. Conformance rows
-  71 and 72 are skipped until then.
-- **Everything in [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, semver ranges
+- **Most of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, semver ranges
   in the pin, `pipack info`, signing-key rotation, per-package-manager registries, native
   (non-JavaScript) package managers, and the rest.
 

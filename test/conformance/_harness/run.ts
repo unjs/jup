@@ -46,6 +46,19 @@ export interface RunOptions {
  * A clean environment: everything the tool reads is either absent or set
  * deliberately by the test.
  */
+const PROXY_VARIABLES = new Set([
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "NODE_USE_ENV_PROXY",
+  "NODE_EXTRA_CA_CERTS",
+]);
+
 export function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -54,6 +67,10 @@ export function cleanEnv(): Record<string, string> {
     // `CI` gates the interactive half of the download prompt (§05.5), and
     // `NODE_OPTIONS` could smuggle a loader into the child.
     if (key === "CI" || key === "NODE_OPTIONS" || key === "PIPACK_MOCK_ORIGIN") continue;
+    // §14.8 makes the proxy variables live with no second opt-in, so a developer
+    // who has one configured would otherwise route every fixture request through
+    // it. The rows that want a proxy set these themselves.
+    if (PROXY_VARIABLES.has(key)) continue;
     env[key] = value;
   }
   return env;

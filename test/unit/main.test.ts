@@ -635,10 +635,15 @@ describe("the warm fast path — §01.3 (test 96)", () => {
  * cold-path only: the downloader and its transport, hashing, signature
  * verification and tar reader (§07, §06), plus the management command surface
  * (§09) and the shim writer (§10), which the proxy path already loads lazily.
+ *
+ * `proxy.ts` (§14.8) is on this list for the same reason as `http.ts`: it is
+ * reached only when a request is about to go out, and its socket stack is loaded
+ * later still — only once a proxy has actually matched.
  */
 const COLD_PATH_MODULES = [
   "install.ts",
   "http.ts",
+  "proxy.ts",
   "integrity.ts",
   "registry.ts",
   "tar.ts",

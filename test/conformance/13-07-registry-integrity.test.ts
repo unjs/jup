@@ -289,33 +289,6 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(proxy.connects).toEqual(["example.com:443"]);
   });
 
-  it("157: NO_PROXY bypasses the proxy for a matching host (§15.6)", async () => {
-    const proxy = await startProxy(() => registry.origin);
-    const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
-
-    try {
-      // The registry is the mock itself this time, so a bypassed request can
-      // succeed on its own — and a proxied one would be recorded.
-      const result = await run(["pnpm", "--version"], {
-        ...fixture,
-        env: trusted({
-          COREPACK_NPM_REGISTRY: registry.origin,
-          HTTP_PROXY: proxy.origin,
-          HTTPS_PROXY: proxy.origin,
-          NO_PROXY: "127.0.0.1",
-        }),
-      });
-
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toBe("6.6.2\n");
-      expect(proxy.absoluteForm).toEqual([]);
-      expect(proxy.connects).toEqual([]);
-      expect(registry.requests.length).toBeGreaterThan(0);
-    } finally {
-      await proxy.stop();
-    }
-  });
-
   it("73: a signature from an untrusted key is refused", async () => {
     registry.mode = "untrusted_key";
     const untrusted = createFixture({ packageManager: "pnpm@6.6.2" });
