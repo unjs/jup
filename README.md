@@ -141,6 +141,86 @@ pipack pack pnpm@11.1.2              # or: build a portable archive on a network
 pipack install -g corepack.tgz       # and seed a cache from it elsewhere
 ```
 
+## Enabling the shims
+
+```sh
+pipack enable
+```
+
+That puts `npm`, `npx`, `pnpm`, `pnpx`, `yarn` and `yarnpkg` on your `PATH`, each pointing
+back at pipack. `disable` takes them off again.
+
+**Two differences from corepack you will notice immediately.**
+
+*npm is shimmed by default.* Corepack excludes it deliberately, but the exclusion is an
+inter-team agreement between the corepack and npm maintainers ([#138]), not a technical
+limit, and pipack is not party to it. What the exclusion costs is the very thing the tool
+exists to prevent: a project pinned to `yarn` correctly blocks `pnpm`, while `npm install`
+silently works anyway and writes the inconsistent lockfile state. `pipack enable --exclude
+npm` restores the old default.
+
+*Shims go to a per-user directory, and never need `sudo`.* Corepack writes them next to
+its own binary — `C:\Program Files\nodejs` on Windows, `/usr` under a distro package, a
+read-only path on NixOS ([#71], 34 👍 and open since 2021; also [#265], [#416]). pipack
+uses `--install-directory`, else `COREPACK_SHIM_DIRECTORY`, else `$XDG_BIN_HOME` or
+`~/.local/bin` (`%LOCALAPPDATA%\node\corepack\bin` on Windows). The directory is created
+and probed for writability *before* anything is written; if it is not writable, pipack
+falls back to the per-user default and says so rather than failing. To keep corepack's
+behaviour: `pipack enable --install-directory "$(dirname "$(command -v pipack)")"`.
+
+`LOCALAPPDATA` is read **only on Windows** — corepack honours it everywhere, which is why
+a Linux process started through WSL interop puts its cache on `/mnt/c` with alien
+permissions ([#673]). The same rule governs the store, and it is the one place pipack
+deliberately breaks cache-location compatibility.
+
+### `enable` tells you when it did nothing
+
+`corepack enable` exits 0 in silence even when `yarn` still resolves to the previous
+install ([#507], 12 👍). pipack checks its own post-condition — if the shim directory is
+not on `PATH` it prints the exact line to add, for the shell you are using:
+
+```
+! /home/you/.local/bin is not on your PATH, so the shims installed there will not be found.
+! Add it by running:
+!     export PATH="/home/you/.local/bin:$PATH"
+! A shell that is already open may need `hash -r` before the change is visible.
+```
+
+And if something else on `PATH` wins anyway — Volta, asdf, a distro package — it names the
+winner:
+
+```
+! yarn on PATH resolves to /home/you/.volta/bin/yarn, not the shim just installed at /home/you/.local/bin/yarn. Another version manager may be shadowing it.
+```
+
+Both are warnings; the exit code stays 0.
+
+### `enable` will not eat your package manager
+
+It refuses to replace a binary it did not install. With `--force` it goes ahead, but
+records what it displaced — path, type, symlink target, and for a regular file the file
+itself — under `<COREPACK_HOME>/shims.json`. `disable` removes only what pipack created,
+restores anything on that record, and clears it, so this round-trips:
+
+```sh
+pipack enable --force     # your distro's yarn is set aside
+pipack disable            # ...and put back, mode and all
+```
+
+Corepack deletes whatever occupies the name, in both directions ([#112], 10 👍). A shim
+left pointing at a `dist/` that no longer exists — what happens when Node stops bundling a
+version manager ([#751]) — is recognised as a shim rather than as a missing file, so
+`enable` replaces it and `disable` removes it.
+
+[#71]: https://github.com/nodejs/corepack/issues/71
+[#112]: https://github.com/nodejs/corepack/issues/112
+[#138]: https://github.com/nodejs/corepack/issues/138
+[#265]: https://github.com/nodejs/corepack/issues/265
+[#416]: https://github.com/nodejs/corepack/issues/416
+[#507]: https://github.com/nodejs/corepack/issues/507
+[#673]: https://github.com/nodejs/corepack/issues/673
+[#751]: https://github.com/nodejs/corepack/issues/751
+
 ## Commands
 
 | Command                              | What it does                                                             |
@@ -297,6 +377,8 @@ The ones you are most likely to want:
 | `COREPACK_STRICT_SSL=0`             | Disable TLS certificate verification, loudly                      |
 | `COREPACK_NETWORK_TIMEOUT`          | Connect and idle timeout in milliseconds (default `30000`)        |
 | `COREPACK_NETWORK_RETRIES`          | Attempts per request, the first included (default `3`); `0` disables retrying |
+| `COREPACK_SHIM_DIRECTORY`           | Where `enable` installs shims and `disable` looks for them |
+| `XDG_BIN_HOME`                      | Per-user shim directory on Linux and BSD; not consulted on macOS or Windows |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
 Security-relevant ones are deliberately not settable that way — see
@@ -370,6 +452,10 @@ The full list with rationale is in
   sentence; here each has its own, and there is a `COREPACK_CAFILE` to point at.
 - **Requests time out and are retried.** Corepack has no timeout, no retry and no
   backoff, so one hiccup is fatal and the message says nothing about what happened.
+- **`enable` never needs `sudo`, and `disable` gives back what it displaced.** Shims go to
+  a per-user directory, `npm` is shimmed like everything else, and `enable` verifies it
+  actually won on `PATH` instead of exiting 0 in silence. See
+  [Enabling the shims](#enabling-the-shims).
 - **Signing-key expiry is honoured** rather than stored and ignored.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
@@ -403,11 +489,12 @@ Measured, not hoped for:
 
 Not done, deliberately:
 
-- **Most of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, signing-key
+- **Part of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, signing-key
   rotation, per-package-manager registries, native (non-JavaScript) package managers, and
-  the rest. Semver ranges in the pin with `.corepack.lock`
-  ([§15.23](./.agents/15-gaps.md)), and `pipack info` ([§15.30](./.agents/15-gaps.md)),
-  are done.
+  the rest. Done so far: semver ranges in the pin with `.corepack.lock` (§15.23),
+  `pipack info` (§15.30), proxies (§15.6), TLS diagnostics and retries (§15.4, §15.5),
+  registry-metadata tiering (§15.7, §15.8), and shims and enablement
+  (§15.13–§15.16, §15.29).
 
 ### What the audit found
 

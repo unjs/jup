@@ -377,10 +377,26 @@ describe("§15.30 corepack info", () => {
     expect(yarn.ours).toBe(true);
     expect(yarn.shadowed).toBe(false);
 
-    // `enable` with no names skips npm (§10.5), so its shim is absent and the
-    // report must not claim otherwise.
+    // §15.16 redirected this row: `enable` with no names now shims npm too, so
+    // the report must show it. `--exclude npm` is what leaves it absent.
     const npm = report.shims.entries.find((entry) => entry.binary === "npm")!;
-    expect(npm.shim).toBeNull();
+    expect(npm.shim).toBe(join(shimDirectory, "npm"));
+
+    expect(
+      (
+        await run(["disable", "--install-directory", shimDirectory, "--exclude", "yarn"], {
+          ...fixture,
+          bin,
+        })
+      ).exitCode,
+    ).toBe(0);
+    const after = await info(fixture, {
+      env: { PATH: `${shimDirectory}:${process.env.PATH ?? ""}` },
+    });
+    expect(after.shims.entries.find((entry) => entry.binary === "npm")!.shim).toBeNull();
+    expect(after.shims.entries.find((entry) => entry.binary === "yarn")!.shim).toBe(
+      join(shimDirectory, "yarn"),
+    );
   });
 
   it("196: --json and the human form describe the same run", async () => {

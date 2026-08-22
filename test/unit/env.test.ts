@@ -272,6 +272,11 @@ describe("isEnvFileEligible", () => {
     // again — and §15.37's table marks them eligible.
     expect(isEnvFileEligible("COREPACK_NETWORK_TIMEOUT")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NETWORK_RETRIES")).toBe(true);
+    // §15.37 marks §15.13's shim directory eligible: where a project's tooling
+    // lands is a preference, not a security boundary — nothing is executed from
+    // it that was not already going to run. Asserted explicitly so a later edit
+    // to ENV_FILE_INELIGIBLE cannot quietly withdraw it.
+    expect(isEnvFileEligible("COREPACK_SHIM_DIRECTORY")).toBe(true);
 
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);

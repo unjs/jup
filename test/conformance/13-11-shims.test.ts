@@ -1,47 +1,72 @@
 /**
  * §13.11 — `enable` and `disable` (rows 117–131).
  *
- * The tool has to be findable on `PATH` for the default install directory to
- * resolve (§10.4), so each fixture plants an executable `pipack` in a throwaway
- * directory and puts it first on `PATH`. `enable` writes its stubs next to the
- * library entry module, so these rows run a *copy* of `src/` and leave the
- * checkout alone.
+ * Two things every row here has to get right, both of them learned the hard way:
+ *
+ * 1. **The shims must be ours.** A row that plants a fake package manager and
+ *    then runs `yarn` proves nothing if the machine's own corepack is what ran
+ *    it. Every fixture therefore runs a *copy* of the tool (`copyTool`) and the
+ *    shim-execution row asserts `COREPACK_ROOT` points back at that copy.
+ * 2. **The per-user default must be redirected.** §15.13 sends shims to
+ *    `$XDG_BIN_HOME`/`~/.local/bin` by default, so a row that forgets to
+ *    override `HOME` writes into the developer's own `PATH`.
+ *
+ * `enable` writes its stubs next to the library entry module, so these rows run
+ * a copy of `src/` and leave the checkout alone.
  */
 
 import {
-  chmodSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { cleanupFixtures, copyTool, createFixture, run } from "./_harness/index.ts";
+import {
+  cleanupFixtures,
+  copyTool,
+  createFixture,
+  run,
+  seedPackageManager,
+} from "./_harness/index.ts";
 
 const TOOL = copyTool();
 
 const IS_WINDOWS = process.platform === "win32";
 
-/** A directory on `PATH` holding our own binary — where shims belong by default. */
-function toolOnPath() {
+/**
+ * A fixture whose per-user shim directory (§15.13) is inside the fixture, with
+ * both it and a second candidate directory on `PATH` — so §15.29's verification
+ * is satisfied and a clean `enable` really does print nothing.
+ */
+function shimFixture() {
   const fixture = createFixture();
+  const shimDir = join(fixture.root, "user-bin");
   const binDir = join(fixture.root, "bin");
+  mkdirSync(shimDir, { recursive: true });
   mkdirSync(binDir, { recursive: true });
-  writeFileSync(join(binDir, "pipack"), "#!/bin/sh\nexit 0\n");
-  chmodSync(join(binDir, "pipack"), 0o755);
 
   return {
     fixture,
+    /** Where `enable` with no `--install-directory` puts things. */
+    shimDir,
+    /** A second writable directory, for the `--install-directory` rows. */
     binDir,
-    /** `run()` options that make `<binDir>` the natural shim directory. */
     options: {
       cwd: fixture.cwd,
       home: fixture.home,
       bin: TOOL,
-      env: { PATH: `${binDir}:${process.env.PATH ?? ""}` },
+      env: {
+        HOME: fixture.root,
+        USERPROFILE: fixture.root,
+        XDG_BIN_HOME: shimDir,
+        LOCALAPPDATA: undefined,
+        PATH: `${shimDir}${delimiter}${binDir}${delimiter}${process.env.PATH ?? ""}`,
+      },
     },
   };
 }
@@ -49,36 +74,34 @@ function toolOnPath() {
 afterAll(cleanupFixtures);
 
 describe("§13.11 enable / disable", () => {
-  it("117: enable installs a shim for every non-npm package manager beside the tool", async () => {
-    const { binDir, options } = toolOnPath();
+  // §15.13 and §15.16 both redirected this row: the default directory is no
+  // longer "beside the tool" (#71) and npm is no longer excluded (#138).
+  it("117: enable installs a shim for every package manager, npm included", async () => {
+    const { shimDir, options } = shimFixture();
 
     const result = await run(["enable"], options);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
-    for (const name of ["yarn", "yarnpkg", "pnpm", "pnpx"]) {
-      expect(lstatSync(join(binDir, name)).isSymbolicLink()).toBe(true);
-    }
-    for (const name of ["npm", "npx"]) {
-      expect(() => lstatSync(join(binDir, name))).toThrow();
+    for (const name of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
+      expect(lstatSync(join(shimDir, name)).isSymbolicLink()).toBe(true);
     }
   });
 
   it("118: enable --install-directory puts the shims there instead", async () => {
-    const { fixture, options } = toolOnPath();
-    const target = join(fixture.root, "elsewhere");
-    mkdirSync(target);
+    const { binDir, options } = shimFixture();
 
-    const result = await run(["enable", "--install-directory", target], options);
+    const result = await run(["enable", "--install-directory", binDir], options);
 
     expect(result.exitCode).toBe(0);
-    expect(lstatSync(join(target, "yarn")).isSymbolicLink()).toBe(true);
-    expect(lstatSync(join(target, "pnpm")).isSymbolicLink()).toBe(true);
+    expect(result.stderr).toBe("");
+    expect(lstatSync(join(binDir, "yarn")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(binDir, "pnpm")).isSymbolicLink()).toBe(true);
   });
 
   it("119: enable --install-directory=<dir> yarn installs yarn and yarnpkg only", async () => {
-    const { fixture, options } = toolOnPath();
+    const { fixture, options } = shimFixture();
     const target = join(fixture.root, "only-yarn");
     mkdirSync(target);
 
@@ -93,11 +116,11 @@ describe("§13.11 enable / disable", () => {
   it.skipIf(IS_WINDOWS)(
     "120: enable replaces a plain file that is one of our own stubs",
     async () => {
-      const { binDir, options } = toolOnPath();
+      const { shimDir, options } = shimFixture();
       // A shim we wrote earlier, copied rather than linked — §14.16 recognises it
       // by its marker and replaces it; a *foreign* file is row 121's case.
       writeFileSync(
-        join(binDir, "yarn"),
+        join(shimDir, "yarn"),
         "#!/usr/bin/env node\n// @pipack-shim — generated by `pipack enable`\n",
       );
 
@@ -105,69 +128,70 @@ describe("§13.11 enable / disable", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
-      expect(lstatSync(join(binDir, "yarn")).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(shimDir, "yarn")).isSymbolicLink()).toBe(true);
     },
   );
 
   it.skipIf(IS_WINDOWS)(
     "121: enable refuses a foreign regular file unless --force (§14.16)",
     async () => {
-      const { binDir, options } = toolOnPath();
+      const { shimDir, options } = shimFixture();
       const foreign = "#!/bin/sh\necho a real yarn\n";
-      writeFileSync(join(binDir, "yarn"), foreign);
+      writeFileSync(join(shimDir, "yarn"), foreign);
 
       const refused = await run(["enable"], options);
 
       expect(refused.exitCode).toBe(0);
       expect(refused.stderr).toContain("was not installed by this tool");
       expect(refused.stderr).toContain("use --force to overwrite");
-      expect(readFileSync(join(binDir, "yarn"), "utf8")).toBe(foreign);
-      expect(lstatSync(join(binDir, "yarn")).isSymbolicLink()).toBe(false);
+      expect(readFileSync(join(shimDir, "yarn"), "utf8")).toBe(foreign);
+      expect(lstatSync(join(shimDir, "yarn")).isSymbolicLink()).toBe(false);
       // Its siblings are still installed.
-      expect(lstatSync(join(binDir, "pnpm")).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(shimDir, "pnpm")).isSymbolicLink()).toBe(true);
 
       const forced = await run(["enable", "--force"], options);
       expect(forced.exitCode).toBe(0);
-      expect(lstatSync(join(binDir, "yarn")).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(shimDir, "yarn")).isSymbolicLink()).toBe(true);
     },
   );
 
   it.skipIf(IS_WINDOWS)(
     "122: enable is idempotent — a correct symlink is not rewritten",
     async () => {
-      const { binDir, options } = toolOnPath();
+      const { shimDir, options } = shimFixture();
       expect((await run(["enable"], options)).exitCode).toBe(0);
-      const before = lstatSync(join(binDir, "yarn"));
+      const before = lstatSync(join(shimDir, "yarn"));
 
       const again = await run(["enable"], options);
 
       expect(again.exitCode).toBe(0);
-      const after = lstatSync(join(binDir, "yarn"));
+      expect(again.stderr).toBe("");
+      const after = lstatSync(join(shimDir, "yarn"));
       expect(after.mtimeMs).toBe(before.mtimeMs);
       expect(after.ino).toBe(before.ino);
     },
   );
 
   it.skipIf(IS_WINDOWS)("123: enable corrects a symlink pointing elsewhere", async () => {
-    const { binDir, fixture, options } = toolOnPath();
+    const { shimDir, fixture, options } = shimFixture();
     const stray = join(fixture.root, "stray.js");
     writeFileSync(stray, "");
-    symlinkSync(stray, join(binDir, "yarn"));
+    symlinkSync(stray, join(shimDir, "yarn"));
 
     const result = await run(["enable"], options);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(readlinkSync(join(binDir, "yarn"))).not.toBe(stray);
-    expect(readlinkSync(join(binDir, "yarn"))).toContain("yarn.js");
+    expect(readlinkSync(join(shimDir, "yarn"))).not.toBe(stray);
+    expect(readlinkSync(join(shimDir, "yarn"))).toContain("yarn.js");
   });
 
   it.skipIf(IS_WINDOWS)("124: enable skips a Yarn Switch install and says so", async () => {
-    const { binDir, fixture, options } = toolOnPath();
+    const { shimDir, fixture, options } = shimFixture();
     const switchBin = join(fixture.root, "switch", "bin");
     mkdirSync(switchBin, { recursive: true });
     writeFileSync(join(switchBin, "yarn.js"), "");
-    symlinkSync(join(switchBin, "yarn.js"), join(binDir, "yarn"));
+    symlinkSync(join(switchBin, "yarn.js"), join(shimDir, "yarn"));
 
     const result = await run(["enable"], options);
 
@@ -175,27 +199,26 @@ describe("§13.11 enable / disable", () => {
     expect(result.stderr).toMatch(
       /^yarn is already installed in .+ and points to a Yarn Switch install - skipping\n$/,
     );
-    expect(readlinkSync(join(binDir, "yarn"))).toBe(join(switchBin, "yarn.js"));
+    expect(readlinkSync(join(shimDir, "yarn"))).toBe(join(switchBin, "yarn.js"));
   });
 
   it("125: disable removes the shims and leaves everything else alone", async () => {
-    const { binDir, options } = toolOnPath();
-    writeFileSync(join(binDir, "unrelated"), "#!/bin/sh\n");
+    const { shimDir, options } = shimFixture();
+    writeFileSync(join(shimDir, "unrelated"), "#!/bin/sh\n");
     expect((await run(["enable"], options)).exitCode).toBe(0);
 
     const result = await run(["disable"], options);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    for (const name of ["yarn", "yarnpkg", "pnpm", "pnpx"]) {
-      expect(() => lstatSync(join(binDir, name))).toThrow();
+    for (const name of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
+      expect(() => lstatSync(join(shimDir, name))).toThrow();
     }
-    expect(lstatSync(join(binDir, "pipack")).isFile()).toBe(true);
-    expect(lstatSync(join(binDir, "unrelated")).isFile()).toBe(true);
+    expect(lstatSync(join(shimDir, "unrelated")).isFile()).toBe(true);
   });
 
   it("126: disable --install-directory=<dir> yarn removes yarn and yarnpkg only", async () => {
-    const { fixture, options } = toolOnPath();
+    const { fixture, options } = shimFixture();
     const target = join(fixture.root, "shims");
     mkdirSync(target);
     expect((await run(["enable", `--install-directory=${target}`], options)).exitCode).toBe(0);
@@ -211,11 +234,11 @@ describe("§13.11 enable / disable", () => {
   it.skipIf(IS_WINDOWS)(
     "127: disable skips a Yarn Switch install with the same warning",
     async () => {
-      const { binDir, fixture, options } = toolOnPath();
+      const { shimDir, fixture, options } = shimFixture();
       const switchBin = join(fixture.root, "switch", "bin");
       mkdirSync(switchBin, { recursive: true });
       writeFileSync(join(switchBin, "yarn.js"), "");
-      symlinkSync(join(switchBin, "yarn.js"), join(binDir, "yarn"));
+      symlinkSync(join(switchBin, "yarn.js"), join(shimDir, "yarn"));
 
       const result = await run(["disable", "yarn"], options);
 
@@ -223,32 +246,34 @@ describe("§13.11 enable / disable", () => {
       expect(result.stderr).toMatch(
         /^yarn is already installed in .+ and points to a Yarn Switch install - skipping\n$/,
       );
-      expect(lstatSync(join(binDir, "yarn")).isSymbolicLink()).toBe(true);
+      expect(lstatSync(join(shimDir, "yarn")).isSymbolicLink()).toBe(true);
     },
   );
 
   it.skipIf(!IS_WINDOWS)(
     "128: on Windows the same entry is removed without a warning",
     async () => {
-      // Windows-only by construction (§10.2 makes the Switch guard POSIX-only). The
-      // platform-independent generator is asserted from POSIX by
+      // Windows-only by construction (§10.2 makes the Switch guard POSIX-only).
+      // The platform-independent generator is asserted from POSIX by
       // test/unit/shims.test.ts::"128: Windows removal takes the same entry ...".
-      const { binDir, fixture, options } = toolOnPath();
-      const switchBin = join(fixture.root, "switch", "bin");
-      mkdirSync(switchBin, { recursive: true });
-      writeFileSync(join(switchBin, "yarn.js"), "");
-      writeFileSync(join(binDir, "yarn"), "");
+      //
+      // §15.15 redirected this row: `disable` now removes only what it created,
+      // so the fixture installs real shims rather than planting an empty file.
+      const { shimDir, options } = shimFixture();
+      expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);
 
       const result = await run(["disable", "yarn"], options);
 
       expect(result.exitCode).toBe(0);
       expect(result.stderr).toBe("");
-      expect(() => lstatSync(join(binDir, "yarn"))).toThrow();
+      for (const suffix of ["", ".cmd", ".ps1"]) {
+        expect(() => lstatSync(join(shimDir, `yarn${suffix}`))).toThrow();
+      }
     },
   );
 
   it("129: disable on a directory with no shims succeeds", async () => {
-    const { fixture, options } = toolOnPath();
+    const { fixture, options } = shimFixture();
     const empty = join(fixture.root, "empty");
     mkdirSync(empty);
 
@@ -261,26 +286,52 @@ describe("§13.11 enable / disable", () => {
   });
 
   it("130: enable rejects a name that is not a package manager", async () => {
-    const { binDir, options } = toolOnPath();
+    const { shimDir, options } = shimFixture();
 
     const result = await run(["enable", "cargo"], options);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(`Usage Error: Invalid package manager name 'cargo'`);
     expect(result.stdout).toContain("$ corepack enable");
-    expect(() => lstatSync(join(binDir, "yarn"))).toThrow();
+    expect(() => lstatSync(join(shimDir, "yarn"))).toThrow();
   });
 
   it.skipIf(!IS_WINDOWS)("131: on Windows enable writes <B>, <B>.cmd and <B>.ps1", async () => {
     // Windows-only by construction; the three bodies are compared byte for byte
     // from POSIX by test/unit/shims.test.ts::"131: writes <B>, <B>.cmd and <B>.ps1".
-    const { binDir, options } = toolOnPath();
+    const { shimDir, options } = shimFixture();
 
     const result = await run(["enable", "yarn"], options);
 
     expect(result.exitCode).toBe(0);
     for (const suffix of ["", ".cmd", ".ps1"]) {
-      expect(lstatSync(join(binDir, `yarn${suffix}`)).isFile()).toBe(true);
+      expect(lstatSync(join(shimDir, `yarn${suffix}`)).isFile()).toBe(true);
     }
+  });
+
+  it.skipIf(IS_WINDOWS)("a shim the tool wrote is the tool, and knows it", async () => {
+    // The trap this guards: a shim row can pass because the *machine's own*
+    // corepack answered. Three independent proofs that it did not — the stub
+    // carries our marker, the symlink resolves inside the throwaway copy, and
+    // running it reports `COREPACK_ROOT` pointing at that copy rather than at
+    // anything installed globally.
+    const { shimDir, fixture, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);
+
+    const shim = join(shimDir, "yarn");
+    const copyRoot = dirname(dirname(TOOL));
+    expect(realpathSync(shim).startsWith(copyRoot)).toBe(true);
+    // `readFileSync` follows the symlink, so this is the stub's own text.
+    expect(readFileSync(shim, "utf8")).toContain("@pipack-shim");
+
+    const result = await run(["run", "env"], { ...options, bin: shim });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`COREPACK_ROOT=${copyRoot}\n`);
+    // §10.1 — a shim defaults the download prompt to 1; `bin.ts` defaults it to 0.
+    expect(result.stdout).toContain(`COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n`);
   });
 });

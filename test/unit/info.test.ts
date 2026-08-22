@@ -32,6 +32,9 @@ import type { CorepackMarker } from "../../src/types.ts";
 
 const ENV_KEYS = [
   "COREPACK_HOME",
+  // §15.13 — the shim directory is now configurable, so it has to be scrubbed
+  // like every other input.
+  "COREPACK_SHIM_DIRECTORY",
   "COREPACK_NPM_REGISTRY",
   "COREPACK_NPM_TOKEN",
   "COREPACK_FROZEN_LOCKFILE",
@@ -520,9 +523,10 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
   it("recognises one of our own stubs, and something else's binary", () => {
     const bin = join(home, "bin");
     mkdirSync(bin, { recursive: true });
-    // §14.17 — shims live where our own binary lives, so the directory only
-    // counts as one once it holds it.
-    writeFileSync(join(bin, "pipack"), "#!/usr/bin/env node\n", { mode: 0o755 });
+    // §15.13 replaced §14.17's "wherever our own binary lives" with an explicit
+    // per-user chain, so the fixture names the directory instead of planting a
+    // `pipack` beside it.
+    process.env.COREPACK_SHIM_DIRECTORY = bin;
 
     // A stub carrying the marker, plus the relative symlink `enable` writes.
     writeFileSync(join(bin, "yarn.js"), `// ${SHIM_MARKER} — generated\n`, { mode: 0o755 });
@@ -549,12 +553,15 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     expect(winning.shadowed).toBe(false);
   });
 
-  it("survives a shim directory it cannot determine", () => {
+  // §15.13 redirected this row: the shim directory is now always determinable —
+  // that is the whole of #71 — so the case this asserted no longer arises. What
+  // survives is the promise underneath it: the report is complete either way.
+  it("names the per-user directory even with an empty PATH", () => {
     process.env.PATH = "";
     const info = buildReport().shims;
 
-    expect(info.directory).toBeNull();
-    expect(info.problem).toContain("Unable to determine where to install the shims");
+    expect(info.directory).not.toBeNull();
+    expect(info.problem).toBeNull();
     // And the rest of the report is still there.
     expect(info.entries).toHaveLength(6);
   });

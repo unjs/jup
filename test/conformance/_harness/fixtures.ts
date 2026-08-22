@@ -101,6 +101,15 @@ export function copyTool(): string {
   const root = mkdtempSync(join(tmpdir(), "pipack-tool-"));
   roots.push(root);
   cpSync(new URL("../../../src", import.meta.url), join(root, "src"), { recursive: true });
+  // The published package has one, and two things depend on it: `.js` files —
+  // which is what `enable` writes (§10.1) — are only ESM when it says so, and
+  // `COREPACK_ROOT` (§08.7) is the directory that holds it. Without it a shim
+  // written into the copy could not run, and `COREPACK_ROOT` would point
+  // somewhere outside the copy entirely.
+  writeFileSync(
+    join(root, "package.json"),
+    `{"name":"pipack","version":"0.0.0","type":"module"}\n`,
+  );
   return join(root, "src", "bin.ts");
 }
 

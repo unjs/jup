@@ -96,11 +96,19 @@ describe("getHomeFolder — §07.1", () => {
     expect(getHomeFolder()).toBe(join("/xdg", "cache", "node", "corepack"));
   });
 
-  it("consults LOCALAPPDATA even on POSIX, when XDG_CACHE_HOME is unset", () => {
+  // §15.13 point 5 redirected this row (conformance 171). Corepack honours
+  // LOCALAPPDATA on POSIX, which is #673: a Linux process started through WSL
+  // interop inherits it and lands its cache on /mnt/c.
+  it("171: ignores LOCALAPPDATA off Windows", () => {
     vi.stubEnv("COREPACK_HOME", undefined);
     vi.stubEnv("XDG_CACHE_HOME", undefined);
     vi.stubEnv("LOCALAPPDATA", join("/lad"));
-    expect(getHomeFolder()).toBe(join("/lad", "node", "corepack"));
+
+    const expected =
+      process.platform === "win32"
+        ? join("/lad", "node", "corepack")
+        : join(homedir(), ".cache", "node", "corepack");
+    expect(getHomeFolder()).toBe(expected);
   });
 
   it("falls back to the platform default under the user's home directory", () => {

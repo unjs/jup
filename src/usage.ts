@@ -18,8 +18,8 @@
  */
 export const USAGE_LINES: Record<string, string> = {
   cache: "$ corepack cache clean|clear|list",
-  disable: "$ corepack disable [--install-directory <path>] ...",
-  enable: "$ corepack enable [--install-directory <path>] ...",
+  disable: "$ corepack disable [--install-directory <path>] [--exclude <name>] ...",
+  enable: "$ corepack enable [--install-directory <path>] [--exclude <name>] [--force] ...",
   hydrate: "$ corepack hydrate [--activate] <file>",
   info: "$ corepack info [--json]",
   install: "$ corepack install [-g,--global] [--cache-only] ...",
@@ -39,8 +39,8 @@ export const HELP_TEXT = `Usage: corepack <command>
   corepack cache clean [--all]
   corepack cache clear [--all]
   corepack cache list [--json]
-  corepack disable [--install-directory <path>] [...name]
-  corepack enable  [--install-directory <path>] [...name]
+  corepack disable [--install-directory <path>] [--exclude <name>] [...name]
+  corepack enable  [--install-directory <path>] [--exclude <name>] [--force] [...name]
   corepack info [--json]
   corepack install
   corepack install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
@@ -54,6 +54,12 @@ Deprecated, retained for compatibility:
 
   corepack hydrate [--activate] <file>
   corepack prepare [--activate] [--all] [-o|--output [<path>]] [...spec]
+
+With no names, enable and disable target every supported package manager,
+npm included (§15.16) — pass --exclude npm to leave npm alone. Shims are
+installed to a per-user directory that never needs elevation (§15.13):
+COREPACK_SHIM_DIRECTORY, else $XDG_BIN_HOME or ~/.local/bin, else
+%LOCALAPPDATA%\\node\\corepack\\bin on Windows.
 
 Configuration is by environment variable only; COREPACK_ENABLE_DOWNLOAD_PROMPT
 defaults to 1 when invoked through a package-manager shim and 0 when invoked as

@@ -53,12 +53,16 @@ function randomSuffix(): string {
  * §07.1 — `COREPACK_HOME`, else `XDG_CACHE_HOME`/`LOCALAPPDATA`/platform default,
  * joined with `node/corepack`.
  *
- * Note `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA` on every platform,
- * and `LOCALAPPDATA` is consulted on POSIX if set. Both are quirks of the
- * fallback chain rather than design, and both must be reproduced for cache
- * compatibility. (§15.13 narrows this later: in phase 2 `LOCALAPPDATA` becomes
- * Windows-only, which is the one place this spec breaks store-location
- * compatibility with corepack — see #673.)
+ * `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA` on every platform,
+ * including Windows. That is a quirk of corepack's fallback chain rather than
+ * design, and it is reproduced for cache compatibility.
+ *
+ * §15.13 point 5 narrows the other half: `LOCALAPPDATA` is consulted **only on
+ * Windows** (row 171). Corepack reads it on POSIX too, which is #673 — a Linux
+ * process started from WSL interop inherits `LOCALAPPDATA` and lands its cache
+ * on `/mnt/c`, with alien permissions and Windows path semantics. This is the
+ * one place the spec deliberately breaks store-location compatibility, and the
+ * same rule governs §15.13's per-user shim directory.
  *
  * Nullish coalescing, not truthiness: an explicitly empty `COREPACK_HOME` is
  * honoured verbatim, exactly as corepack honours it.
@@ -67,10 +71,11 @@ export function getHomeFolder(): string {
   const home = process.env.COREPACK_HOME;
   if (home !== undefined) return home;
 
+  const isWindows = process.platform === "win32";
   const cacheRoot =
     process.env.XDG_CACHE_HOME ??
-    process.env.LOCALAPPDATA ??
-    join(homedir(), process.platform === "win32" ? join("AppData", "Local") : ".cache");
+    (isWindows ? process.env.LOCALAPPDATA : undefined) ??
+    join(homedir(), isWindows ? join("AppData", "Local") : ".cache");
 
   return join(cacheRoot, "node", "corepack");
 }
