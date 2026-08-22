@@ -963,35 +963,53 @@ should have been the *first* step of phase 2, not a check after it.
 
 Four sections nobody was assigned turned out satisfied incidentally; five were real gaps.
 
-## Ranked, and who has them
+## Ranked — all closed except one
 
-| # | Gap | State |
+| # | Gap | Landed |
 |---|---|---|
-| 1 | **§15.31** global `-g`/`--global` must bypass the project pin | in flight |
-| 2 | **§15.32** prepend the resolved manager's dir to `PATH` | in flight |
-| 3 | **§15.9** trust-key refresh on keyid-miss | in flight |
-| 4 | **§15.10** custom-registry trust — keys for a private mirror currently widen to registry.npmjs.org | in flight |
-| 5 | §15.33 bullet 2 — yarn's `default` is still Classic 1.22.22, the exact value §15.33 calls a maintenance failure; no test locks it | open |
-| 6 | §15.7 — `COREPACK_REQUIRE_SIGNATURES` is silently ignored on the pinned-hash path, untested in either direction | open |
-| 7 | §15.35c — no deprecation/migration line (zero hits for `is deprecated`) | open |
-| 8 | §15.35k — no `outside any project` suffix | open |
-| 9 | §15.17 — `getSpecFor` throws where §15.17 wants a fallback; `noRangeBand` has zero test references | open |
-| 10 | §15.35d — `COREPACK_SPEC_FILE`; must be added to `ENV_FILE_INELIGIBLE` in the same change, since eligibility is a deny-list | open |
+| 1 | **§15.31** global `-g`/`--global` bypasses the project pin | `4175429` |
+| 2 | **§15.32** the resolved manager's directory is prepended to `PATH` | `4175429` |
+| 3 | **§15.9** trust-key refresh on a keyid miss | `61d6d57` |
+| 4 | **§15.10** per-origin trust — a private mirror's keys no longer widen to npm | `61d6d57` |
+| 5 | §15.33 bullet 2 — yarn's `default` moved off Classic, plus a refresh job | `74fa698` |
+| 6 | §15.7 on the pinned-hash path — **decided**, and now tested both ways | `74fa698` |
+| 7 | §15.35c — the deprecation line, on stderr | `74fa698` |
+| 8 | §15.35k — the `outside any project` suffix | `74fa698` |
+| 9 | §15.17 — fall forward to the newest band, `bin` from the verified package | `74fa698` |
+| 10 | §15.35d — `COREPACK_SPEC_FILE`, on both deny-lists | `74fa698` |
+| — | §15.35e — `COREPACK_MINIMUM_RELEASE_AGE` | **the last one** |
 
-**§15.31 is worse here than in corepack, and that is our doing**: §15.16 made `enable`
+**§15.31 was worse here than in corepack, and that was our doing**: §15.16 made `enable`
 shim `npm` by default, which corepack never did, so `npm install -g …` inside a pinned
-project now fails for users corepack's version never reached.
+project failed for users corepack's version never reached. Closing §15.16 without §15.31
+was a mistake the value-ordered plan made easy to miss — they are one change, and only a
+walk of the spec pairs them.
 
-## Two things the audit could not settle
+## The two open questions — both settled
 
-* **§15.26's proving test asserts the implementation's chosen behaviour**, so it proves
-  self-consistency rather than conformance with row 190's "both updated". Needs a ruling.
-* **§15.24's row 184 cannot detect the missing `latest`-dist-tag SHOULD**, because the
-  fixture's `latest` and its stable maximum are the same version. The row passes either
-  way — exactly the "test that cannot distinguish" failure this project keeps hitting.
+Recorded in full at the end of [`S15-AUDIT.md`](./S15-AUDIT.md).
 
-## Unasserted §15.38 rows
+* **§15.26 / row 190** was a genuine internal conflict, not an implementation liberty:
+  §15.26 unqualified would collapse a `devEngines` range, and §09.4 with §13 rows 112–113
+  needs that range to carry `up` across a major. Pin-versus-constraint is the only reading
+  under which both hold.
+* **§15.24 / row 184** was a real blind spot. A new row publishes a `latest` older than the
+  stable maximum, so the decision *not* to honour §15.24's dist-tag SHOULD is now asserted
+  rather than invisible, and mutating the selection order fails it.
 
-The table runs to **207**, not 203. No test asserts: **162, 163, 164, 165, 166, 176, 180,
-197, 198, 201, 203, 205, 207**. (162–166 are what the in-flight §15.9/§15.10 work adds.)
-Row **207** needs no feature at all, only a test.
+## Conformance coverage — complete
+
+Recounted mechanically rather than by eye: every row of §13 (1–147) and §15.38 (148–207)
+has a test whose title names it. Four are visibly skipped for §15.35e, and that file's
+helper throws so a premature un-skip fails loudly instead of passing vacuously.
+
+## Standing hazards for whoever is next
+
+* **The warm byte ceiling is at 189,821 of 190,000.** The next warm-path change has to
+  raise it deliberately, with a reason. It is a tripwire, not a budget.
+* **The sandbox has live network and the conformance harness does not disable it.** A row
+  relying on a *fallback* version can pass over the wire; seed the store and set
+  `COREPACK_ENABLE_NETWORK=0` wherever the answer must come from the fixture. One draft
+  during phase 3 silently downloaded real Yarn 4.14.1 and passed.
+* **A plan organised by value will miss requirements.** Phase 2 shipped twelve items and
+  left eight §15 sections unassigned. Walk the spec first, then rank.
