@@ -830,18 +830,41 @@ interleaved A/B against a bundle built from the previous commit (which P11 ran, 
 implementation"*, so this is not a conformance failure, and we remain ~2.3× faster than
 corepack on the path that runs on every invocation forever.
 
-### The chunking finding stands
+### The chunking finding — **fixed** (`51c9e10`)
 
-Importing the warm chunk alone costs **~9 ms** of the ~14 (`node:path` alone is 0.3 ms,
-for scale). The warm chain is `main2` → `{env, errors, manifest, store, usage}`, about
-73 kB of JS parsed on every invocation, and **`usage.mjs` is misnamed by the bundler**:
-obuild merged `exec.ts` (warm — it has `execPackageManager`) with `resolve.ts` and the
-usage strings. A *pinned, exact* invocation — the whole point of the fast path — pays to
-parse `resolveDescriptor`, `getFallbackLocator` and every usage line it will never touch.
+`main.ts` now reaches `resolve.ts` and `usage.ts` by `await import()`, and the build
+groups the warm set into a single `warm.mjs`: **7 chunk files / 87.0 kB → 1 file /
+79.9 kB**. Two costs were in play, not one — the bytes a pinned run never touches, *and*
+~0.2 ms of module resolve/link overhead per extra chunk file.
 
-`COLD_PATH_MODULES` cannot catch this: `resolve.ts` genuinely *is* warm-reachable in the
-source graph (an unpinned project needs it), so the list is right and the chunking is
-what is wrong. The fix is to split the warm entry so `execPackageManager` comes from a
-module that does not pull `resolveDescriptor`, and to let the non-pinned branch reach it
-by dynamic import — the same trick `proxy.ts` already uses for its socket stack. Worth
-doing as its own item, with an **interleaved A/B** benchmark, not an absolute one.
+Interleaved A/B, 60 samples alternating in one loop, reproduced independently in a clean
+worktree at HEAD:
+
+| | min | median |
+|---|---|---|
+| `node -e ""` | 19.24 | 22.24 |
+| before | 32.64 | 36.19 |
+| **after** | **29.50** | **32.93** |
+
+Our own overhead falls from 13.4 ms to **10.3 ms** — 23% off the thing that runs on every
+invocation forever.
+
+The regression guard is worth more than the fix: `test/unit/main.test.ts` now asserts that
+the set of modules statically reachable from `src/shim.ts` **equals** the build's declared
+warm set. Static reachability is what decides rolldown's chunking, so it pins the emitted
+chunk by construction, and it closes the loop both ways — a new static import on the warm
+path fails until `build.config.ts` is updated. Verified negatively against the pre-fix
+`main.ts`.
+
+### Remaining warm-path wins, measured
+
+* **`node:util` on the warm path is the biggest single one.** `src/env.ts` imports
+  `parseEnv` at module top level, but `parseEnvFile` only runs when a `.corepack.env`
+  actually exists. Measured by building a variant without the import: **−0.85 ms min**.
+  `await import` will not do — `parseEnvFile` is called synchronously from
+  `discoverProjectSpec` — so the fix is the hand-rolled ~80-line dotenv parser §16.2
+  already budgets for, which the zero-dependency goal wants anyway.
+* `manifest.ts` + `json.ts` ≈ 28 kB, of which the rewrite half (`parseManifest`,
+  `setNestedString`, `setTopLevelString`, `writePin`) is cold but statically reached.
+  Splitting it behind a dynamic import inside `manifest.ts` looks like the next ~1 ms.
+* `errors.ts` ≈ 14 kB is the whole `messages` table, all of it parsed to print one line.
