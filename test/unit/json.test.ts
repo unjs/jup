@@ -2,12 +2,11 @@ import { EOL } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   detectFormat,
-  parseManifest,
-  scanTopLevelFields,
   scanTopLevelKey,
   setNestedString,
   setTopLevelString,
-} from "../../src/json.ts";
+} from "../../src/json-write.ts";
+import { parseManifest, scanTopLevelFields } from "../../src/json.ts";
 
 const BOM = "﻿";
 

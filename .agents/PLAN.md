@@ -896,13 +896,47 @@ path fails until `build.config.ts` is updated. Verified negatively against the p
 
 ### Remaining warm-path wins, measured
 
-* **`node:util` on the warm path is the biggest single one.** `src/env.ts` imports
-  `parseEnv` at module top level, but `parseEnvFile` only runs when a `.corepack.env`
-  actually exists. Measured by building a variant without the import: **−0.85 ms min**.
-  `await import` will not do — `parseEnvFile` is called synchronously from
-  `discoverProjectSpec` — so the fix is the hand-rolled ~80-line dotenv parser §16.2
-  already budgets for, which the zero-dependency goal wants anyway.
-* `manifest.ts` + `json.ts` ≈ 28 kB, of which the rewrite half (`parseManifest`,
-  `setNestedString`, `setTopLevelString`, `writePin`) is cold but statically reached.
-  Splitting it behind a dynamic import inside `manifest.ts` looks like the next ~1 ms.
+* ~~**`node:util` on the warm path**~~ — **done.** `src/env.ts` imported `parseEnv` at
+  module top level to parse a file that, for most projects, is not there. Replaced with
+  the hand-rolled dotenv parser §16.2 budgets for (`await import` was never an option —
+  `parseEnvFile` is called synchronously from `discoverProjectSpec`). What makes it safe
+  is the differential test in `test/unit/env.test.ts`: ~95 hand-written cases plus
+  20 000 generated files, both parsers, exact agreement. `parseEnv`'s quirks are
+  reproduced rather than tidied — the `export ` prefix that survives an empty value, the
+  blanks after `=` that skip *across* newlines, the unterminated quote that is not a
+  quote — and the one deliberate divergence is key *order*, since `parseEnv` sorts and
+  we do not (nothing reads them in order).
+* ~~**the manifest rewriter**~~ — **done**, as `src/pin.ts` (`writePin` and its
+  helpers) plus `src/json-write.ts` (the format-preserving editor, and with it
+  `node:os`'s `EOL`). `main.ts` reaches `pin.ts` by `await import` from its auto-pin
+  branch; `cli.ts` imports it directly, being cold already. `json.ts` keeps the read
+  half and exports the scanning primitives the two share.
+* The measurement, interleaved against a `dist` built from the previous commit, 400
+  spawns alternating in one loop, plus the same two chunks timed on import alone
+  (120 spawns, far less noise than a whole process):
+
+  | | end-to-end min | end-to-end median | `import(warm.mjs)` min |
+  |---|---|---|---|
+  | before | 29.52 | 33.79 | 7.41 |
+  | + hand-rolled dotenv | 28.74 | 32.53 | 6.51 |
+  | + rewriter split | 28.61 | 32.86 | 6.38 |
+
+  `node -e ""` on the same run: 18.88 min / 22.31 median. So our own overhead falls from
+  ~10.6 ms to ~9.7 ms. The dotenv change is worth the predicted ~0.9 ms; **the split is
+  worth ~0.15 ms, not the ~1 ms estimated above** — the estimate assumed bytes cost what
+  chunk *files* cost, and they do not. `warm.mjs` is 80.7 kB → 72.7 kB (a 10.7 kB drop
+  against the parser's own +2.7 kB), which is a "small" win rather than a fast one; it is
+  kept for that, and for putting the rewriter where the house pattern says it goes.
 * `errors.ts` ≈ 14 kB is the whole `messages` table, all of it parsed to print one line.
+* `manifest.ts`'s `hashFromIntegrity` is a copy of `lockfile.ts`'s, made when
+  `lockfile.ts` was cold. §15.23 put it on the warm path, so the copy now buys nothing
+  and one of the two should go.
+
+### The guard, extended
+
+`test/unit/main.test.ts` still asserts that the modules statically reachable from
+`shim.ts` **equal** `build.config.ts`'s `WARM_MODULES`, which is what pins the emitted
+chunk. It now also asserts a **byte ceiling** on that set's source (190 kB against
+176.9 kB today, which emits a 72.7 kB `warm.mjs`), because an exact module set says
+nothing about a module that doubles in size. Measured on the source, so it needs no
+build and names the file that grew.

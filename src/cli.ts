@@ -36,7 +36,8 @@ import {
   usesLockfile,
   writeResolution,
 } from "./lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec, type PinStyle, writePin } from "./manifest.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec } from "./manifest.ts";
+import { type PinStyle, writePin } from "./pin.ts";
 import { resolveDescriptor, type ResolveOptions } from "./resolve.ts";
 import { isValidRange, isValidVersion, major, parse } from "./semver.ts";
 import {

@@ -7,7 +7,6 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseEnv } from "node:util";
 import { messages } from "./errors.ts";
 
 /**
@@ -85,17 +84,213 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set([
  */
 const warnedIneligible = new Set<string>();
 
-/** dotenv-style parse, matching `node:util`'s `parseEnv` semantics. */
+const CH_TAB = 0x09;
+const CH_LF = 0x0a;
+const CH_SPACE = 0x20;
+const CH_HASH = 0x23;
+const CH_EQUAL = 0x3d;
+const CH_DOUBLE_QUOTE = 0x22;
+const CH_SINGLE_QUOTE = 0x27;
+const CH_BACKTICK = 0x60;
+
+/**
+ * §03.2, §16.2 — dotenv parse, reproducing `node:util`'s `parseEnv`.
+ *
+ * Written out by hand rather than delegating, because `node:util` is ~40 kB of
+ * JavaScript and 3 native modules loaded on **every** invocation to serve a file
+ * that, for almost every project, does not exist: `parseEnvFile` runs only when
+ * `.corepack.env` is actually there. `await import` cannot help — the walk in
+ * §03.1 is synchronous — so the ~80 lines §16.2 budgets are what buys it back
+ * (measured: −0.85 ms on a warm run, out of ~10 ms of our own).
+ *
+ * The behaviour is `parseEnv`'s, quirks included, and
+ * `test/unit/env.test.ts` holds a differential test that runs both over a corpus
+ * of generated files and asserts they agree — importing `node:util` in a *test*
+ * costs nothing, and it is what stops the two drifting. The quirks worth naming,
+ * since none of them is what a reader would guess:
+ *
+ * * **Every** `\r` is deleted first, not just the ones in `\r\n` pairs.
+ * * A value may be `'`, `"` or `` ` `` quoted, and the quoted run may span lines.
+ *   Only a **double**-quoted value expands `\n`; nothing else is an escape, so
+ *   `"a\"b"` ends at the middle quote. An **unterminated** quote is not a quote
+ *   at all: the value is the rest of the line, including the quote character,
+ *   and `#` does not start a comment in it.
+ * * In an unquoted value `#` starts a comment anywhere, no space required.
+ * * Leading blanks after `=` are skipped *across newlines* — `A= \nB=2` sets `A`
+ *   to `B=2` — but only when the first character is a space or tab, which is why
+ *   `A=\nB=2` sets `A` to `""` and `B` to `2`.
+ * * `export ` is stripped from a key, once, and only with that single space.
+ * * An empty key keeps its line's value out of the result (`=1` yields nothing),
+ *   except when the value is empty, where `""` is stored under `""` — one
+ *   consequence of `parseEnv`'s ordering, reproduced rather than tidied because
+ *   the differential test would otherwise have to paper over it.
+ * * The document itself is trimmed once up front, which is the *only* thing that
+ *   ever trims an unterminated-quote value: `A='x \nB=2` keeps the space,
+ *   `A='x \n` does not, because there the space is at the end of the file.
+ */
 export function parseEnvFile(content: string): Record<string, string> {
-  const parsed = parseEnv(content);
   const vars: Record<string, string> = Object.create(null) as Record<string, string>;
-  for (const key of Object.keys(parsed)) {
-    const value = parsed[key];
-    if (typeof value === "string") {
-      vars[key] = value;
+  const text = trimDocument(content.includes("\r") ? content.replaceAll("\r", "") : content);
+
+  let i = 0;
+  while (i < text.length) {
+    const code = text.charCodeAt(i);
+    // A blank line, and with it the blanks opening the next one — which is how
+    // `A=1\n\t#=2` is a comment while `#c\n\t#=2` is the key `#`.
+    if (code === CH_LF) {
+      i = skipBlanks(text, i + 1);
+      continue;
     }
+    // A comment line: everything up to the break, and no more.
+    if (code === CH_HASH) {
+      i = endOfLine(text, i) + 1;
+      continue;
+    }
+
+    // A line with no `=` on it is skipped, blanks and all. The search stops at
+    // the line break rather than running to the next `=` anywhere in the file,
+    // which keeps a file of prose linear instead of quadratic.
+    const eol = endOfLine(text, i);
+    const equal = indexWithin(text, CH_EQUAL, i, eol);
+    if (equal === -1) {
+      i = skipBlanks(text, eol + 1);
+      continue;
+    }
+
+    const trimmed = trimBlanks(text, i, equal);
+    i = skipBlanks(text, equal + 1);
+
+    // An empty value is recorded before the key is finished, which is why
+    // `export A=` keeps its prefix while `export A=1` loses it, and why an empty
+    // key reaches the result here and nowhere else.
+    if (i >= text.length) {
+      assign(vars, trimmed, "");
+      break;
+    }
+    if (text.charCodeAt(i) === CH_LF) {
+      assign(vars, trimmed, "");
+      i++;
+      continue;
+    }
+
+    const key = withoutExport(trimmed);
+    // `=1`: the value is dropped and re-scanned as if it were its own line, so
+    // `=1 B=2` still leaves nothing behind but `A=1\n=2\nB=3` still sets `B`.
+    if (key === "") continue;
+
+    const quote = text.charCodeAt(i);
+    if (quote === CH_DOUBLE_QUOTE || quote === CH_SINGLE_QUOTE || quote === CH_BACKTICK) {
+      const close = text.indexOf(text[i]!, i + 1);
+      if (close !== -1) {
+        const raw = text.slice(i + 1, close);
+        assign(vars, key, quote === CH_DOUBLE_QUOTE ? raw.replaceAll(String.raw`\n`, "\n") : raw);
+        // Whatever follows the closing quote on that line is discarded.
+        i = endOfLine(text, close + 1) + 1;
+        continue;
+      }
+      // Unterminated: a plain value that happens to start with a quote — one in
+      // which `#` is an ordinary character and trailing blanks are kept.
+      const lineEnd = endOfLine(text, i);
+      assign(vars, key, text.slice(i, lineEnd));
+      i = lineEnd;
+      continue;
+    }
+
+    const lineEnd = endOfLine(text, i);
+    const hash = indexWithin(text, CH_HASH, i, lineEnd);
+    assign(vars, key, trimBlanks(text, i, hash === -1 ? lineEnd : hash));
+    i = lineEnd;
   }
+
   return vars;
+}
+
+/**
+ * `parseEnv` has no `__proto__` key in its output, so neither does this.
+ *
+ * Nothing behavioural rides on it — the key cannot carry the `COREPACK_` prefix
+ * §03.2 filters on — but matching it keeps the differential test exact.
+ */
+function assign(vars: Record<string, string>, key: string, value: string): void {
+  if (key !== "__proto__") vars[key] = value;
+}
+
+/**
+ * The whole document's own leading and trailing blanks.
+ *
+ * The two ends are not symmetric, and both halves are load-bearing: the leading
+ * run follows {@link skipBlanks}, while the trailing run also eats newlines
+ * unconditionally, which is what trims a file's last value when it is an
+ * unterminated quote.
+ */
+function trimDocument(text: string): string {
+  let end = text.length;
+  while (end > 0) {
+    const code = text.charCodeAt(end - 1);
+    if (!isBlank(code) && code !== CH_LF) break;
+    end--;
+  }
+  return text.slice(skipBlanks(text, 0), end);
+}
+
+/** The first `code` in `text[from, to)`, or -1: an `indexOf` that cannot leave the line. */
+function indexWithin(text: string, code: number, from: number, to: number): number {
+  for (let i = from; i < to; i++) {
+    if (text.charCodeAt(i) === code) return i;
+  }
+  return -1;
+}
+
+/** The `\n` ending the line `index` is on, or the end of the text. */
+function endOfLine(text: string, index: number): number {
+  const eol = text.indexOf("\n", index);
+  return eol === -1 ? text.length : eol;
+}
+
+/**
+ * Skip spaces and tabs — and, once skipping has started, newlines too.
+ *
+ * The asymmetry is `parseEnv`'s: the run is only entered when the first
+ * character is a space or tab, but it then runs over line breaks as well.
+ */
+function skipBlanks(text: string, index: number): number {
+  const first = text.charCodeAt(index);
+  if (first !== CH_SPACE && first !== CH_TAB) return index;
+
+  let i = index + 1;
+  while (i < text.length) {
+    const code = text.charCodeAt(i);
+    if (code !== CH_SPACE && code !== CH_TAB && code !== CH_LF) return i;
+    i++;
+  }
+  return i;
+}
+
+/** `text[start, end)` without its surrounding spaces and tabs. */
+function trimBlanks(text: string, start: number, end: number): string {
+  let from = start;
+  let to = end;
+  while (from < to && isBlank(text.charCodeAt(from))) from++;
+  while (to > from && isBlank(text.charCodeAt(to - 1))) to--;
+  return text.slice(from, to);
+}
+
+function isBlank(code: number): boolean {
+  return code === CH_SPACE || code === CH_TAB;
+}
+
+/**
+ * One `export ` prefix removed from an already-trimmed key.
+ *
+ * Once only — `export export A` is the key `export A` — and only with that
+ * exact single space, so `export\tA` is a key that begins with the word.
+ */
+function withoutExport(key: string): string {
+  if (!key.startsWith("export ")) return key;
+
+  let from = "export ".length;
+  while (from < key.length && isBlank(key.charCodeAt(from))) from++;
+  return key.slice(from);
 }
 
 /**

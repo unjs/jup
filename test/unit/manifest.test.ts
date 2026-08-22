@@ -10,8 +10,8 @@ import {
   readSpecFromManifest,
   reconcile,
   warnOrThrow,
-  writePin,
 } from "../../src/manifest.ts";
+import { writePin } from "../../src/pin.ts";
 import type { LazyLocator, SpecResult } from "../../src/types.ts";
 
 let root: string;

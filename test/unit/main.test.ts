@@ -696,6 +696,12 @@ const COLD_PATH_MODULES = [
   // §09's synopsis and §12.1's usage lines. Both are error/`--help` output; a
   // proxy run that succeeds has no business parsing either.
   "usage.ts",
+  // §03.7's pin writer and, under it, §16.4's format-preserving JSON editor —
+  // which reaches `node:os` for the platform line ending. Only `use`, `up` and
+  // §03.6's auto-pin write a manifest; every other invocation on the machine
+  // only reads one.
+  "pin.ts",
+  "json-write.ts",
 ];
 
 /**
@@ -704,12 +710,19 @@ const COLD_PATH_MODULES = [
  * nothing.
  *
  * The budget is a delta rather than an absolute so that a Node upgrade, which
- * moves both numbers together, does not fail the suite. At the time of writing
- * the warm path costs 17 and the ceiling is 25; before the cold path was made
- * lazy it cost 41, and `node:crypto` alone accounts for 21 of those — so a
- * reintroduced static import cannot slip under this.
+ * moves both numbers together, does not fail the suite. Before the cold path was
+ * made lazy the warm path cost 41 of these, and `node:crypto` alone accounts for
+ * 21 — so a reintroduced static import cannot slip under this.
+ *
+ * At the time of writing all three entries cost **2**, against a ceiling that
+ * was 25 and had 24 of them spent: `node:util`, imported by `env.ts` for
+ * `parseEnv`, was dragging in `internal/util/parse_args`, `internal/util/colors`
+ * and `internal/util/diff` on every invocation to parse a `.corepack.env` that
+ * usually does not exist. The hand-rolled parser that replaced it (§16.2) is
+ * what freed the headroom, and this is now a real ceiling again rather than one
+ * a single import would breach.
  */
-const NATIVE_MODULE_BUDGET = 25;
+const NATIVE_MODULE_BUDGET = 6;
 
 interface ModuleGraph {
   code: number;
@@ -881,5 +894,33 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     for (const module of WARM_MODULES) {
       expect(statSync(join(SRC, module)).isFile()).toBe(true);
     }
+  });
+
+  /**
+   * A ceiling on the source the warm chunk is built from.
+   *
+   * The module *set* above is exact, but a set can stay exact while one of its
+   * members doubles in size, and every byte of it is parsed on every `yarn`,
+   * `npm` and `pnpm` invocation on the machine. This is the second half of that
+   * guard: it is measured on the source rather than on `dist/`, so it runs
+   * without a build and reports which file grew.
+   *
+   * The numbers, when this was written: 176.9 kB of source emitted a 72.7 kB
+   * `warm.mjs`, and the headroom below is about one average module. A change
+   * that needs more than that is a change worth arguing for in review — raise
+   * the ceiling deliberately, or move the code behind a dynamic import the way
+   * `pin.ts` and `resolve.ts` are.
+   */
+  it("stays inside the warm chunk's byte ceiling", () => {
+    const sizes = ["shim.ts", ...WARM_MODULES]
+      .map((module) => [module, statSync(join(SRC, module)).size] as const)
+      .sort(([, a], [, b]) => b - a);
+    const total = sizes.reduce((sum, [, bytes]) => sum + bytes, 0);
+
+    const breakdown = sizes.map(([module, bytes]) => `${module} ${bytes}`).join(", ");
+    expect(
+      total,
+      `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
+    ).toBeLessThanOrEqual(190_000);
   });
 });

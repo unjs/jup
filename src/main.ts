@@ -15,7 +15,7 @@ import { envDisabled, envFlag, isFrozenLockfile } from "./env.ts";
 import { explainFetchFailure, messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
 import { readResolution, usesLockfile, writeResolution } from "./lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./manifest.ts";
 import { isValidVersion, parse } from "./semver.ts";
 import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./store.ts";
 import type {
@@ -430,6 +430,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
 
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
+  const { writePin } = await import("./pin.ts");
   const { target } = writePin(dirname(specResult.target), {
     name: locator.name,
     reference,

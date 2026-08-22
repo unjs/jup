@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseEnv } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyEnvFile,
@@ -66,6 +67,219 @@ describe("parseEnvFile", () => {
 
   it("returns an empty record for an empty file", () => {
     expect(parseEnvFile("")).toEqual({});
+  });
+
+  it("has no prototype, so a `__proto__` line cannot reach one", () => {
+    const vars = parseEnvFile("__proto__=polluted\nCOREPACK_ENABLE_AUTO_PIN=1\n");
+
+    expect(Object.getPrototypeOf(vars)).toBe(null);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    // `parseEnv` drops the key outright, and so does this — see `assign`.
+    expect(Object.keys(vars)).toEqual(["COREPACK_ENABLE_AUTO_PIN"]);
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * The differential test.
+ *
+ * `parseEnvFile` is written out by hand so that `node:util` — ~40 kB of
+ * JavaScript and three native modules — stays off the warm path, where it was
+ * being loaded on every invocation to parse a file that usually does not exist
+ * (measured: −0.85 ms). What makes that safe is this: both implementations run
+ * over the same corpus and must agree exactly. Importing `node:util` in a *test*
+ * is free, and it is the only thing that stops the two drifting.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Hand-written cases, each one a behaviour of `parseEnv` that a reasonable
+ * reimplementation would get wrong. They are asserted against `parseEnv` itself
+ * rather than against literals, so a change in Node's semantics shows up here as
+ * a failure rather than as a silent divergence in the field.
+ */
+const CORPUS = [
+  // Nothing at all.
+  "",
+  "   ",
+  "\n\n",
+  "#only a comment",
+  "# comment\n",
+  // The ordinary shapes.
+  "A=1\nB=2",
+  "A=1\r\nB=2\r\n",
+  "  A  =  1  ",
+  "\tA\t=\t1\t",
+  "A=1\n\n\nB=2",
+  "#c\nA=1",
+  "A=1\n#c\nB=2",
+  "A=1\nA=2",
+  // Quoting, in all three spellings.
+  `A="1"`,
+  "A='1'",
+  "A=`1`",
+  `A=""`,
+  "A=''",
+  "A=``",
+  `A=  "1"  `,
+  // Escapes: only `\n`, only in double quotes.
+  String.raw`A="line1\nline2"`,
+  String.raw`A='line1\nline2'`,
+  String.raw`A=` + "`" + String.raw`line1\nline2` + "`",
+  String.raw`A="\n\t\r"`,
+  String.raw`A="a\\nb"`,
+  String.raw`A="a\"b"`,
+  // Multi-line quoted values.
+  'A="multi\nline"\nB=2',
+  "A='multi\nline'\nB=2",
+  "A=`multi\nline`\nB=2",
+  'A="x\ny" B=2',
+  'A="x\ny"z\nB=2',
+  'A="a"  x=2\nB=3',
+  // Unterminated quotes are not quotes.
+  'A="unterminated',
+  "A='unterminated\nB=2",
+  'A="a #c\nB=2',
+  "A='x \nB=2",
+  "A='x \n",
+  // Comments in unquoted values, and only there.
+  "A=1 # comment",
+  "A=1#comment",
+  "A=#1",
+  "A= #1",
+  'A="a#b"',
+  "A='a#b'",
+  'A="a" # "b"\nB=2',
+  "A=1 ## c\nB=2",
+  // Blank-line and comment-line handling, which differ from one another.
+  "A=1\n\t#=2",
+  "#c\n\t#=2",
+  "é\n\t#=2",
+  "A=\n\t#=2",
+  "A='v'\n\t#=2",
+  "\n\t#=2",
+  // Empty and absent values.
+  "A=",
+  "A=\nB=2",
+  "A= \nB=2",
+  "A=\t\nB=2",
+  "A=  \n  \nB=2",
+  "A= \n#c\nB=2",
+  "A= \n'q'\nB=2",
+  // Lines that are not assignments.
+  "A",
+  "A=1\nB\nC=3",
+  "B\nA=1",
+  "A==1",
+  "A=1 B=2",
+  "A=1 =2\nB=3",
+  // Empty keys, whose two spellings behave differently.
+  "=1",
+  "=1\nA=2",
+  "=\nA=2",
+  "= \nA=2",
+  "=  \n=  \nA=2",
+  // `export`, with and without its single space.
+  "export A=1",
+  "export  A=1",
+  "exportA=1",
+  "export\tA=1",
+  "export export A=1",
+  "export A =1",
+  "export  =1",
+  "export A =",
+  "export A=\nB=2",
+  "export=1",
+  // Carriage returns, which are deleted wherever they are.
+  "A=1\rB=2",
+  'A="a\rb"',
+  "\r\n\r\nA=1",
+  "A\r=1",
+  // Keys that are not identifiers.
+  "KEY WITH SPACE = v\nB=2",
+  "A.B=1",
+  "'A'=1",
+  `"A"=1`,
+  "﻿A=1",
+  "__proto__=1\nA=2",
+  "constructor=1",
+  // Values that look like something else.
+  "A=$B",
+  String.raw`A=\n`,
+  "A=1;B=2",
+  "A=x y \nB=2",
+  "A=1 \t ",
+];
+
+/**
+ * A deterministic corpus of adversarial files, built from the tokens the parser
+ * makes decisions on. The seed is fixed: a failure is reproducible, and a run
+ * that passes today passes tomorrow.
+ */
+function* generated(count: number): Generator<string> {
+  const tokens = [
+    "A",
+    "KEY",
+    "1",
+    "x y",
+    "=",
+    "#",
+    '"',
+    "'",
+    "`",
+    "\n",
+    " ",
+    "\t",
+    "\r",
+    "export ",
+    "export",
+    String.raw`\n`,
+    "\\",
+    "__proto__",
+    "\v",
+    "\f",
+    "é",
+    ";",
+    "$X",
+  ];
+
+  let seed = 0x9e37_79b9;
+  const next = (): number => {
+    seed ^= seed << 13;
+    seed >>>= 0;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    seed >>>= 0;
+    return seed / 0x1_0000_0000;
+  };
+
+  for (let n = 0; n < count; n++) {
+    const length = 1 + Math.floor(next() * 24);
+    let input = "";
+    for (let k = 0; k < length; k++) input += tokens[Math.floor(next() * tokens.length)];
+    yield input;
+  }
+}
+
+/** Both parsers' output, compared key by key and independently of key order. */
+function agrees(input: string): void {
+  const expected = Object.fromEntries(Object.entries(parseEnv(input)).sort());
+  // `parseEnv` returns a null-prototype object with its keys sorted; ours
+  // returns them in the order the file declares. Nothing reads them in order —
+  // `applyEnvFile` filters and merges, `info.ts` sorts — so the sort here is the
+  // deliberate divergence, and it is the *only* one.
+  const actual = Object.fromEntries(Object.entries(parseEnvFile(input)).sort());
+
+  expect(actual, `disagreed on ${JSON.stringify(input)}`).toEqual(expected);
+}
+
+describe("parseEnvFile — differential against node:util's parseEnv", () => {
+  it.for(CORPUS.map((input) => [input] as const))("agrees on %j", ([input]) => {
+    agrees(input);
+  });
+
+  it("agrees on 20000 generated files", () => {
+    for (const input of generated(20_000)) {
+      agrees(input);
+    }
   });
 });
 
