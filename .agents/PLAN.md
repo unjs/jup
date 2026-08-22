@@ -708,7 +708,7 @@ surprising and I cannot see why"*; §15.30 lists five issues that one command wo
 diagnosed. Must make no network request and must not fail on an invalid project spec —
 reporting *why* it is invalid is the point.
 
-### P10 — Shims and enablement §15.13, §15.14, §15.15, §15.16, §15.29 — *in progress*
+### P10 — Shims and enablement §15.13, §15.14, §15.15, §15.16, §15.29 — **done** (`353a726`)
 #71 is the highest-signal issue in the tracker (34👍, four years). Per-user shim directory
 by default, never require elevation, `LOCALAPPDATA` only on Windows, restore what `enable
 --force` displaced, shim npm by default with `--exclude npm`, and verify the shims
@@ -746,11 +746,31 @@ lockfile, no monorepo task-runner pinning. Only `install --project` is accepted.
 
 ## Carried follow-ups
 
-* `COREPACK_SHIM_DIRECTORY` (§15.37, env-file **eligible**) still needs registering in
-  `src/env.ts`'s eligible list plus an assertion in `test/unit/env.test.ts` — P10 was
-  barred from that file by concurrency, so the wiring is owed once it lands.
+* ~~`COREPACK_SHIM_DIRECTORY` eligibility assertion~~ — done in `353a726`. Note what it
+  taught: eligibility is a **deny-list**, so a new `COREPACK_*` variable is env-file
+  eligible with no edit to `src/env.ts` at all. The assertion exists so a later edit to
+  `ENV_FILE_INELIGIBLE` cannot withdraw it silently; adding the variable to that list
+  fails the test.
 * `src/info.ts` should learn to report `COREPACK_CAFILE` / `COREPACK_STRICT_SSL`, and to
   name a custom shim directory once `COREPACK_SHIM_DIRECTORY` exists.
 * §15.4's expired / not-yet-valid certificate branch is unit-tested by code path, not end
   to end — the committed fixture is valid until 2126 and an expired cert needs a second
   fixture.
+
+### §15.14's native half — assessed, not attempted (P10)
+
+`enable` symlinks `<shimdir>/<B>` to `dist/<B>.js`, one generated stub per binary, each
+importing `./shim.mjs` by a *relative* specifier. Measured against §14.15: the relative
+specifier already dissolves half of #751 (the pair is relocatable), and P10 closed the
+behavioural remainder (a dangling shim is replaced/removed, not skipped). #213 (Windows
+execution policy on the `.ps1` wrapper) and #486 (`#!/usr/bin/env node` must find a
+runtime to *start*) are untouched and genuinely need a native binary.
+
+One correction to the premise, verified: **`process.argv[1]` is not realpathed.**
+Invoking a symlink `bin/yarn` → `dist/tool.mjs` yields `argv[1] === ".../bin/yarn"` while
+`import.meta.url` is the realpath. Corepack's stated reason for avoiding invocation-name
+dispatch therefore applies to `import.meta.url`, not to `argv[1]` — so a JS distribution
+could do §14.15's `basename(argv[1])` dispatch on POSIX today: one shipped `dist/shim.mjs`
+and six symlinks to it, no generator, #751 closed at the root. It does not help on
+Windows, where the `.cmd`/`.ps1` wrappers pass the stub path to `node` and the invocation
+name is lost. Worth doing as its own item; it changes the shim contract, not enablement.
