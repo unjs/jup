@@ -225,6 +225,9 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_HOME")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NPM_REGISTRY")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NODE_EXECPATH")).toBe(true);
+    // §15.37 — mandating signed sources is a policy a project may state, unlike
+    // the trust store itself (§14.5), which a cloned repo must never supply.
+    expect(isEnvFileEligible("COREPACK_REQUIRE_SIGNATURES")).toBe(true);
 
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);

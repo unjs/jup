@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { createHash, generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors.ts";
 import {
   applyRegistryOverride,
@@ -12,6 +12,7 @@ import {
   fetchTarballURLAndSignature,
   getRegistryUrl,
   NPM_ACCEPT_HEADER,
+  verifyRegistryTrust,
 } from "../../src/registry.ts";
 import type { NpmRegistrySpec, TrustedKey, UrlRegistrySpec } from "../../src/types.ts";
 
@@ -81,6 +82,7 @@ const ENV_KEYS = [
   "COREPACK_NPM_REGISTRY",
   "COREPACK_ENABLE_NETWORK",
   "COREPACK_INTEGRITY_KEYS",
+  "COREPACK_REQUIRE_SIGNATURES",
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
@@ -453,6 +455,9 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+    // §15.7 soft-fails an unsigned document onto its `integrity`, so mandating
+    // signatures is what makes this one a failure to wrap at all.
+    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
 
     const error = await rejection(fetchLatestStableVersion(npm("pnpm")));
 
@@ -747,5 +752,260 @@ describe("applyRegistryOverride (§15.3)", () => {
 
     const result = await fetchTarballURLAndSignature(npm("pnpm"), "9.1.0");
     expect(result.tarball).toBe(`${server.origin}/pnpm/-/pnpm-9.1.0.tgz`);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.7 / §15.8 — the metadata tiering, in isolation
+ * ------------------------------------------------------------------ */
+
+describe("verifyRegistryTrust (§15.7, §15.8)", () => {
+  /**
+   * A fresh package name per call: §15.7's warning is emitted once per package
+   * and version for the life of the process, so reusing one across tests would
+   * silence all but the first.
+   */
+  let counter = 0;
+  const freshPackage = (): string => `pkg-${++counter}`;
+
+  function signed(packageName: string, version: string, integrity: string, pair: Keypair): unknown {
+    return {
+      keyid: pair.keyid,
+      sig: sign(
+        "sha256",
+        Buffer.from(`${packageName}@${version}:${integrity}`, "utf8"),
+        pair.privateKey,
+      ).toString("base64"),
+    };
+  }
+
+  it("tier 1: an absent `dist` is reported, not destructured (§15.7)", async () => {
+    const packageName = freshPackage();
+    const server = await startServer({
+      [`/${packageName}/latest`]: { name: packageName, version: "9.1.0" },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+
+    const error = await rejection(fetchLatestStableVersion(npm(packageName)));
+
+    expect(error.message).toBe(messages.cannotDownloadLatest(packageName));
+    expect((error.cause as Error).message).toBe(
+      messages.noDistSection(packageName, "9.1.0", server.origin),
+    );
+    // #570's actual symptom, which must never resurface.
+    expect((error.cause as Error).message).not.toContain("Cannot read properties");
+  });
+
+  it("tier 2: warns once per package and version, then proceeds", async () => {
+    const packageName = freshPackage();
+    const server = await startServer({ [`/${packageName}`]: { name: packageName } });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const call = (): Promise<void> =>
+      verifyRegistryTrust({
+        packageName,
+        version: "9.1.0",
+        registryUrl: server.origin,
+        signatures: undefined,
+        integrity: "sha512-abc",
+        hasDigest: true,
+      });
+
+    await call();
+    await call();
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      `! ${server.origin} does not publish signatures for ${packageName}@9.1.0; falling back to integrity-only verification`,
+    );
+    warn.mockRestore();
+  });
+
+  it("tier 2: refuses when the registry publishes no digest at all", async () => {
+    const packageName = freshPackage();
+    const server = await startServer({ [`/${packageName}`]: { name: packageName } });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+
+    const error = await rejection(
+      verifyRegistryTrust({
+        packageName,
+        version: "9.1.0",
+        registryUrl: server.origin,
+        signatures: undefined,
+        integrity: undefined,
+        hasDigest: false,
+      }),
+    );
+
+    expect(error.message).toBe(messages.noRegistryDigest(packageName, "9.1.0", server.origin));
+  });
+
+  it("COREPACK_REQUIRE_SIGNATURES makes the soft-fail a UsageError", async () => {
+    const packageName = freshPackage();
+    const server = await startServer({ [`/${packageName}`]: { name: packageName } });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+
+    const error = await rejection(
+      verifyRegistryTrust({
+        packageName,
+        version: "9.1.0",
+        registryUrl: server.origin,
+        signatures: undefined,
+        integrity: "sha512-abc",
+        hasDigest: true,
+      }),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(messages.noCompatibleSignature());
+  });
+
+  it("COREPACK_INTEGRITY_KEYS=0 skips the tiering entirely (§06.1 row 5)", async () => {
+    const packageName = freshPackage();
+    const server = await startServer({ [`/${packageName}`]: { name: packageName } });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = "0";
+    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await verifyRegistryTrust({
+      packageName,
+      version: "9.1.0",
+      registryUrl: server.origin,
+      signatures: undefined,
+      integrity: undefined,
+      hasDigest: false,
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(server.requests).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it("§15.8: reads `versions[<version>].dist.signatures` from the package root", async () => {
+    const packageName = freshPackage();
+    const pair = keypair();
+    const { sri } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      // The version endpoint Artifactory strips, and the root it does not.
+      [`/${packageName}`]: {
+        name: packageName,
+        versions: {
+          "9.1.0": {
+            dist: { integrity: sri, signatures: [signed(packageName, "9.1.0", sri, pair)] },
+          },
+        },
+      },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await verifyRegistryTrust({
+      packageName,
+      version: "9.1.0",
+      registryUrl: server.origin,
+      signatures: undefined,
+      integrity: sri,
+      hasDigest: true,
+    });
+
+    expect(server.requests.map((request) => request.url)).toStrictEqual([`/${packageName}`]);
+    // Verified, so nothing was downgraded and nothing is warned about.
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("§15.8: a signature recovered from the root still hard-fails when invalid", async () => {
+    const packageName = freshPackage();
+    const pair = keypair();
+    const rogue = keypair("SHA256:rogue");
+    const { sri } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      [`/${packageName}`]: {
+        name: packageName,
+        versions: {
+          "9.1.0": {
+            dist: {
+              integrity: sri,
+              // The trusted keyid over someone else's signature: §15.7 tier 3.
+              signatures: [
+                { ...(signed(packageName, "9.1.0", sri, rogue) as object), keyid: pair.keyid },
+              ],
+            },
+          },
+        },
+      },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+
+    const error = await rejection(
+      verifyRegistryTrust({
+        packageName,
+        version: "9.1.0",
+        registryUrl: server.origin,
+        signatures: undefined,
+        integrity: sri,
+        hasDigest: true,
+      }),
+    );
+
+    expect(error.message).toBe(messages.signatureMismatch());
+  });
+
+  it("§15.8: makes no request at all when COREPACK_ENABLE_NETWORK=0", async () => {
+    const packageName = freshPackage();
+    const pair = keypair();
+    const { sri } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      [`/${packageName}`]: {
+        name: packageName,
+        versions: {
+          "9.1.0": {
+            dist: { integrity: sri, signatures: [signed(packageName, "9.1.0", sri, pair)] },
+          },
+        },
+      },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await verifyRegistryTrust({
+      packageName,
+      version: "9.1.0",
+      registryUrl: server.origin,
+      signatures: undefined,
+      integrity: sri,
+      hasDigest: true,
+    });
+
+    expect(server.requests).toHaveLength(0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+  });
+
+  it("§15.8: never fires when the version endpoint is already signed", async () => {
+    const packageName = freshPackage();
+    const pair = keypair();
+    const { sri } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({ [`/${packageName}`]: { name: packageName } });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+
+    await verifyRegistryTrust({
+      packageName,
+      version: "9.1.0",
+      registryUrl: server.origin,
+      signatures: [signed(packageName, "9.1.0", sri, pair)] as never,
+      integrity: sri,
+      hasDigest: true,
+    });
+
+    expect(server.requests).toHaveLength(0);
   });
 });

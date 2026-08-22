@@ -7,7 +7,7 @@
  */
 
 import { DEFAULT_REGISTRY } from "./config/keys.ts";
-import { envDisabled } from "./env.ts";
+import { envDisabled, envFlag } from "./env.ts";
 import { messages, redactUserinfo, UsageError } from "./errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck, verifySignature } from "./integrity.ts";
@@ -120,24 +120,23 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
       );
     }
 
-    // §15.7 — corepack destructures `dist` here and throws a raw `TypeError`
-    // when a private registry omits it. Say what happened instead.
+    // §15.7 tier 1 — corepack destructures `dist` here and throws a raw
+    // `TypeError` when a private registry omits it. Say what happened instead.
     const dist = requireDist(metadata, spec.package, version, registryUrl);
     const integrity = asString(dist.integrity);
     const shasum = asString(dist.shasum);
 
-    // The signature covers the integrity string; with no integrity there is
-    // nothing signed to verify, and the legacy `shasum` path below is all the
-    // registry offers. (§15.7's soft-fail tiering refines this in phase 2.)
-    if (integrity !== undefined && !shouldSkipIntegrityCheck()) {
-      verifySignature({
-        signatures: readSignatures(dist),
-        integrity,
-        packageName: spec.package,
-        version,
-        registryOrigin: registryUrl,
-      });
-    }
+    // §15.7 tiers 2 and 3. The digest this returns becomes the reference's pin,
+    // so "the bytes match the registry's claim" is enforced by §06.2 at download
+    // time; what this decides is whether that claim was *signed*.
+    await verifyRegistryTrust({
+      packageName: spec.package,
+      version,
+      registryUrl,
+      signatures: readSignatures(dist),
+      integrity,
+      hasDigest: integrity !== undefined || shasum !== undefined,
+    });
 
     if (integrity !== undefined) {
       // §14.12 — the algorithm comes from the SRI string, never from `slice(7)`:
@@ -148,18 +147,14 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
     }
 
     if (shasum === undefined) {
-      throw new Error(
-        `${spec.package}@${version} metadata from ${redactUserinfo(registryUrl)} has neither "dist.integrity" nor "dist.shasum"`,
-      );
+      // Only reachable with integrity checks disabled; otherwise
+      // `verifyRegistryTrust` has already refused for the same reason.
+      throw new Error(messages.noRegistryDigest(spec.package, version, registryUrl));
     }
 
-    // Taking the legacy branch means nothing was verified. Say so rather than
-    // downgrading silently — §15.7 turns this into a hard failure under
-    // COREPACK_REQUIRE_SIGNATURES in phase 2.
-    if (!shouldSkipIntegrityCheck()) {
-      console.warn(messages.unverifiableIntegrity(registryUrl, spec.package, version));
-    }
-
+    // §04.5's legacy branch: unsigned, but still a digest the download is
+    // checked against. `verifyRegistryTrust` has warned about the missing
+    // signature already.
     return `${version}+sha1.${shasum}`;
   } catch (error) {
     // Verbatim §04.5 wrapper — both env var names in it are asserted, which is
@@ -175,7 +170,12 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
 export async function fetchTarballURLAndSignature(
   spec: NpmRegistrySpec,
   version: string,
-): Promise<{ tarball: string; integrity?: string; signatures?: RegistrySignature[] }> {
+): Promise<{
+  tarball: string;
+  integrity?: string;
+  shasum?: string;
+  signatures?: RegistrySignature[];
+}> {
   const registryUrl = getRegistryUrl();
   const metadata = asRecord(await npmGetJson(`${spec.package}/${version}`));
   const dist = requireDist(metadata, spec.package, version, registryUrl);
@@ -195,8 +195,132 @@ export async function fetchTarballURLAndSignature(
   return {
     tarball: rewritten,
     integrity: asString(dist.integrity),
+    // §15.7's soft-fail accepts the legacy digest when that is all the registry
+    // publishes, so the caller needs it in hand — §04.5's `latest` path has
+    // always used it, and refusing it only here would make the same registry
+    // work for `pnpm` and fail for `pnpm@6.x`.
+    shasum: asString(dist.shasum),
     signatures: readSignatures(dist),
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* §15.7 / §15.8 — registry metadata tiering                                   */
+/* -------------------------------------------------------------------------- */
+
+/** One warning per `<registry>\0<pkg>\0<version>`; §15.7 asks for exactly one. */
+const warnedUnsigned = new Set<string>();
+
+/**
+ * §15.7's tier-2 warning, emitted at most once per package and version.
+ *
+ * Exported because §06.1 row 1 short-circuits the rest of the tiering — a
+ * user-pinned hash is the check, and it must not be turned into a signature
+ * requirement — while the observation that the registry publishes no signatures
+ * is still worth making, and costs no request when the metadata is already in
+ * hand.
+ */
+export function warnUnsignedRegistry(
+  registryUrl: string,
+  packageName: string,
+  version: string,
+): void {
+  const seen = `${registryUrl}\0${packageName}\0${version}`;
+  if (warnedUnsigned.has(seen)) return;
+  warnedUnsigned.add(seen);
+  console.warn(messages.unsignedRegistry(registryUrl, packageName, version));
+}
+
+/**
+ * §15.7's three outcomes, in one place, for every site that reads `dist`.
+ *
+ * | Registry response | Outcome |
+ * |---|---|
+ * | `dist` absent | already an error — `requireDist`, upstream of here |
+ * | `signatures` absent or empty | §15.8's retry, then soft-fail: proceed on a digest, warn once |
+ * | `signatures` present | verified; an invalid one is `Signature does not match` |
+ *
+ * `COREPACK_REQUIRE_SIGNATURES=1` turns the soft-fail into a hard failure, for
+ * organisations mandating signed sources. It is deliberately *not* consulted on
+ * §06.1 row 1's pinned-hash path, which never reaches here: an explicit hash is
+ * a stronger, user-chosen assertion than the registry's own claim (§14.21), and
+ * making it depend on registry metadata would both weaken that rule and cost a
+ * request the fast path does not make.
+ *
+ * §06.1 row 5 is handled here rather than at each call site: `COREPACK_INTEGRITY_KEYS`
+ * in {"", "0"} disables the mechanism outright rather than tiering it, so this
+ * returns without a warning, a request, or a refusal.
+ */
+export async function verifyRegistryTrust(input: {
+  packageName: string;
+  version: string;
+  registryUrl: string;
+  signatures: RegistrySignature[] | undefined;
+  integrity: string | undefined;
+  /** Whether the caller holds *some* digest to check the downloaded bytes against. */
+  hasDigest: boolean;
+}): Promise<void> {
+  const { packageName, version, registryUrl, integrity, hasDigest } = input;
+
+  if (shouldSkipIntegrityCheck()) return;
+
+  // §15.8 — the version endpoint is the one Artifactory strips; the package
+  // root often still carries the signatures. One extra request, on a path that
+  // was heading for a degraded outcome anyway, and never on the happy path.
+  // Skipped when there is no `integrity` either: the signed statement is *about*
+  // that string, so a recovered signature would have nothing to cover.
+  const signatures =
+    input.signatures ??
+    (integrity === undefined ? undefined : await fetchRootSignatures(packageName, version));
+
+  // Tier 3: a signature exists, so it decides. `verifySignature` reports an
+  // untrusted keyid, an expired key and a bad signature distinctly (§06.3).
+  if (signatures !== undefined && integrity !== undefined) {
+    verifySignature({ signatures, integrity, packageName, version, registryOrigin: registryUrl });
+    return;
+  }
+
+  // Tier 2. A registry that publishes signatures but no `integrity` is in the
+  // same position: the signed statement is *about* the integrity string, so
+  // without one there is nothing signed to check, and the same soft-fail
+  // applies.
+  if (envFlag("COREPACK_REQUIRE_SIGNATURES")) {
+    throw new UsageError(messages.noCompatibleSignature());
+  }
+
+  // "otherwise refuse": no signature *and* no digest is an unverifiable
+  // artifact, and installing it would be the silent downgrade §15.7 exists to
+  // prevent.
+  if (!hasDigest) {
+    throw new Error(messages.noRegistryDigest(packageName, version, registryUrl));
+  }
+
+  warnUnsignedRegistry(registryUrl, packageName, version);
+}
+
+/**
+ * §15.8 — `versions[<version>].dist.signatures` from `GET /<pkg>`.
+ *
+ * Exactly one extra request, and only from a caller that has already seen an
+ * unsigned version endpoint. Best-effort by construction: a failure here leaves
+ * the caller where it already was — at §15.7's soft-fail — rather than turning a
+ * metadata quirk into an error.
+ */
+async function fetchRootSignatures(
+  packageName: string,
+  version: string,
+): Promise<RegistrySignature[] | undefined> {
+  // Not a request we are allowed to make; the soft-fail applies unchanged.
+  if (envDisabled("COREPACK_ENABLE_NETWORK")) return undefined;
+
+  try {
+    const body = asRecord(await npmGetJson(packageName));
+    const doc = asRecord(asRecord(body?.versions)?.[version]);
+    const dist = asRecord(doc?.dist);
+    return dist === undefined ? undefined : readSignatures(dist);
+  } catch {
+    return undefined;
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -247,7 +371,7 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-/** §15.7 — an absent `dist` is a clear error, never a `TypeError`. */
+/** §15.7 tier 1 — an absent `dist` is a clear error, never a `TypeError`. */
 function requireDist(
   metadata: Record<string, unknown> | undefined,
   packageName: string,
@@ -256,9 +380,7 @@ function requireDist(
 ): Record<string, unknown> {
   const dist = asRecord(metadata?.dist);
   if (dist === undefined) {
-    throw new Error(
-      `${packageName}@${version} metadata from ${redactUserinfo(registryUrl)} has no "dist" section; this registry may not be npm-compatible`,
-    );
+    throw new Error(messages.noDistSection(packageName, version, registryUrl));
   }
   return dist;
 }

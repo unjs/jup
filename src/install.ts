@@ -19,9 +19,14 @@ import {
   hashStream,
   parseSri,
   shouldSkipIntegrityCheck,
-  verifySignature,
 } from "./integrity.ts";
-import { applyRegistryOverride, fetchTarballURLAndSignature, getRegistryUrl } from "./registry.ts";
+import {
+  applyRegistryOverride,
+  fetchTarballURLAndSignature,
+  getRegistryUrl,
+  verifyRegistryTrust,
+  warnUnsignedRegistry,
+} from "./registry.ts";
 import { parse } from "./semver.ts";
 import {
   bumpLastKnownGood,
@@ -52,7 +57,15 @@ interface ArtifactSource {
   registry?: RegistrySpec;
   /** Reused by §06.3 rather than re-fetched, when §07.3 already asked for it. */
   integrity?: string;
+  /** §15.7's legacy digest, used only when the registry publishes no `integrity`. */
+  shasum?: string;
   signatures?: RegistrySignature[];
+  /**
+   * Whether the version metadata has been read. Not `integrity !== undefined`:
+   * a registry that publishes none is exactly the §15.7 case, and asking twice
+   * would double the requests on the path that can least afford them.
+   */
+  fetched?: boolean;
 }
 
 /** §02.1 — a reference's build suffix, from semver build metadata or a URL fragment. */
@@ -281,7 +294,9 @@ async function chooseSource(
       const metadata = await fetchTarballURLAndSignature(registry, version);
       source.url = metadata.tarball;
       source.integrity = metadata.integrity;
+      source.shasum = metadata.shasum;
       source.signatures = metadata.signatures;
+      source.fetched = true;
       if (registry.bin !== undefined) source.binPath = registry.bin;
     }
   } else {
@@ -322,43 +337,55 @@ async function resolveExpectedIntegrity(
   pin: HashPin,
   version: string | undefined,
 ): Promise<{ algo: string; hex: string } | undefined> {
-  // Row 1: an explicit pin is a stronger, user-chosen assertion than the
-  // registry's claim about itself, and it turns signature verification off.
-  if (pin.digest !== undefined) return undefined;
-
   // Rows 4 and 5: a url-type registry publishes no signatures at all, and
   // `COREPACK_INTEGRITY_KEYS` in {"", "0"} disables the whole mechanism.
   const registry = source.registry;
   if (registry?.type !== "npm" || version === undefined) return undefined;
   if (shouldSkipIntegrityCheck()) return undefined;
 
-  // §07.3 fetched this already when a custom registry is configured; on the
-  // default registry the artifact URL comes from the table, so the metadata has
-  // to be asked for separately.
-  if (source.integrity === undefined) {
-    const metadata = await fetchTarballURLAndSignature(registry, version);
-    source.integrity = metadata.integrity;
-    source.signatures = metadata.signatures;
-  }
+  const registryUrl = getRegistryUrl();
 
-  if (source.integrity === undefined) {
-    // Nothing signed to verify: the signature covers the integrity string, so
-    // without one there is no chain. Say so rather than downgrading silently —
-    // §15.7 turns this into a hard failure in phase 2.
-    console.warn(messages.unverifiableIntegrity(getRegistryUrl(), registry.package, version));
+  // Row 1: an explicit pin is a stronger, user-chosen assertion than the
+  // registry's claim about itself, and it turns signature verification off —
+  // including §15.7's requirement and §15.8's extra request, neither of which
+  // may add a fetch to a path that already knows what it expects. When §07.3
+  // fetched the metadata anyway (a configured registry supplies `dist.tarball`),
+  // an unsigned registry is still worth one warning.
+  if (pin.digest !== undefined) {
+    if (source.fetched && source.signatures === undefined) {
+      warnUnsignedRegistry(registryUrl, registry.package, version);
+    }
     return undefined;
   }
 
-  // Trusted key -> signature -> `integrity` -> the bytes checked below.
-  verifySignature({
-    signatures: source.signatures,
-    integrity: source.integrity,
+  // §07.3 fetched this already when a custom registry is configured; on the
+  // default registry the artifact URL comes from the table, so the metadata has
+  // to be asked for separately.
+  if (source.fetched !== true) {
+    const metadata = await fetchTarballURLAndSignature(registry, version);
+    source.integrity = metadata.integrity;
+    source.shasum = metadata.shasum;
+    source.signatures = metadata.signatures;
+    source.fetched = true;
+  }
+
+  // §15.7 tiers 2 and 3, plus §15.8's package-root retry: a verified signature,
+  // a warned soft-fail onto the registry's own digest, or a refusal.
+  await verifyRegistryTrust({
     packageName: registry.package,
     version,
-    registryOrigin: getRegistryUrl(),
+    registryUrl,
+    signatures: source.signatures,
+    integrity: source.integrity,
+    hasDigest: source.integrity !== undefined || source.shasum !== undefined,
   });
 
-  return parseSri(source.integrity);
+  // Trusted key -> signature -> `integrity` -> the bytes checked by the caller.
+  if (source.integrity !== undefined) return parseSri(source.integrity);
+
+  // Soft-fail: unsigned, but the bytes are still checked against the legacy
+  // digest, which is strictly more than corepack does here (it checks nothing).
+  return source.shasum === undefined ? undefined : { algo: "sha1", hex: source.shasum };
 }
 
 /** §06.2 — `algo` from `build[0]`/the URL fragment, `digest` from `build[1]`. */

@@ -22,6 +22,10 @@ export type RegistryMode =
   | "invalid_signature"
   | "invalid_integrity"
   | "no_signatures"
+  /** §15.7 tier 1: a `dist`-less version document, as #570's registries serve. */
+  | "no_dist"
+  /** §15.8: JFrog Artifactory's shape — signed at the root, stripped per version. */
+  | "root_only_signatures"
   | "untrusted_key";
 
 export interface RecordedRequest {
@@ -213,7 +217,7 @@ export class MockRegistry {
     if (rest.length === 0) {
       const versions: Record<string, unknown> = {};
       for (const version of entry.versions.keys()) {
-        versions[version] = this.#versionDoc(name, version, base);
+        versions[version] = this.#versionDoc(name, version, base, "root");
       }
       this.#json(response, { name, "dist-tags": entry.distTags, versions });
       return;
@@ -225,12 +229,22 @@ export class MockRegistry {
       this.#notFound(response);
       return;
     }
-    this.#json(response, this.#versionDoc(name, version, base));
+    this.#json(response, this.#versionDoc(name, version, base, "version"));
   }
 
-  #versionDoc(name: string, version: string, base: string): unknown {
+  /**
+   * @param endpoint Which document this is going into: `GET /<pkg>` or
+   * `GET /<pkg>/<version>`. They differ only under `root_only_signatures`, which
+   * is exactly the Artifactory shape §15.8 exists for.
+   */
+  #versionDoc(name: string, version: string, base: string, endpoint: "root" | "version"): unknown {
     const published = this.#packages.get(name)!.versions.get(version)!;
     const basename = name.split("/").pop()!;
+
+    // §15.7 tier 1 — the metadata shape corepack destructures blind.
+    if (this.mode === "no_dist") {
+      return { name, version };
+    }
 
     // A validly signed statement about bytes we are not serving.
     const integrity =
@@ -244,7 +258,11 @@ export class MockRegistry {
       shasum: createHash("sha1").update(published.tarball).digest("hex"),
     };
 
-    if (this.mode !== "no_signatures") {
+    const signs =
+      this.mode !== "no_signatures" &&
+      (this.mode !== "root_only_signatures" || endpoint === "root");
+
+    if (signs) {
       const payload = `${name}@${version}:${integrity}`;
       const useRogueKey = this.mode === "invalid_signature";
       dist.signatures = [

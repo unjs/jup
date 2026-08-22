@@ -136,6 +136,7 @@ The ones you are most likely to want:
 | `COREPACK_ENABLE_AUTO_PIN=1`        | Write a pin automatically when a project has none                 |
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` | Announce (and on a TTY, confirm) each download                    |
 | `COREPACK_INTEGRITY_KEYS`           | Replace the built-in trust store, or set `0` to skip verification  |
+| `COREPACK_REQUIRE_SIGNATURES=1`     | Refuse a registry that publishes no signature, rather than warning |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
 Security-relevant ones are deliberately not settable that way — see
@@ -152,6 +153,13 @@ Every artifact must clear a check before it is allowed into the cache:
   `<name>@<version>:<integrity>` is verified against a built-in trust store, and the
   `integrity` it covers becomes the expected hash. That chains a trusted key all the way
   to the bytes on disk.
+- **The registry's own digest, with a warning.** Proxies such as Artifactory and Nexus
+  routinely strip `dist.signatures`. When they do — and only then — pipack asks the
+  package-root endpoint once, and if that is unsigned too it falls back to checking the
+  bytes against the registry's `integrity`, saying so once. Set
+  `COREPACK_REQUIRE_SIGNATURES=1` to refuse instead. A registry publishing neither a
+  signature nor a digest is always refused, and metadata with no `dist` section at all
+  names the registry rather than crashing.
 
 A failed check discards the download and caches nothing, so a re-run fails the same way
 rather than silently succeeding.

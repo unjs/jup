@@ -262,15 +262,36 @@ export const messages = {
   unsupportedHashAlgo: (algo: string) =>
     `Unsupported hash algorithm '${algo}' in the packageManager field`,
 
+  /* §15.7 — registry metadata tiering ------------------------------------- */
+
   /**
-   * §15.7-aligned — a registry that publishes no `dist.integrity` leaves nothing
-   * for the signature to cover, so the legacy `shasum` is all that is on offer.
-   * §04.5 documents that fallback branch; this makes taking it visible rather
-   * than a silent downgrade. Phase 2's `COREPACK_REQUIRE_SIGNATURES` turns it
-   * into a hard failure.
+   * Tier 1: no `dist` at all. Corepack destructures it and throws a raw
+   * `TypeError: Cannot read properties of undefined`, which is the whole of
+   * #570/#725/#808; this says which registry answered and what was wrong with
+   * the answer.
    */
-  unverifiableIntegrity: (registry: string, packageName: string, version: string) =>
-    `! ${url_(registry)} publishes no integrity digest for ${packageName}@${version}; falling back to its unsigned shasum`,
+  noDistSection: (packageName: string, version: string, registry: string) =>
+    `${packageName}@${version} metadata from ${url_(registry)} has no "dist" section; this registry may not be npm-compatible`,
+
+  /**
+   * Tier 2's refusal half: the registry signed nothing *and* published no digest
+   * of any kind, so there is nothing for the downloaded bytes to be checked
+   * against. §15.7 says refuse rather than install unverified bytes.
+   */
+  noRegistryDigest: (packageName: string, version: string, registry: string) =>
+    `${packageName}@${version} metadata from ${url_(registry)} has neither "dist.integrity" nor "dist.shasum"`,
+
+  /**
+   * Tier 2's soft-fail half, verbatim from §15.7.
+   *
+   * Emitted once per package/version: Artifactory, Nexus and friends strip
+   * `signatures` routinely, and the pre-§15.7 remedy — `COREPACK_INTEGRITY_KEYS=0`
+   * — traded a metadata-shape problem for a permanent, global security
+   * downgrade. The bytes are still checked against the registry's own digest;
+   * what is lost is the signature that would have covered it.
+   */
+  unsignedRegistry: (registry: string, packageName: string, version: string) =>
+    `! ${url_(registry)} does not publish signatures for ${packageName}@${version}; falling back to integrity-only verification`,
 
   /* §14.5 — env-file eligibility ------------------------------------------ */
 

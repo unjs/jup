@@ -20,7 +20,9 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  type RunResult,
 } from "./_harness/index.ts";
+import { startProxy, type ProxyFixture } from "./_harness/proxy.ts";
 
 const registry = new MockRegistry();
 
@@ -218,13 +220,100 @@ describe("§13.7 registry, auth and integrity", () => {
     for (const request of download) expect(request.authorization).toBeUndefined();
   });
 
-  it.skip("71: HTTP_PROXY + a CONNECT proxy tunnels the request (deferred to phase 2)", () => {
-    // §14.8/§15.6 and PLAN T7: `fetch` cannot proxy without a custom dispatcher,
-    // so proxy support — and this row with it — is explicitly phase 2.
+  /**
+   * Rows 71 and 72 — the environment a user behind a corporate proxy actually
+   * has: one proxy for both schemes, a registry that only resolves on its far
+   * side, and a `dist.tarball` served over TLS. The run has to come out the
+   * other end with the package manager installed, which means the metadata went
+   * absolute-form through `HTTP_PROXY` and the artifact went through a `CONNECT`
+   * tunnel whose certificate was verified.
+   *
+   * Neither row is allowed to reach `example.com`: nothing but the proxy knows
+   * where the registry lives.
+   */
+  async function proxiedInstall(
+    extra?: Record<string, string | undefined>,
+  ): Promise<{ result: RunResult; proxy: ProxyFixture }> {
+    const proxy = await startProxy(() => registry.origin);
+    // The artifact is advertised over TLS on the same host, so one run exercises
+    // both proxy request shapes (§05.1).
+    registry.tarballOrigin = "https://example.com";
+    const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
+
+    try {
+      const result = await run(["pnpm", "--version"], {
+        ...fixture,
+        env: trusted({
+          COREPACK_NPM_REGISTRY: "http://example.com",
+          HTTP_PROXY: proxy.origin,
+          HTTPS_PROXY: proxy.origin,
+          NODE_EXTRA_CA_CERTS: proxy.caFile,
+          ...extra,
+        }),
+      });
+      return { result, proxy };
+    } finally {
+      await proxy.stop();
+    }
+  }
+
+  it("71: HTTP_PROXY plus a CONNECT proxy tunnels the request", async () => {
+    const { result, proxy } = await proxiedInstall({ NODE_USE_ENV_PROXY: "1" });
+
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+
+    // The metadata request line named the whole URL — that is the forward-proxy
+    // protocol, and it is the only reason a registry on `example.com` resolved.
+    expect(proxy.absoluteForm).toContain("http://example.com/pnpm/6.6.2");
+    // The artifact went through a tunnel, opened to the target's own authority.
+    expect(proxy.connects).toEqual(["example.com:443"]);
+
+    // The mock saw both, and saw them as the URLs the tool asked for.
+    const originals = registry.requests.map((request) => request.original);
+    expect(originals).toContain("http://example.com/pnpm/6.6.2");
+    expect(originals).toContain("https://example.com/pnpm/-/pnpm-6.6.2.tgz");
   });
 
-  it.skip("72: the same without NODE_USE_ENV_PROXY still tunnels (deferred to phase 2)", () => {
-    // Same deferral as row 71.
+  it("72: the same without NODE_USE_ENV_PROXY still tunnels (§14.8)", async () => {
+    // Corepack needs this second flag before `HTTP_PROXY` does anything at all,
+    // which is the whole of #447 and #458. Here its absence changes nothing.
+    expect(process.env.NODE_USE_ENV_PROXY).toBeUndefined();
+
+    const { result, proxy } = await proxiedInstall({ NODE_USE_ENV_PROXY: undefined });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+    expect(proxy.absoluteForm).toContain("http://example.com/pnpm/6.6.2");
+    expect(proxy.connects).toEqual(["example.com:443"]);
+  });
+
+  it("157: NO_PROXY bypasses the proxy for a matching host (§15.6)", async () => {
+    const proxy = await startProxy(() => registry.origin);
+    const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
+
+    try {
+      // The registry is the mock itself this time, so a bypassed request can
+      // succeed on its own — and a proxied one would be recorded.
+      const result = await run(["pnpm", "--version"], {
+        ...fixture,
+        env: trusted({
+          COREPACK_NPM_REGISTRY: registry.origin,
+          HTTP_PROXY: proxy.origin,
+          HTTPS_PROXY: proxy.origin,
+          NO_PROXY: "127.0.0.1",
+        }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe("6.6.2\n");
+      expect(proxy.absoluteForm).toEqual([]);
+      expect(proxy.connects).toEqual([]);
+      expect(registry.requests.length).toBeGreaterThan(0);
+    } finally {
+      await proxy.stop();
+    }
   });
 
   it("73: a signature from an untrusted key is refused", async () => {
@@ -236,16 +325,21 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(result.exitCode).toBe(1);
     // §06.3 step 4: an unmatched keyid is "not signed by any trusted keys". The
     // row's `No compatible signature found in package metadata` is step 1's
-    // message, which is what an absent signature list produces — asserted below,
-    // since both halves of §06.3 are observable contract.
+    // message, which an *absent* signature list used to produce here too —
+    // §15.7 makes that case a soft-fail instead, so row 160 asserts the step-1
+    // message on the path that still refuses (COREPACK_REQUIRE_SIGNATURES).
     expect(result.stderr).toContain("The package was not signed by any trusted keys");
 
     registry.mode = "no_signatures";
     const unsigned = createFixture({ packageManager: "pnpm@6.6.2" });
     const missing = await run(["pnpm", "--version"], { ...unsigned, registry, env: trusted() });
 
-    expect(missing.exitCode).toBe(1);
-    expect(missing.stderr).toContain("No compatible signature found in package metadata");
+    // §15.7 tier 2: no signature, but a matching `integrity` — proceed, warned.
+    // A missing signature is a registry-shape problem (Artifactory, Nexus), and
+    // refusing every such registry is what drove users to
+    // `COREPACK_INTEGRITY_KEYS=0`, a permanent global downgrade.
+    expect(missing.exitCode).toBe(0);
+    expect(missing.stderr).toContain("does not publish signatures for pnpm@6.6.2");
   });
 
   it("74: COREPACK_INTEGRITY_KEYS naming the mock's key makes the same install succeed", async () => {

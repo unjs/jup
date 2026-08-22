@@ -82,6 +82,7 @@ const ENV_KEYS = [
   "COREPACK_ENABLE_DOWNLOAD_PROMPT",
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_ENABLE_NETWORK",
+  "COREPACK_REQUIRE_SIGNATURES",
   "CI",
 ] as const;
 
@@ -184,10 +185,18 @@ function packument(options: {
   version: string;
   tarball: string;
   integrityOf?: Uint8Array;
+  /** §15.7's legacy digest — the only thing a pre-integrity registry publishes. */
+  shasumOf?: Uint8Array;
   keyid?: string;
   signWith?: KeyObject;
+  /** Omit `dist` entirely, the way #570's private registries do (§15.7 tier 1). */
+  noDist?: boolean;
 }): unknown {
   const dist: Record<string, unknown> = { tarball: options.tarball };
+
+  if (options.shasumOf !== undefined) {
+    dist.shasum = hashOf(options.shasumOf, "sha1");
+  }
 
   if (options.integrityOf !== undefined) {
     const integrity = sriOf(options.integrityOf);
@@ -203,7 +212,9 @@ function packument(options: {
     }
   }
 
-  return { name: options.packageName, version: options.version, dist };
+  return options.noDist === true
+    ? { name: options.packageName, version: options.version }
+    : { name: options.packageName, version: options.version, dist };
 }
 
 function marker(location: string): CorepackMarker {
@@ -561,7 +572,7 @@ describe("registry signatures (§06.1 row 2)", () => {
     expect(spec.hash).toBe(`sha512.${hashOf(evil)}`);
   });
 
-  it("warns rather than failing when the registry publishes no integrity at all", async () => {
+  it("refuses when the registry publishes neither a signature nor a digest (§15.7)", async () => {
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.1.0"}` });
     routes["/pnpm/9.1.0"] = jsonRoute(
       packument({
@@ -572,12 +583,175 @@ describe("registry signatures (§06.1 row 2)", () => {
     );
     routes["/pnpm/-/pnpm-9.1.0.tgz"] = bytesRoute(tarball);
     process.env.COREPACK_NPM_REGISTRY = origin;
+
+    const error = await rejection(ensureInstalled({ name: "pnpm", reference: "9.1.0" }));
+
+    // Nothing signed *and* nothing to compare the bytes against: §15.7's
+    // "otherwise refuse". Corepack installs these bytes unverified.
+    expect(error.message).toBe(
+      `pnpm@9.1.0 metadata from ${origin} has neither "dist.integrity" nor "dist.shasum"`,
+    );
+    expect(storeIsEmpty()).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.7 — the three-outcome tiering on the download path
+ * ------------------------------------------------------------------ */
+
+describe("§15.7 registry metadata tiering", () => {
+  /**
+   * `pnpm@<version>` served with whatever `dist` shape a test asks for.
+   *
+   * Every test uses its own version: §15.7's warning is emitted once per package
+   * and version for the life of the process, which is the behaviour under test —
+   * so sharing a version between tests would silence all but the first.
+   */
+  async function serve(
+    version: string,
+    dist: Omit<Parameters<typeof packument>[0], "packageName" | "version" | "tarball">,
+    body?: Uint8Array,
+  ): Promise<Uint8Array> {
+    const tarball =
+      body ?? (await tarballOf({ "package.json": `{"name":"pnpm","version":"${version}"}` }));
+    routes[`/pnpm/${version}`] = jsonRoute(
+      packument({
+        packageName: "pnpm",
+        version,
+        tarball: `${origin}/pnpm/-/pnpm-${version}.tgz`,
+        ...dist,
+      }),
+    );
+    routes[`/pnpm/-/pnpm-${version}.tgz`] = bytesRoute(tarball);
+    process.env.COREPACK_NPM_REGISTRY = origin;
+    return tarball;
+  }
+
+  it("tier 1: absent `dist` is an error naming the registry, not a TypeError", async () => {
+    await serve("9.1.0", { noDist: true });
+
+    const error = await rejection(ensureInstalled({ name: "pnpm", reference: "9.1.0" }));
+
+    expect(error.message).toBe(
+      `pnpm@9.1.0 metadata from ${origin} has no "dist" section; this registry may not be npm-compatible`,
+    );
+    expect(error.message).not.toContain("Cannot read properties");
+    expect(storeIsEmpty()).toBe(true);
+  });
+
+  it("tier 2: absent signatures soft-fail onto `integrity`, with exactly one warning", async () => {
+    const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.2.0"}` });
+    await serve("9.2.0", { integrityOf: tarball }, tarball);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    const spec = await ensureInstalled({ name: "pnpm", reference: "9.1.0" });
+    const spec = await ensureInstalled({ name: "pnpm", reference: "9.2.0" });
 
     expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("publishes no integrity digest"));
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      `! ${origin} does not publish signatures for pnpm@9.2.0; falling back to integrity-only verification`,
+    );
+  });
+
+  it("tier 2: the unsigned `integrity` is still checked against the bytes", async () => {
+    const evil = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.3.0"} ` });
+    const good = await serve("9.3.0", { integrityOf: evil });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const error = await rejection(ensureInstalled({ name: "pnpm", reference: "9.3.0" }));
+
+    expect(error.message).toBe(`Mismatch hashes. Expected ${hashOf(evil)}, got ${hashOf(good)}`);
+    expect(storeIsEmpty()).toBe(true);
+  });
+
+  it("tier 2: falls back to the legacy shasum when there is no integrity either", async () => {
+    const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.4.0"}` });
+    await serve("9.4.0", { shasumOf: tarball }, tarball);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const spec = await ensureInstalled({ name: "pnpm", reference: "9.4.0" });
+
+    // The digest the registry published is the one that was checked, so the
+    // recorded hash is `sha1`, not the default `sha512`.
+    expect(spec.hash).toBe(`sha1.${hashOf(tarball, "sha1")}`);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("COREPACK_REQUIRE_SIGNATURES turns the soft-fail into a refusal", async () => {
+    const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.5.0"}` });
+    await serve("9.5.0", { integrityOf: tarball }, tarball);
+    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+
+    const error = await rejection(ensureInstalled({ name: "pnpm", reference: "9.5.0" }));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe("No compatible signature found in package metadata");
+    expect(storeIsEmpty()).toBe(true);
+  });
+
+  it("§06.1 row 1: a pinned hash still overrides the tiering, and warns once", async () => {
+    const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.6.0"}` });
+    await serve("9.6.0", {}, tarball);
+    // Mandating signatures must not override §14.21: the user's own hash is the
+    // stronger assertion, and it is what gets checked.
+    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const spec = await ensureInstalled({
+      name: "pnpm",
+      reference: `9.6.0+sha512.${hashOf(tarball)}`,
+    });
+
+    expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("does not publish signatures"));
+    // §15.8 must not add a request on a path that is already verified.
+    expect(requested).not.toContain(`${origin}/pnpm`);
+  });
+
+  it("§15.8: signatures absent from the version endpoint are read from the package root", async () => {
+    const pair = keypair();
+    const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.7.0"}` });
+    const signed = packument({
+      packageName: "pnpm",
+      version: "9.7.0",
+      tarball: `${origin}/pnpm/-/pnpm-9.7.0.tgz`,
+      integrityOf: tarball,
+      keyid: pair.keyid,
+      signWith: pair.privateKey,
+    });
+
+    // What Artifactory does: the package root keeps `dist.signatures`, the
+    // version endpoint strips them (#808).
+    routes["/pnpm"] = jsonRoute({ name: "pnpm", versions: { "9.7.0": signed } });
+    await serve("9.7.0", { integrityOf: tarball }, tarball);
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const spec = await ensureInstalled({ name: "pnpm", reference: "9.7.0" });
+
+    expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
+    expect(requested).toContain(`${origin}/pnpm`);
+    // Verified through the fallback, so no soft-fail warning at all.
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("§15.8: a signed happy path never asks the package root", async () => {
+    const pair = keypair();
+    const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.8.0"}` });
+    await serve(
+      "9.8.0",
+      { integrityOf: tarball, keyid: pair.keyid, signWith: pair.privateKey },
+      tarball,
+    );
+    process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const spec = await ensureInstalled({ name: "pnpm", reference: "9.8.0" });
+
+    expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
+    expect(requested).toStrictEqual([`${origin}/pnpm/9.8.0`, `${origin}/pnpm/-/pnpm-9.8.0.tgz`]);
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 
