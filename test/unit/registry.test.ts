@@ -11,12 +11,16 @@ import { resetNpmrcCache } from "../../src/npmrc.ts";
 import {
   applyRegistryOverride,
   applySourceOverride,
+  capToReleaseAge,
   fetchAvailableTags,
   fetchAvailableVersions,
   fetchLatestStableVersion,
+  fetchResolvableVersions,
   fetchTarballURLAndSignature,
   getRegistryUrl,
+  minimumReleaseAge,
   NPM_ACCEPT_HEADER,
+  NPM_FULL_ACCEPT_HEADER,
   resolveRegistrySpec,
   verifyRegistryTrust,
 } from "../../src/registry.ts";
@@ -97,6 +101,7 @@ const ENV_KEYS = [
   "COREPACK_REGISTRY_YARN",
   "COREPACK_REGISTRY_PNPM",
   "COREPACK_REGISTRY_NPM",
+  "COREPACK_MINIMUM_RELEASE_AGE",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -1182,5 +1187,257 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
       resetNpmrcCache();
       rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.35e — COREPACK_MINIMUM_RELEASE_AGE
+ * ------------------------------------------------------------------ */
+
+const HOUR = 60 * 60 * 1000;
+
+/** A packument with a `time` map, as the **full** document carries it. */
+function datedPackument(entries: Record<string, number>, options?: { time?: boolean }): unknown {
+  const versions: Record<string, unknown> = {};
+  const time: Record<string, string> = {};
+  for (const [version, agoHours] of Object.entries(entries)) {
+    versions[version] = { name: "pnpm", version, dist: { tarball: `https://x/${version}.tgz` } };
+    time[version] = new Date(Date.now() - agoHours * HOUR).toISOString();
+  }
+  const document: Record<string, unknown> = { name: "pnpm", versions };
+  if (options?.time !== false) document.time = time;
+  return document;
+}
+
+describe("minimumReleaseAge (§15.35e)", () => {
+  it("is off when unset, empty, blank or explicitly zero", () => {
+    expect(minimumReleaseAge()).toBeUndefined();
+    for (const value of ["", "   ", "0", "0.0"]) {
+      process.env.COREPACK_MINIMUM_RELEASE_AGE = value;
+      expect(minimumReleaseAge(), JSON.stringify(value)).toBeUndefined();
+    }
+  });
+
+  it("reads hours, and answers milliseconds", () => {
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    expect(minimumReleaseAge()).toBe(24 * HOUR);
+
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = " 0.5 ";
+    expect(minimumReleaseAge()).toBe(HOUR / 2);
+  });
+
+  it("refuses an unparseable or negative value rather than falling back to off", () => {
+    // The whole point: `COREPACK_NETWORK_TIMEOUT=abc` costing a user the default
+    // timeout is a preference gone wrong, while this silently turning a
+    // supply-chain control off on the machine of someone who believes they
+    // turned it on is the fail-open shape §15.35e exists to close.
+    for (const value of ["24h", "-1", "abc", "NaN", "Infinity"]) {
+      process.env.COREPACK_MINIMUM_RELEASE_AGE = value;
+      expect(() => minimumReleaseAge(), value).toThrow(UsageError);
+      expect(() => minimumReleaseAge(), value).toThrow(
+        `COREPACK_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(value)}`,
+      );
+    }
+  });
+});
+
+describe("fetchResolvableVersions (§15.35e, §04.1 step 6)", () => {
+  it("is fetchAvailableVersions, header and all, while the gate is off", async () => {
+    const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 1, "9.1.0": 1 }) });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+
+    const candidates = await fetchResolvableVersions(npm("pnpm"));
+
+    expect(candidates.versions).toStrictEqual(["9.0.0", "9.1.0"]);
+    expect(candidates.undatedSource).toBeUndefined();
+    // Both halves of "costs nothing when unset": one request, abbreviated.
+    expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm"]);
+    expect(server.last().headers.accept).toBe(NPM_ACCEPT_HEADER);
+  });
+
+  it("asks for the full document, and only then, when the gate is on", async () => {
+    const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 100, "9.1.0": 1 }) });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    const candidates = await fetchResolvableVersions(npm("pnpm"));
+
+    expect(candidates.versions).toStrictEqual(["9.0.0"]);
+    expect(candidates.undatedSource).toBeUndefined();
+    // Still exactly one request — the gate changes which document, never how
+    // many are sent.
+    expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm"]);
+    expect(server.last().headers.accept).toBe(NPM_FULL_ACCEPT_HEADER);
+    expect(server.last().headers.accept).toBe("application/json");
+  });
+
+  it("drops a version the `time` map does not mention", async () => {
+    const document = datedPackument({ "9.0.0": 100, "9.1.0": 100 }) as {
+      time: Record<string, string>;
+    };
+    delete document.time["9.1.0"];
+    const server = await startServer({ "/pnpm": document });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    // Undatable, so unvouchable, so not a candidate — even though it is older
+    // than everything the map does date.
+    expect((await fetchResolvableVersions(npm("pnpm"))).versions).toStrictEqual(["9.0.0"]);
+  });
+
+  it("reports a packument with no `time` map at all as an undated source", async () => {
+    const server = await startServer({
+      "/pnpm": datedPackument({ "9.0.0": 100 }, { time: false }),
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    const candidates = await fetchResolvableVersions(npm("pnpm"));
+
+    expect(candidates.versions).toStrictEqual(["9.0.0"]);
+    expect(candidates.undatedSource).toBe(`${server.origin}/pnpm`);
+  });
+
+  it("reports a url-typed registry as an undated source (blocker 3)", async () => {
+    const server = await startServer({
+      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.0", "4.14.1"] },
+    });
+    const spec: UrlRegistrySpec = {
+      type: "url",
+      url: `${server.origin}/tags`,
+      fields: { tags: "aliases", versions: "tags" },
+    };
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    const candidates = await fetchResolvableVersions(spec);
+
+    // Nothing is filtered — there is nothing to filter *by*. The caller decides,
+    // once it knows whether this source contributes a candidate at all.
+    expect(candidates.versions).toStrictEqual(["4.14.0", "4.14.1"]);
+    expect(candidates.undatedSource).toBe(`${server.origin}/tags`);
+  });
+});
+
+describe("capToReleaseAge (§15.35e, §04.1 step 3)", () => {
+  it("returns its argument and makes no request while the gate is off", async () => {
+    const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 100 }) });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+
+    expect(await capToReleaseAge(npm("pnpm"), "9.9.9")).toBe("9.9.9");
+    expect(server.requests).toStrictEqual([]);
+  });
+
+  it("caps a dist-tag at the newest release old enough to be chosen", async () => {
+    const server = await startServer({
+      "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0": 100, "9.2.0": 1 }),
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    expect(await capToReleaseAge(npm("pnpm"), "9.2.0")).toBe("9.1.0");
+  });
+
+  it("never caps *upwards* — a tag pointing backwards stays there", async () => {
+    const server = await startServer({
+      "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0": 100, "9.2.0": 100 }),
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    // 9.2.0 is eligible too, but the tag named the 9.0.0 line and the gate is
+    // not licence to move a user forward.
+    expect(await capToReleaseAge(npm("pnpm"), "9.0.0")).toBe("9.0.0");
+  });
+
+  it("§15.24 — skips a prerelease unless the tag itself names one", async () => {
+    const server = await startServer({
+      "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0-rc.1": 100, "9.2.0": 1 }),
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    expect(await capToReleaseAge(npm("pnpm"), "9.2.0")).toBe("9.0.0");
+    expect(await capToReleaseAge(npm("pnpm"), "9.2.0-rc.9")).toBe("9.1.0-rc.1");
+  });
+
+  it("refuses when the source publishes no release dates", async () => {
+    const server = await startServer({
+      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.0", "4.14.1"] },
+    });
+    const spec: UrlRegistrySpec = {
+      type: "url",
+      url: `${server.origin}/tags`,
+      fields: { tags: "aliases", versions: "tags" },
+    };
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    const error = await rejection(capToReleaseAge(spec, "4.14.1"));
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(
+      `COREPACK_MINIMUM_RELEASE_AGE is set, but ${server.origin}/tags publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set COREPACK_NPM_REGISTRY to an npm registry that serves this package manager`,
+    );
+  });
+
+  it("refuses when nothing published is old enough", async () => {
+    const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 1, "9.1.0": 2 }) });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    const error = await rejection(capToReleaseAge(npm("pnpm"), "9.1.0"));
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(
+      "No release of pnpm is old enough for COREPACK_MINIMUM_RELEASE_AGE=24",
+    );
+  });
+});
+
+describe("fetchLatestStableVersion under the gate (§15.35e, §04.5)", () => {
+  it("selects the newest eligible stable release instead of asking for `latest`", async () => {
+    const { sri, hex } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0": 100, "9.2.0": 1 }),
+      "/pnpm/9.1.0": { name: "pnpm", version: "9.1.0", dist: { integrity: sri } },
+      "/pnpm/latest": { name: "pnpm", version: "9.2.0", dist: { integrity: sri } },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = "0";
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    expect(await fetchLatestStableVersion(npm("pnpm"))).toBe(`9.1.0+sha512.${hex}`);
+    // The packument (full) to learn the ages, then the version document. Never
+    // `/pnpm/latest`, which would answer 9.2.0.
+    expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm", "/pnpm/9.1.0"]);
+    expect(server.requests[0]!.headers.accept).toBe(NPM_FULL_ACCEPT_HEADER);
+    expect(server.requests[1]!.headers.accept).toBe(NPM_ACCEPT_HEADER);
+  });
+
+  it("still asks for `latest` in one request while the gate is off", async () => {
+    const { sri, hex } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      "/pnpm/latest": { name: "pnpm", version: "9.2.0", dist: { integrity: sri } },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = "0";
+
+    expect(await fetchLatestStableVersion(npm("pnpm"))).toBe(`9.2.0+sha512.${hex}`);
+    expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm/latest"]);
+  });
+
+  it("refuses an undated url document rather than reading `stable` from it", async () => {
+    const server = await startServer({
+      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.1"] },
+    });
+    const spec: UrlRegistrySpec = {
+      type: "url",
+      url: `${server.origin}/tags`,
+      fields: { tags: "aliases", versions: "tags" },
+    };
+    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+
+    const error = await rejection(fetchLatestStableVersion(spec));
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toContain("publishes no release dates");
+    // And it did not fetch the document it could not have gated anyway.
+    expect(server.requests).toStrictEqual([]);
   });
 });

@@ -499,6 +499,14 @@ describe("isEnvFileEligible", () => {
     // §15.24's opt-in: choosing to accept prereleases is a project's call, and
     // it widens a candidate set rather than deciding who is trusted.
     expect(isEnvFileEligible("COREPACK_ENABLE_PRERELEASES")).toBe(true);
+    // §15.35e / §15.37 — the minimum release age is eligible: a project raising
+    // the bar on what it will resolve implicitly is stating a policy, not
+    // deciding who is trusted, and the direction it can move things in is
+    // *older*. Eligibility is a deny-list, so it needs no entry in `env.ts` to
+    // be eligible — which is exactly why it is asserted here, so a later edit to
+    // ENV_FILE_INELIGIBLE cannot withdraw it silently.
+    expect(isEnvFileEligible("COREPACK_MINIMUM_RELEASE_AGE")).toBe(true);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_MINIMUM_RELEASE_AGE")).toBe(false);
 
     // §15.11 / §15.37 — the one opt-out from "every artifact clears a
     // verification tier". Eligibility is a deny-list, so a new COREPACK_*

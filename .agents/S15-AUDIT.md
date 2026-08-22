@@ -296,3 +296,72 @@ Every row in **both** tables now has a test whose title begins with the row numb
 Four of them are visibly skipped (§15.35e, `COREPACK_MINIMUM_RELEASE_AGE`), which is the
 point: the file states what blocks it, and its helper throws so a premature un-skip fails
 loudly instead of passing vacuously.
+
+---
+
+# Follow-up: §15.35e closed (2026-08-22)
+
+The last outstanding `[required]` item is implemented. Row **203** is asserted, and
+`test/conformance/15-35e-release-age.test.ts` is no longer `describe.skip` — 15 rows, and
+the `publishedAt` helper that threw is gone, replaced by a `time` option on the mock's
+`publish`.
+
+## What the three recorded blockers turned out to be
+
+1. **`fetchAvailableVersions` returns `string[]`.** True, and left that way: §05.2's
+   contract function is untouched, and `fetchResolvableVersions` sits beside it returning
+   `{ versions, undatedSource? }`. §04.1 step 6 calls the new one.
+2. **The abbreviated packument carries no `time`.** True. The full document is now
+   requested — `Accept: application/json` — on **one** path (step 6's candidate list) and
+   only while `COREPACK_MINIMUM_RELEASE_AGE` is set. No path changes its header when the
+   variable is unset, and the gate adds **no request** to step 6: it changes which
+   document is asked for, not how many are asked for. Both halves are asserted by a row
+   that diffs the full request log of a gated and an ungated run, header by header.
+3. **`url`-typed registries publish no times.** Decided: **fail closed.**
+
+## Blocker 3, decided
+
+A source that dates nothing cannot be gated. The options were to warn and proceed, or to
+refuse. It refuses, and the reasoning is in `undatedSourceError` in `src/registry.ts`:
+
+* `COREPACK_MINIMUM_RELEASE_AGE` is a supply-chain **control**. Reporting success without
+  having applied it is the fail-open shape the item exists to close, and a warning is not
+  a substitute — warnings are swallowed in exactly the CI runs that most want the gate.
+* Auto-switching Yarn Berry onto `@yarnpkg/cli-dist` (which *is* dated) was considered and
+  rejected: it would silently move where the artifact comes from as a side effect of a
+  *timing* preference, changing the trust origin for every user of the variable rather
+  than only for the ones who hit the undated source.
+* The blast radius is narrow by construction. §04.1 step 5 returns an exact version before
+  any of this runs, so `packageManager: "yarn@4.14.1"` — the ordinary case — is untouched;
+  only *implicit* Yarn Berry resolution refuses. And a band that contributes no candidate
+  cannot refuse, so `yarn@^1.22` still resolves over the Berry band it also fans out over.
+* The refusal names the way out: an npm-protocol registry routes Berry through
+  `@yarnpkg/cli-dist` via §05.2 rewrite 1, which does publish release dates.
+
+## Two further decisions worth recording
+
+* **A dist-tag is capped, not trusted.** §15.35e exempts an *exact* version; a tag is the
+  registry choosing on the user's behalf, which is precisely what a fresh malicious
+  publish subverts. So §04.1 step 3's target — and §04.5's `latest` — are capped at the
+  newest release old enough to be chosen.
+* **An unparseable or negative value is refused, not ignored.** Every other numeric
+  variable here (`COREPACK_NETWORK_TIMEOUT`, `COREPACK_NETWORK_RETRIES`) falls back to its
+  default on garbage. This one does not: `COREPACK_MINIMUM_RELEASE_AGE=24h` silently
+  meaning "off" would leave someone who believes they turned the control on unprotected.
+
+## Stated limitation
+
+The gate applies to **resolution**, not to the store or to `.corepack.lock`. Enforcing it
+on §04.1 step 4's cache probe would mean a registry request on every warm run, which §01.3
+forbids, and the store records no publish times. `use` and `up` pass `useCache: false`, so
+they always re-resolve. A row asserts this, with `COREPACK_ENABLE_NETWORK=0` so the answer
+can only have come from the seeded store.
+
+## Coverage recount
+
+* §13 rows 1–147, §15.38 rows 148–207: every row has a test; **none is `describe.skip`**
+  any more. The only remaining skips in the suite are platform-conditional (`skipIf` on
+  Windows, root, or no TTY).
+* `test/unit/env.test.ts` now asserts `COREPACK_MINIMUM_RELEASE_AGE` is env-file eligible
+  *and* absent from `SECURITY_ONLY_FROM_ENVIRONMENT`, so a later edit to the deny-list
+  cannot withdraw §15.37's eligibility silently.

@@ -23,8 +23,8 @@ pnpm install   # runs pnpm 11.1.2 — the version this project pinned, not whate
 > [!NOTE]
 > **Early, but it runs.** The whole behavioural contract in [`.agents/`](./.agents/) is
 > implemented, the conformance suite passes, and the CLI works end to end. There is no
-> published release yet, so treat this as pre-1.0, and see [Status](#status) for the four
-> items still outstanding.
+> published release yet, so treat this as pre-1.0, and see [Status](#status) for what is
+> left.
 
 ## Why
 
@@ -529,6 +529,7 @@ to want:
 | `COREPACK_NETWORK_RETRIES`          | Attempts per request, the first included (default `3`); `0` disables retrying |
 | `COREPACK_SHIM_DIRECTORY`           | Where `enable` installs shims and `disable` looks for them |
 | `COREPACK_SPEC_FILE`                | Read `packageManager` / `devEngines.packageManager` from this file instead of the project's `package.json` |
+| `COREPACK_MINIMUM_RELEASE_AGE`      | Hours a release must have been published for before pipack will choose it *for* you; `0` or unset means no minimum |
 | `XDG_BIN_HOME`                      | Per-user shim directory on Linux and BSD; not consulted on macOS or Windows |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
@@ -843,6 +844,19 @@ The full list with rationale is in
 - **`COREPACK_SPEC_FILE` supplies the spec for a tree whose manifest cannot be edited**
   ([#682], [#402]). It overrides the manifest — and the broken manifest is not even read,
   which is the point — and it is deliberately not settable from `.corepack.env`.
+- **A release can be made to wait before pipack will pick it.**
+  `COREPACK_MINIMUM_RELEASE_AGE=24` (hours) keeps anything published in the last day out
+  of the versions pipack chooses *for* you ([#850]), the same `minimumReleaseAge` gate npm
+  and pnpm now ship — a compromised release is usually pulled within hours, and this is
+  what stops it being installed in the meantime. It applies to a range, to a bare name and
+  to a dist-tag, which are all pipack choosing on your behalf; a version you pinned
+  exactly is never filtered, and neither is one already in the store. A typo'd value
+  (`24h`, `-1`) is an error rather than a silent fallback to off: a security control that
+  quietly stops applying is worse than one that stops. And where a source publishes no
+  release dates at all — Yarn Berry's `repo.yarnpkg.com/tags` document is the one in the
+  built-in table — pipack **refuses** rather than resolving from it and reporting success
+  it cannot back up. Pin the version, or point `COREPACK_NPM_REGISTRY` at an npm registry,
+  which routes Berry through `@yarnpkg/cli-dist` and its publish times; the error says so.
 - **A package manager does not have to be JavaScript.** Corepack's most-upvoted open
   issue is Bun support ([#295], 146 👍), blocked by an architectural assumption rather
   than by effort: *"Corepack was written with assumption that package managers would be
@@ -891,6 +905,7 @@ The full list with rationale is in
 [#540]: https://github.com/nodejs/corepack/issues/540
 [#679]: https://github.com/nodejs/corepack/issues/679
 [#812]: https://github.com/nodejs/corepack/issues/812
+[#850]: https://github.com/nodejs/corepack/issues/850
 
 ## Status
 
@@ -903,14 +918,14 @@ what it found is listed below rather than summarised away.
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
 | Implementation | 33 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 382 passing, 7 skipped — every row of both tables has a test |
-| Unit tests | 1201 passing |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 397 passing, 3 skipped (platform-conditional) — every row of both tables has a test |
+| Unit tests | 1218 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
 Measured, not hoped for:
 
-- **43 kB** min+gzipped, **zero** runtime dependencies.
+- **44 kB** min+gzipped, **zero** runtime dependencies.
 - **~28 ms** for a warm proxy invocation against **~19 ms** for bare Node — so **~9 ms**
   of actual work — against **~51 ms** for corepack on the same machine. (Best of 150
   spawns, interleaved in one loop; absolute timings taken minutes apart on a loaded
@@ -931,20 +946,29 @@ signed metadata (§15.17), native package-manager support (§15.28), one verific
 for every source with sidecar integrity (§15.11, §15.12), signing-key rotation and
 per-origin trust (§15.9, §15.10), global invocations and `PATH` (§15.31, §15.32), and most
 of §15.14, §15.19 and §15.35 — including the deprecation lines (§15.35c),
-`COREPACK_SPEC_FILE` (§15.35d) and the stray-`$HOME`-manifest suffix (§15.35k).
+`COREPACK_SPEC_FILE` (§15.35d), `COREPACK_MINIMUM_RELEASE_AGE` (§15.35e) and the
+stray-`$HOME`-manifest suffix (§15.35k).
 
-Not done yet, from the audit:
+Every `[required]` item the audit tracked is now implemented. The last one,
+`COREPACK_MINIMUM_RELEASE_AGE`, needed per-version publish times the abbreviated packument
+does not carry; the full document is now requested on exactly one path, and only while the
+variable is set, so the resolution everyone else performs is byte-for-byte the request it
+always was.
 
-- **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
-  the abbreviated packument the registry client requests does not carry.
-
-One §15 question the audit raised was decided rather than implemented:
+Two §15 questions the audit raised were decided rather than left open. One is that
 `COREPACK_REQUIRE_SIGNATURES` does **not** apply on the pinned-hash path (§06.1 row 1). An
 explicit hash is a stronger, user-chosen assertion than the registry's claim about itself
 (§14.21), §15.11 counts it as a full verification tier, and the alternative is incoherent
 in practice — a pinned install over the default registry makes no metadata request at all,
 so honouring the variable would refuse over a mirror and permit over npm for the very same
 `packageManager` field. Both directions are now pinned by tests.
+
+The other is what §15.35e should do about a source that publishes no release dates at all
+— Yarn Berry's `repo.yarnpkg.com/tags` document. It **refuses**, rather than warning and
+proceeding: a supply-chain control that reports success without having been applied is the
+failure mode the item exists to close, and warnings are swallowed in exactly the CI runs
+that most want the gate. The blast radius is narrow by construction, since an exact pin
+never reaches implicit resolution, and the refusal names the way out.
 
 Every row of both conformance tables now has a test: §13's 1–147 and §15.38's 148–207.
 The audit's two "this test proves less than its name suggests" findings are settled — one

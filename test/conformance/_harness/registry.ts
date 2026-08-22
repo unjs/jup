@@ -54,6 +54,15 @@ interface PublishedVersion {
   tarball: Uint8Array;
   /** What `dist.integrity` claims — normally the tarball's own digest. */
   integrity: string;
+  /**
+   * §15.35e — when this version was published, ISO-8601, or `undefined` for a
+   * version published without one.
+   *
+   * Additive: a version published with no `time` simply does not appear in the
+   * packument's `time` map, which is the shape a registry that dates only some
+   * of its releases serves.
+   */
+  time?: string;
 }
 
 interface PublishedPackage {
@@ -173,14 +182,21 @@ export class MockRegistry {
     name: string,
     version: string,
     tarball: Uint8Array,
-    options?: { distTags?: Record<string, string> },
+    options?: { distTags?: Record<string, string>; time?: Date },
   ): void {
     let entry = this.#packages.get(name);
     if (entry === undefined) {
       entry = { versions: new Map(), distTags: {} };
       this.#packages.set(name, entry);
     }
-    entry.versions.set(version, { tarball, integrity: sriOf(tarball) });
+    entry.versions.set(version, {
+      tarball,
+      integrity: sriOf(tarball),
+      // §15.35e — republishing the same version keeps a time already recorded,
+      // so `publish(v, …)` followed by `publish(v, …, {distTags})` (which is how
+      // several rows set a dist-tag) does not silently undate it.
+      time: options?.time?.toISOString() ?? entry.versions.get(version)?.time,
+    });
     Object.assign(entry.distTags, options?.distTags);
   }
 
@@ -277,7 +293,22 @@ export class MockRegistry {
       for (const version of entry.versions.keys()) {
         versions[version] = this.#versionDoc(name, version, base, "root");
       }
-      this.#json(response, { name, "dist-tags": entry.distTags, versions });
+      const document: Record<string, unknown> = { name, "dist-tags": entry.distTags, versions };
+
+      // §15.35e — `time` belongs to the **full** packument only. A client asking
+      // for `application/vnd.npm.install-v1+json` gets the abbreviated document,
+      // which npm strips it from, and so does this mock: serving dates to that
+      // client anyway would let an implementation that never switched its
+      // `Accept` header pass the age rows for entirely the wrong reason.
+      if (prefersFullDocument(request.headers.accept)) {
+        const time: Record<string, string> = {};
+        for (const [version, published] of entry.versions) {
+          if (published.time !== undefined) time[version] = published.time;
+        }
+        if (Object.keys(time).length > 0) document.time = time;
+      }
+
+      this.#json(response, document);
       return;
     }
 
@@ -347,6 +378,17 @@ export class MockRegistry {
     response.writeHead(404, { "content-type": "application/json" });
     response.end(`{"error":"Not found"}`);
   }
+}
+
+/**
+ * §05.2 / §15.35e — whether this request asked for the *full* packument.
+ *
+ * Anything naming the abbreviated media type is served the abbreviated document,
+ * whatever `q=` it attached: that is the header §05.2 mandates on every path but
+ * one, and the mock must not quietly upgrade it.
+ */
+function prefersFullDocument(accept: string | undefined): boolean {
+  return accept !== undefined && !accept.includes("application/vnd.npm.install-v1+json");
 }
 
 /** `/@scope/name/rest…` and `/name/rest…`, with the query string dropped. */

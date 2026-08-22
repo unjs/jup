@@ -113,12 +113,17 @@ export async function resolveDescriptor(
     // per-version one. This is why `yarn@latest` consults repo.yarnpkg.com even
     // though `yarn@1.22.22` would come from npm.
     const lastEntry = definition.ranges[definition.ranges.length - 1]!;
-    const { fetchAvailableTags } = await loadRegistry();
-    const tags = await fetchAvailableTags(registryFor(lastEntry[1]));
+    const tagRegistry = registryFor(lastEntry[1]);
+    const { capToReleaseAge, fetchAvailableTags } = await loadRegistry();
+    const tags = await fetchAvailableTags(tagRegistry);
     if (!Object.hasOwn(tags, range)) {
       throw new UsageError(messages.tagNotFound(range));
     }
-    range = tags[range]!;
+    // §15.35e — a tag is the registry choosing on the user's behalf, so the
+    // minimum-release-age gate applies to it just as it does to step 6's range
+    // query; only step 5's exact version is exempt. `capToReleaseAge` returns
+    // its argument, and makes no request at all, when the gate is off.
+    range = await capToReleaseAge(tagRegistry, tags[range]!);
   }
 
   // 4 — the cache probe, and it comes **before** step 5. For an exact version
@@ -158,14 +163,25 @@ export async function resolveDescriptor(
   // code runs) and `>=4.0.0-rc.1` matching, while `*` no longer does.
   const wantsPrereleases = envFlag("COREPACK_ENABLE_PRERELEASES") || rangeNamesPrerelease(range);
 
-  const { fetchAvailableVersions } = await loadRegistry();
+  // §15.35e — `fetchResolvableVersions` is `fetchAvailableVersions` with the
+  // minimum-release-age gate applied: same request, same `Accept` header, same
+  // answer while `COREPACK_MINIMUM_RELEASE_AGE` is unset. When it *is* set and a
+  // band's source publishes no release dates (§05.3's tags document), the band
+  // reports that instead of quietly resolving from it — but only a band that
+  // actually matches something refuses, so `yarn@^1.22` is unaffected by the
+  // Berry band it also fans out over.
+  const { fetchResolvableVersions, undatedSourceError } = await loadRegistry();
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {
-      const versions = await fetchAvailableVersions(registryFor(spec));
-      return versions.filter(
+      const candidates = await fetchResolvableVersions(registryFor(spec));
+      const matched = candidates.versions.filter(
         (version) =>
           satisfiesWithPrereleases(version, range) && (wantsPrereleases || !isPrerelease(version)),
       );
+      if (candidates.undatedSource !== undefined && matched.length > 0) {
+        throw undatedSourceError(candidates.undatedSource);
+      }
+      return matched;
     }),
   );
 

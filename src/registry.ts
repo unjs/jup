@@ -13,6 +13,7 @@ import { messages, networkError, redactUserinfo, UsageError } from "./errors.ts"
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck } from "./integrity.ts";
 import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
+import { isPrerelease, rcompare } from "./semver.ts";
 import { verifySignatureWithRefresh } from "./trust.ts";
 import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "./types.ts";
 
@@ -97,6 +98,18 @@ export const NPM_ACCEPT_HEADER =
   "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8";
 
 /**
+ * §15.35e — the only header that gets a `time` map back.
+ *
+ * The abbreviated packument {@link NPM_ACCEPT_HEADER} asks for deliberately
+ * omits per-version publish dates, and it is an order of magnitude smaller. So
+ * this header is sent on exactly one request, on exactly one path: the candidate
+ * list of §04.1 step 6, and only while `COREPACK_MINIMUM_RELEASE_AGE` is set.
+ * Every other request — dist-tags, `latest`, the version document, §15.8's
+ * signature fallback — keeps the abbreviated header whatever the gate says.
+ */
+export const NPM_FULL_ACCEPT_HEADER = "application/json";
+
+/**
  * §05.2 rewrite 2 / §15.3 — move a URL that lives on the default registry onto
  * `COREPACK_NPM_REGISTRY`.
  *
@@ -153,6 +166,181 @@ function rebase(url: string, base: string): string {
   return new URL(`${prefix}${target.pathname}${target.search}${target.hash}`, override).href;
 }
 
+/* -------------------------------------------------------------------------- */
+/* §15.35e — COREPACK_MINIMUM_RELEASE_AGE                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The gate, in milliseconds, or `undefined` when it is off.
+ *
+ * Hours, per §15.37's table. Unset and empty are off; so is an explicit `0`,
+ * which is how npm and pnpm spell "no minimum" for the same setting.
+ *
+ * **An unparseable or negative value is refused, not ignored.** Every other
+ * numeric variable in this codebase (`COREPACK_NETWORK_TIMEOUT`,
+ * `COREPACK_NETWORK_RETRIES`) falls back to its default on garbage, because a
+ * mistyped timeout costs a user some latency. This one is a supply-chain
+ * control: falling back would mean `COREPACK_MINIMUM_RELEASE_AGE=24h` silently
+ * turns the protection *off* on the machine of someone who believes they turned
+ * it on, which is the same fail-open shape §15.35e exists to close.
+ *
+ * Read at the point of use rather than at startup: the whole feature is
+ * cold-path, and a warm run (§01.3) must not parse an environment variable it
+ * can never act on.
+ */
+export function minimumReleaseAge(): number | undefined {
+  const raw = process.env.COREPACK_MINIMUM_RELEASE_AGE;
+  if (raw === undefined || raw.trim() === "") return undefined;
+
+  const hours = Number(raw.trim());
+  if (!Number.isFinite(hours) || hours < 0) {
+    throw new UsageError(
+      `COREPACK_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(raw)}`,
+    );
+  }
+
+  return hours === 0 ? undefined : hours * 60 * 60 * 1000;
+}
+
+/** What one registry offers as candidates for §04.1 step 6. */
+export interface VersionCandidates {
+  /**
+   * The versions this source lists — already age-filtered when the gate is on
+   * *and* the source dates its releases.
+   */
+  versions: string[];
+  /**
+   * §15.35e, blocker 3 — set to the document's URL when the gate is on and this
+   * source publishes no release dates at all, so nothing in {@link versions}
+   * could be filtered.
+   *
+   * The caller must **refuse** rather than resolve from it, but only once it
+   * knows the source actually contributes a candidate: `yarn@^1.22` fans out
+   * over the Berry band too (§04.1 step 6 queries every band), and that band
+   * matching nothing is not a reason to fail the run.
+   */
+  undatedSource?: string;
+}
+
+/**
+ * §15.35e's refusal. Deliberately fail **closed**: a source that publishes no
+ * dates cannot be gated, and a security control that reports success without
+ * having been applied is worse than one that stops.
+ *
+ * Narrow by construction — §04.1 step 5 returns an exact version before any of
+ * this runs, so the usual `packageManager: "yarn@4.14.1"` is untouched; only
+ * *implicit* resolution against `repo.yarnpkg.com` is refused. And the way out
+ * is named: an npm-protocol registry switches Yarn Berry onto
+ * `@yarnpkg/cli-dist` (§05.2 rewrite 1), which does date its releases.
+ */
+export function undatedSourceError(url: string): UsageError {
+  return new UsageError(
+    `COREPACK_MINIMUM_RELEASE_AGE is set, but ${redactUserinfo(url)} publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set COREPACK_NPM_REGISTRY to an npm registry that serves this package manager`,
+  );
+}
+
+function noEligibleReleaseError(packageName: string): UsageError {
+  return new UsageError(
+    `No release of ${packageName} is old enough for COREPACK_MINIMUM_RELEASE_AGE=${process.env.COREPACK_MINIMUM_RELEASE_AGE}`,
+  );
+}
+
+/**
+ * §04.1 step 6's candidate set — {@link fetchAvailableVersions}, with §15.35e
+ * applied.
+ *
+ * With the gate off this **is** `fetchAvailableVersions`: the same one request,
+ * with the same abbreviated `Accept` header. The only thing the gate changes is
+ * that this asks for the full document instead, because that is the only one
+ * carrying `time`.
+ *
+ * A version the `time` map does not mention is dropped rather than kept: we
+ * cannot say how old it is, and the whole point is to not choose what we cannot
+ * vouch for. A response with no `time` map at all is the undated-source case —
+ * some private registries strip it — and is reported the same way as §05.3's
+ * url-typed sources.
+ */
+export async function fetchResolvableVersions(input: RegistrySpec): Promise<VersionCandidates> {
+  const minimumAge = minimumReleaseAge();
+  if (minimumAge === undefined) {
+    return { versions: await fetchAvailableVersions(input) };
+  }
+
+  const spec = resolveRegistrySpec(input);
+  if (spec.type !== "npm") {
+    // §05.3's tags document has versions and aliases and nothing dated.
+    const name = packageManagerForRegistry(spec);
+    return {
+      versions: keysOrValues(asRecord(await urlGetJson(spec.url, spec))?.[spec.fields.versions]),
+      undatedSource: applySourceOverride(spec.url, name),
+    };
+  }
+
+  const body = asRecord(await npmGetJson(spec.package, spec, { full: true }));
+  const versions = keysOrValues(body?.versions);
+  const times = asRecord(body?.time);
+  if (times === undefined) {
+    return { versions, undatedSource: `${registryUrlFor(spec)}/${spec.package}` };
+  }
+
+  const cutoff = Date.now() - minimumAge;
+  return {
+    versions: versions.filter((version) => {
+      const published = Date.parse(asString(times[version]) ?? "");
+      return Number.isFinite(published) && published <= cutoff;
+    }),
+  };
+}
+
+/**
+ * §15.35e applied to a single version the *registry* chose — §04.1 step 3's
+ * dist-tag, and §04.5's `latest`.
+ *
+ * A tag is not an exact pin: the user named a channel and let the registry
+ * decide what is in it, which is precisely the choice a freshly-published
+ * compromised release subverts. So the tag's target is **capped** at the newest
+ * release that is no newer than it and old enough to be chosen — the same rule
+ * npm and pnpm apply to a tag under `minimumReleaseAge`.
+ *
+ * Returns `version` untouched, and makes **no request**, when the gate is off.
+ *
+ * @param version The tag's target, or `undefined` to mean "the newest eligible
+ * stable release" — §04.5's `latest`, where the target is not yet known and
+ * asking for it would cost a request this can answer from the same document.
+ */
+export async function capToReleaseAge(
+  input: RegistrySpec,
+  version: string | undefined,
+): Promise<string> {
+  if (minimumReleaseAge() === undefined) {
+    if (version === undefined) throw new Error("capToReleaseAge: no target and no gate");
+    return version;
+  }
+
+  const candidates = await fetchResolvableVersions(input);
+  if (candidates.undatedSource !== undefined) {
+    throw undatedSourceError(candidates.undatedSource);
+  }
+
+  // §15.24 — a prerelease is never chosen implicitly unless the thing being
+  // capped is itself one (`yarn@canary` stays on the canary line).
+  const wantsPrereleases = version !== undefined && isPrerelease(version);
+
+  const capped = candidates.versions
+    .filter(
+      (candidate) =>
+        (wantsPrereleases || !isPrerelease(candidate)) &&
+        (version === undefined || rcompare(candidate, version) >= 0),
+    )
+    .sort(rcompare)[0];
+
+  if (capped === undefined) {
+    const spec = resolveRegistrySpec(input);
+    throw noEligibleReleaseError(spec.type === "npm" ? spec.package : spec.url);
+  }
+  return capped;
+}
+
 export async function fetchAvailableVersions(input: RegistrySpec): Promise<string[]> {
   const spec = resolveRegistrySpec(input);
 
@@ -191,6 +379,11 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
   const spec = resolveRegistrySpec(input);
 
   if (spec.type !== "npm") {
+    // §15.35e — `stable` is the document choosing on the user's behalf, and this
+    // document dates nothing, so the gate cannot be enforced here at all.
+    if (minimumReleaseAge() !== undefined) {
+      throw undatedSourceError(applySourceOverride(spec.url, packageManagerForRegistry(spec)));
+    }
     const body = asRecord(await urlGetJson(spec.url, spec));
     const stable = stringMap(body?.[spec.fields.tags]).stable;
     if (stable === undefined) {
@@ -204,7 +397,16 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
   try {
     // `latest` is a dist-tag the registry resolves server-side, so this is one
     // request rather than two.
-    const metadata = asRecord(await npmGetJson(`${spec.package}/latest`, spec));
+    //
+    // §15.35e — with the gate on it cannot be: the age of what `latest` points
+    // at is only in the packument, so the selector becomes the newest eligible
+    // stable release instead. That costs one extra request, and only while the
+    // gate is set. (Taking the eligible semver maximum rather than capping at
+    // `dist-tags.latest` is the same choice §15.24 was decided on here — §04.1
+    // step 6 unions bands, a dist-tag names one.)
+    const selector =
+      minimumReleaseAge() === undefined ? "latest" : await capToReleaseAge(spec, undefined);
+    const metadata = asRecord(await npmGetJson(`${spec.package}/${selector}`, spec));
     const version = asString(metadata?.version);
     if (version === undefined) {
       throw new Error(
@@ -456,7 +658,11 @@ export function registryUrlFor(spec: NpmRegistrySpec): string {
  * One npm-protocol GET. `path` is interpolated **without** percent-encoding, so
  * `@yarnpkg/cli-dist` appears literally — npm registry convention (§05.2).
  */
-function npmGetJson(path: string, spec: NpmRegistrySpec): Promise<unknown> {
+function npmGetJson(
+  path: string,
+  spec: NpmRegistrySpec,
+  options?: { full?: boolean },
+): Promise<unknown> {
   const registryUrl = registryUrlFor(spec);
 
   // §05.2 — the registry layer checks the flag itself, and its message names the
@@ -466,7 +672,9 @@ function npmGetJson(path: string, spec: NpmRegistrySpec): Promise<unknown> {
   }
 
   return httpGetJson(`${registryUrl}/${path}`, {
-    headers: { accept: NPM_ACCEPT_HEADER },
+    // §15.35e — the abbreviated document unless the caller needs `time`, which
+    // only §04.1 step 6's candidate list ever does.
+    headers: { accept: options?.full === true ? NPM_FULL_ACCEPT_HEADER : NPM_ACCEPT_HEADER },
     // §14.6 — without this the HTTP layer sends no credentials at all.
     registryOrigin: registryUrl,
   });
