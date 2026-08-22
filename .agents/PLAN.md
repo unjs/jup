@@ -714,7 +714,7 @@ by default, never require elevation, `LOCALAPPDATA` only on Windows, restore wha
 --force` displaced, shim npm by default with `--exclude npm`, and verify the shims
 actually won on `PATH` afterwards.
 
-### P11 — Native package managers §15.28
+### P11 — Native package managers §15.28 — **done** (`3130a96`)
 #295 is the **most-upvoted issue in the tracker** (146👍). `{platform}`/`{arch}` in a URL
 template and `"exec": "native"` so a band's binaries run directly. This is architectural
 headroom, not a package-manager addition: §15.21 and §15.28 both require maintainer
@@ -810,29 +810,38 @@ name is lost. Worth doing as its own item; it changes the shim contract, not ena
 
 ## Warm-path cost, measured after phase 2 (2026-08-22)
 
-Median of 21 spawns, machine under load from concurrent agents, so read the *ratios*:
+**Corrected.** A first measurement was taken while two agents were building and running
+the suite, and it showed our own share growing from ~13 ms to ~17 ms. Re-measured on a
+quiet machine (41 spawns; read the **min**, which is least noise-contaminated):
 
-| | median | vs bare node |
-|---|---|---|
-| `node -e ""` | 22.8 ms | — |
-| `pipack pnpm --version` (cache hit) | 39.9 ms | +17.1 ms |
-| `corepack pnpm --version` (cache hit) | 56.7 ms | +33.9 ms |
+| | min | median | vs bare node (min) |
+|---|---|---|---|
+| `node -e ""` | 18.4 ms | 22.5 ms | — |
+| `pipack pnpm --version` (cache hit) | 33.2 ms | 36.3 ms | **+14 ms** |
+| `corepack pnpm --version` (cache hit) | 50.8 ms | 53.7 ms | +32 ms |
 
-Still ~30% faster than corepack, and §16.1's `< 5 ms` target is explicitly scoped to *"a
-native single-binary implementation"*, so this is not a conformance failure. But our own
-share has grown from ~13 ms at the end of phase 1 to ~17 ms, and the cause is visible:
+So the real growth across the whole of phase 2 is roughly **1 ms** (~13 ms → ~14 ms), not
+4 ms — twelve §15 items for one millisecond. The lesson is about the measurement, not the
+code: absolute timings taken while the machine is loaded are worthless, and only an
+interleaved A/B against a bundle built from the previous commit (which P11 ran, showing
+34.5 ms vs 34.6 ms) or a min-of-many on a quiet box says anything.
 
-* Importing the warm chunk alone costs **~12.8 ms**. The warm chain is `main2` →
-  `{env, errors, manifest, store, usage}`, about 73 kB of JS parsed on every invocation.
-* **`usage.mjs` is misnamed by the bundler**: obuild merged `exec.ts` (warm — it has
-  `execPackageManager`) with `resolve.ts` and the usage strings. So a *pinned, exact*
-  invocation — the whole point of the fast path — pays to parse `resolveDescriptor`,
-  `getFallbackLocator` and every usage line it will never touch.
+§16.1's `< 5 ms` target is explicitly scoped to *"a native single-binary
+implementation"*, so this is not a conformance failure, and we remain ~2.3× faster than
+corepack on the path that runs on every invocation forever.
+
+### The chunking finding stands
+
+Importing the warm chunk alone costs **~9 ms** of the ~14 (`node:path` alone is 0.3 ms,
+for scale). The warm chain is `main2` → `{env, errors, manifest, store, usage}`, about
+73 kB of JS parsed on every invocation, and **`usage.mjs` is misnamed by the bundler**:
+obuild merged `exec.ts` (warm — it has `execPackageManager`) with `resolve.ts` and the
+usage strings. A *pinned, exact* invocation — the whole point of the fast path — pays to
+parse `resolveDescriptor`, `getFallbackLocator` and every usage line it will never touch.
 
 `COLD_PATH_MODULES` cannot catch this: `resolve.ts` genuinely *is* warm-reachable in the
 source graph (an unpinned project needs it), so the list is right and the chunking is
-what is wrong. A fix is to split the warm entry so `execPackageManager` comes from a
+what is wrong. The fix is to split the warm entry so `execPackageManager` comes from a
 module that does not pull `resolveDescriptor`, and to let the non-pinned branch reach it
-by dynamic import — the same trick already used for the socket stack in `proxy.ts`.
-
-Worth doing as its own item after P11/P12, with the benchmark re-run on a quiet machine.
+by dynamic import — the same trick `proxy.ts` already uses for its socket stack. Worth
+doing as its own item, with an **interleaved A/B** benchmark, not an absolute one.
