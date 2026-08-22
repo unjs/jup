@@ -9,7 +9,7 @@
 import { DEFAULT_REGISTRY } from "./config/keys.ts";
 import { npmAlternativeFor, packageManagerForRegistry } from "./config/table.ts";
 import { envDisabled, envFlag } from "./env.ts";
-import { messages, redactUserinfo, UsageError } from "./errors.ts";
+import { messages, networkError, redactUserinfo, UsageError } from "./errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck, verifySignature } from "./integrity.ts";
 import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
@@ -250,7 +250,16 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
   } catch (error) {
     // Verbatim §04.5 wrapper — both env var names in it are asserted, which is
     // why it comes from the message builder rather than from here.
-    throw new Error(messages.cannotDownloadLatest(spec.package), { cause: error });
+    //
+    // The wrapper names two remedies but never the reason, and the reason is
+    // what a user needs: as of writing, npm signs `yarn@latest` with keyid
+    // `SHA256:jl3bws…`, which npm's own `/-/npm/v1/keys` marks
+    // `expires: 2025-01-29`, so a bare `yarn` fails here on an untrusted keyid
+    // and the sentence alone reads like a network fault. §15.5 requires the
+    // underlying cause to survive; `networkError` appends it to the stack,
+    // where `main.ts` will actually print it, and leaves the message byte for
+    // byte as §04.5 specifies.
+    throw networkError(new Error(messages.cannotDownloadLatest(spec.package)), error);
   }
 }
 

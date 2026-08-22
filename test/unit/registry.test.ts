@@ -480,6 +480,12 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     expect(error.message).not.toContain("COREPACK_USE_LATEST");
     // No signatures at all in that document.
     expect((error.cause as Error).message).toBe(messages.noCompatibleSignature());
+    // §15.5 — and the reason has to survive to the *stack*, because `main.ts`
+    // presents an unexpected error as its stack and a stack says nothing about
+    // `cause`. Without this the sentence above names two remedies and no cause,
+    // which reads like a network fault: that is exactly how npm signing
+    // `yarn@latest` with a key its own /-/npm/v1/keys marks expired presents.
+    expect(error.stack).toContain(`Caused by: ${messages.noCompatibleSignature()}`);
   });
 
   it("wraps a transport failure in the same message", async () => {
