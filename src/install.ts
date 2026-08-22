@@ -29,7 +29,7 @@ import {
   getInstallFolder,
   getVersionDir,
   promote,
-  readMarker,
+  readInstalledSpec,
   resolveBin,
   writeMarker,
 } from "./store.ts";
@@ -81,10 +81,12 @@ export async function ensureInstalled(
   const location = join(getInstallFolder(), locator.name, versionDir);
 
   // §07.2 / §01.3 — the entire warm path. No network, no directory scan, no
-  // last-known-good read: one `open` of the marker and we are done.
-  const marker = readMarker(location);
-  if (marker !== null) {
-    return { location, bin: marker.bin, hash: marker.hash };
+  // last-known-good read: one `open` of the marker and we are done. The proxy
+  // path in `main` performs this same check *before* importing this module, so
+  // reaching here at all normally means a miss.
+  const installed = readInstalledSpec(locator);
+  if (installed !== null) {
+    return installed;
   }
 
   const parsed = parse(locator.reference);

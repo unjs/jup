@@ -16,8 +16,21 @@ import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-/** Candidate names for the library entry, newest layout first. */
-const ENTRY_CANDIDATES = ["index.mjs", "index.js", "index.ts"];
+/**
+ * Candidate names for the module a shim stub should import, best first.
+ *
+ * `shim.*` comes first because it is the proxy-only entry (§16.3): it exports
+ * `runMain` and nothing else, so a shim never loads the library surface. Older
+ * installations have no such file, and `index.*` still works there.
+ */
+export const ENTRY_CANDIDATES = [
+  "shim.mjs",
+  "shim.js",
+  "shim.ts",
+  "index.mjs",
+  "index.js",
+  "index.ts",
+];
 
 /** Stop rather than walking to `/` if something is badly wrong. */
 const MAX_DEPTH = 16;

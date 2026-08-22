@@ -6,7 +6,6 @@
  * success**. There is no lockfile and must never be one (§07.5, §16.6).
  */
 
-import { randomBytes } from "node:crypto";
 import {
   mkdirSync,
   readdirSync,
@@ -35,6 +34,19 @@ export const LAYOUT_VERSION = "v1";
 
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
+}
+
+/**
+ * Four random bytes, hex encoded, for a temp file name.
+ *
+ * `node:crypto` is reached through `process.getBuiltinModule` rather than an
+ * `import`, because importing it pulls in two dozen native modules (webcrypto,
+ * x509, keygen, diffiehellman, …) and neither caller — `createTempDir` and
+ * `writeLastKnownGood` — is on the warm path (§01.3, §16.3). The lookup itself
+ * loads nothing until it is called.
+ */
+function randomSuffix(): string {
+  return process.getBuiltinModule("node:crypto").randomBytes(4).toString("hex");
 }
 
 /**
@@ -109,6 +121,22 @@ export function readMarker(dir: string): CorepackMarker | null {
   return JSON.parse(text) as CorepackMarker;
 }
 
+/**
+ * §07.2 / §01.3 — the entire warm path, in one call: the store location for a
+ * locator plus its marker, or `null` when the version is not installed.
+ *
+ * It lives here rather than in `install` so the proxy path can answer "is this
+ * already installed?" without loading the download-and-verify stack — `http`,
+ * `tar`, `integrity` and `registry` are ~36 KB of code and 70-odd native modules
+ * that a warm run never executes (§16.3).
+ */
+export function readInstalledSpec(locator: Locator): InstallSpec | null {
+  const location = join(getInstallFolder(), locator.name, getVersionDir(locator));
+  const marker = readMarker(location);
+  if (marker === null) return null;
+  return { location, bin: marker.bin, hash: marker.hash };
+}
+
 export function writeMarker(dir: string, marker: CorepackMarker): void {
   writeFileSync(join(dir, MARKER_NAME), JSON.stringify(marker), "utf8");
 }
@@ -135,7 +163,7 @@ export function createTempDir(): string {
 
   // The name only has to be unique; `EEXIST` simply means "draw again".
   for (;;) {
-    const dir = join(installFolder, `corepack-${process.pid}-${randomBytes(4).toString("hex")}`);
+    const dir = join(installFolder, `corepack-${process.pid}-${randomSuffix()}`);
     try {
       mkdirSync(dir);
       return dir;
@@ -299,7 +327,7 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
 
     // Same directory, so the rename is atomic: a concurrent reader sees either
     // the old file or the new one, never a truncated interleaving (§14.3).
-    tmp = `${target}.${process.pid}-${randomBytes(4).toString("hex")}`;
+    tmp = `${target}.${process.pid}-${randomSuffix()}`;
     writeFileSync(tmp, content, "utf8");
     renameSync(tmp, target);
   } catch (error) {

@@ -4,7 +4,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEFINITIONS, getSpecFor } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
@@ -617,5 +617,148 @@ describe("the warm fast path — §01.3 (test 96)", () => {
     expect(budget.lkg).toEqual([]);
     // And nothing reached the mock registry either.
     expect(requested).toEqual([]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §01.3 / §16.3 — what a warm run is allowed to *load*
+ *
+ * The syscall budget above says nothing about the module graph, and a
+ * single static `import` anywhere in the `main → resolve → install`
+ * chain silently drags the download-and-verify stack — and with it
+ * `node:crypto` (two dozen native modules) and `node:zlib` — into every
+ * `yarn`, `npm` and `pnpm` invocation on the machine.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Modules a warm, exactly-pinned run must never load. Everything here is
+ * cold-path only: the downloader and its transport, hashing, signature
+ * verification and tar reader (§07, §06), plus the management command surface
+ * (§09) and the shim writer (§10), which the proxy path already loads lazily.
+ */
+const COLD_PATH_MODULES = [
+  "install.ts",
+  "http.ts",
+  "integrity.ts",
+  "registry.ts",
+  "tar.ts",
+  "cli.ts",
+  "shims.ts",
+];
+
+/**
+ * Native modules a warm run may load *beyond* what the measuring harness itself
+ * costs, measured against a driver that registers the same hooks and runs
+ * nothing.
+ *
+ * The budget is a delta rather than an absolute so that a Node upgrade, which
+ * moves both numbers together, does not fail the suite. At the time of writing
+ * the warm path costs 17 and the ceiling is 25; before the cold path was made
+ * lazy it cost 41, and `node:crypto` alone accounts for 21 of those — so a
+ * reintroduced static import cannot slip under this.
+ */
+const NATIVE_MODULE_BUDGET = 25;
+
+interface ModuleGraph {
+  code: number;
+  natives: number;
+  /** `node:crypto` / `node:zlib` internals, which only the cold path needs. */
+  heavy: string[];
+  /** Our own source files, relative to `src/`. */
+  ours: string[];
+}
+
+/**
+ * Run the proxy pipeline through `entry` and report what the process loaded.
+ *
+ * `registerHooks` sees every module the run resolves, and the report is written
+ * *before* the package manager is loaded on `nextTick` (§08.2), so the numbers
+ * describe our pipeline and nothing else.
+ */
+function moduleGraph(entry: string): ModuleGraph {
+  const { cwd, home } = makeProject({ packageManager: `yarn@1.0.0` });
+  installFake(home, "yarn", "1.0.0");
+
+  const report = join(home, "graph.json");
+  const driver = join(home, "graph-driver.mjs");
+  writeFileSync(
+    driver,
+    [
+      `import { writeFileSync } from "node:fs";`,
+      `import { registerHooks } from "node:module";`,
+      ``,
+      `const loaded = [];`,
+      `registerHooks({ load(url, context, next) { loaded.push(url); return next(url, context); } });`,
+      ``,
+      `process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";`,
+      `const { runMain } = await import(${JSON.stringify(pathToFileURL(join(REPO_ROOT, "src", entry)).href)});`,
+      `const code = await runMain(process.argv.slice(2));`,
+      `writeFileSync(${JSON.stringify(report)}, JSON.stringify({`,
+      `  code,`,
+      `  natives: process.moduleLoadList.length,`,
+      `  heavy: process.moduleLoadList.filter((name) => /crypto|zlib/.test(name)),`,
+      `  ours: loaded`,
+      `    .filter((url) => url.includes("/src/"))`,
+      `    .map((url) => url.slice(url.indexOf("/src/") + 5)),`,
+      `}));`,
+      ``,
+    ].join("\n"),
+  );
+
+  const result = run(cwd, home, ["yarn", "--version"], {}, driver);
+  expect(result.stderr).toBe("");
+  expect(result.status).toBe(0);
+
+  return JSON.parse(readFileSync(report, "utf8")) as ModuleGraph;
+}
+
+/** The same harness with nothing under test: the floor both entries are measured against. */
+function harnessFloor(): number {
+  const { cwd, home } = makeProject({});
+  const report = join(home, "floor.json");
+  const driver = join(home, "floor-driver.mjs");
+  writeFileSync(
+    driver,
+    [
+      `import { writeFileSync } from "node:fs";`,
+      `import { registerHooks } from "node:module";`,
+      `registerHooks({ load(url, context, next) { return next(url, context); } });`,
+      `writeFileSync(${JSON.stringify(report)}, JSON.stringify({ natives: process.moduleLoadList.length }));`,
+      ``,
+    ].join("\n"),
+  );
+
+  expect(run(cwd, home, [], {}, driver).status).toBe(0);
+  return (JSON.parse(readFileSync(report, "utf8")) as { natives: number }).natives;
+}
+
+describe("the warm fast path — the module graph (§16.3)", () => {
+  // Both entries a warm proxy run can arrive through: our own binary, and the
+  // module the generated shims import (§10.1). The shims are the hot one — they
+  // are what occupies `yarn`, `npm` and `pnpm` on `PATH` once `enable` has run —
+  // so a lazy `main.ts` is worth nothing unless the shim entry is lazy too.
+  it.for([
+    ["bin", "main.ts"],
+    ["shim", "shim.ts"],
+    ["library", "index.ts"],
+  ])("loads no cold-path module through the %s entry", ([, entry]) => {
+    const graph = moduleGraph(entry!);
+
+    expect(graph.code).toBe(0);
+    for (const cold of COLD_PATH_MODULES) {
+      expect(graph.ours).not.toContain(cold);
+    }
+    // Nothing else reached for them either: `node:crypto` is 21 native modules
+    // on its own, and only hashing and signature verification need it.
+    expect(graph.heavy).toEqual([]);
+  });
+
+  it("stays inside the native-module budget", () => {
+    const floor = harnessFloor();
+
+    for (const entry of ["main.ts", "shim.ts", "index.ts"]) {
+      const graph = moduleGraph(entry);
+      expect(graph.natives - floor).toBeLessThanOrEqual(NATIVE_MODULE_BUDGET);
+    }
   });
 });

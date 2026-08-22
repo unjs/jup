@@ -13,12 +13,13 @@ import {
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
-import { ensureInstalled } from "./install.ts";
 import { discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
 import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
 import { parse } from "./semver.ts";
+import { readInstalledSpec } from "./store.ts";
 import type {
   Descriptor,
+  InstallSpec,
   Invocation,
   LazyLocator,
   Locator,
@@ -163,7 +164,7 @@ export async function runProxy(
   }
 
   // Step 6 — one `.corepack` read on a hit; download, verify and promote on a miss.
-  const installSpec = await ensureInstalled(locator);
+  const installSpec = await ensureInstalledLazily(locator);
 
   // Step 7 — hand over. Nothing after this point may write to the store: the
   // package manager owns the process from here (§08.2).
@@ -242,6 +243,23 @@ export function presentError(error: unknown, invocation: Invocation): number {
 /* -------------------------------------------------------------------------- */
 
 /**
+ * §01.3 step 6 — the marker first, the downloader only if it is missing.
+ *
+ * `install` is the head of the whole cold-path stack (`http`, `tar`,
+ * `integrity`, `registry`, and through them `node:crypto` and `node:zlib`), and
+ * a warm run executes none of it. Reading the marker here — one `open` either
+ * way, exactly as §16.3 budgets — keeps that stack out of the process entirely
+ * unless something actually has to be downloaded.
+ */
+async function ensureInstalledLazily(locator: Locator): Promise<InstallSpec> {
+  const installed = readInstalledSpec(locator);
+  if (installed !== null) return installed;
+
+  const { ensureInstalled } = await import("./install.ts");
+  return ensureInstalled(locator);
+}
+
+/**
  * Force a lazy fallback into a concrete descriptor.
  *
  * This is the *only* place the fallback thunk is forced, which is what keeps the
@@ -270,7 +288,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
-  const installSpec = await ensureInstalled(locator);
+  const installSpec = await ensureInstalledLazily(locator);
 
   // §03.6 — "installing yields the hash, so the written pin is hash-bearing".
   // A download rewrites `locator.reference` itself; a cache hit does not, so the

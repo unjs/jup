@@ -7,11 +7,6 @@
 import { getDefinition, isSupportedPackageManager } from "./config/table.ts";
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
-import {
-  fetchAvailableTags,
-  fetchAvailableVersions,
-  fetchLatestStableVersion,
-} from "./registry.ts";
 import { isValidRange, isValidVersion, rcompare, satisfiesWithPrereleases } from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "./store.ts";
 import type {
@@ -59,6 +54,19 @@ function hasRegistryOverride(): boolean {
   return configured !== undefined && configured !== "";
 }
 
+/**
+ * The registry client, loaded only by the branches that talk to it.
+ *
+ * A warm, exactly-pinned run answers from the store at step 4 and never reaches
+ * any of the three call sites below. Importing `registry` statically would still
+ * drag `http` and `integrity` — and through them `node:crypto` and `node:zlib` —
+ * into every single invocation, which is precisely what §01.3's budget and
+ * §16.3's syscall shape rule out.
+ */
+function loadRegistry(): Promise<typeof import("./registry.ts")> {
+  return import("./registry.ts");
+}
+
 export async function resolveDescriptor(
   descriptor: Descriptor,
   options?: ResolveOptions,
@@ -97,6 +105,7 @@ export async function resolveDescriptor(
     // per-version one. This is why `yarn@latest` consults repo.yarnpkg.com even
     // though `yarn@1.22.22` would come from npm.
     const lastEntry = definition.ranges[definition.ranges.length - 1]!;
+    const { fetchAvailableTags } = await loadRegistry();
     const tags = await fetchAvailableTags(registryFor(lastEntry[1]));
     if (!Object.hasOwn(tags, range)) {
       throw new UsageError(messages.tagNotFound(range));
@@ -132,6 +141,7 @@ export async function resolveDescriptor(
   // before testing, so a published `11.0.0-dev.1005` satisfies `*` and then
   // sorts above every stable release. Phase 2 discards prerelease candidates
   // from *implicit* resolution unless the range itself names one.
+  const { fetchAvailableVersions } = await loadRegistry();
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {
       const versions = await fetchAvailableVersions(registryFor(spec));
@@ -172,6 +182,7 @@ export async function getDefaultVersion(name: string): Promise<string> {
   }
 
   // 3 — the only branch that reaches the registry.
+  const { fetchLatestStableVersion } = await loadRegistry();
   const reference = await fetchLatestStableVersion(definition.fetchLatestFrom);
 
   // Recording is bookkeeping: an unwritable store must degrade (the next run

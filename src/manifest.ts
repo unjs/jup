@@ -10,7 +10,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import { isSupportedPackageManager } from "./config/table.ts";
 import { applyEnvFile, envDisabled, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "./errors.ts";
-import { parseManifest, setTopLevelString } from "./json.ts";
+import { parseManifest, scanTopLevelFields, setTopLevelString } from "./json.ts";
 import { isValidRange, isValidVersion, satisfies } from "./semver.ts";
 import type {
   Descriptor,
@@ -27,6 +27,9 @@ export const NODE_MODULES_RE = /[\\/]node_modules[\\/](@[^\\/]*[\\/])?([^@\\/][^
 
 /** The manifest file name the walk looks for in every directory. */
 const MANIFEST_NAME = "package.json";
+
+/** §03.3 — every field of the manifest the discovery walk actually looks at. */
+const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
 
 /**
  * §03.1 — the walk's stop condition, isolated because §15.25 changes it.
@@ -133,12 +136,20 @@ export function discoverProjectSpec(
       throw error;
     }
 
-    let data: unknown;
-    try {
-      data = parseManifest(content);
-    } catch {
-      // Unparseable and "parsed to a non-object" are the same user-facing error.
-      data = undefined;
+    // §16.3 — the walk reads two fields, so scan for them rather than resolving
+    // the whole manifest into a DOM: a 400-dependency `package.json` costs
+    // several hundred allocations to answer a two-field question. The scan is
+    // conservative and answers `null` for anything it cannot prove well-formed,
+    // in which case the real parser decides — which is what keeps §03.1's
+    // `Invalid package.json` firing on exactly the inputs it fired on before.
+    let data: unknown = scanTopLevelFields(content, MANIFEST_FIELDS);
+    if (data === null) {
+      try {
+        data = parseManifest(content);
+      } catch {
+        // Unparseable and "parsed to a non-object" are the same user-facing error.
+        data = undefined;
+      }
     }
     if (typeof data !== "object" || data === null) {
       // §03.1 — "relative to `d`", the directory being examined, not to the

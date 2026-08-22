@@ -26,7 +26,7 @@ import { delimiter, dirname, join, relative, resolve as resolvePath } from "node
 import { fileURLToPath } from "node:url";
 import { DEFINITIONS, getBinariesFor } from "./config/table.ts";
 import { messages, UsageError } from "./errors.ts";
-import { findEntryModule } from "./self.ts";
+import { ENTRY_CANDIDATES, findEntryModule } from "./self.ts";
 
 /** Our own binary name — what the §10.4 `PATH` lookup searches for. */
 const TOOL_NAME = "pipack";
@@ -39,13 +39,6 @@ const SHIM_MARKER = "@pipack-shim";
 
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;
-
-/**
- * The stub imports the library entry by a path *relative to the dist folder*, so
- * the pair stays relocatable (§10.2 property 2). Which name exists depends on
- * whether we are running from source or from a build.
- */
-const ENTRY_CANDIDATES = ["index.mjs", "index.js", "index.ts"];
 
 /** Windows writes three files per binary name (§10.3); `disable` removes all three. */
 const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
@@ -287,6 +280,11 @@ async function readHead(file: string, length: number): Promise<string | undefine
  * dist folder is read-only.
  */
 async function ensureStub(distFolder: string, binName: string): Promise<string> {
+  // The stub imports its entry module by a path *relative to the dist folder*, so
+  // the pair stays relocatable (§10.2 property 2). Which name exists depends on
+  // whether we are running from source or from a build; `ENTRY_CANDIDATES` is the
+  // single definition of that order, and `scripts/generate-shims.mjs` shares it so
+  // that the shipped stubs and the ones `enable` writes are byte-identical.
   const entry = ENTRY_CANDIDATES.find((candidate) => existsSync(join(distFolder, candidate)));
   if (entry === undefined) throw new UsageError(messages.assertStubFolderMissing());
 

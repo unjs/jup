@@ -1,6 +1,12 @@
 import { EOL } from "node:os";
 import { describe, expect, it } from "vitest";
-import { detectFormat, parseManifest, scanTopLevelKey, setTopLevelString } from "../../src/json.ts";
+import {
+  detectFormat,
+  parseManifest,
+  scanTopLevelFields,
+  scanTopLevelKey,
+  setTopLevelString,
+} from "../../src/json.ts";
 
 const BOM = "﻿";
 
@@ -238,5 +244,103 @@ describe("setTopLevelString", () => {
   it("refuses to edit content that is not a JSON object", () => {
     expect(() => setTopLevelString(`[1,2,3]`, "packageManager", "yarn@1")).toThrow();
     expect(() => setTopLevelString(`{`, "packageManager", "yarn@1")).toThrow();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §16.3 — the DOM-free warm-path scan
+ * ------------------------------------------------------------------ */
+
+const FIELDS = ["packageManager", "devEngines"];
+
+describe("scanTopLevelFields", () => {
+  it("extracts the requested top-level fields and nothing else", () => {
+    const text = `{"name":"x","packageManager":"pnpm@9.1.0","dependencies":{"a":"^1"}}`;
+    expect(scanTopLevelFields(text, FIELDS)).toEqual({ packageManager: "pnpm@9.1.0" });
+  });
+
+  it("reads a nested devEngines block", () => {
+    const text = `{"devEngines":{"packageManager":{"name":"pnpm","onFail":"warn"}}}`;
+    expect(scanTopLevelFields(text, FIELDS)).toEqual({
+      devEngines: { packageManager: { name: "pnpm", onFail: "warn" } },
+    });
+  });
+
+  it("never mistakes a nested key for a top-level one", () => {
+    const text = `{"nested":{"packageManager":"yarn@1.0.0"},"a":[{"packageManager":1}]}`;
+    expect(scanTopLevelFields(text, FIELDS)).toEqual({});
+  });
+
+  it("skips the BOM and an empty object", () => {
+    expect(scanTopLevelFields(`${BOM}{"packageManager":"yarn@1.22.4"}`, FIELDS)).toEqual({
+      packageManager: "yarn@1.22.4",
+    });
+    expect(scanTopLevelFields(`  {}  `, FIELDS)).toEqual({});
+  });
+
+  it("takes the last of duplicate keys, exactly as JSON.parse does", () => {
+    const text = `{"packageManager":"yarn@1.0.0","packageManager":"pnpm@9.0.0"}`;
+    expect(scanTopLevelFields(text, FIELDS)).toEqual(JSON.parse(text) as Record<string, unknown>);
+  });
+
+  it.for([
+    ['{"packageManager":"yarn@1.0.0"'],
+    ["{"],
+    [""],
+    ["   "],
+    ["[1,2,3]"],
+    ["null"],
+    ['{"a":tru}'],
+    ['{"a":01}'],
+    ['{"a":+1}'],
+    ['{"a":1.}'],
+    ['{"a":1e}'],
+    ['{"a":1,}'],
+    ['{"a" 1}'],
+    ['{"a":"unterminated}'],
+    ['{"a":"bad \\x escape"}'],
+    ['{"a":"raw\u0001control"}'],
+    ['{"a":1} trailing'],
+    ["{a:1}"],
+    ["{'a':1}"],
+    ['{"a":[1,]}'],
+    ['{"a":{"b":}}'],
+    ['{"pack\\u0061geManager":"yarn@1.0.0"}'],
+  ])("defers to the real parser for %j", ([text]) => {
+    // Never a guess: anything the scan cannot prove well-formed comes back
+    // `null`, so §03.1's `Invalid package.json` still fires on exactly the same
+    // inputs it fired on before.
+    expect(scanTopLevelFields(text!, FIELDS)).toBeNull();
+  });
+
+  it("accepts nothing JSON.parse would reject", () => {
+    // A differential check over the shapes a manifest can take: whenever the
+    // scan answers, the answer agrees with a real parse.
+    const corpus = [
+      `{}`,
+      `{"packageManager":"yarn@1.0.0"}`,
+      `{"a":-0.5e+10,"packageManager":"pnpm@9.0.0"}`,
+      `{"a":[],"b":{},"c":[[{"d":[true,false,null]}]]}`,
+      String.raw`{"a":"\u00e9\n\t\\\"","devEngines":{"packageManager":{"name":"npm"}}}`,
+      `{"a":1}`,
+      `{ "a" : 1 , "b" : 2 }`,
+      `\n{\n  "packageManager": "yarn@4.0.0"\n}\n`,
+    ];
+
+    for (const text of corpus) {
+      const scanned = scanTopLevelFields(text, FIELDS);
+      expect(scanned).not.toBeNull();
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      for (const key of FIELDS) {
+        expect(scanned![key]).toEqual(parsed[key]);
+      }
+    }
+  });
+
+  it("gives up rather than recursing without bound", () => {
+    const deep = `{"a":${"[".repeat(200)}1${"]".repeat(200)}}`;
+    expect(scanTopLevelFields(deep, FIELDS)).toBeNull();
+    // And the caller's fallback still reads it correctly.
+    expect(parseManifest(deep)).toBeTypeOf("object");
   });
 });
