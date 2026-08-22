@@ -119,3 +119,26 @@ function which(binary) {
     .split(delimiter)
     .some((dir) => dir !== "" && existsSync(join(dir, binary)));
 }
+
+/**
+ * oxc's parser, which rolldown re-exports and obuild vendors. Used for its
+ * *locations*, never its codegen: `transformSync` would strip the types, and the
+ * types are the program `scriptc` compiles.
+ */
+export async function loadOxc() {
+  return import(createRequire(import.meta.resolve("obuild")).resolve("rolldown/utils"));
+}
+
+/** The repo's own `tsc`, over a generated tree. Resolves with its exit code. */
+export function runTsc(args) {
+  const local = join(root, "node_modules", ".bin", "tsc");
+  if (!existsSync(local)) {
+    console.error("tsc is not installed; run `pnpm install` before --typecheck.");
+    exit(1);
+  }
+  return new Promise((done, failed) => {
+    const child = spawn(local, args, { cwd: root, env, stdio: "inherit" });
+    child.on("error", failed);
+    child.on("close", (code) => done(code ?? 1));
+  });
+}
