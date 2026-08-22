@@ -96,6 +96,61 @@ export function isTransparentCommand(binaryName: string, args: string[]): boolea
   return false;
 }
 
+/**
+ * §15.31 — the spellings of "operate outside this project" that count.
+ *
+ * `--location=global` is npm's; `--location global` is the same flag written
+ * apart and is handled by the scan below.
+ */
+const GLOBAL_FLAGS = new Set(["-g", "--global", "--location=global"]);
+
+/**
+ * §15.31 — does this invocation carry a global flag as a **leading** argument?
+ *
+ * #690: `npm install -g corepack@latest` inside a yarn-pinned project dies on
+ * §03.5's name mismatch, blocking the tool's own documented upgrade path. A
+ * global command operates outside the project by definition, so it is treated
+ * exactly like a transparent command (§01.4).
+ *
+ * Where the scan **stops** is the whole argument: a `-g` further along belongs
+ * to whatever the package manager is about to run, not to the package manager.
+ *
+ * * `--` ends it — `npm run build -- -g` passes `-g` to the script.
+ * * A *second* operand ends it. The first is the subcommand (`install`, `exec`);
+ *   what follows is that subcommand's own argument, and `npm exec foo -g` hands
+ *   `-g` to `foo`.
+ *
+ * The other direction is deliberate: `npm install foo -g`, where npm's own
+ * parser would still see the flag, is **not** recognised. That leaves the
+ * pre-existing mismatch error standing, which is a refusal to guess rather than
+ * a regression — guessing wrong the other way would let an argument the user
+ * never wrote bypass the project's pin.
+ */
+export function isGlobalInvocation(args: string[]): boolean {
+  let operands = 0;
+
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === "--") return false;
+
+    // A bare `-` is an operand (stdin), not an option.
+    if (arg.length > 1 && arg.startsWith("-")) {
+      if (GLOBAL_FLAGS.has(arg)) return true;
+      // `--location global`: consume the value so it is not counted as the
+      // subcommand it would otherwise displace.
+      if (arg === "--location") {
+        if (args[index + 1] === "global") return true;
+        index++;
+      }
+      continue;
+    }
+
+    if (++operands > 1) return false;
+  }
+
+  return false;
+}
+
 /** §01.3 — the hot path: classify, resolve, ensure installed, hand over. */
 export async function runProxy(
   invocation: Extract<Invocation, { mode: "proxy" }>,
@@ -106,7 +161,10 @@ export async function runProxy(
   // thunk, because forcing it reads `lastKnownGood.json` and may hit the
   // network — which the §01.3 budget forbids on a warm, pinned run.
   const name = getPackageManagerFor(binaryName);
-  const transparent = name !== undefined && isTransparentCommand(binaryName, args);
+  // §15.31 — a global invocation is transparent for the same reason a
+  // bootstrapping command is: neither one is asking the project for anything.
+  const transparent =
+    name !== undefined && (isTransparentCommand(binaryName, args) || isGlobalInvocation(args));
   const requestedName = name ?? binaryName;
   const fallback: LazyLocator =
     name === undefined

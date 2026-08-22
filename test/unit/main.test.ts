@@ -15,7 +15,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { WARM_MODULES } from "../../build.config.ts";
 import { DEFINITIONS, getSpecFor } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
-import { classifyInvocation, isTransparentCommand, presentError } from "../../src/main.ts";
+import {
+  classifyInvocation,
+  isGlobalInvocation,
+  isTransparentCommand,
+  presentError,
+} from "../../src/main.ts";
 import { parse } from "../../src/semver.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
@@ -271,6 +276,61 @@ describe("isTransparentCommand — §01.4", () => {
     // `prefix[0] === binaryName` — `yarnpkg dlx` is not `yarn dlx`.
     expect(isTransparentCommand("yarnpkg", ["dlx"])).toBe(false);
     expect(isTransparentCommand("foo", ["dlx"])).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.31 — global flags, recognised positionally
+ * ------------------------------------------------------------------ */
+
+describe("isGlobalInvocation — §15.31", () => {
+  it("recognises a global flag before the subcommand", () => {
+    expect(isGlobalInvocation(["-g", "install", "corepack@latest"])).toBe(true);
+    expect(isGlobalInvocation(["--global", "add", "x"])).toBe(true);
+    expect(isGlobalInvocation(["--location=global", "install", "x"])).toBe(true);
+    expect(isGlobalInvocation(["--location", "global", "install", "x"])).toBe(true);
+  });
+
+  it("recognises one after the subcommand — the #690 invocation itself", () => {
+    expect(isGlobalInvocation(["install", "-g", "corepack@latest"])).toBe(true);
+    expect(isGlobalInvocation(["i", "--global", "x"])).toBe(true);
+    expect(isGlobalInvocation(["add", "--location=global", "x"])).toBe(true);
+    expect(isGlobalInvocation(["install", "--location", "global", "x"])).toBe(true);
+    // Other options in front of it are still leading arguments.
+    expect(isGlobalInvocation(["--silent", "install", "--no-audit", "-g", "x"])).toBe(true);
+  });
+
+  /* The boundary, from the other side. Each of these contains a `-g` that
+   * belongs to something the package manager is about to run, and a scan that
+   * simply grepped `args` would accept every one of them. */
+
+  it("stops at `--`", () => {
+    expect(isGlobalInvocation(["run", "build", "--", "-g"])).toBe(false);
+    expect(isGlobalInvocation(["exec", "--", "something", "-g"])).toBe(false);
+    expect(isGlobalInvocation(["--", "-g"])).toBe(false);
+    // Even directly after the subcommand, `--` ends the tool's reading of argv.
+    expect(isGlobalInvocation(["install", "--", "-g"])).toBe(false);
+  });
+
+  it("stops at the subcommand's first operand", () => {
+    expect(isGlobalInvocation(["exec", "something", "-g"])).toBe(false);
+    expect(isGlobalInvocation(["run", "build", "-g"])).toBe(false);
+    expect(isGlobalInvocation(["dlx", "tool", "--global"])).toBe(false);
+    // The deliberate false negative (see the doc comment): npm would honour
+    // this, and the tool does not guess.
+    expect(isGlobalInvocation(["install", "foo", "-g"])).toBe(false);
+  });
+
+  it("does not match a flag that merely contains or resembles one", () => {
+    expect(isGlobalInvocation([])).toBe(false);
+    expect(isGlobalInvocation(["install"])).toBe(false);
+    expect(isGlobalInvocation(["install", "-G"])).toBe(false);
+    expect(isGlobalInvocation(["install", "--globalthing"])).toBe(false);
+    expect(isGlobalInvocation(["install", "--global=false"])).toBe(false);
+    expect(isGlobalInvocation(["install", "--location=user"])).toBe(false);
+    expect(isGlobalInvocation(["install", "--location", "user", "-g"])).toBe(true);
+    // A bare `-` is an operand, not an option, so it consumes the one slot.
+    expect(isGlobalInvocation(["publish", "-", "-g"])).toBe(false);
   });
 });
 

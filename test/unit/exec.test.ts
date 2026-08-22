@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { delimiter, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { messages } from "../../src/errors.ts";
-import { resolveBinPath } from "../../src/exec.ts";
+import { pathWith, resolveBinPath } from "../../src/exec.ts";
 import type { BinList, BinSpec } from "../../src/types.ts";
 
 /**
@@ -318,5 +318,207 @@ describe("resolveBinPath — §14.13 confinement", () => {
     expect(resolveBinPath("yarn", spec, TGZ_URL)).toBe(
       join(spec.location, "bin", "..", "bin", "yarn.js"),
     );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.32 — the resolved package manager on `PATH`
+ *
+ * #412: a script that shells out to `pnpm` under `corepack pnpm exec`
+ * gets a *different* pnpm, or none. Every case below therefore plants a
+ * decoy directory on `PATH` first: an assertion that only checked that
+ * `pnpm` was findable would pass on the decoy, and prove nothing about
+ * the entry the tool added.
+ * ------------------------------------------------------------------ */
+
+describe("§15.32 — PATH", () => {
+  describe("pathWith", () => {
+    it("prepends, with the platform's separator", () => {
+      expect(pathWith("/a", "/b")).toBe(`/a${delimiter}/b`);
+      expect(pathWith("/a", "/b/a")).toBe(`/a${delimiter}/b/a`);
+    });
+
+    it("is the only modification: the rest of PATH is carried through verbatim", () => {
+      const current = `/x${delimiter}/y${delimiter}/z`;
+      expect(pathWith("/a", current)).toBe(`/a${delimiter}${current}`);
+    });
+
+    it("is idempotent, so nesting cannot grow PATH without bound", () => {
+      expect(pathWith("/a", `/a${delimiter}/b`)).toBeUndefined();
+      expect(pathWith("/a", "/a")).toBeUndefined();
+      // A *prefix* of an entry is not that entry.
+      expect(pathWith("/a", `/ab${delimiter}/b`)).toBe(`/a${delimiter}/ab${delimiter}/b`);
+      // Present but not first: §15.32 says prepend, so it moves to the front.
+      expect(pathWith("/a", `/b${delimiter}/a`)).toBe(`/a${delimiter}/b${delimiter}/a`);
+    });
+
+    it("handles an absent or empty PATH", () => {
+      expect(pathWith("/a", undefined)).toBe("/a");
+      expect(pathWith("/a", "")).toBe("/a");
+    });
+  });
+
+  /** A shim directory holding a stub named `binName`, plus a decoy directory. */
+  function pathFixture(name: string, binNames: string[]): { shims: string; decoy: string } {
+    const shims = join(root, name, "shims");
+    const decoy = join(root, name, "decoy");
+    mkdirSync(shims, { recursive: true });
+    mkdirSync(decoy, { recursive: true });
+    for (const binName of binNames) writeFileSync(join(shims, binName), "");
+    writeFileSync(join(decoy, "yarn"), "");
+    return { shims, decoy };
+  }
+
+  /**
+   * The environment is built from nothing rather than from `process.env`: the
+   * developer's own `~/.local/bin` is §15.13's default shim directory, so a run
+   * that inherited `HOME` could pass on *their* shims.
+   */
+  function runWithEnv(
+    location: string,
+    binName: string,
+    bin: BinSpec,
+    env: Record<string, string>,
+  ): { status: number | null; stdout: string; stderr: string } {
+    const result = spawnSync(
+      process.execPath,
+      [driver, location, binName, TGZ_URL, JSON.stringify(bin)],
+      {
+        encoding: "utf8",
+        env: { HOME: join(root, "nowhere"), USERPROFILE: join(root, "nowhere"), ...env },
+      },
+    );
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  const REPORT = `console.log(process.env.PATH);\n`;
+
+  it("puts the shim directory in front of everything, including a decoy", () => {
+    const location = fixture("path-shim", { "bin/yarn.js": REPORT });
+    const { shims, decoy } = pathFixture("path-shim", ["yarn"]);
+
+    const result = runWithEnv(
+      location,
+      "yarn",
+      { yarn: "./bin/yarn.js" },
+      {
+        COREPACK_SHIM_DIRECTORY: shims,
+        PATH: `${decoy}${delimiter}/usr/bin`,
+      },
+    );
+
+    expect(result.status).toBe(0);
+    // Ours, and first — not the decoy that also answers to `yarn`.
+    expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}${delimiter}/usr/bin`);
+  });
+
+  it("prepends nothing when the shim directory holds no shim for this binary", () => {
+    const location = fixture("path-noshim", { "bin/yarn.js": REPORT });
+    // A shim for a *different* binary: the directory exists and is ours, and
+    // still must not be prepended, because it does not contain this program.
+    const { shims, decoy } = pathFixture("path-noshim", ["pnpm"]);
+
+    const result = runWithEnv(
+      location,
+      "yarn",
+      { yarn: "./bin/yarn.js" },
+      {
+        COREPACK_SHIM_DIRECTORY: shims,
+        PATH: `${decoy}${delimiter}/usr/bin`,
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(`${decoy}${delimiter}/usr/bin`);
+  });
+
+  it("does not stack a second copy when it is already first (nested runs)", () => {
+    const location = fixture("path-nested", { "bin/yarn.js": REPORT });
+    const { shims, decoy } = pathFixture("path-nested", ["yarn"]);
+
+    const result = runWithEnv(
+      location,
+      "yarn",
+      { yarn: "./bin/yarn.js" },
+      {
+        COREPACK_SHIM_DIRECTORY: shims,
+        PATH: `${shims}${delimiter}${decoy}`,
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}`);
+  });
+
+  // §15.13's per-user default is platform-specific; XDG is the Linux/BSD half.
+  it.skipIf(process.platform === "darwin" || process.platform === "win32")(
+    "falls back to §15.13's per-user default when nothing is configured",
+    () => {
+      const location = fixture("path-peruser", { "bin/yarn.js": REPORT });
+      const { shims, decoy } = pathFixture("path-peruser", ["yarn"]);
+
+      const result = runWithEnv(
+        location,
+        "yarn",
+        { yarn: "./bin/yarn.js" },
+        {
+          XDG_BIN_HOME: shims,
+          PATH: decoy,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}`);
+    },
+  );
+
+  /* The native branch (§15.28) spawns, so it is the one place where "must not
+   * leak into the tool's own process" has a literal meaning to check. */
+  describe.skipIf(process.platform === "win32")("the native branch", () => {
+    /** Reports the child's PATH, then the tool's own once the child is gone. */
+    function runNative(location: string, bin: BinSpec, env: Record<string, string>) {
+      const script = join(root, "native-driver.mjs");
+      writeFileSync(
+        script,
+        [
+          `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
+          `const [location, binJson] = process.argv.slice(2);`,
+          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], ${JSON.stringify(TGZ_URL)}, undefined, "native");`,
+          `console.log("parent:" + process.env.PATH);`,
+          ``,
+        ].join("\n"),
+      );
+      const result = spawnSync(process.execPath, [script, location, JSON.stringify(bin)], {
+        encoding: "utf8",
+        env: { HOME: join(root, "nowhere"), ...env },
+      });
+      return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    }
+
+    it("prepends the directory holding the extracted binary, and only to the child", () => {
+      const location = fixture("path-native", {
+        "bin/bunny": `#!/bin/sh\nprintf 'child:%s\\n' "$PATH"\n`,
+      });
+      chmodSync(join(location, "bin", "bunny"), 0o755);
+      const { shims, decoy } = pathFixture("path-native", ["bunny"]);
+
+      const result = runNative(
+        location,
+        { bunny: "./bin/bunny" },
+        {
+          // Set, and deliberately irrelevant: a native artifact is not reachable
+          // through a shim, so the store directory is what must win.
+          COREPACK_SHIM_DIRECTORY: shims,
+          PATH: decoy,
+        },
+      );
+
+      expect(result.stderr).toBe("");
+      expect(result.status).toBe(0);
+      const lines = result.stdout.trimEnd().split("\n");
+      expect(lines[0]).toBe(`child:${join(location, "bin")}${delimiter}${decoy}`);
+      // No leak: the tool's own PATH is exactly what it started with.
+      expect(lines[1]).toBe(`parent:${decoy}`);
+    });
   });
 });

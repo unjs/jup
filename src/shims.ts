@@ -50,11 +50,11 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFINITIONS, getBinariesFor } from "./config/table.ts";
 import { messages, UsageError } from "./errors.ts";
+import { perUserShimDirectory as perUserDefault } from "./exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "./self.ts";
 import { getHomeFolder } from "./store.ts";
 
@@ -289,34 +289,15 @@ function samePath(left: string, right: string): boolean {
  * §15.13 point 1 — the per-user default, the one place a shim can always be
  * written without elevation.
  *
- * `LOCALAPPDATA` is read **only** on Windows (point 5, closing #673): a Linux
- * process that inherited it from WSL interop must not be steered onto `/mnt/c`.
+ * The chain itself lives in `exec.ts`, because §15.32 prepends this directory to
+ * `PATH` on every proxy invocation and the two must name the same place. All
+ * this adds is §14.17's error: without a home directory there is no per-user
+ * default to fall back to, and the user has to name a directory.
  */
 export function perUserShimDirectory(): string {
-  if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
-    const base =
-      localAppData !== undefined && localAppData !== ""
-        ? localAppData
-        : join(userHome(), "AppData", "Local");
-    return join(base, "node", "corepack", "bin");
-  }
-
-  // macOS has no XDG convention; Linux and the BSDs do.
-  if (process.platform !== "darwin") {
-    const xdg = process.env.XDG_BIN_HOME;
-    if (xdg !== undefined && xdg !== "") return xdg;
-  }
-
-  return join(userHome(), ".local", "bin");
-}
-
-function userHome(): string {
-  const home = homedir();
-  // §14.17's error is the right one: without a home directory there is no
-  // per-user default to fall back to, and the user has to name a directory.
-  if (home === "") throw new UsageError(messages.noShimDirectory());
-  return home;
+  const directory = perUserDefault();
+  if (directory === undefined) throw new UsageError(messages.noShimDirectory());
+  return directory;
 }
 
 /**

@@ -5,7 +5,9 @@
  * manager itself can tell a trampoline was involved.
  */
 
-import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { getPackageManagerFor } from "./config/table.ts";
 import { messages } from "./errors.ts";
@@ -24,6 +26,93 @@ let ownRoot: string | undefined;
 function getOwnRoot(): string {
   ownRoot ??= resolveOwnRoot(import.meta.url);
   return ownRoot;
+}
+
+/* -------------------------------------------------------------------------- */
+/* §15.32 — the resolved package manager on `PATH`                             */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * §15.13 point 1 — the per-user shim directory, the one place a shim can always
+ * be written without elevation. `LOCALAPPDATA` only on Windows (point 5, #673).
+ *
+ * It lives here rather than in `shims.ts`, which imports it: §15.32 needs it on
+ * every proxy invocation, and the directory this prepends and the one `enable`
+ * writes into must never drift apart. `undefined` means there is no home
+ * directory to derive one from — §14.17's error for `enable`, and simply nothing
+ * to prepend for a proxy run.
+ */
+export function perUserShimDirectory(): string | undefined {
+  if (process.platform === "win32") {
+    const localAppData = process.env.LOCALAPPDATA;
+    if (localAppData !== undefined && localAppData !== "") {
+      return join(localAppData, "node", "corepack", "bin");
+    }
+    const home = homedir();
+    return home === "" ? undefined : join(home, "AppData", "Local", "node", "corepack", "bin");
+  }
+
+  // macOS has no XDG convention; Linux and the BSDs do.
+  if (process.platform !== "darwin") {
+    const xdg = process.env.XDG_BIN_HOME;
+    if (xdg !== undefined && xdg !== "") return xdg;
+  }
+
+  const home = homedir();
+  return home === "" ? undefined : join(home, ".local", "bin");
+}
+
+/** §15.13 point 1 — `COREPACK_SHIM_DIRECTORY`, else the per-user default. */
+function defaultShimDirectory(): string | undefined {
+  const configured = process.env.COREPACK_SHIM_DIRECTORY;
+  if (configured !== undefined && configured !== "") return resolve(configured);
+  return perUserShimDirectory();
+}
+
+/**
+ * §15.32 — the directory to put in front of `PATH` for a JavaScript package
+ * manager, or `undefined` when there is none.
+ *
+ * §14.15's shims are self-dispatching, so the shim directory *is* a directory
+ * containing the resolved package manager's binaries: a nested `pnpm` re-enters
+ * this tool, walks the same project and resolves the same version, with nothing
+ * copied or generated to make it so.
+ *
+ * The one `stat` keeps that claim honest. Shims may never have been installed,
+ * and the per-user default (`~/.local/bin`) is full of *other* programs;
+ * prepending it when it holds no shim of ours would put the package manager
+ * nowhere and only re-rank the user's own binaries for the child — which is what
+ * §15.32's "the prepended entry MUST be the only modification" forbids.
+ */
+function shimDirectoryFor(binName: string): string | undefined {
+  const directory = defaultShimDirectory();
+  if (directory === undefined) return undefined;
+  return existsSync(join(directory, binName)) ? directory : undefined;
+}
+
+/**
+ * `PATH` with `directory` prepended, or `undefined` when it is already first.
+ *
+ * Idempotent on purpose: a nested run re-enters through the very shim this entry
+ * made reachable, so without the check each level of nesting would add another
+ * copy and a deep `pnpm run` chain would grow `PATH` without bound.
+ */
+export function pathWith(directory: string, current: string | undefined): string | undefined {
+  if (current === undefined || current === "") return directory;
+  if (current === directory || current.startsWith(directory + delimiter)) return undefined;
+  return directory + delimiter + current;
+}
+
+/**
+ * Set `PATH` on a child environment, whatever case the ambient one spells it:
+ * Windows variables are case-insensitive but an object's keys are not, so a
+ * spread of `process.env` yields `Path` and adding `PATH` would hand it two.
+ */
+function setPath(env: Record<string, string | undefined>, value: string): void {
+  for (const key of Object.keys(env)) {
+    if (key !== "PATH" && key.toLowerCase() === "path") delete env[key];
+  }
+  env.PATH = value;
 }
 
 /**
@@ -144,15 +233,35 @@ export function execPackageManager(
 
   // §08.7 — the only variable we add, and it is added the same way for both
   // models: a native child inherits `process.env` wholesale. Package managers
-  // use it purely as an "am I running under a version manager?" flag. `PATH` is
-  // deliberately left alone in phase 1; §15.32 will prepend `dirname(binPath)`
-  // to it here.
+  // use it purely as an "am I running under a version manager?" flag.
   process.env.COREPACK_ROOT = getOwnRoot();
 
   if (execMode === "native") {
+    // §15.32 — what goes in front of `PATH` for a native artifact is the
+    // directory holding it. This branch spawns, so it has a real child
+    // environment: the entry is written into *that* and `process.env.PATH` is
+    // never touched, which is "MUST NOT leak into the tool's own process" in its
+    // literal form.
+    const env = { ...process.env };
+    const path = pathWith(dirname(binPath), process.env.PATH);
+    if (path !== undefined) setPath(env, path);
+
     // Imported here and nowhere else: `node:child_process` must not enter the
     // module graph of a JavaScript cache hit (§01.3, §16.3).
-    return import("./native.ts").then((native) => native.execNative(binPath, args));
+    return import("./native.ts").then((native) => native.execNative(binPath, args, env));
+  }
+
+  // §15.32 — the JavaScript path hands over **in process**, so there is no child
+  // environment to write into: `process.env` *is* what the package manager will
+  // read. "Must not leak into the tool's own process" is therefore honoured by
+  // scope rather than by copying — this is the last statement before handover,
+  // after every write the tool performs (§08.3.2) and after all of its own work,
+  // none of which resolves a binary from `PATH`. Nothing of ours ever observes
+  // the modified value.
+  const shimDirectory = shimDirectoryFor(binName);
+  if (shimDirectory !== undefined) {
+    const path = pathWith(shimDirectory, process.env.PATH);
+    if (path !== undefined) process.env.PATH = path;
   }
 
   process.argv = [process.execPath, binPath, ...args];
