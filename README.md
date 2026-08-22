@@ -837,6 +837,13 @@ The full list with rationale is in
   pinned hash, a verified signature or a registry digest is required, and a cache hit is
   checked against the pin rather than trusted. See
   [How a version is verified](#how-a-version-is-verified).
+- **A global install is not a project operation.** `npm install -g <anything>` inside a
+  pinned project runs, instead of failing with "This project is configured to use yarn"
+  and blocking the tool's own documented upgrade path ([#690]). The flag is recognised
+  positionally, so it cannot be smuggled in after a subcommand.
+- **The resolved package manager is on `PATH` for anything it starts** ([#412]), so a
+  script that shells out to `pnpm` gets the one the project pinned rather than whatever
+  the machine happens to have.
 - **Signing-key expiry is honoured** rather than stored and ignored — which is why a bare
   `pipack yarn` currently fails online, and corepack does not. npm signs the `yarn`
   packument's `latest` with a key its own `/-/npm/v1/keys` marks
@@ -868,14 +875,14 @@ what it found is listed below rather than summarised away.
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
 | Implementation | 33 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 326 passing, 3 skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 1186 passing |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–207) | 346 passing, 3 skipped (two Windows-only, one needs a real TTY) |
+| Unit tests | 1195 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
 Measured, not hoped for:
 
-- **42 kB** min+gzipped, **zero** runtime dependencies.
+- **43 kB** min+gzipped, **zero** runtime dependencies.
 - **~28 ms** for a warm proxy invocation against **~19 ms** for bare Node — so **~9 ms**
   of actual work — against **~51 ms** for corepack on the same machine. (Best of 150
   spawns, interleaved in one loop; absolute timings taken minutes apart on a loaded
@@ -893,18 +900,11 @@ per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and p
 prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
 `pipack info` (§15.30), stale and shadowed defaults (§15.33), native package-manager
 support (§15.28), one verification tier for every source with sidecar integrity
-(§15.11, §15.12), signing-key rotation and per-origin trust (§15.9, §15.10), and parts of
-§15.14, §15.19 and §15.35.
+(§15.11, §15.12), signing-key rotation and per-origin trust (§15.9, §15.10), global invocations and
+`PATH` (§15.31, §15.32), and parts of §15.14, §15.19 and §15.35.
 
 Not done yet, from the audit:
 
-- **Global invocations still hit the project pin** (§15.31). `npm install -g <anything>`
-  inside a yarn- or pnpm-pinned project fails with the name-mismatch error, blocking the
-  tool's own documented upgrade path ([#690]). This is currently *worse* here than in
-  corepack, and by our own hand: shimming npm by default (§15.16) reaches users corepack's
-  version never did.
-- **The resolved package manager is not put on `PATH`** (§15.32), so a script that shells
-  out to `pnpm` gets a different one ([#412]).
 - **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
   the abbreviated packument the registry client requests does not carry.
 - Smaller: yarn's compiled-in `default` is still Classic 1.22.22 (§15.33 bullet 2);
@@ -913,7 +913,7 @@ Not done yet, from the audit:
   unmatched version band throws where §15.17 wants a fallback; `COREPACK_SPEC_FILE`
   (§15.35d) does not exist.
 
-Thirteen of §15.38's conformance rows have no test yet, and the audit records two places
+Eleven of §15.38's conformance rows have no test yet, and the audit records two places
 where an existing test proves less than its name suggests — §15.26's row asserts the
 implementation's own behaviour rather than the spec's, and §15.24's row 184 cannot detect
 the SHOULD it appears to cover, because its fixture's `latest` and stable maximum are the
