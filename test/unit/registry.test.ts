@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors.ts";
-import { resetNpmrcCache } from "../../src/npmrc.ts";
+import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import {
   applyRegistryOverride,
   applySourceOverride,
@@ -23,7 +23,7 @@ import {
   NPM_FULL_ACCEPT_HEADER,
   resolveRegistrySpec,
   verifyRegistryTrust,
-} from "../../src/registry.ts";
+} from "../../src/net/registry.ts";
 import { DEFINITIONS } from "../../src/config/table.ts";
 import type { NpmRegistrySpec, TrustedKey, UrlRegistrySpec } from "../../src/types.ts";
 

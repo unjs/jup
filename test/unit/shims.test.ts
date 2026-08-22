@@ -41,7 +41,7 @@ import {
   targetBinaries,
   verifyOnPath,
   whichFile,
-} from "../../src/shims.ts";
+} from "../../src/commands/shims.ts";
 
 const execFileAsync = promisify(execFile);
 

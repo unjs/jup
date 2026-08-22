@@ -14,13 +14,18 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { messages } from "./errors.ts";
-import { detectFormat, scanTopLevelKey, setNestedString, setTopLevelString } from "./json-write.ts";
-import { parseManifest } from "./json.ts";
+import { messages } from "../errors.ts";
+import {
+  detectFormat,
+  scanTopLevelKey,
+  setNestedString,
+  setTopLevelString,
+} from "../utils/json-write.ts";
+import { parseManifest } from "../utils/json.ts";
 import { integrityFromHash } from "./lockfile.ts";
 import { discoverProjectSpec, warnOrThrow } from "./manifest.ts";
-import { isValidVersion, parse, satisfies } from "./semver.ts";
-import type { DevEnginesDeclaration, Manifest } from "./types.ts";
+import { isValidVersion, parse, satisfies } from "../version/semver.ts";
+import type { DevEnginesDeclaration, Manifest } from "../types.ts";
 
 /**
  * §03.7, as amended by §15.26 and §15.27 — write the pin.

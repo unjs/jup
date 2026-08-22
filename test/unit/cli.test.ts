@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
 // `exec.ts` hands the process over to the package manager for real — it rewrites
 // `process.argv` and imports the entry point on `nextTick`. Every assertion here
 // is about *what* would be run, so the handover itself is mocked out.
-vi.mock("../../src/exec.ts", () => ({
+vi.mock("../../src/run/exec.ts", () => ({
   // `0` mirrors the real JavaScript path (§08.4): the package manager sets the
   // exit code from its own module body afterwards, so handover itself answers 0.
   // §15.28's native path is the one that returns a promise of a real code.
@@ -28,12 +28,12 @@ import {
   cmdUse,
   resolvePatternsToDescriptors,
   runManagementCommand,
-} from "../../src/cli.ts";
+} from "../../src/commands/cli.ts";
 import { messages, UsageError } from "../../src/errors.ts";
-import { execPackageManager } from "../../src/exec.ts";
-import { create } from "../../src/tar.ts";
+import { execPackageManager } from "../../src/run/exec.ts";
+import { create } from "../../src/cache/tar.ts";
 import type { CorepackMarker } from "../../src/types.ts";
-import { USAGE_LINES } from "../../src/usage.ts";
+import { USAGE_LINES } from "../../src/commands/usage.ts";
 
 /* ------------------------------------------------------------------ *
  * Harness

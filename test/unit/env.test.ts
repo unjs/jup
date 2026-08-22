@@ -15,7 +15,7 @@ import {
   isFrozenLockfile,
   loadEnvFileFrom,
   parseEnvFile,
-} from "../../src/env.ts";
+} from "../../src/project/env.ts";
 import { messages } from "../../src/errors.ts";
 
 let dir: string;

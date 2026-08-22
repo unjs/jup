@@ -4,9 +4,9 @@
  * Descriptor in, Locator out (or `null`, meaning "no release matches").
  */
 
-import { getDefinition, isSupportedPackageManager } from "./config/table.ts";
-import { envDisabled, envFlag } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
+import { getDefinition, isSupportedPackageManager } from "../config/table.ts";
+import { envDisabled, envFlag } from "../project/env.ts";
+import { messages, UsageError } from "../errors.ts";
 import {
   isPrerelease,
   isValidRange,
@@ -16,14 +16,14 @@ import {
   rcompare,
   satisfiesWithPrereleases,
 } from "./semver.ts";
-import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "./store.ts";
+import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "../cache/store.ts";
 import type {
   Descriptor,
   LazyLocator,
   Locator,
   PackageManagerSpec,
   RegistrySpec,
-} from "./types.ts";
+} from "../types.ts";
 
 export interface ResolveOptions {
   allowTags?: boolean;
@@ -71,8 +71,8 @@ function hasRegistryOverride(): boolean {
  * into every single invocation, which is precisely what §01.3's budget and
  * §16.3's syscall shape rule out.
  */
-function loadRegistry(): Promise<typeof import("./registry.ts")> {
-  return import("./registry.ts");
+function loadRegistry(): Promise<typeof import("../net/registry.ts")> {
+  return import("../net/registry.ts");
 }
 
 export async function resolveDescriptor(

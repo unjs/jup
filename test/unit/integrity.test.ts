@@ -8,7 +8,7 @@ import {
   parseSri,
   shouldSkipIntegrityCheck,
   verifySignature,
-} from "../../src/integrity.ts";
+} from "../../src/verify/integrity.ts";
 import type { RegistrySignature, TrustedKey } from "../../src/types.ts";
 
 /* -------------------------------------------------------------------------- */

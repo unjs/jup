@@ -5,7 +5,7 @@ import { delimiter, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { messages } from "../../src/errors.ts";
-import { pathWith, resolveBinPath } from "../../src/exec.ts";
+import { pathWith, resolveBinPath } from "../../src/run/exec.ts";
 import type { BinList, BinSpec } from "../../src/types.ts";
 
 /**
@@ -19,7 +19,7 @@ const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(
   new RegExp(`${sep === "\\" ? "\\\\" : sep}$`),
   "",
 );
-const EXEC_URL = pathToFileURL(join(REPO_ROOT, "src", "exec.ts")).href;
+const EXEC_URL = pathToFileURL(join(REPO_ROOT, "src", "run", "exec.ts")).href;
 
 /** A single-file download's URL, whose basename is what a `bin` list resolves to. */
 const YARN_URL = "https://repo.yarnpkg.com/4.0.0/packages/yarnpkg-cli/bin/yarn.js";

@@ -21,7 +21,7 @@ import {
   resolutionKey,
   usesLockfile,
   writeResolution,
-} from "../../src/lockfile.ts";
+} from "../../src/project/lockfile.ts";
 
 let dir: string;
 

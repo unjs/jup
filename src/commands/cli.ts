@@ -23,11 +23,11 @@ import {
   getTableSpec,
   isSupportedPackageManager,
   SUPPORTED_NAMES,
-} from "./config/table.ts";
-import { isFrozenLockfile } from "./env.ts";
-import { explainFetchFailure, messages, UsageError } from "./errors.ts";
-import { execPackageManager } from "./exec.ts";
-import { ensureInstalled } from "./install.ts";
+} from "../config/table.ts";
+import { isFrozenLockfile } from "../project/env.ts";
+import { explainFetchFailure, messages, UsageError } from "../errors.ts";
+import { execPackageManager } from "../run/exec.ts";
+import { ensureInstalled } from "../cache/install.ts";
 import {
   LOCKFILE_NAME,
   readResolution,
@@ -35,11 +35,11 @@ import {
   resolutionKey,
   usesLockfile,
   writeResolution,
-} from "./lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec } from "./manifest.ts";
-import { type PinStyle, writePin } from "./pin.ts";
-import { resolveDescriptor, type ResolveOptions } from "./resolve.ts";
-import { isValidRange, isValidVersion, major, parse } from "./semver.ts";
+} from "../project/lockfile.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec } from "../project/manifest.ts";
+import { type PinStyle, writePin } from "../project/pin.ts";
+import { resolveDescriptor, type ResolveOptions } from "../version/resolve.ts";
+import { isValidRange, isValidVersion, major, parse } from "../version/semver.ts";
 import {
   cacheClean,
   createTempDir,
@@ -51,15 +51,15 @@ import {
   readLastKnownGood,
   referenceWithHash,
   writeLastKnownGood,
-} from "./store.ts";
-import { create, extract, listEntries } from "./tar.ts";
-import type { Descriptor, InstallSpec, Locator, SpecResult } from "./types.ts";
+} from "../cache/store.ts";
+import { create, extract, listEntries } from "../cache/tar.ts";
+import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
 
 import { HELP_TEXT } from "./usage.ts";
-import { getOwnVersion } from "./self.ts";
+import { getOwnVersion } from "../utils/self.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Small shared helpers                                                        */

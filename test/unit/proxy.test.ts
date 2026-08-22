@@ -30,8 +30,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors.ts";
-import { httpGet, httpGetJson } from "../../src/http.ts";
-import { bypassesProxy, proxyForUrl } from "../../src/proxy.ts";
+import { httpGet, httpGetJson } from "../../src/net/http.ts";
+import { bypassesProxy, proxyForUrl } from "../../src/net/proxy.ts";
 import { CERT, KEY } from "../_fixtures/tls.ts";
 
 /* ------------------------------------------------------------------ *

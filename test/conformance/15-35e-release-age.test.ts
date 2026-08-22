@@ -32,7 +32,7 @@
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { NPM_ACCEPT_HEADER, NPM_FULL_ACCEPT_HEADER } from "../../src/registry.ts";
+import { NPM_ACCEPT_HEADER, NPM_FULL_ACCEPT_HEADER } from "../../src/net/registry.ts";
 import {
   cleanupFixtures,
   createFixture,

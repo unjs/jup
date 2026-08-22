@@ -24,7 +24,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { messages } from "./errors.ts";
+import { messages } from "../errors.ts";
 import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";
 
 /** What the environment (and, later, `.npmrc`) says about TLS. */

@@ -28,12 +28,12 @@
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_REGISTRY } from "./config/keys.ts";
-import { envDisabled } from "./env.ts";
-import { httpGetJson } from "./http.ts";
+import { DEFAULT_REGISTRY } from "../config/keys.ts";
+import { envDisabled } from "../project/env.ts";
+import { httpGetJson } from "../net/http.ts";
 import { getTrustedKeys, UntrustedKeyidError, verifySignature } from "./integrity.ts";
-import { getHomeFolder } from "./store.ts";
-import type { RegistrySignature, TrustedKey } from "./types.ts";
+import { getHomeFolder } from "../cache/store.ts";
+import type { RegistrySignature, TrustedKey } from "../types.ts";
 
 /** §15.9 — `<home>/keys.json`, a sibling of `lastKnownGood.json` and outside `v1`. */
 export const KEYS_CACHE_NAME = "keys.json";

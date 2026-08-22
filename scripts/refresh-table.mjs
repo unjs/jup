@@ -28,7 +28,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compareDigest, parseSri, verifySignature } from "../src/integrity.ts";
+import { compareDigest, parseSri, verifySignature } from "../src/verify/integrity.ts";
 
 const SRC = join(import.meta.dirname, "..", "src", "config");
 const TABLE = join(SRC, "table.ts");

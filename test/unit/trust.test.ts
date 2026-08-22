@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_REGISTRY, TRUST_KEYS } from "../../src/config/keys.ts";
-import { UntrustedKeyidError } from "../../src/integrity.ts";
+import { UntrustedKeyidError } from "../../src/verify/integrity.ts";
 import {
   fetchNpmKeys,
   KEYS_CACHE_NAME,
@@ -28,7 +28,7 @@ import {
   shouldRefresh,
   verifySignatureWithRefresh,
   writeKeysCache,
-} from "../../src/trust.ts";
+} from "../../src/verify/trust.ts";
 import type { RegistrySignature, TrustedKey } from "../../src/types.ts";
 
 /* -------------------------------------------------------------------------- */

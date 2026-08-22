@@ -17,12 +17,19 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { isSupportedPackageManager } from "./config/table.ts";
-import { envDisabled } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
-import { compare, isValidVersion, lt, major, parse, satisfiesWithPrereleases } from "./semver.ts";
-import type { SemVer } from "./semver.ts";
-import type { CorepackMarker, InstallSpec, Locator } from "./types.ts";
+import { isSupportedPackageManager } from "../config/table.ts";
+import { envDisabled } from "../project/env.ts";
+import { messages, UsageError } from "../errors.ts";
+import {
+  compare,
+  isValidVersion,
+  lt,
+  major,
+  parse,
+  satisfiesWithPrereleases,
+} from "../version/semver.ts";
+import type { SemVer } from "../version/semver.ts";
+import type { CorepackMarker, InstallSpec, Locator } from "../types.ts";
 
 /** §07.2 — the file whose presence means "this install is complete and valid". */
 export const MARKER_NAME = ".corepack";

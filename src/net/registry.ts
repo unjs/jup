@@ -6,16 +6,16 @@
  * and both must be reproduced.
  */
 
-import { DEFAULT_REGISTRY } from "./config/keys.ts";
-import { npmAlternativeFor, packageManagerForRegistry } from "./config/table.ts";
-import { envDisabled, envFlag } from "./env.ts";
-import { messages, networkError, redactUserinfo, UsageError } from "./errors.ts";
+import { DEFAULT_REGISTRY } from "../config/keys.ts";
+import { npmAlternativeFor, packageManagerForRegistry } from "../config/table.ts";
+import { envDisabled, envFlag } from "../project/env.ts";
+import { messages, networkError, redactUserinfo, UsageError } from "../errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
-import { parseSri, shouldSkipIntegrityCheck } from "./integrity.ts";
+import { parseSri, shouldSkipIntegrityCheck } from "../verify/integrity.ts";
 import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
-import { isPrerelease, rcompare } from "./semver.ts";
-import { verifySignatureWithRefresh } from "./trust.ts";
-import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "./types.ts";
+import { isPrerelease, rcompare } from "../version/semver.ts";
+import { verifySignatureWithRefresh } from "../verify/trust.ts";
+import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "../types.ts";
 
 /** The origin every table URL is written against, and the only one §07.3 rewrites. */
 const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;

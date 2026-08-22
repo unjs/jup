@@ -1018,6 +1018,31 @@ fixed:
 
 </details>
 
+### Source layout
+
+Directories follow the spec's own sections, so a requirement in `.agents/` and the
+code that implements it are one hop apart.
+
+| Path | § | Contents |
+|---|---|---|
+| `src/bin.ts`, `src/shim.ts`, `src/index.ts` | §01.2, §10.1 | The three entry points: the CLI binary, the module the generated shims import, and the library export. |
+| `src/main.ts` | §01.2–§01.4 | The proxy pipeline — the code that runs on every `yarn`, `npm` and `pnpm` invocation. |
+| `src/types.ts`, `src/errors.ts` | §02.1, §12 | The data model, and every user-facing message and exit code. |
+| `src/config/` | §02.3, §02.6 | The embedded registry table and trust store. Data, compiled in. |
+| `src/project/` | §03 | What the project declares: the manifest, `.corepack.env`, `.corepack.lock`, and the pin writer. |
+| `src/version/` | §04 | The semver subset and descriptor resolution. |
+| `src/net/` | §05, §15.1–§15.6 | HTTP, TLS, proxies, `.npmrc`, and the npm registry protocol. |
+| `src/verify/` | §06 | Hashes, signatures, and key refresh. |
+| `src/cache/` | §07 | The on-disk store, the installer, and the tar reader. |
+| `src/run/` | §08 | Handing control to the package manager, in-process or native. |
+| `src/commands/` | §09, §10 | The management CLI, `info`, the shim writer, and the usage text. |
+| `src/utils/` | §16.4 | JSON reading and format-preserving editing; locating our own install. |
+
+The one split that is not thematic is **warm versus cold**: `build.config.ts`'s
+`WARM_MODULES` names the modules a cache-hit run loads, and `test/unit/main.test.ts`
+fails if that set drifts from what is statically reachable from `src/shim.ts`. Moving
+a file between directories is free; making a warm module import a cold one is not.
+
 ## License
 
 Published under the [MIT](https://github.com/pi0/pipack/blob/main/LICENSE) license 💛.

@@ -31,10 +31,10 @@ import {
   resolveInstallTarget,
   writeLastKnownGood,
   writeMarker,
-} from "../../src/store.ts";
+} from "../../src/cache/store.ts";
 // §15.17 moved `resolveBin` onto the cold path — it runs once per *install*,
 // never on a cache hit, and the warm chunk is measured in bytes (§16.3).
-import { resolveBin } from "../../src/install.ts";
+import { resolveBin } from "../../src/cache/install.ts";
 
 /**
  * `node:fs`'s ESM namespace is frozen, so `vi.spyOn` cannot touch it. The mock

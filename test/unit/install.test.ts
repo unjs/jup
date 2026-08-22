@@ -9,8 +9,8 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../../src/errors.ts";
-import { confirmDownload, ensureInstalled } from "../../src/install.ts";
-import { create } from "../../src/tar.ts";
+import { confirmDownload, ensureInstalled } from "../../src/cache/install.ts";
+import { create } from "../../src/cache/tar.ts";
 import type { CorepackMarker, Locator, TrustedKey } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *

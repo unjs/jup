@@ -5,8 +5,8 @@ import {
   scanTopLevelKey,
   setNestedString,
   setTopLevelString,
-} from "../../src/json-write.ts";
-import { parseManifest, scanTopLevelFields } from "../../src/json.ts";
+} from "../../src/utils/json-write.ts";
+import { parseManifest, scanTopLevelFields } from "../../src/utils/json.ts";
 
 const BOM = "﻿";
 

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { messages } from "../../src/errors.ts";
-import { create, extract, listEntries } from "../../src/tar.ts";
+import { create, extract, listEntries } from "../../src/cache/tar.ts";
 
 /* -------------------------------------------------------------------------- */
 /* In-memory tarball construction — friendly and hostile alike                  */

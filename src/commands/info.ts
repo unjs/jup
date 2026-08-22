@@ -36,17 +36,17 @@ import {
   statSync,
 } from "node:fs";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
-import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "./config/table.ts";
-import { isCI, isEnvFileEligible, parseEnvFile } from "./env.ts";
-import { redactUserinfo, UsageError } from "./errors.ts";
-import { parseManifest } from "./json.ts";
-import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "./lockfile.ts";
-import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "./manifest.ts";
-import { loadNpmrc, type NpmrcLevel, registryVariableFor, resolveRegistry } from "./npmrc.ts";
-import { getOwnRoot, getOwnVersion } from "./self.ts";
-import { isValidRange, isValidVersion, parse } from "./semver.ts";
+import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../config/table.ts";
+import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
+import { redactUserinfo, UsageError } from "../errors.ts";
+import { parseManifest } from "../utils/json.ts";
+import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "../project/lockfile.ts";
+import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "../project/manifest.ts";
+import { loadNpmrc, type NpmrcLevel, registryVariableFor, resolveRegistry } from "../net/npmrc.ts";
+import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
+import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
 import { resolveInstallDirectory, SHIM_MARKER } from "./shims.ts";
-import { tlsSettings } from "./tls.ts";
+import { tlsSettings } from "../net/tls.ts";
 import {
   findInstalledVersion,
   getHomeFolder,
@@ -54,8 +54,8 @@ import {
   LAST_KNOWN_GOOD_NAME,
   listInstalled,
   readLastKnownGood,
-} from "./store.ts";
-import type { Descriptor, Manifest } from "./types.ts";
+} from "../cache/store.ts";
+import type { Descriptor, Manifest } from "../types.ts";
 
 /**
  * The `--json` schema version.

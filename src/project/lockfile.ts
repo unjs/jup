@@ -22,8 +22,13 @@
 
 import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { isValidRange, isValidVersion, parse, satisfiesWithPrereleases } from "./semver.ts";
-import type { Descriptor, Locator } from "./types.ts";
+import {
+  isValidRange,
+  isValidVersion,
+  parse,
+  satisfiesWithPrereleases,
+} from "../version/semver.ts";
+import type { Descriptor, Locator } from "../types.ts";
 
 /** §15.23 — the file lives at the project root, next to the manifest that declared the spec. */
 export const LOCKFILE_NAME = ".corepack.lock";

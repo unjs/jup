@@ -21,7 +21,7 @@ import {
   isTransparentCommand,
   presentError,
 } from "../../src/main.ts";
-import { parse } from "../../src/semver.ts";
+import { parse } from "../../src/version/semver.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const BIN = join(REPO_ROOT, "src", "bin.ts");
@@ -724,44 +724,44 @@ describe("the warm fast path — §01.3 (test 96)", () => {
  * later still — only once a proxy has actually matched.
  */
 const COLD_PATH_MODULES = [
-  "install.ts",
-  "http.ts",
-  "proxy.ts",
-  "integrity.ts",
-  "registry.ts",
-  "tar.ts",
-  "cli.ts",
-  "shims.ts",
+  "cache/install.ts",
+  "net/http.ts",
+  "net/proxy.ts",
+  "verify/integrity.ts",
+  "net/registry.ts",
+  "cache/tar.ts",
+  "commands/cli.ts",
+  "commands/shims.ts",
   // §15.30's report is management-mode only, and it reaches for the shim
   // resolver and a full store listing — none of which a `yarn --version` may pay
   // for.
-  "info.ts",
+  "commands/info.ts",
   // §15.4's CA handling and failure classification. `http.ts` reaches it only
   // when a request is about to go out, and `tls.ts` itself defers `node:tls`
   // until something is actually configured.
-  "tls.ts",
+  "net/tls.ts",
   // §15.1's `.npmrc` reader. A cache hit must not read a single `.npmrc`, and
   // `strace` on the built binary confirms zero such syscalls — this list is what
   // keeps it that way.
-  "npmrc.ts",
+  "net/npmrc.ts",
   // §15.28's native handover, and with it `node:child_process`. A JavaScript
   // package manager is handed over to in-process (§08.2) and must not pay for
   // the machinery that exists for the ones that are not JavaScript.
-  "native.ts",
+  "run/native.ts",
   // §04.1's tag lookup, range fan-out and `lastKnownGood.json` fallback. An
   // exactly-pinned descriptor resolves to itself and the store marker is the
   // probe (§14.1), so the whole of `resolve.ts` — and the registry entry points
   // it reaches — belongs behind a dynamic import.
-  "resolve.ts",
+  "version/resolve.ts",
   // §09's synopsis and §12.1's usage lines. Both are error/`--help` output; a
   // proxy run that succeeds has no business parsing either.
-  "usage.ts",
+  "commands/usage.ts",
   // §03.7's pin writer and, under it, §16.4's format-preserving JSON editor —
   // which reaches `node:os` for the platform line ending. Only `use`, `up` and
   // §03.6's auto-pin write a manifest; every other invocation on the machine
   // only reads one.
-  "pin.ts",
-  "json-write.ts",
+  "project/pin.ts",
+  "utils/json-write.ts",
 ];
 
 /**
@@ -970,6 +970,13 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * that needs more than that is a change worth arguing for in review — raise
    * the ceiling deliberately, or move the code behind a dynamic import the way
    * `pin.ts` and `resolve.ts` are.
+   *
+   * The ceiling was raised from 190,000 to 191,000 when the sources moved into
+   * subdirectories: the deeper relative specifiers (`"../errors.ts"` for
+   * `"./errors.ts"`, and a few lines rewrapped by the formatter) cost 190 bytes
+   * of source and **nothing** at runtime — the emitted `warm.mjs` was
+   * byte-identical at 76,005 before and after. Specifier text is the one kind
+   * of growth this measure over-counts, so it was corrected for once, here.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -981,6 +988,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(190_000);
+    ).toBeLessThanOrEqual(191_000);
   });
 });

@@ -6,6 +6,13 @@ test is recorded as untested.
 
 **Suite state at audit time.** `vitest run` → 55 files, **1473 passed, 3 skipped**, green.
 
+> **Layout note.** Every `file:line` reference in this document predates the move of
+> `src/` into subdirectories (`project/`, `version/`, `net/`, `verify/`, `cache/`,
+> `run/`, `commands/`, `utils/`; `config/` unchanged). Basenames did not change, so
+> `registry.ts` is now `src/net/registry.ts` and so on — the table in README's
+> *Source layout* section maps each directory to its spec section. Line numbers are as
+> of the referenced commit either way.
+
 **Two things happened during the audit and you should know about both.**
 
 1. **The repo was being edited while I read it, and still is.** At the moment I

@@ -8,11 +8,11 @@
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { isSupportedPackageManager } from "./config/table.ts";
+import { isSupportedPackageManager } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
-import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "./errors.ts";
-import { parseManifest, scanTopLevelFields } from "./json.ts";
-import { isValidRange, isValidVersion, parse, satisfies } from "./semver.ts";
+import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
+import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
+import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type {
   Descriptor,
   DevEnginesDeclaration,
@@ -22,7 +22,7 @@ import type {
   Manifest,
   ParseSpecOptions,
   SpecResult,
-} from "./types.ts";
+} from "../types.ts";
 
 /** Directories inside a `node_modules` are skipped, so a dependency cannot hijack its host. */
 export const NODE_MODULES_RE = /[\\/]node_modules[\\/](@[^\\/]*[\\/])?([^@\\/][^\\/]*)$/;

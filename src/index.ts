@@ -5,13 +5,13 @@
  * embedded (and so the package has a meaningful `exports` entry).
  */
 
-import type { ResolveOptions } from "./resolve.ts";
+import type { ResolveOptions } from "./version/resolve.ts";
 import type { Descriptor, InstallSpec, Locator } from "./types.ts";
 
 export type * from "./types.ts";
 export { UsageError } from "./errors.ts";
 export { classifyInvocation, runMain } from "./main.ts";
-export { discoverProjectSpec, parseSpec } from "./manifest.ts";
+export { discoverProjectSpec, parseSpec } from "./project/manifest.ts";
 
 /**
  * §04 — resolve a descriptor to a locator.
@@ -25,7 +25,7 @@ export async function resolveDescriptor(
   descriptor: Descriptor,
   options?: ResolveOptions,
 ): Promise<Locator | null> {
-  const resolve = await import("./resolve.ts");
+  const resolve = await import("./version/resolve.ts");
   return await resolve.resolveDescriptor(descriptor, options);
 }
 
@@ -42,6 +42,6 @@ export async function ensureInstalled(
   locator: Locator,
   options?: { cacheOnly?: boolean },
 ): Promise<InstallSpec> {
-  const install = await import("./install.ts");
+  const install = await import("./cache/install.ts");
   return install.ensureInstalled(locator, options);
 }

@@ -22,7 +22,7 @@ import {
   registryVariableFor,
   resetNpmrcCache,
   resolveRegistry,
-} from "../../src/npmrc.ts";
+} from "../../src/net/npmrc.ts";
 
 const roots: string[] = [];
 const savedEnv = { ...process.env };

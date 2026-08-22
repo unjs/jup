@@ -9,10 +9,10 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { getPackageManagerFor } from "./config/table.ts";
-import { messages } from "./errors.ts";
-import type { BinList, BinSpec, InstallSpec } from "./types.ts";
-import { getOwnRoot as resolveOwnRoot } from "./self.ts";
+import { getPackageManagerFor } from "../config/table.ts";
+import { messages } from "../errors.ts";
+import type { BinList, BinSpec, InstallSpec } from "../types.ts";
+import { getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
  * §08.7 — the directory containing our own installation root.

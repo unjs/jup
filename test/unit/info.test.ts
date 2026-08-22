@@ -25,10 +25,10 @@ import {
   formatReport,
   INFO_REPORT_VERSION,
   type InfoReport,
-} from "../../src/info.ts";
-import { discoverProjectSpec } from "../../src/manifest.ts";
-import { getRegistryUrl } from "../../src/registry.ts";
-import { SHIM_MARKER } from "../../src/shims.ts";
+} from "../../src/commands/info.ts";
+import { discoverProjectSpec } from "../../src/project/manifest.ts";
+import { getRegistryUrl } from "../../src/net/registry.ts";
+import { SHIM_MARKER } from "../../src/commands/shims.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 
 const ENV_KEYS = [

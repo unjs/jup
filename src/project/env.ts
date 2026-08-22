@@ -7,7 +7,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { messages } from "./errors.ts";
+import { messages } from "../errors.ts";
 
 /**
  * §03.2 — the prefix filter is the entire sandbox against a hostile repository.

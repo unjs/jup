@@ -36,7 +36,7 @@ import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
-import { DEFAULT_REGISTRY } from "./config/keys.ts";
+import { DEFAULT_REGISTRY } from "../config/keys.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                       */

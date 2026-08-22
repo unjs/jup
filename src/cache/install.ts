@@ -15,10 +15,10 @@ import {
   isEmbeddedReference,
   isSupportedPackageManager,
   resolveSpecUrl,
-} from "./config/table.ts";
-import { envFlag, isCI } from "./env.ts";
-import { messages, UsageError } from "./errors.ts";
-import { httpGet } from "./http.ts";
+} from "../config/table.ts";
+import { envFlag, isCI } from "../project/env.ts";
+import { messages, UsageError } from "../errors.ts";
+import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
   compareDigest,
@@ -26,8 +26,8 @@ import {
   hashStream,
   parseSri,
   shouldSkipIntegrityCheck,
-} from "./integrity.ts";
-import { resolveRegistry } from "./npmrc.ts";
+} from "../verify/integrity.ts";
+import { resolveRegistry } from "../net/npmrc.ts";
 import {
   applyRegistryOverride,
   applySourceOverride,
@@ -36,8 +36,8 @@ import {
   resolveRegistrySpec,
   verifyRegistryTrust,
   warnUnsignedRegistry,
-} from "./registry.ts";
-import { parse } from "./semver.ts";
+} from "../net/registry.ts";
+import { parse } from "../version/semver.ts";
 import {
   bumpLastKnownGood,
   createTempDir,
@@ -56,7 +56,7 @@ import type {
   Locator,
   RegistrySignature,
   RegistrySpec,
-} from "./types.ts";
+} from "../types.ts";
 
 /** §07.4 — the two artifact shapes the table can produce. */
 const TARBALL_EXT = ".tgz";

@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { getSpecFor } from "../../../src/config/table.ts";
-import { parse } from "../../../src/semver.ts";
+import { parse } from "../../../src/version/semver.ts";
 import { npmTarball } from "./tarball.ts";
 
 const roots: string[] = [];

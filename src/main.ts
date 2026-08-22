@@ -11,13 +11,13 @@ import {
   getTableSpec,
   isSupportedPackageManager,
 } from "./config/table.ts";
-import { envDisabled, envFlag, isFrozenLockfile } from "./env.ts";
+import { envDisabled, envFlag, isFrozenLockfile } from "./project/env.ts";
 import { explainFetchFailure, messages, UsageError } from "./errors.ts";
-import { execPackageManager } from "./exec.ts";
-import { readResolution, usesLockfile, writeResolution } from "./lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./manifest.ts";
-import { isValidVersion, parse } from "./semver.ts";
-import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./store.ts";
+import { execPackageManager } from "./run/exec.ts";
+import { readResolution, usesLockfile, writeResolution } from "./project/lockfile.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./project/manifest.ts";
+import { isValidVersion, parse } from "./version/semver.ts";
+import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./cache/store.ts";
 import type {
   Descriptor,
   InstallSpec,
@@ -274,7 +274,7 @@ export async function runMain(argv: string[]): Promise<number> {
     }
     // Loaded lazily: the proxy path is the hot one and must not pay for the
     // command surface it never touches (§16.3).
-    const { runManagementCommand } = await import("./cli.ts");
+    const { runManagementCommand } = await import("./commands/cli.ts");
     return await runManagementCommand(invocation.args);
   } catch (error) {
     return await presentError(error, invocation);
@@ -332,7 +332,7 @@ async function ensureInstalledLazily(locator: Locator, range: string): Promise<I
   const installed = readInstalledSpec(locator);
   if (installed !== null) return installed;
 
-  const { ensureInstalled } = await import("./install.ts");
+  const { ensureInstalled } = await import("./cache/install.ts");
   try {
     return await ensureInstalled(locator);
   } catch (error) {
@@ -378,7 +378,7 @@ function resolveExactPin(descriptor: Descriptor): Locator | null {
 
 /** §15.19 — the same diagnostic around resolution, which is where a range fails. */
 async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null> {
-  const { resolveDescriptor } = await import("./resolve.ts");
+  const { resolveDescriptor } = await import("./version/resolve.ts");
   try {
     return await resolveDescriptor(descriptor, { allowTags: true });
   } catch (error) {
@@ -395,7 +395,7 @@ async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null>
  * module itself now loads only when something actually forces the fallback.
  */
 async function fallbackReference(name: string, transparent: boolean): Promise<string> {
-  const { getFallbackLocator } = await import("./resolve.ts");
+  const { getFallbackLocator } = await import("./version/resolve.ts");
   return await getFallbackLocator(name, { transparent }).reference();
 }
 
@@ -408,7 +408,7 @@ async function fallbackReference(name: string, transparent: boolean): Promise<st
  * that succeeds.
  */
 async function usageLineFor(command: string | undefined): Promise<string> {
-  const { GENERIC_USAGE_LINE, USAGE_LINES } = await import("./usage.ts");
+  const { GENERIC_USAGE_LINE, USAGE_LINES } = await import("./commands/usage.ts");
   return command !== undefined && Object.hasOwn(USAGE_LINES, command)
     ? USAGE_LINES[command]!
     : GENERIC_USAGE_LINE;
@@ -488,7 +488,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
 
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
-  const { writePin } = await import("./pin.ts");
+  const { writePin } = await import("./project/pin.ts");
   const { target } = writePin(dirname(specResult.target), {
     name: locator.name,
     reference,

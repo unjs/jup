@@ -11,7 +11,7 @@ import {
   rcompare,
   satisfies,
   satisfiesWithPrereleases,
-} from "../../src/semver.ts";
+} from "../../src/version/semver.ts";
 
 const SHA1 = "+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610";
 const SHA224 = "+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113";

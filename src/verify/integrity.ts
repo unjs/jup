@@ -18,9 +18,9 @@
 
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "./config/keys.ts";
-import { messages, UsageError } from "./errors.ts";
-import type { RegistrySignature, TrustedKey, TrustStore } from "./types.ts";
+import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "../config/keys.ts";
+import { messages, UsageError } from "../errors.ts";
+import type { RegistrySignature, TrustedKey, TrustStore } from "../types.ts";
 
 /** §14.11 — explicit allowlist; anything else is a clear error, not a crash. */
 export const SUPPORTED_HASH_ALGOS = ["sha1", "sha224", "sha256", "sha384", "sha512"] as const;

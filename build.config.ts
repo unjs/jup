@@ -22,17 +22,17 @@ import { defineBuildConfig } from "obuild/config";
  * mistake fails it too.
  */
 export const WARM_MODULES = [
+  "cache/store.ts",
   "config/table.ts",
-  "env.ts",
   "errors.ts",
-  "exec.ts",
-  "json.ts",
-  "lockfile.ts",
   "main.ts",
-  "manifest.ts",
-  "self.ts",
-  "semver.ts",
-  "store.ts",
+  "project/env.ts",
+  "project/lockfile.ts",
+  "project/manifest.ts",
+  "run/exec.ts",
+  "utils/json.ts",
+  "utils/self.ts",
+  "version/semver.ts",
 ];
 
 /** `config/table.ts` → `config[\\/]table\.ts`, so the pattern matches on either separator. */

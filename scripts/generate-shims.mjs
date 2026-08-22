@@ -14,8 +14,8 @@ import { existsSync } from "node:fs";
 import { chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFINITIONS, getBinariesFor } from "../src/config/table.ts";
-import { ENTRY_CANDIDATES } from "../src/self.ts";
-import { shimSource } from "../src/shims.ts";
+import { ENTRY_CANDIDATES } from "../src/utils/self.ts";
+import { shimSource } from "../src/commands/shims.ts";
 
 const dist = join(import.meta.dirname, "..", "dist");
 

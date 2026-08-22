@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFINITIONS } from "../../src/config/table.ts";
 import { messages } from "../../src/errors.ts";
-import { getDefaultVersion, getFallbackLocator, resolveDescriptor } from "../../src/resolve.ts";
+import {
+  getDefaultVersion,
+  getFallbackLocator,
+  resolveDescriptor,
+} from "../../src/version/resolve.ts";
 import type { UrlRegistrySpec } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { findEntryModule, getOwnRoot } from "../../src/self.ts";
+import { findEntryModule, getOwnRoot } from "../../src/utils/self.ts";
 
 /**
  * These two questions were answered three separate times by counting `dirname`

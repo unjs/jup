@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, networkError, redactUserinfoAnywhere, UsageError } from "../../src/errors.ts";
-import { loadNpmrc, npmrcAuthorizationFor, resetNpmrcCache } from "../../src/npmrc.ts";
+import { loadNpmrc, npmrcAuthorizationFor, resetNpmrcCache } from "../../src/net/npmrc.ts";
 import {
   assertSafeArtifactUrl,
   credentialsFor,
@@ -14,7 +14,7 @@ import {
   httpGetJson,
   retryAfterMs,
   USER_AGENT,
-} from "../../src/http.ts";
+} from "../../src/net/http.ts";
 
 /* ------------------------------------------------------------------ *
  * A real local server per test: the *client* is what must be fetch-based,

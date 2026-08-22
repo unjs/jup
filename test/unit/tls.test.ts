@@ -22,8 +22,8 @@ import { join } from "node:path";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors.ts";
-import { httpGet, httpGetJson } from "../../src/http.ts";
-import { resetNpmrcCache } from "../../src/npmrc.ts";
+import { httpGet, httpGetJson } from "../../src/net/http.ts";
+import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import {
   applyTlsConfiguration,
   classifyTlsFailure,
@@ -33,7 +33,7 @@ import {
   tlsConnectOptions,
   tlsSettings,
   tlsTransportRequired,
-} from "../../src/tls.ts";
+} from "../../src/net/tls.ts";
 import { CERT, KEY } from "../_fixtures/tls.ts";
 
 /* ------------------------------------------------------------------ *
@@ -509,22 +509,38 @@ describe("applyTlsConfiguration", () => {
  * ------------------------------------------------------------------ */
 
 describe("the warm path never reaches TLS (§16.3)", () => {
-  const WARM = ["main.ts", "bin.ts", "shim.ts", "index.ts", "resolve.ts", "store.ts", "exec.ts"];
+  const WARM = [
+    "main.ts",
+    "bin.ts",
+    "shim.ts",
+    "index.ts",
+    "version/resolve.ts",
+    "cache/store.ts",
+    "run/exec.ts",
+  ];
+
+  // The specifier is matched by basename rather than by the literal relative
+  // path, so a module moving between subdirectories cannot quietly defeat this.
+  const IMPORTS_TLS = /from\s*"[^"]*\/tls\.ts"/;
 
   it.for(WARM.map((name) => [name]))("src/%s names neither tls.ts nor node:tls", ([name]) => {
     const source = readFileSync(new URL(`../../src/${name}`, import.meta.url), "utf8");
 
-    expect(source).not.toContain('"./tls.ts"');
+    expect(source).not.toMatch(IMPORTS_TLS);
     expect(source).not.toContain("node:tls");
   });
 
   it("only http.ts and proxy.ts import it, and both are cold-path already", () => {
-    const importers = WARM.concat(["http.ts", "proxy.ts", "install.ts", "registry.ts"]).filter(
-      (name) =>
-        readFileSync(new URL(`../../src/${name}`, import.meta.url), "utf8").includes('"./tls.ts"'),
+    const importers = WARM.concat([
+      "net/http.ts",
+      "net/proxy.ts",
+      "cache/install.ts",
+      "net/registry.ts",
+    ]).filter((name) =>
+      IMPORTS_TLS.test(readFileSync(new URL(`../../src/${name}`, import.meta.url), "utf8")),
     );
 
-    expect(importers.sort()).toEqual(["http.ts", "proxy.ts"]);
+    expect(importers.sort()).toEqual(["net/http.ts", "net/proxy.ts"]);
   });
 });
 

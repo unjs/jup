@@ -52,11 +52,11 @@ import {
 } from "node:fs/promises";
 import { basename, delimiter, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFINITIONS, getBinariesFor } from "./config/table.ts";
-import { messages, UsageError } from "./errors.ts";
-import { perUserShimDirectory as perUserDefault } from "./exec.ts";
-import { ENTRY_CANDIDATES, findEntryModule } from "./self.ts";
-import { getHomeFolder } from "./store.ts";
+import { DEFINITIONS, getBinariesFor } from "../config/table.ts";
+import { messages, UsageError } from "../errors.ts";
+import { perUserShimDirectory as perUserDefault } from "../run/exec.ts";
+import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
+import { getHomeFolder } from "../cache/store.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
 const TOOL_NAME = "pipack";

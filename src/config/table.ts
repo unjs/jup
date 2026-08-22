@@ -12,7 +12,7 @@
  */
 
 import { messages, UsageError } from "../errors.ts";
-import { parse, satisfiesWithPrereleases } from "../semver.ts";
+import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {
   Locator,
   NpmRegistrySpec,
