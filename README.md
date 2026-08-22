@@ -690,6 +690,18 @@ The full list with rationale is in
   table's compiled-in pin with no way to change it ([#202]). A recorded default from an
   older *major line* does not shadow the floor, so `yarn create` cannot fall back to Yarn
   Classic ([#812]).
+- **A package manager does not have to be JavaScript.** Corepack's most-upvoted open
+  issue is Bun support ([#295], 146 👍), blocked by an architectural assumption rather
+  than by effort: *"Corepack was written with assumption that package managers would be
+  implemented in JS."* Here a band's `url` may carry `{platform}` and `{arch}`, and a band
+  may declare `"exec": "native"` so its binaries run directly, with no JavaScript runtime
+  looked up and none interposed — exit codes, signals and stdio behave exactly as they do
+  on the JavaScript path, so a child killed by `SIGTERM` kills pipack with `SIGTERM`
+  rather than with exit code 143. **No package manager was added**: §15.21 requires a
+  project's maintainers to agree first, and Bun's asked not to be. The built-in table is
+  still npm, pnpm and yarn — this is headroom, and adding an entry stays a data-only
+  change, which the conformance suite demonstrates by adding exactly one table entry and
+  no code at all.
 - **Signing-key expiry is honoured** rather than stored and ignored.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
@@ -700,6 +712,7 @@ The full list with rationale is in
 - **The UTF-8 BOM survives** a `use` or `up` that rewrites your `package.json`.
 
 [#202]: https://github.com/nodejs/corepack/issues/202
+[#295]: https://github.com/nodejs/corepack/issues/295
 [#540]: https://github.com/nodejs/corepack/issues/540
 [#679]: https://github.com/nodejs/corepack/issues/679
 [#812]: https://github.com/nodejs/corepack/issues/812
@@ -721,8 +734,9 @@ Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)
 Measured, not hoped for:
 
 - **39 kB** min+gzipped, **zero** runtime dependencies.
-- **~38 ms** for a warm proxy invocation against **~22 ms** for bare Node — so ~16 ms of
-  actual work — and ~53 ms for corepack on the same machine.
+- **~33 ms** for a warm proxy invocation against **~19 ms** for bare Node — so **~14 ms**
+  of actual work — and **~51 ms** for corepack on the same machine. (Best-of-41 spawns on
+  an idle machine; absolute timings on a loaded one are noise wider than the effect.)
 - A warm run makes **zero** network requests, never reads the recorded default, and never
   scans the store. That is asserted by a test which patches `fetch` and `readFileSync`
   and fails if either is touched, and was independently confirmed with `strace`.
@@ -732,16 +746,21 @@ per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and p
 (§15.4–§15.6), registry-metadata tiering (§15.7, §15.8), shims and enablement (§15.13,
 §15.15, §15.16, §15.29), semver ranges in the pin with `.corepack.lock` (§15.23),
 prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
-`pipack info` (§15.30), stale and shadowed defaults (§15.33), and parts of §15.14,
-§15.19 and §15.35.
+`pipack info` (§15.30), stale and shadowed defaults (§15.33), native
+package-manager support (§15.28), and parts of §15.14, §15.19 and §15.35.
 
 Not done yet:
 
 - **Signing-key rotation** (§15.9) — key freshness is still tied to the release cadence.
 - **One verification tier for every source** (§15.11).
-- **Native, non-JavaScript package managers** (§15.28).
 - **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
   the abbreviated packument the registry client requests does not carry.
+
+One limitation worth stating: a **native** package manager must currently ship as a
+`.tgz`. §07.4 dispatches on the URL path's extension and requires an unrecognised one to
+fail loudly rather than be guessed at, and the only other extension it recognises is
+`.js`. A package manager distributing a bare, extension-less binary would need §07.4
+extended — not §15.28.
 
 ### What the audit found
 
