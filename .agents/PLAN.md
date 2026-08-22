@@ -638,7 +638,7 @@ for most items, and that signal is the ordering input — #295 (146👍), #95 (1
 
 ## Wave A — the network layer (independent of everything else)
 
-### P1 — Proxy support §14.8, §15.6
+### P1 — Proxy support §14.8, §15.6 — **done** (`176942b`)
 The one phase-1 MUST left unimplemented, and the reason conformance rows 71 and 72 are
 skipped. `fetch` cannot do it without a dispatcher, so this means a `CONNECT` tunnel and
 an absolute-form request path behind `HttpOptions.transport`, the seam already left for
@@ -657,6 +657,11 @@ crash; what remains is the three-outcome tiering: absent `dist` errors, absent
 `COREPACK_CAFILE`, `COREPACK_STRICT_SSL`, classified TLS failures (a corporate
 interception proxy currently surfaces as an unexplained transport error), timeouts, and
 retries with backoff on idempotent GETs only.
+
+Confirmed against the built binary after P1: a proxy that answers `CONNECT` with
+`502 Bad Gateway` surfaces as the generic `Error when performing the request to
+<url>` with nothing naming the proxy or the status. That is precisely the class
+§15.4 asks to classify, and it is now reachable, so it is P3's first case.
 
 ## Wave B — configuration the user already wrote
 
