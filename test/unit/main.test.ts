@@ -1,11 +1,18 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import {
+  basename,
+  dirname,
+  join,
+  relative as relativePath,
+  resolve as resolvePath,
+} from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { WARM_MODULES } from "../../build.config.ts";
 import { DEFINITIONS, getSpecFor } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
 import { classifyInvocation, isTransparentCommand, presentError } from "../../src/main.ts";
@@ -287,11 +294,11 @@ function capture(): { out: string[]; err: string[]; restore: () => void } {
 }
 
 describe("presentError — §08.4, §12.1", () => {
-  it("prints a proxy-mode UsageError bare on stderr", () => {
+  it("prints a proxy-mode UsageError bare on stderr", async () => {
     const sink = capture();
     let code: number;
     try {
-      code = presentError(new UsageError("This project is configured to use npm"), {
+      code = await presentError(new UsageError("This project is configured to use npm"), {
         mode: "proxy",
         binaryName: "yarn",
         args: [],
@@ -305,11 +312,11 @@ describe("presentError — §08.4, §12.1", () => {
     expect(sink.err.join("")).toBe("This project is configured to use npm\n");
   });
 
-  it("prints a management-mode UsageError on stdout with a usage line", () => {
+  it("prints a management-mode UsageError on stdout with a usage line", async () => {
     const sink = capture();
     let code: number;
     try {
-      code = presentError(new UsageError("boom"), {
+      code = await presentError(new UsageError("boom"), {
         mode: "management",
         args: ["use", "yarn@1"],
       });
@@ -322,12 +329,14 @@ describe("presentError — §08.4, §12.1", () => {
     expect(sink.out.join("")).toBe("Usage Error: boom\n\n$ corepack use [--here] <pattern>\n");
   });
 
-  it("keeps the stack for anything that is not a UsageError", () => {
+  it("keeps the stack for anything that is not a UsageError", async () => {
     const sink = capture();
     const error = new TypeError("internal");
     try {
-      expect(presentError(error, { mode: "proxy", binaryName: "yarn", args: [] })).toBe(1);
-      expect(presentError(error, { mode: "management", args: ["use"] })).toBe(1);
+      await expect(
+        presentError(error, { mode: "proxy", binaryName: "yarn", args: [] }),
+      ).resolves.toBe(1);
+      await expect(presentError(error, { mode: "management", args: ["use"] })).resolves.toBe(1);
     } finally {
       sink.restore();
     }
@@ -670,6 +679,14 @@ const COLD_PATH_MODULES = [
   // package manager is handed over to in-process (§08.2) and must not pay for
   // the machinery that exists for the ones that are not JavaScript.
   "native.ts",
+  // §04.1's tag lookup, range fan-out and `lastKnownGood.json` fallback. An
+  // exactly-pinned descriptor resolves to itself and the store marker is the
+  // probe (§14.1), so the whole of `resolve.ts` — and the registry entry points
+  // it reaches — belongs behind a dynamic import.
+  "resolve.ts",
+  // §09's synopsis and §12.1's usage lines. Both are error/`--help` output; a
+  // proxy run that succeeds has no business parsing either.
+  "usage.ts",
 ];
 
 /**
@@ -785,6 +802,75 @@ describe("the warm fast path — the module graph (§16.3)", () => {
     for (const entry of ["main.ts", "shim.ts", "index.ts"]) {
       const graph = moduleGraph(entry);
       expect(graph.natives - floor).toBeLessThanOrEqual(NATIVE_MODULE_BUDGET);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The *emitted* warm chunk, which the graph above cannot see.
+ *
+ * `moduleGraph` reports what a run loads from `src/`, and it is blind
+ * to how the bundler groups those files. That blindness cost a
+ * measurable ~2.8 ms: obuild merged `exec.ts` (warm) with `resolve.ts`
+ * and `usage.ts` (cold) into one chunk, so every exactly-pinned
+ * invocation parsed §04.1's range fan-out and §09's `--help` synopsis
+ * before handing over. `COLD_PATH_MODULES` could not catch it —
+ * `resolve.ts` really is warm-reachable in the *source* graph, since an
+ * unpinned project needs it — because the chunking was what was wrong.
+ *
+ * What decides the chunking is static-import reachability from the
+ * entry, so that is what these tests pin: the warm set is exactly
+ * `WARM_MODULES`, and `WARM_MODULES` is what `build.config.ts` ships as
+ * a single `warm.mjs`. Either half drifting fails the suite, and no
+ * build is needed to find out.
+ * ------------------------------------------------------------------ */
+
+const SRC = join(REPO_ROOT, "src");
+
+/**
+ * `import`/`export … from "./relative"` statements, skipping `import type`.
+ *
+ * Type-only specifiers are erased before the bundler ever sees them, so they do
+ * not put a module in a chunk — which is why `types.ts` is absent from the warm
+ * set despite being named by nearly every file in it.
+ */
+const STATIC_IMPORT = /(?:^|\n)\s*(?:import|export)\s+(?!type\b)[^;]*?from\s*"(\.[^"]+)"/g;
+
+/** Every module statically reachable from `src/<entry>`, relative to `src/`, sorted. */
+function staticGraph(entry: string): string[] {
+  const seen = new Set<string>();
+  const pending = [join(SRC, entry)];
+
+  while (pending.length > 0) {
+    const file = pending.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const [, specifier] of readFileSync(file, "utf8").matchAll(STATIC_IMPORT)) {
+      pending.push(resolvePath(dirname(file), specifier!));
+    }
+  }
+
+  return [...seen].map((file) => relativePath(SRC, file).replaceAll("\\", "/")).sort();
+}
+
+describe("the warm fast path — the emitted chunk (§16.3)", () => {
+  it("reaches exactly the modules the build ships as one warm chunk", () => {
+    // `shim.ts` is the entry itself, so it is a file of its own either way.
+    expect(staticGraph("shim.ts")).toEqual(["shim.ts", ...WARM_MODULES].sort());
+  });
+
+  it("keeps every cold-path module out of that chunk", () => {
+    // Belt and braces on top of the runtime graph: a cold module reached
+    // statically would be merged into `warm.mjs` and parsed on every run even if
+    // nothing ever called into it.
+    for (const cold of COLD_PATH_MODULES) {
+      expect(WARM_MODULES).not.toContain(cold);
+    }
+  });
+
+  it("names only modules that exist", () => {
+    for (const module of WARM_MODULES) {
+      expect(statSync(join(SRC, module)).isFile()).toBe(true);
     }
   });
 });

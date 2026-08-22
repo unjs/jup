@@ -16,9 +16,8 @@ import { explainFetchFailure, messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
 import { readResolution, usesLockfile, writeResolution } from "./lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
-import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
-import { parse } from "./semver.ts";
-import { readInstalledSpec, referenceWithHash } from "./store.ts";
+import { isValidVersion, parse } from "./semver.ts";
+import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./store.ts";
 import type {
   Descriptor,
   InstallSpec,
@@ -27,7 +26,6 @@ import type {
   Locator,
   SpecResult,
 } from "./types.ts";
-import { GENERIC_USAGE_LINE, USAGE_LINES } from "./usage.ts";
 
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
 const ARG0_RE = /^([^@]*)(?:@(.*))?$/;
@@ -118,7 +116,7 @@ export async function runProxy(
           // is precisely §12.2's name-only "unsupported specification" case.
           reference: () => Promise.reject(new UsageError(messages.unsupportedSpec(binaryName))),
         }
-      : getFallbackLocator(name, { transparent });
+      : { name, reference: () => fallbackReference(name, transparent) };
 
   // Step 3 — one `package.json` read plus at most one `.corepack.env` open per
   // directory walked. The env file it loads is applied to `process.env` here,
@@ -159,14 +157,15 @@ export async function runProxy(
   // `.corepack.lock`; an exact pin never touches it at all.
   const lockDir = lockfileDirFor(specResult, reconciled, descriptor, binaryVersion);
 
-  // Step 5 — resolution. For an exact pin this is a single `stat` of the store;
-  // for a recorded range it is one `.corepack.lock` read and nothing else.
+  // Step 5 — resolution. For an exact pin this is answered inline by
+  // {@link resolveExactPin}; for a recorded range it is one `.corepack.lock`
+  // read and nothing else.
   const recorded = lockDir === undefined ? null : readResolution(lockDir, descriptor);
   if (recorded === null && lockDir !== undefined && isFrozenLockfile()) {
     throw new UsageError(messages.lockfileUnresolved(descriptor.name, descriptor.range));
   }
 
-  const locator = recorded ?? (await resolveOrExplain(descriptor));
+  const locator = recorded ?? resolveExactPin(descriptor) ?? (await resolveOrExplain(descriptor));
   if (locator === null) {
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
@@ -220,7 +219,7 @@ export async function runMain(argv: string[]): Promise<number> {
     const { runManagementCommand } = await import("./cli.ts");
     return await runManagementCommand(invocation.args);
   } catch (error) {
-    return presentError(error, invocation);
+    return await presentError(error, invocation);
   }
 }
 
@@ -230,8 +229,13 @@ export async function runMain(argv: string[]): Promise<number> {
  *
  * Returns the exit code rather than exiting, so a caller that still has work to
  * do keeps control.
+ *
+ * Asynchronous only because of the usage table: the management-mode branch is
+ * the *only* thing on the whole warm graph that reads `usage.ts`, and a
+ * successful proxy run — the path that runs on every invocation forever — never
+ * reaches it. See {@link usageLineFor}.
  */
-export function presentError(error: unknown, invocation: Invocation): number {
+export async function presentError(error: unknown, invocation: Invocation): Promise<number> {
   if (error instanceof UsageError) {
     if (invocation.mode === "proxy") {
       // Bare, on stderr, no stack: the user typed something the project forbids,
@@ -242,11 +246,7 @@ export function presentError(error: unknown, invocation: Invocation): number {
 
     // Management mode puts it on **stdout**, with the offending command's usage
     // line underneath. The stream split between the two modes is test-asserted.
-    const command = invocation.args[0];
-    const usage =
-      command !== undefined && Object.hasOwn(USAGE_LINES, command)
-        ? USAGE_LINES[command]!
-        : GENERIC_USAGE_LINE;
+    const usage = await usageLineFor(invocation.args[0]);
     process.stdout.write(`Usage Error: ${error.message}\n\n${usage}\n`);
     return 1;
   }
@@ -287,13 +287,73 @@ async function ensureInstalledLazily(locator: Locator, range: string): Promise<I
   }
 }
 
+/**
+ * §04.1 steps 4 and 5, for the one case the fast path exists to serve: an exact
+ * pin. It is a transcription of `resolveDescriptor`'s two middle steps, not a
+ * shortcut past them — see the ordering note below.
+ *
+ * Steps 1–3 cannot apply to an exact version (a URL is not one, and neither is a
+ * tag), and step 6 is unreachable once step 5 has answered. So for this
+ * descriptor the two files agree by construction, and answering here is what
+ * keeps `resolve.ts` — the tag lookup, the registry client's entry points, the
+ * range fan-out and `lastKnownGood.json` — out of the warm module graph
+ * entirely.
+ *
+ * Everything this declines takes the full {@link resolveOrExplain} path.
+ */
+function resolveExactPin(descriptor: Descriptor): Locator | null {
+  // A name outside the table has no §04.1 step 2 definition, and the error for
+  // it belongs to the full path. Step 1's URL branch is unreachable from here,
+  // since a URL is never a valid version.
+  if (!isSupportedPackageManager(descriptor.name)) return null;
+  if (!isValidVersion(descriptor.range)) return null;
+
+  // Step 4 **before** step 5, exactly as §04.1 orders them, and the order is
+  // load-bearing rather than incidental: a cache hit answers with the bare
+  // version, and shedding the `+<hash>` suffix is what makes §07.2 re-attach the
+  // marker's hash instead of demanding a store directory qualified by the pin.
+  // Returning `descriptor.range` unconditionally sends every hash-bearing pin
+  // back to the registry. One `stat`, which is what §16.3 budgets (§14.1).
+  const cached = findInstalledVersion(descriptor.name, descriptor.range);
+  return { name: descriptor.name, reference: cached ?? descriptor.range };
+}
+
 /** §15.19 — the same diagnostic around resolution, which is where a range fails. */
 async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null> {
+  const { resolveDescriptor } = await import("./resolve.ts");
   try {
     return await resolveDescriptor(descriptor, { allowTags: true });
   } catch (error) {
     throw explainFetchFailure(error, descriptor) ?? error;
   }
+}
+
+/**
+ * §04.5's fallback reference, behind the same dynamic import.
+ *
+ * `getFallbackLocator` is a pure table lookup that hands back a thunk, so moving
+ * the lookup *into* the thunk changes nothing observable — the laziness that
+ * matters (no `lastKnownGood.json` read, no network) is unchanged, and the
+ * module itself now loads only when something actually forces the fallback.
+ */
+async function fallbackReference(name: string, transparent: boolean): Promise<string> {
+  const { getFallbackLocator } = await import("./resolve.ts");
+  return await getFallbackLocator(name, { transparent }).reference();
+}
+
+/**
+ * §12.1 — the usage line appended to a management-mode `Usage Error:`.
+ *
+ * Keyed by the command word, falling back to the generic line for anything
+ * unrecognised. Loaded on demand: `usage.ts` also carries `--help`'s full
+ * synopsis, and neither string has any business being parsed by a `yarn --version`
+ * that succeeds.
+ */
+async function usageLineFor(command: string | undefined): Promise<string> {
+  const { GENERIC_USAGE_LINE, USAGE_LINES } = await import("./usage.ts");
+  return command !== undefined && Object.hasOwn(USAGE_LINES, command)
+    ? USAGE_LINES[command]!
+    : GENERIC_USAGE_LINE;
 }
 
 /**
