@@ -2,12 +2,13 @@ import { Buffer } from "node:buffer";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { UsageError, messages } from "../../src/errors.ts";
+import { messages, networkError, redactUserinfoAnywhere, UsageError } from "../../src/errors.ts";
 import {
   assertSafeArtifactUrl,
   credentialsFor,
   httpGet,
   httpGetJson,
+  retryAfterMs,
   USER_AGENT,
 } from "../../src/http.ts";
 
@@ -101,6 +102,13 @@ const ENV_KEYS = [
   "COREPACK_NPM_PASSWORD",
   "COREPACK_ENABLE_NETWORK",
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
+  // §15.4 / §15.5 — a developer's own TLS or retry settings must not reach the
+  // fixtures, and the retry default must not turn every failure assertion below
+  // into three round trips plus backoff.
+  "COREPACK_CAFILE",
+  "COREPACK_STRICT_SSL",
+  "COREPACK_NETWORK_RETRIES",
+  "COREPACK_NETWORK_TIMEOUT",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -111,6 +119,9 @@ beforeEach(() => {
     saved[key] = process.env[key];
     delete process.env[key];
   }
+  // The retry-specific block below opts back in; everything else in this file
+  // predates §15.5 and asserts the shape of a *single* attempt.
+  process.env.COREPACK_NETWORK_RETRIES = "0";
 });
 
 afterEach(async () => {
@@ -591,5 +602,399 @@ describe("assertSafeArtifactUrl (§14.9)", () => {
 
     expect(error.message).not.toContain("hunter2");
     expect(error.message).toContain("https://npm.corp");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.5 — timeouts and retries
+ *
+ * Corepack has no timeout, no retry and no backoff: one hiccup is
+ * fatal, which is the exact shape of the undiagnosable CI failure in
+ * #458. Every test here counts *requests the server actually saw*,
+ * because that is the only thing that distinguishes a retry from a
+ * hopeful assertion about one.
+ * ------------------------------------------------------------------ */
+
+/** Backoff is real time; a test that wants to assert the schedule records it instead. */
+function recordingSleep(): { delays: number[]; sleep: (ms: number) => Promise<void> } {
+  const delays: number[] = [];
+  return {
+    delays,
+    sleep: (ms: number) => {
+      delays.push(ms);
+      return Promise.resolve();
+    },
+  };
+}
+
+/** A server that answers `status` for the first `times` requests, then 200. */
+function flaky(
+  times: number,
+  status: number,
+  headers: Record<string, string> = {},
+): Promise<TestServer> {
+  let seen = 0;
+  return startServer((_request, response) => {
+    seen += 1;
+    if (seen <= times) {
+      response.writeHead(status, { "content-type": "text/plain", ...headers });
+      response.end("later");
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(`{"ok":true}`);
+  });
+}
+
+describe("retries (§15.5, row 154)", () => {
+  it("retries a 503 and succeeds — three attempts by default", async () => {
+    // The variable left unset: this is the *default* the spec states.
+    delete process.env.COREPACK_NETWORK_RETRIES;
+    const server = await flaky(2, 503);
+    const { sleep, delays } = recordingSleep();
+
+    await expect(httpGetJson(`${server.origin}/pkg`, { sleep })).resolves.toEqual({ ok: true });
+
+    expect(server.requests).toHaveLength(3);
+    // Exponential, jittered: each delay inside [step/2, step].
+    expect(delays).toHaveLength(2);
+    expect(delays[0]).toBeGreaterThanOrEqual(125);
+    expect(delays[0]).toBeLessThanOrEqual(250);
+    expect(delays[1]).toBeGreaterThanOrEqual(250);
+    expect(delays[1]).toBeLessThanOrEqual(500);
+  });
+
+  it("gives up with the §12.6 status message once the attempts are spent", async () => {
+    const server = await startServer((_request, response) => {
+      response.writeHead(503, { "content-type": "text/plain" });
+      response.end("down");
+    });
+    const { sleep } = recordingSleep();
+    const url = `${server.origin}/pkg`;
+
+    await expect(httpGet(url, { attempts: 3, sleep })).rejects.toThrow(
+      messages.badStatus(503, url),
+    );
+
+    expect(server.requests).toHaveLength(3);
+  });
+
+  it("COREPACK_NETWORK_RETRIES=0 fails on the first answer (row 154's other half)", async () => {
+    const server = await flaky(2, 503);
+    process.env.COREPACK_NETWORK_RETRIES = "0";
+
+    await expect(httpGet(`${server.origin}/pkg`)).rejects.toThrow(/HTTP 503/);
+
+    expect(server.requests).toHaveLength(1);
+  });
+
+  it("honours COREPACK_NETWORK_RETRIES as a count of attempts", async () => {
+    const server = await flaky(4, 500);
+    process.env.COREPACK_NETWORK_RETRIES = "5";
+    const { sleep } = recordingSleep();
+
+    await expect(httpGetJson(`${server.origin}/pkg`, { sleep })).resolves.toEqual({ ok: true });
+
+    expect(server.requests).toHaveLength(5);
+  });
+
+  it.for([[408], [425], [429], [500], [502], [503], [504]])("retries HTTP %i", async ([status]) => {
+    const server = await flaky(1, status!);
+    const { sleep } = recordingSleep();
+
+    await expect(httpGetJson(`${server.origin}/pkg`, { attempts: 3, sleep })).resolves.toEqual({
+      ok: true,
+    });
+    expect(server.requests).toHaveLength(2);
+  });
+
+  it.for([[400], [401], [403], [404], [409], [410], [418], [422]])(
+    "never retries HTTP %i",
+    async ([status]) => {
+      const server = await startServer((_request, response) => {
+        response.writeHead(status!, { "content-type": "text/plain" });
+        response.end("no");
+      });
+      const { sleep, delays } = recordingSleep();
+
+      await expect(httpGet(`${server.origin}/pkg`, { attempts: 3, sleep })).rejects.toThrow(
+        messages.badStatus(status!, `${server.origin}/pkg`),
+      );
+
+      expect(server.requests).toHaveLength(1);
+      expect(delays).toEqual([]);
+    },
+  );
+
+  it("retries a transport failure and reports it once the attempts are spent", async () => {
+    const origin = await deadOrigin();
+    const { sleep, delays } = recordingSleep();
+
+    const error = await httpGet(`${origin}/pkg`, { attempts: 3, sleep }).catch(
+      (error_: Error) => error_,
+    );
+
+    expect((error as Error).message).toBe(messages.requestFailed(`${origin}/pkg`));
+    expect(delays).toHaveLength(2);
+    // §15.5 — the underlying reason survives, and says how many tries it took.
+    expect((error as Error).stack).toContain("Caused by: Giving up after 3 attempts");
+    expect((error as Error).stack).toMatch(/ECONNREFUSED/);
+  });
+
+  it("honours Retry-After in seconds", async () => {
+    const server = await flaky(1, 429, { "retry-after": "2" });
+    const { sleep, delays } = recordingSleep();
+
+    await expect(httpGetJson(`${server.origin}/pkg`, { attempts: 2, sleep })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(delays).toEqual([2000]);
+  });
+
+  it("honours Retry-After as an HTTP-date", async () => {
+    const when = new Date(Date.now() + 3000).toUTCString();
+    const server = await flaky(1, 503, { "retry-after": when });
+    const { sleep, delays } = recordingSleep();
+
+    await expect(httpGetJson(`${server.origin}/pkg`, { attempts: 2, sleep })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(delays).toHaveLength(1);
+    // Within a second of the requested wait, allowing for the round trip.
+    expect(delays[0]).toBeGreaterThan(1500);
+    expect(delays[0]).toBeLessThanOrEqual(3000);
+  });
+
+  it("falls back to backoff for an unusable Retry-After", async () => {
+    const server = await flaky(1, 503, { "retry-after": "soon" });
+    const { sleep, delays } = recordingSleep();
+
+    await expect(httpGetJson(`${server.origin}/pkg`, { attempts: 2, sleep })).resolves.toEqual({
+      ok: true,
+    });
+
+    expect(delays[0]).toBeGreaterThanOrEqual(125);
+    expect(delays[0]).toBeLessThanOrEqual(250);
+  });
+
+  it("drains each failed attempt, so the connection is reused rather than torn down", async () => {
+    const server = await flaky(1, 503);
+    const { sleep } = recordingSleep();
+
+    await httpGetJson(`${server.origin}/pkg`, { attempts: 2, sleep });
+
+    // Two requests, and the fixture only ever accepted connections it could
+    // keep alive; a body left unread would have forced a new one.
+    expect(server.requests).toHaveLength(2);
+  });
+});
+
+describe("retryAfterMs", () => {
+  const now = Date.parse("2026-08-22T10:00:00Z");
+
+  it("reads delta-seconds", () => {
+    expect(retryAfterMs("0", now)).toBe(0);
+    expect(retryAfterMs("5", now)).toBe(5000);
+    expect(retryAfterMs(" 5 ", now)).toBe(5000);
+  });
+
+  it("reads an HTTP-date, and never returns a negative wait", () => {
+    expect(retryAfterMs("Sat, 22 Aug 2026 10:00:10 GMT", now)).toBe(10_000);
+    expect(retryAfterMs("Sat, 22 Aug 2026 09:00:00 GMT", now)).toBe(0);
+  });
+
+  it("declines a wait longer than the cap, and anything unparseable", () => {
+    expect(retryAfterMs("120", now)).toBeUndefined();
+    expect(retryAfterMs("Sat, 22 Aug 2026 11:00:00 GMT", now)).toBeUndefined();
+    expect(retryAfterMs("soon", now)).toBeUndefined();
+    expect(retryAfterMs("", now)).toBeUndefined();
+    expect(retryAfterMs(null, now)).toBeUndefined();
+  });
+});
+
+describe("timeouts (§15.5, row 155)", () => {
+  it("names the timeout, the URL and the variable in the cause", async () => {
+    const server = await startServer(() => {
+      // Never answers.
+    });
+    const url = `${server.origin}/slow`;
+
+    const error = await httpGet(url, { timeout: 50 }).catch((error_: Error) => error_);
+
+    expect((error as Error).message).toBe(messages.requestFailed(url));
+    expect((error as Error).stack).toContain(`Caused by: Timed out after 50ms waiting for ${url}`);
+    expect((error as Error).stack).toContain("COREPACK_NETWORK_TIMEOUT");
+  });
+
+  it("reads COREPACK_NETWORK_TIMEOUT when the caller names no timeout", async () => {
+    const server = await startServer(() => {});
+    process.env.COREPACK_NETWORK_TIMEOUT = "60";
+    const url = `${server.origin}/slow`;
+
+    const error = await httpGet(url).catch((error_: Error) => error_);
+
+    expect((error as Error).stack).toContain("Timed out after 60ms");
+  });
+
+  it("ignores a COREPACK_NETWORK_TIMEOUT that is not a number", async () => {
+    const server = await ok();
+    process.env.COREPACK_NETWORK_TIMEOUT = "soon";
+
+    await expect(httpGetJson(`${server.origin}/pkg`)).resolves.toEqual({ ok: true });
+  });
+
+  it("retries a timeout, since a stalled connection is a transport failure", async () => {
+    const server = await startServer(() => {});
+    const { sleep, delays } = recordingSleep();
+
+    await expect(
+      httpGet(`${server.origin}/slow`, { timeout: 40, attempts: 3, sleep }),
+    ).rejects.toThrow(messages.requestFailed(`${server.origin}/slow`));
+
+    expect(server.requests).toHaveLength(3);
+    expect(delays).toHaveLength(2);
+  });
+
+  it("applies the timeout to the *body* too, not only the headers", async () => {
+    // Headers and a first chunk arrive at once; the rest never does. Corepack's
+    // model — and ours before §15.5 — would hang here until CI killed the job.
+    const server = await startServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/octet-stream" });
+      response.write("first");
+    });
+
+    const response = await httpGet(`${server.origin}/tarball`, { timeout: 80 });
+    // The headers landed, so this is the idle half of the budget.
+    expect(response.status).toBe(200);
+
+    await expect(response.text()).rejects.toThrow();
+  });
+
+  it("does not cut a body short just because it takes longer than the timeout in total", async () => {
+    // Four chunks, each well inside the idle budget, adding up to more than it:
+    // an idle timeout is not a total-transfer deadline.
+    const server = await startServer((_request, response) => {
+      response.writeHead(200, { "content-type": "text/plain" });
+      let sent = 0;
+      const tick = setInterval(() => {
+        response.write("chunk");
+        sent += 1;
+        if (sent === 4) {
+          clearInterval(tick);
+          response.end();
+        }
+      }, 40);
+    });
+
+    const response = await httpGet(`${server.origin}/tarball`, { timeout: 120 });
+
+    expect(await response.text()).toBe("chunkchunkchunkchunk");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §12.6 — a retried failure must not leak the credential it was
+ * carrying. The precedent is `proxy.test.ts`'s proxy-password check.
+ * ------------------------------------------------------------------ */
+
+describe("credentials never reach the cause chain", () => {
+  it("keeps COREPACK_NPM_USERNAME/PASSWORD out of every link", async () => {
+    const origin = await deadOrigin();
+    process.env.COREPACK_NPM_USERNAME = "someuser";
+    process.env.COREPACK_NPM_PASSWORD = "hunter2";
+    const { sleep } = recordingSleep();
+
+    const error = await httpGet(`${origin}/pkg`, {
+      registryOrigin: origin,
+      attempts: 3,
+      sleep,
+    }).catch((error_: Error) => error_);
+
+    const seen: string[] = [];
+    let link: unknown = error;
+    while (link instanceof Error) {
+      seen.push(link.message);
+      seen.push(link.stack ?? "");
+      link = link.cause;
+    }
+
+    const text = seen.join("\n");
+    expect(text).not.toContain("hunter2");
+    expect(text).not.toContain("someuser");
+    expect(text).not.toContain("Basic ");
+    // …and the failure is still diagnosable.
+    expect(text).toContain("ECONNREFUSED");
+  });
+
+  it("strips userinfo from a URL appearing anywhere in a cause message", async () => {
+    const origin = await deadOrigin();
+    const withUserinfo = origin.replace("http://", "http://user:hunter2@");
+
+    const error = await httpGet(`${withUserinfo}/pkg`).catch((error_: Error) => error_);
+
+    expect(`${(error as Error).message}\n${(error as Error).stack}`).not.toContain("hunter2");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * `networkError` — the mechanism the two blocks above rely on
+ * ------------------------------------------------------------------ */
+
+describe("networkError (§15.5)", () => {
+  it("leaves the §12.6 message alone and appends the chain to the stack", () => {
+    const inner = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), {
+      code: "ECONNREFUSED",
+    });
+    const outer = new Error("fetch failed", { cause: inner });
+
+    const error = networkError(new Error(messages.requestFailed("https://npm.corp/pnpm")), outer);
+
+    // Byte for byte what §12.6 specifies — scripts match on it.
+    expect(error.message).toBe(
+      "Error when performing the request to https://npm.corp/pnpm; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting",
+    );
+    expect(error.cause).toBe(outer);
+    expect(error.stack).toContain("Caused by: fetch failed");
+    // The errno is already in that message, so it is not repeated.
+    expect(error.stack).toContain("Caused by: connect ECONNREFUSED 127.0.0.1:1");
+    expect(error.stack).not.toContain("(ECONNREFUSED)");
+  });
+
+  it("adds the errno when the message does not already carry it", () => {
+    const inner = Object.assign(new Error("socket hang up"), { code: "ECONNRESET" });
+
+    const error = networkError(new Error("outer"), inner);
+
+    expect(error.stack).toContain("Caused by: socket hang up (ECONNRESET)");
+  });
+
+  it("redacts a URL carrying userinfo wherever it appears in a cause", () => {
+    const error = networkError(
+      new Error(messages.requestFailed("https://npm.corp/pnpm")),
+      new Error("request to https://user:hunter2@npm.corp/pnpm failed"),
+    );
+
+    expect(error.stack).toContain("Caused by: request to https://npm.corp/pnpm failed");
+    expect(error.stack).not.toContain("hunter2");
+  });
+
+  it("redacts free text the anchored form would miss", () => {
+    expect(redactUserinfoAnywhere("connecting to https://user:hunter2@npm.corp/x, retrying")).toBe(
+      "connecting to https://npm.corp/x, retrying",
+    );
+    expect(redactUserinfoAnywhere("nothing to redact")).toBe("nothing to redact");
+  });
+
+  it("survives a cyclic cause chain", () => {
+    const first = new Error("first");
+    const second = new Error("second", { cause: first });
+    (first as { cause?: unknown }).cause = second;
+
+    const error = networkError(new Error("outer"), first);
+
+    expect(error.stack).toContain("Caused by: first");
+    expect(error.stack).toContain("Caused by: second");
   });
 });

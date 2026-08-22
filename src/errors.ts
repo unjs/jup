@@ -51,7 +51,90 @@ export function redactUserinfo(raw: string): string {
   }
 }
 
+/**
+ * The same redaction, applied to a URL appearing *anywhere* in free text.
+ *
+ * {@link redactUserinfo} is anchored, because it is given a URL and nothing
+ * else. A transport error's message is prose with a URL somewhere inside it, and
+ * that is exactly the text {@link describeCause} is about to append to a stack
+ * trace, so it needs the unanchored form.
+ */
+export function redactUserinfoAnywhere(text: string): string {
+  return text.replace(/([a-z][\d+.a-z-]*:\/\/)[^\s#/?]*@/gi, "$1");
+}
+
 const url_ = redactUserinfo;
+
+/**
+ * A network failure whose message is already the best thing to say.
+ *
+ * §15.4's three TLS sentences replace §12.6's transport-failure message rather
+ * than hiding underneath it — "MUST NOT surface a bare transport error" — and a
+ * failure classified deep in the transport (an `https://` proxy's own
+ * certificate, say) must not be re-classified against the wrong host on the way
+ * out. This class is that marker.
+ */
+export class NetworkError extends Error {
+  override readonly name = "NetworkError";
+}
+
+/**
+ * One line per link of an error's `cause` chain, redacted.
+ *
+ * §15.5 — "the final error MUST include the underlying cause, the errno or TLS
+ * reason, not just the wrapper message". §12.6's wrapper is a fixed string that
+ * real scripts match on, so the cause is carried alongside it rather than
+ * spliced into it.
+ */
+function describeCause(cause: unknown): string[] {
+  const lines: string[] = [];
+  const seen = new Set<unknown>();
+  let current = cause;
+
+  while (current !== undefined && current !== null && !seen.has(current)) {
+    seen.add(current);
+    if (current instanceof Error) {
+      const code = (current as { code?: unknown }).code;
+      const suffix =
+        typeof code === "string" && !current.message.includes(code) ? ` (${code})` : ``;
+      lines.push(redactUserinfoAnywhere(`${current.message}${suffix}`));
+      current = current.cause;
+    } else {
+      lines.push(redactUserinfoAnywhere(String(current)));
+      break;
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Build a network error that shows its cause.
+ *
+ * `main.ts` presents an unexpected error as its `stack`, and a `stack` does not
+ * mention `cause` — so a `CONNECT` refused with `502 Bad Gateway`, or an
+ * `ECONNRESET`, or a timeout, reached the user as §12.6's generic sentence and
+ * nothing else. The cause is attached as `cause` (for programmatic callers) and
+ * appended to the stack (for the human), and the message itself is left byte for
+ * byte as §12.6 specifies it.
+ */
+export function networkError<T extends Error>(error: T, cause: unknown): T {
+  if (cause === undefined) return error;
+
+  Object.defineProperty(error, "cause", {
+    value: cause,
+    writable: true,
+    enumerable: false,
+    configurable: true,
+  });
+
+  const described = describeCause(cause);
+  if (described.length > 0 && typeof error.stack === "string") {
+    error.stack = [error.stack, ...described.map((line) => `Caused by: ${line}`)].join("\n");
+  }
+
+  return error;
+}
 
 /** §12.3 — prefix applied when a validation failure warns instead of throwing. */
 export const VALIDATION_WARNING_PREFIX = "! Corepack validation warning: ";
@@ -172,6 +255,48 @@ export const messages = {
    */
   cannotDownloadLatest: (packageName: string) =>
     `Corepack cannot download the latest stable version of ${packageName}; you can disable signature verification by setting COREPACK_INTEGRITY_KEYS to 0 in your env, or instruct Corepack to use the latest stable release known by this version of Corepack by setting COREPACK_DEFAULT_TO_LATEST to 0`,
+
+  /* §15.4 — TLS ------------------------------------------------------------ */
+
+  /**
+   * The three sentences §15.4 requires in place of a bare transport error, each
+   * verbatim (the spec wraps them across lines; they are one logical string).
+   *
+   * `<host>` is the authority whose certificate was rejected — the target's, or
+   * the proxy's when the proxy is itself `https://`.
+   */
+  tlsUnknownAuthority: (host: string) =>
+    `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.`,
+
+  tlsBadValidity: (host: string) =>
+    `TLS certificate for ${host} is expired or not yet valid (check the system clock).`,
+
+  tlsHostnameMismatch: (host: string) =>
+    `TLS certificate for ${host} does not match that hostname.`,
+
+  /** Verbatim. `<source>` names where the setting came from, not what it does. */
+  strictSslDisabled: (source: string) =>
+    `! TLS certificate verification is disabled (set by ${source})`,
+
+  cafileUnreadable: (path: string) =>
+    `Unable to read the TLS certificate bundle at ${path} (set by COREPACK_CAFILE)`,
+
+  cafileEmpty: (path: string) =>
+    `The TLS certificate bundle at ${path} contains no PEM certificate`,
+
+  /* §15.5 — resilience ----------------------------------------------------- */
+
+  /**
+   * Attached as the cause of §12.6's transport-failure message, never in place
+   * of it: §05.1 requires a timeout to "surface as the transport-failure
+   * message", and §15.5 requires the underlying reason to survive alongside it.
+   */
+  networkTimeout: (milliseconds: number, url: string) =>
+    `Timed out after ${milliseconds}ms waiting for ${url_(url)} (set COREPACK_NETWORK_TIMEOUT to allow longer)`,
+
+  /** The last of several attempts; the wrapper above still names the URL. */
+  retriesExhausted: (attempts: number) =>
+    `Giving up after ${attempts} attempt${attempts === 1 ? "" : "s"} (set COREPACK_NETWORK_RETRIES to change)`,
 
   /* §12.7 — integrity ----------------------------------------------------- */
 

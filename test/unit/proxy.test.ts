@@ -25,7 +25,10 @@ import {
 import { createServer as createHttpsServer } from "node:https";
 import { connect, type AddressInfo, type Socket } from "node:net";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors.ts";
 import { httpGet, httpGetJson } from "../../src/http.ts";
 import { bypassesProxy, proxyForUrl } from "../../src/proxy.ts";
@@ -239,6 +242,12 @@ const PROXY_KEYS = [
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",
+  // §15.4 / §15.5 — the tunnel now consults both, and the retry default would
+  // otherwise turn each failure assertion into three round trips.
+  "COREPACK_CAFILE",
+  "COREPACK_STRICT_SSL",
+  "COREPACK_NETWORK_RETRIES",
+  "COREPACK_NETWORK_TIMEOUT",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -260,6 +269,9 @@ beforeEach(() => {
     saved[key] = process.env[key];
     delete process.env[key];
   }
+  // Every assertion in this file is about the shape of a single attempt; the
+  // §15.5 retry schedule has its own tests in `http.test.ts`.
+  process.env.COREPACK_NETWORK_RETRIES = "0";
 });
 
 afterEach(async () => {
@@ -770,5 +782,84 @@ describe("failures (§12.6)", () => {
     expect(((error as Error).cause as Error).message).toBe(
       `The proxy at 127.0.0.1:${port} refused to tunnel to example.com:443 (HTTP 502)`,
     );
+    // §15.5 — and the reason is *visible*, not merely attached: `main.ts`
+    // presents an unexpected error as its stack, and a stack says nothing about
+    // `cause`. Before this, a CONNECT refused with 502 reached the user as
+    // §12.6's generic sentence and nothing else.
+    expect((error as Error).stack).toContain(
+      `Caused by: The proxy at 127.0.0.1:${port} refused to tunnel to example.com:443 (HTTP 502)`,
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.4 — TLS inside the tunnel
+ *
+ * A corporate interception proxy is where a custom CA and a CONNECT
+ * tunnel meet: the certificate presented at the far end is the proxy's
+ * re-signed one, and the trust decision has to reach *inside* the
+ * tunnel to be made at all. This block un-trusts the fixture CA that
+ * the rest of the file installs, so the tunnel really is facing an
+ * unknown issuer.
+ * ------------------------------------------------------------------ */
+
+describe("TLS inside the tunnel (§15.4)", () => {
+  beforeEach(() => {
+    setDefaultCACertificates(trust);
+  });
+
+  afterEach(() => {
+    setDefaultCACertificates([...trust, CERT]);
+  });
+
+  /** A CA bundle at a path nothing has seen before — the module memoises by path. */
+  function bundleFile(): string {
+    const path = join(mkdtempSync(join(tmpdir(), "pipack-proxy-ca-")), "bundle.pem");
+    writeFileSync(
+      path,
+      `${CERT}
+`,
+    );
+    return path;
+  }
+
+  it("classifies an unknown issuer against the *target*, not the proxy", async () => {
+    const origin = await startOrigin(true);
+    const proxy = await startProxy(() => origin.port);
+    process.env.HTTPS_PROXY = proxy.origin;
+
+    const error = await httpGet("https://example.com/pkg").catch((error_: Error) => error_);
+
+    // The tunnel was opened — the failure is the certificate at the far end of
+    // it, and the host named is the one whose certificate it is.
+    expect(proxy.connects).toEqual(["example.com:443"]);
+    expect((error as Error).message).toBe(messages.tlsUnknownAuthority("example.com"));
+    expect((error as Error).message).toContain("COREPACK_CAFILE");
+  });
+
+  it("verifies against COREPACK_CAFILE inside the tunnel", async () => {
+    const origin = await startOrigin(true);
+    const proxy = await startProxy(() => origin.port);
+    process.env.HTTPS_PROXY = proxy.origin;
+    process.env.COREPACK_CAFILE = bundleFile();
+
+    await expect(httpGetJson<{ ok: boolean }>("https://example.com/pkg")).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(proxy.connects).toEqual(["example.com:443"]);
+  });
+
+  it("skips the check inside the tunnel under COREPACK_STRICT_SSL=0", async () => {
+    const origin = await startOrigin(true);
+    const proxy = await startProxy(() => origin.port);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    process.env.HTTPS_PROXY = proxy.origin;
+    process.env.COREPACK_STRICT_SSL = "0";
+
+    await expect(httpGetJson<{ ok: boolean }>("https://example.com/pkg")).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    warn.mockRestore();
   });
 });

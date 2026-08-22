@@ -25,9 +25,10 @@ export const DEFAULT_ENV_FILE_NAME = ".corepack.env";
  *
  * `COREPACK_ENV_FILE` is chicken-and-egg; `COREPACK_ENABLE_DOWNLOAD_PROMPT`'s
  * default depends on how the tool was invoked, which a project file must not be
- * able to override. The rest are §14.5's security additions: a hostile repo must
- * not be able to disable signature verification, point at an arbitrary host, or
- * pair a token with a hostile registry to exfiltrate it.
+ * able to override. The rest are §14.5's and §15.37's security additions: a
+ * hostile repo must not be able to disable signature verification, point at an
+ * arbitrary host, pair a token with a hostile registry to exfiltrate it, or
+ * switch off (or redirect) TLS certificate verification.
  */
 export const ENV_FILE_INELIGIBLE = new Set([
   "COREPACK_ENV_FILE",
@@ -37,6 +38,8 @@ export const ENV_FILE_INELIGIBLE = new Set([
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",
+  "COREPACK_CAFILE",
+  "COREPACK_STRICT_SSL",
 ]);
 
 /**
@@ -55,6 +58,14 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set([
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",
+  // §15.37 marks both TLS variables env-file INELIGIBLE, and for the same
+  // reason as the rest of this list: a cloned repository must not be able to
+  // switch certificate verification off, or to nominate the certificate
+  // authority its downloads are checked against. `COREPACK_NETWORK_TIMEOUT` and
+  // `COREPACK_NETWORK_RETRIES` are eligible — they are preferences, not trust
+  // decisions.
+  "COREPACK_CAFILE",
+  "COREPACK_STRICT_SSL",
 ]);
 
 /**

@@ -153,7 +153,9 @@ pipack install -g corepack.tgz       # and seed a cache from it elsewhere
 | `pipack install`                     | Download and cache the version this project pins                          |
 | `pipack install -g [...name\|<file>]`| Install globally, or seed the cache from a `pack` archive                 |
 | `pipack pack [...name]`              | Build a portable archive of cached versions                               |
-| `pipack cache clean`                 | Empty the download cache                                                  |
+| `pipack info [--json]`               | Explain what this project resolves to, and why                            |
+| `pipack cache list [--json]`         | List the cached versions and the recorded defaults                        |
+| `pipack cache clean [--all]`         | Empty the download cache, and with `--all` the recorded defaults too      |
 | `pipack --version`, `pipack --help`  | The usual                                                                 |
 
 `enable` and `disable` accept `--install-directory <path>`; `install -g` accepts
@@ -161,6 +163,118 @@ pipack install -g corepack.tgz       # and seed a cache from it elsewhere
 
 Note that `pipack yarn --version` prints **Yarn's** version, not pipack's — proxy mode
 shadows the built-in commands, by design.
+
+## When something is surprising: `pipack info`
+
+Everything the tool decided, and where each decision came from, in one command. It makes
+**no network request** and it does **not fail on a broken project** — telling you *why*
+the project is broken is the point.
+
+```console
+$ pipack info
+pipack 0.1.0
+  root            /usr/local/lib/node_modules/pipack
+
+Project
+  status          found
+  manifest        /home/you/app/package.json
+  field           packageManager
+  spec            pnpm@^11.0.0  (range)
+  devEngines      pnpm@>=11  (onFail: error)
+
+Resolution
+  status          locked
+  package manager pnpm
+  version         11.1.2
+  hash            sha512.0102…
+  source          /home/you/app/.corepack.lock
+  in the store    yes
+
+Lockfile
+  path            /home/you/app/.corepack.lock
+  present         yes
+  key             pnpm@^11.0.0
+  resolved        11.1.2
+  integrity       sha512-…
+  frozen          no (default)
+
+Environment
+  env file        /home/you/app/.corepack.env
+  applied         COREPACK_ENABLE_STRICT
+  refused         COREPACK_NPM_TOKEN
+  ignored         FOO
+  variables       COREPACK_HOME=/home/you/.cache/node/corepack
+
+Package managers
+  npm             https://registry.npmjs.org  (built-in)
+                  binaries: npm, npx
+                  default: 11.14.1+sha1.4a68… (built-in)
+                  cached: (none)
+  pnpm            https://registry.npmjs.org  (built-in)
+                  binaries: pnpm, pnpx
+                  default: 11.1.2+sha1.ed39… (built-in)
+                  cached: 11.1.2
+  yarn            https://registry.npmjs.org  (built-in)
+                  binaries: yarn, yarnpkg
+                  default: 1.22.22 (recorded)
+                  cached: (none)
+                  yarn@>=2.0.0 is fetched from https://repo.yarnpkg.com; setting COREPACK_NPM_REGISTRY switches it to @yarnpkg/cli-dist
+  .npmrc          .npmrc files are not read yet (§15.1); set COREPACK_NPM_REGISTRY to point at a mirror
+
+Store
+  home            /home/you/.cache/node/corepack
+  path            /home/you/.cache/node/corepack/v1
+  writable        yes
+  versions        pnpm@11.1.2
+  defaults        /home/you/.cache/node/corepack/lastKnownGood.json
+                  yarn: 1.22.22
+
+Shims
+  directory       /usr/local/bin
+  npm             not installed   PATH: /usr/local/bin/npm (not ours)
+  pnpm            installed       PATH: /usr/local/bin/pnpm
+  yarn            installed       PATH: /home/you/.nvm/versions/node/v22/bin/yarn (not ours) — shadowing the shim
+```
+
+The last line is the one that answers most "why is it running the wrong version?"
+questions: the shim is installed correctly and something earlier on `PATH` is winning
+anyway.
+
+A pin the tool cannot resolve is reported rather than resolved, because resolving it
+would need the network:
+
+```console
+$ pipack info
+Resolution
+  status          network
+  package manager pnpm
+  version         (unresolved)
+  reason          pnpm@^11.0.0 has no recorded resolution and nothing in the store satisfies it; resolving it needs a registry request, which 'info' does not make
+```
+
+### `pipack info --json`
+
+The JSON form is a stable, documented contract — it is what a bug report template or a
+CI check should read. It carries its own schema `version` (currently `1`), bumped only
+for a breaking change; new fields may be added without one.
+
+| Field | Contents |
+| --- | --- |
+| `version` | Schema version of this report. Read it first. |
+| `tool` | `{ name, version, root }` — pipack's own version and installation root |
+| `project` | `status` (`found` / `invalid` / `no-spec` / `no-project`), the absolute `manifest` path, the `field` (`packageManager` or `devEngines.packageManager`), the `spec` as written, its `name` / `range` / `kind` (`exact`, `range`, `tag`, `url`), any `devEngines` block, and `problem` — the sentence explaining why an invalid spec is invalid |
+| `resolution` | `status` (`pinned`, `locked`, `cache`, `network`, `frozen`, `fallback`, `unknown`), the `version` and `hash`, the `source` it came from, whether it is `installed`, and a `reason` when nothing could be decided offline |
+| `lockfile` | `path`, `present`, the `key` this project's spec uses, the recorded `resolution`, and whether writes are `frozen` (with `frozenSource`: `COREPACK_FROZEN_LOCKFILE`, `CI`, or `default`) |
+| `envFile` | The `.corepack.env` in effect and its variables sorted into `applied`, `overridden`, `refused` and `ignored` |
+| `environment` | Every `COREPACK_*` variable in the real environment; credentials are `<set>` and URLs are stripped of `user:pass@` |
+| `packageManagers` | Per package manager: `binaries`, the effective `registry` and its `registrySource`, `notes` about any band that a registry setting cannot redirect, the `builtinDefault`, the `recordedDefault`, and the `cached` versions |
+| `npmrc` | `{ consulted: false, note }` — `.npmrc` support is not implemented yet ([§15.1](./.agents/15-gaps.md)) and the report says so rather than implying your `.npmrc` was honoured |
+| `store` | `home`, `path`, `writable`, and every complete install as `{ name, version }` |
+| `defaults` | The `lastKnownGood.json` path and its `entries` |
+| `shims` | The shim `directory` (or a `problem` explaining why it could not be determined) and, per binary name, whether a `shim` is installed, what `PATH` resolves it to, whether that is `ours`, and whether the shim is `shadowed` |
+
+`pipack cache list [--json]` is the store half of the same report — `version`, `store`
+and `defaults` — for answering "did my container image actually get seeded?"
 
 ## Configuration
 
@@ -179,10 +293,40 @@ The ones you are most likely to want:
 | `COREPACK_INTEGRITY_KEYS`           | Replace the built-in trust store, or set `0` to skip verification  |
 | `COREPACK_REQUIRE_SIGNATURES=1`     | Refuse a registry that publishes no signature, rather than warning |
 | `COREPACK_FROZEN_LOCKFILE=1`        | Never resolve or record a range that `.corepack.lock` does not already answer (default in CI) |
+| `COREPACK_CAFILE`                   | PEM bundle to verify registry certificates against, replacing the platform trust store |
+| `COREPACK_STRICT_SSL=0`             | Disable TLS certificate verification, loudly                      |
+| `COREPACK_NETWORK_TIMEOUT`          | Connect and idle timeout in milliseconds (default `30000`)        |
+| `COREPACK_NETWORK_RETRIES`          | Attempts per request, the first included (default `3`); `0` disables retrying |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
 Security-relevant ones are deliberately not settable that way — see
-[Divergences](#divergences).
+[Divergences](#divergences). `COREPACK_CAFILE` and `COREPACK_STRICT_SSL` are among them:
+a repository you have just cloned does not get to choose which certificate authority its
+own downloads are checked against.
+
+## Networks that get in the way
+
+Corporate networks are where a version manager spends its worst days, so the failures
+have their own sentences rather than one shared "request failed".
+
+- **A TLS-inspecting proxy** re-signs every certificate with a CA your trust store has
+  never heard of. That is reported as such, naming the host and `COREPACK_CAFILE` —
+  point it at the bundle your IT department publishes and the same command works. An
+  expired certificate and a certificate issued for another name are also called by name.
+  `COREPACK_STRICT_SSL=0` switches verification off if you must, and says so on stderr
+  every run it does.
+- **A proxy** is honoured from `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NO_PROXY`
+  with no second flag to discover, and a proxy that refuses to open the tunnel names
+  itself and its status code instead of hiding behind the URL you asked for.
+- **A registry that stumbles.** Idempotent GETs are retried three times with jittered
+  exponential backoff on transport errors and on `408`, `425`, `429` and `5xx`,
+  honouring `Retry-After` in either of its forms. Every other `4xx` is final. Requests
+  have a connect *and* an idle timeout, so a stalled download fails in half a minute
+  instead of hanging until CI kills the job.
+
+Whatever goes wrong, the underlying reason — the errno, the TLS code, the proxy's answer
+— is printed with the error rather than swallowed by it. A URL that carries credentials
+is stripped of them first, everywhere.
 
 ## How a version is verified
 
@@ -221,6 +365,11 @@ The full list with rationale is in
 - **`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` just work.** Corepack leaves
   proxying to the host runtime, which needs `NODE_USE_ENV_PROXY=1` before any of them do
   anything; pipack tunnels through the proxy itself, with no second flag to discover.
+- **TLS failures say what went wrong.** Corepack has no TLS surface at all, so an
+  interception proxy, an expired certificate and a wrong hostname are all the same
+  sentence; here each has its own, and there is a `COREPACK_CAFILE` to point at.
+- **Requests time out and are retried.** Corepack has no timeout, no retry and no
+  backoff, so one hiccup is fatal and the message says nothing about what happened.
 - **Signing-key expiry is honoured** rather than stored and ignored.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
@@ -254,10 +403,11 @@ Measured, not hoped for:
 
 Not done, deliberately:
 
-- **Most of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, `pipack info`,
-  signing-key rotation, per-package-manager registries, native (non-JavaScript) package
-  managers, and the rest. Semver ranges in the pin, with `.corepack.lock`
-  ([§15.23](./.agents/15-gaps.md)), are done.
+- **Most of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, signing-key
+  rotation, per-package-manager registries, native (non-JavaScript) package managers, and
+  the rest. Semver ranges in the pin with `.corepack.lock`
+  ([§15.23](./.agents/15-gaps.md)), and `pipack info` ([§15.30](./.agents/15-gaps.md)),
+  are done.
 
 ### What the audit found
 

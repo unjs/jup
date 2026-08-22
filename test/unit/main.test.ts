@@ -653,6 +653,10 @@ const COLD_PATH_MODULES = [
   // resolver and a full store listing — none of which a `yarn --version` may pay
   // for.
   "info.ts",
+  // §15.4's CA handling and failure classification. `http.ts` reaches it only
+  // when a request is about to go out, and `tls.ts` itself defers `node:tls`
+  // until something is actually configured.
+  "tls.ts",
 ];
 
 /**

@@ -217,6 +217,44 @@ describe("applyEnvFile", () => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * §15.37 — the TLS pair is INELIGIBLE
+ *
+ * A cloned repository must not be able to nominate the certificate
+ * authority its own downloads are verified against, nor to switch that
+ * verification off. Both are trust decisions, and §15.37's table marks
+ * them "Env file: no" for the same reason the token is.
+ * ------------------------------------------------------------------ */
+
+describe("§15.37 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§15.4)", () => {
+  it.for([["COREPACK_CAFILE"], ["COREPACK_STRICT_SSL"]])(
+    "%s is ineligible, security-relevant, and announced",
+    ([name]) => {
+      expect(ENV_FILE_INELIGIBLE.has(name!)).toBe(true);
+      expect(SECURITY_ONLY_FROM_ENVIRONMENT.has(name!)).toBe(true);
+      expect(isEnvFileEligible(name!)).toBe(false);
+
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const path = join(dir, DEFAULT_ENV_FILE_NAME);
+
+      applyEnvFile({ [name!]: name === "COREPACK_CAFILE" ? "/tmp/evil.pem" : "0" }, path);
+
+      expect(process.env[name!]).toBeUndefined();
+      expect(warn).toHaveBeenCalledWith(messages.ignoringEnvVar(name!, path));
+    },
+  );
+
+  it("still lets the real environment set them", () => {
+    process.env.COREPACK_STRICT_SSL = "0";
+    process.env.COREPACK_CAFILE = "/etc/corp.pem";
+
+    applyEnvFile({ COREPACK_STRICT_SSL: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
+
+    expect(process.env.COREPACK_STRICT_SSL).toBe("0");
+    expect(process.env.COREPACK_CAFILE).toBe("/etc/corp.pem");
+  });
+});
+
 describe("isEnvFileEligible", () => {
   it("accepts the behavioural variables only", () => {
     expect(isEnvFileEligible("COREPACK_ENABLE_AUTO_PIN")).toBe(true);
@@ -230,6 +268,10 @@ describe("isEnvFileEligible", () => {
     // §15.37 — mandating signed sources is a policy a project may state, unlike
     // the trust store itself (§14.5), which a cloned repo must never supply.
     expect(isEnvFileEligible("COREPACK_REQUIRE_SIGNATURES")).toBe(true);
+    // §15.5's two knobs are preferences — how long to wait, how often to try
+    // again — and §15.37's table marks them eligible.
+    expect(isEnvFileEligible("COREPACK_NETWORK_TIMEOUT")).toBe(true);
+    expect(isEnvFileEligible("COREPACK_NETWORK_RETRIES")).toBe(true);
 
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);

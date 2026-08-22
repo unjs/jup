@@ -15,6 +15,10 @@
  *     http://  target   ->  one request to the proxy whose request line is
  *                           absolute-form (`GET http://host/path HTTP/1.1`)
  *
+ * Since §15.4, the same dispatcher carries one more job: `fetch` has no way to
+ * say "do not verify this certificate", so `COREPACK_STRICT_SSL=0` routes
+ * through here too — with no proxy, but with the TLS policy attached.
+ *
  * Laziness is a requirement, not a nicety. {@link proxyForUrl} is pure env
  * parsing — no `node:` module beyond what is already loaded — and returns
  * `undefined` in the overwhelmingly common unproxied case, which is why
@@ -35,6 +39,8 @@ import { Buffer } from "node:buffer";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { Readable } from "node:stream";
+import { NetworkError, networkError } from "./errors.ts";
+import { classifyTlsFailure, tlsConnectOptions, tlsTransportRequired } from "./tls.ts";
 
 /** §05.1 — "MUST cap the chain (≤ 10 recommended)". */
 const MAX_REDIRECTS = 10;
@@ -195,13 +201,14 @@ function sniFor(hostname: string): string | undefined {
 /* -------------------------------------------------------------------------- */
 
 /**
- * A `fetch`-shaped transport that routes through the configured proxy.
+ * A `fetch`-shaped transport built on `node:http` / `node:https`.
  *
- * `http.ts` selects it only when {@link proxyForUrl} matched, so the unproxied
- * path — every request on a machine with no proxy — stays on native `fetch`
- * exactly as before.
+ * `http.ts` selects it only when a proxy matched (§14.8) or when §15.4's
+ * `COREPACK_STRICT_SSL=0` has to be honoured — `fetch` can express neither — so
+ * the unconfigured path, which is every request on almost every machine, stays
+ * on native `fetch` exactly as before.
  */
-export const proxyFetch: typeof globalThis.fetch = async (input, init) => {
+export const nodeFetch: typeof globalThis.fetch = async (input, init) => {
   const href =
     typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
   const target = new URL(href);
@@ -223,9 +230,9 @@ async function follow(start: URL, init: RequestInit): Promise<Response> {
   let proxy = proxyForUrl(target);
 
   for (let hop = 0; ; hop++) {
-    if (proxy === undefined) {
-      // Not proxied any more — `fetch` follows the remainder, and drops
-      // `Authorization` across origins on its own.
+    if (proxy === undefined && !tlsTransportRequired()) {
+      // Not proxied any more, and TLS needs nothing special — `fetch` follows
+      // the remainder, and drops `Authorization` across origins on its own.
       return await globalThis.fetch(target.href, { ...init, headers });
     }
 
@@ -288,7 +295,7 @@ function headerRecord(headers: HeadersInit | undefined): Record<string, string> 
 async function sendOnce(
   target: URL,
   headers: Record<string, string>,
-  proxy: ProxySelection,
+  proxy: ProxySelection | undefined,
   signal: AbortSignal | undefined,
 ): Promise<Response> {
   signal?.throwIfAborted();
@@ -297,9 +304,11 @@ async function sendOnce(
   // have to be piped into the tunnel before the response could be read.
   const method = "GET";
   const request =
-    target.protocol === "https:"
-      ? await tunnelledRequest(target, headers, proxy, signal, method)
-      : forwardedRequest(target, headers, proxy, method);
+    proxy === undefined
+      ? directRequest(target, headers, method)
+      : target.protocol === "https:"
+        ? await tunnelledRequest(target, headers, proxy, signal, method)
+        : forwardedRequest(target, headers, proxy, method);
 
   return await new Promise<Response>((resolve, reject) => {
     const onAbort = () => request.destroy(abortError(signal));
@@ -350,7 +359,44 @@ async function tunnelledRequest(
     // No agent: the socket is ours, and `createConnection` is only consulted
     // when the request has none (see `_http_client`), so `agent: false` — which
     // *creates* an agent — would quietly ignore the tunnel.
-    createConnection: () => connect({ socket, host, port, servername: sniFor(target.hostname) }),
+    // §15.4 — the certificate checked here is the *target's*; a corporate CA
+    // bundle (or a disabled check) has to reach inside the tunnel, which is
+    // exactly where a TLS-inspecting proxy puts its own certificate.
+    createConnection: () =>
+      connect({
+        socket,
+        host,
+        port,
+        servername: sniFor(target.hostname),
+        ...tlsConnectOptions(),
+      }),
+  });
+}
+
+/**
+ * No proxy, but §15.4 has something to say about TLS: the same `node:https`
+ * request `fetch` would have made, with the certificate policy attached.
+ *
+ * Only reachable when {@link tlsTransportRequired} is true; everything else goes
+ * out through native `fetch`.
+ */
+function directRequest(target: URL, headers: Record<string, string>, method: string) {
+  const { request } =
+    target.protocol === "https:"
+      ? process.getBuiltinModule("node:https")
+      : process.getBuiltinModule("node:http");
+
+  return request({
+    host: bareHost(target.hostname),
+    port: portOf(target),
+    method,
+    path: `${target.pathname}${target.search}`,
+    // Node would spell the default port out; `URL.host` omits it, which is what
+    // `fetch` puts on the wire.
+    headers: { ...headers, host: target.host },
+    agent: false,
+    servername: target.protocol === "https:" ? sniFor(target.hostname) : undefined,
+    ...(target.protocol === "https:" ? tlsConnectOptions() : undefined),
   });
 }
 
@@ -467,8 +513,22 @@ async function connectToProxy(proxy: URL, signal: AbortSignal | undefined): Prom
 
   if (proxy.protocol === "https:") {
     const { connect } = process.getBuiltinModule("node:tls");
-    const socket = connect({ host, port, servername: sniFor(proxy.hostname) });
-    await connected(socket, "secureConnect", signal);
+    const socket = connect({
+      host,
+      port,
+      servername: sniFor(proxy.hostname),
+      ...tlsConnectOptions(),
+    });
+    try {
+      await connected(socket, "secureConnect", signal);
+    } catch (error) {
+      // §15.4 — name the *proxy* here. Classifying this failure against the
+      // target's host, which is what an outer classifier would do, would send
+      // the user looking at the wrong certificate.
+      const classified = classifyTlsFailure(error, proxy.host);
+      if (classified === undefined) throw error;
+      throw networkError(new NetworkError(classified), error);
+    }
     return socket;
   }
 
