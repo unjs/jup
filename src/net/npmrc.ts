@@ -225,7 +225,7 @@ function declaresPackageManager(manifest: string): boolean {
       typeof parsed === "object" &&
       parsed !== null &&
       !Array.isArray(parsed) &&
-      Object.hasOwn(parsed, "packageManager")
+      Object.prototype.hasOwnProperty.call(parsed, "packageManager")
     );
   } catch {
     // An unparseable manifest is somebody else's error to report (§03.1); for

@@ -50,7 +50,7 @@ const OPERATOR_RE = /^(<=|>=|<|>|=)?([^\s<>=]*)$/;
 // --------------------------------------------------------------------------
 
 function toNumber(raw: string): number | null {
-  const value = Number.parseInt(raw, 10);
+  const value = parseInt(raw, 10);
   return Number.isSafeInteger(value) ? value : null;
 }
 
@@ -58,7 +58,7 @@ function splitPrerelease(raw: string | undefined): Array<string | number> {
   if (!raw) return [];
   return raw.split(".").map((id) => {
     if (/^\d+$/.test(id)) {
-      const value = Number.parseInt(id, 10);
+      const value = parseInt(id, 10);
       if (Number.isSafeInteger(value)) return value;
     }
     return id;
@@ -356,10 +356,10 @@ function hyphenComparators(from: string, to: string): ComparatorSet | null {
 }
 
 function parseComparatorToken(token: string): ComparatorSet | null {
-  const head = token[0];
+  const head = token.charAt(0);
   if (head === "^" || head === "~") {
     // `~>1.2.3` is the same as `~1.2.3`.
-    const rest = token.slice(head === "~" && token[1] === ">" ? 2 : 1);
+    const rest = token.slice(head === "~" && token.charAt(1) === ">" ? 2 : 1);
     const p = parsePartial(rest);
     if (!p) return null;
     return head === "^" ? caretComparators(p) : tildeComparators(p);
@@ -380,7 +380,7 @@ function parseComparatorToken(token: string): ComparatorSet | null {
 
 function parseComparatorSet(input: string): ComparatorSet | null {
   // Detach operators from their operand (`>= 1.2.3`) and normalise whitespace.
-  const normalized = input.replaceAll(/(?<=[<>]=?|[~^]|=)\s+/g, "").trim();
+  const normalized = input.replace(/(?<=[<>]=?|[~^]|=)\s+/g, "").trim();
   if (normalized.length === 0) return [ANY];
 
   const tokens = normalized.split(/\s+/);

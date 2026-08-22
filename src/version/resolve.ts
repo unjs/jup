@@ -116,7 +116,7 @@ export async function resolveDescriptor(
     const tagRegistry = registryFor(lastEntry[1]);
     const { capToReleaseAge, fetchAvailableTags } = await loadRegistry();
     const tags = await fetchAvailableTags(tagRegistry);
-    if (!Object.hasOwn(tags, range)) {
+    if (!Object.prototype.hasOwnProperty.call(tags, range)) {
       throw new UsageError(messages.tagNotFound(range));
     }
     // §15.35e — a tag is the registry choosing on the user's behalf, so the

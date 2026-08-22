@@ -314,7 +314,7 @@ function decodeNumber(block: Uint8Array, offset: number, length: number): number
     text += String.fromCodePoint(byte);
   }
   if (text.length === 0) return 0;
-  const value = Number.parseInt(text, 8);
+  const value = parseInt(text, 8);
   if (!Number.isFinite(value)) throw new Error(`Invalid tar header`);
   return value;
 }
@@ -346,10 +346,7 @@ function parsePax(data: Uint8Array): Map<string, string> {
     let cursor = offset;
     while (cursor < data.length && data[cursor] !== 0x20) cursor++;
     if (cursor >= data.length) break;
-    const length = Number.parseInt(
-      Buffer.from(data.subarray(offset, cursor)).toString("latin1"),
-      10,
-    );
+    const length = parseInt(Buffer.from(data.subarray(offset, cursor)).toString("latin1"), 10);
     if (!Number.isInteger(length) || length <= 0 || offset + length > data.length) break;
     const text = Buffer.from(data.subarray(cursor + 1, offset + length))
       .toString("utf8")
@@ -482,7 +479,7 @@ async function walk(
       // An unparseable or unsafe value is ignored rather than trusted (rule 9).
       const paxSize = pax?.get("size");
       if (paxSize !== undefined && /^\d+$/.test(paxSize)) {
-        const parsed = Number.parseInt(paxSize, 10);
+        const parsed = parseInt(paxSize, 10);
         if (Number.isSafeInteger(parsed)) size = parsed;
       }
       longName = undefined;

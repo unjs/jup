@@ -69,13 +69,13 @@ const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
  */
 function stopsWalk(data: Manifest | undefined): boolean {
   if (data === undefined) return false;
-  if (Object.hasOwn(data, "packageManager")) return true;
+  if (Object.prototype.hasOwnProperty.call(data, "packageManager")) return true;
 
   const devEngines = data.devEngines;
   return (
     typeof devEngines === "object" &&
     devEngines !== null &&
-    Object.hasOwn(devEngines, "packageManager") &&
+    Object.prototype.hasOwnProperty.call(devEngines, "packageManager") &&
     devEngines.packageManager !== undefined &&
     devEngines.packageManager !== null
   );
@@ -95,7 +95,8 @@ function stopsWalk(data: Manifest | undefined): boolean {
  * `pnpm-workspace.yaml` beside it (pnpm).
  */
 function isWorkspaceRoot(dir: string, data: Manifest): boolean {
-  if (Object.hasOwn(data, "workspaces") && data.workspaces !== undefined) return true;
+  if (Object.prototype.hasOwnProperty.call(data, "workspaces") && data.workspaces !== undefined)
+    return true;
   return statSync(join(dir, PNPM_WORKSPACE_FILE), { throwIfNoEntry: false }) !== undefined;
 }
 

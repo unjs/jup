@@ -199,7 +199,7 @@ function parseShimArgs(args: string[]): ParsedArgs {
 }
 
 function assertKnownName(name: string): void {
-  if (!Object.hasOwn(DEFINITIONS, name)) {
+  if (!Object.prototype.hasOwnProperty.call(DEFINITIONS, name)) {
     throw new UsageError(messages.invalidPackageManagerName(name));
   }
 }

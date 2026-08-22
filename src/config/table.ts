@@ -129,7 +129,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
 export const SUPPORTED_NAMES: readonly string[] = Object.keys(DEFINITIONS);
 
 export function getDefinition(name: string): PackageManagerDefinition | undefined {
-  return Object.hasOwn(DEFINITIONS, name) ? DEFINITIONS[name] : undefined;
+  return Object.prototype.hasOwnProperty.call(DEFINITIONS, name) ? DEFINITIONS[name] : undefined;
 }
 
 export function isSupportedPackageManager(name: string): boolean {

@@ -167,7 +167,7 @@ export function resolveBinPath(
       // Dispatch on the URL path's extension, exactly as the download did (§07.4).
       if (extname(pathname) === ".js") declared = basename(pathname);
     }
-  } else if (bin !== undefined && Object.hasOwn(bin, binName)) {
+  } else if (bin !== undefined && Object.prototype.hasOwnProperty.call(bin, binName)) {
     declared = bin[binName];
   }
 

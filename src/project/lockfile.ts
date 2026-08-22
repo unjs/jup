@@ -129,7 +129,7 @@ export function readResolution(dir: string, descriptor: Descriptor): Locator | n
   if (data === null) return null;
 
   const key = resolutionKey(descriptor);
-  if (!Object.hasOwn(data.resolutions, key)) return null;
+  if (!Object.prototype.hasOwnProperty.call(data.resolutions, key)) return null;
   const entry = data.resolutions[key]!;
 
   if (isValidRange(descriptor.range) && !satisfiesWithPrereleases(entry.resolved, descriptor.range))
@@ -190,7 +190,7 @@ export function writeResolution(
  */
 export function removeResolution(dir: string, key: string): void {
   const data = readLockfile(dir);
-  if (data === null || !Object.hasOwn(data.resolutions, key)) return;
+  if (data === null || !Object.prototype.hasOwnProperty.call(data.resolutions, key)) return;
 
   delete data.resolutions[key];
   if (Object.keys(data.resolutions).length === 0) {

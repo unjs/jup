@@ -412,7 +412,7 @@ function describeDeclaration(manifest: Manifest | undefined): {
         }
       : null;
 
-  if (manifest !== undefined && Object.hasOwn(manifest, "packageManager")) {
+  if (manifest !== undefined && Object.prototype.hasOwnProperty.call(manifest, "packageManager")) {
     const pm = manifest.packageManager;
     return {
       field: "packageManager",
@@ -691,7 +691,8 @@ function describeEnvFile(path: string, realEnvironment: Record<string, string>):
   for (const name of Object.keys(vars).sort()) {
     if (!name.startsWith("COREPACK_")) info.ignored.push(name);
     else if (!isEnvFileEligible(name)) info.refused.push(name);
-    else if (Object.hasOwn(realEnvironment, name)) info.overridden.push(name);
+    else if (Object.prototype.hasOwnProperty.call(realEnvironment, name))
+      info.overridden.push(name);
     else info.applied.push(name);
   }
 

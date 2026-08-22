@@ -186,7 +186,7 @@ export function parseEnvFile(content: string): Record<string, string> {
 
     const quote = text.charCodeAt(i);
     if (quote === CH_DOUBLE_QUOTE || quote === CH_SINGLE_QUOTE || quote === CH_BACKTICK) {
-      const close = text.indexOf(text[i]!, i + 1);
+      const close = text.indexOf(text.charAt(i), i + 1);
       if (close !== -1) {
         const raw = text.slice(i + 1, close);
         assign(vars, key, quote === CH_DOUBLE_QUOTE ? raw.replaceAll(String.raw`\n`, "\n") : raw);

@@ -234,7 +234,9 @@ function devEnginesWriteTarget(
   // user is about to have overwritten — write it at the top level, as before.
   const hasPin = typeof data.packageManager === "string";
   const hasBrokenPin =
-    Object.hasOwn(data, "packageManager") && !hasPin && data.packageManager != null;
+    Object.prototype.hasOwnProperty.call(data, "packageManager") &&
+    !hasPin &&
+    data.packageManager != null;
   if (hasBrokenPin) return none;
 
   const declaredExactVersion = declared.version !== undefined && isValidVersion(declared.version);
@@ -278,7 +280,7 @@ function writeSidecarPin(
 
   // No `devEngines` at all: create the block, name included — §03.3 reads
   // `name` first and a block without one describes nothing.
-  if (!Object.hasOwn(data, "devEngines")) {
+  if (!Object.prototype.hasOwnProperty.call(data, "devEngines")) {
     return createDevEnginesBlock(content, info.name, version, integrity);
   }
 

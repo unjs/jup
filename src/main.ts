@@ -409,7 +409,7 @@ async function fallbackReference(name: string, transparent: boolean): Promise<st
  */
 async function usageLineFor(command: string | undefined): Promise<string> {
   const { GENERIC_USAGE_LINE, USAGE_LINES } = await import("./commands/usage.ts");
-  return command !== undefined && Object.hasOwn(USAGE_LINES, command)
+  return command !== undefined && Object.prototype.hasOwnProperty.call(USAGE_LINES, command)
     ? USAGE_LINES[command]!
     : GENERIC_USAGE_LINE;
 }
