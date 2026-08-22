@@ -82,12 +82,26 @@ const SCRIPT = [
   // Signals the test by creating "$2", then waits to be signalled. The trap is
   // what makes the forwarding assertion meaningful: exit 33 can only happen if
   // the child actually received SIGTERM.
-  `  --wait) trap 'exit 33' TERM ; : > "$2" ; n=0 ;`,
-  `    while [ "$n" -lt 200 ] ; do sleep 0.1 ; n=$((n+1)) ; done ; exit 44 ;;`,
+  //
+  // The wait is `wait` on a background job rather than a `sleep 0.1` poll, and
+  // the difference is determinism rather than tidiness. A trap action runs only
+  // between commands, so a polling loop cannot react until the *current* `sleep`
+  // returns — up to a tenth of a second of slack per row, on a machine already
+  // under full-suite load. POSIX requires `wait` itself to be interrupted by a
+  // trapped signal and the trap to run immediately, so the child reacts the
+  // instant the signal is delivered and the row no longer has a timing budget.
+  //
+  // The background job is started *before* the ready file, so `$p` is always set
+  // by the time the test is allowed to signal, and the trap kills it rather than
+  // leaving a 20-second orphan behind. Its stdio goes to /dev/null so that even a
+  // hard kill of the tool cannot leave a process holding the pipes `run()` waits
+  // on.
+  `  --wait) trap 'kill $p 2>/dev/null ; exit 33' TERM ;`,
+  `    sleep 20 </dev/null >/dev/null 2>&1 & p=$! ; : > "$2" ; wait $p ; exit 44 ;;`,
   // The same, for a SIGINT the *terminal* delivers to the whole foreground
   // process group. Nothing forwards this one: the child has to be in the group.
-  `  --group) trap 'exit 55' INT ; : > "$2" ; n=0 ;`,
-  `    while [ "$n" -lt 200 ] ; do sleep 0.1 ; n=$((n+1)) ; done ; exit 44 ;;`,
+  `  --group) trap 'kill $p 2>/dev/null ; exit 55' INT ;`,
+  `    sleep 20 </dev/null >/dev/null 2>&1 & p=$! ; : > "$2" ; wait $p ; exit 44 ;;`,
   `  *) printf '%s\\n' "${NAME} $*" ;;`,
   `esac`,
   ``,
@@ -199,6 +213,15 @@ function stored(home: string, relative: string): string {
   return join(home, "v1", NAME, VERSION, relative);
 }
 
+/**
+ * Vitest's default 5 s budget is a *timing* budget, and these two rows spawn the
+ * tool twice each. Nothing here waits on a clock — both rows block on an
+ * observable condition — so a generous ceiling costs a passing run nothing and
+ * stops a loaded full-suite run from turning a correct result into a timeout.
+ */
+const SIGNAL_TIMEOUT = 30_000;
+
+/** Resolves `true` once `path` exists, `false` if it never does. */
 async function waitForFile(path: string, timeoutMs = 15_000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -324,54 +347,80 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     expect(result.exitCode).toBe(null);
   });
 
-  it("193: a signal sent to the tool alone is forwarded to the child (§08.5)", async () => {
-    const fixture = project();
-    const ready = fixture.path("ready");
+  it(
+    "193: a signal sent to the tool alone is forwarded to the child (§08.5)",
+    async () => {
+      const fixture = project();
+      const ready = fixture.path("ready");
 
-    // Seed first, so the wait below cannot be spent on a download.
-    await run([NAME, "--version"], options(fixture));
+      // Seed first, so the wait below cannot be spent on a download — and assert
+      // it, so a seeding failure is reported as itself rather than as a timeout
+      // in the signalling run.
+      expect((await run([NAME, "--version"], options(fixture))).exitCode).toBe(0);
 
-    const result = await run([NAME, "--wait", ready], {
-      ...options(fixture),
-      onSpawn: (child) => {
-        void waitForFile(ready).then(() => child.kill("SIGTERM"));
-      },
-    });
+      // The child announces itself *after* installing its trap, so the file's
+      // existence is the observable condition "this process can now be
+      // signalled". Recorded rather than assumed: a run that signals a child
+      // that never announced itself would be testing the wrong thing, and
+      // `announced` says which of the two happened.
+      let announced: boolean | undefined;
+      const result = await run([NAME, "--wait", ready], {
+        ...options(fixture),
+        onSpawn: (child) => {
+          void waitForFile(ready).then((seen) => {
+            announced = seen;
+            // Signal either way: a missed announcement must surface as the
+            // assertion below, not as a run that never ends.
+            child.kill(seen ? "SIGTERM" : "SIGKILL");
+          });
+        },
+      });
 
-    // 33 is the child's own trap: it can only be reached if the child received
-    // SIGTERM. 44 is the child timing out, `null`/`SIGTERM` is the tool dying
-    // without forwarding, and 0 is the child never having been signalled — every
-    // failure mode is distinguishable from success.
-    expect(result.exitCode).toBe(33);
-    expect(result.signal).toBe(null);
-  });
+      expect(announced).toBe(true);
+      // 33 is the child's own trap: it can only be reached if the child received
+      // SIGTERM. 44 is the child timing out, `null`/`SIGTERM` is the tool dying
+      // without forwarding, and 0 is the child never having been signalled — every
+      // failure mode is distinguishable from success.
+      expect(result.exitCode).toBe(33);
+      expect(result.signal).toBe(null);
+    },
+    SIGNAL_TIMEOUT,
+  );
 
-  it("193: a group signal reaches the child, because the tool made no new group (§08.5)", async () => {
-    const fixture = project();
-    const ready = fixture.path("ready-group");
+  it(
+    "193: a group signal reaches the child, because the tool made no new group (§08.5)",
+    async () => {
+      const fixture = project();
+      const ready = fixture.path("ready-group");
 
-    await run([NAME, "--version"], options(fixture));
+      expect((await run([NAME, "--version"], options(fixture))).exitCode).toBe(0);
 
-    const result = await run([NAME, "--group", ready], {
-      ...options(fixture),
-      // The tool leads its own group, standing in for a terminal's foreground
-      // group; the negative pid then signals the tool *and* everything it did
-      // not detach.
-      detachedGroup: true,
-      onSpawn: (child) => {
-        void waitForFile(ready).then(() => {
-          process.kill(-child.pid!, "SIGINT");
-        });
-      },
-    });
+      let announced: boolean | undefined;
+      const result = await run([NAME, "--group", ready], {
+        ...options(fixture),
+        // The tool leads its own group, standing in for a terminal's foreground
+        // group; the negative pid then signals the tool *and* everything it did
+        // not detach.
+        detachedGroup: true,
+        onSpawn: (child) => {
+          void waitForFile(ready).then((seen) => {
+            announced = seen;
+            if (seen) process.kill(-child.pid!, "SIGINT");
+            else child.kill("SIGKILL");
+          });
+        },
+      });
 
-    // 55 is the child's own SIGINT trap, and nothing forwards SIGINT — §08.5
-    // says not to, precisely because the group already delivered it. Reaching 55
-    // therefore proves two things at once: the child was still in the signalled
-    // group, and the tool did not die of the same signal before it could report.
-    expect(result.exitCode).toBe(55);
-    expect(result.signal).toBe(null);
-  });
+      expect(announced).toBe(true);
+      // 55 is the child's own SIGINT trap, and nothing forwards SIGINT — §08.5
+      // says not to, precisely because the group already delivered it. Reaching 55
+      // therefore proves two things at once: the child was still in the signalled
+      // group, and the tool did not die of the same signal before it could report.
+      expect(result.exitCode).toBe(55);
+      expect(result.signal).toBe(null);
+    },
+    SIGNAL_TIMEOUT,
+  );
 
   it("193: an unrunnable `bin` target is reported, not silently succeeded", async () => {
     const fixture = createFixture({ name: "app", packageManager: `hare@${REFERENCE}` });

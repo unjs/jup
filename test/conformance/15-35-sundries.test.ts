@@ -12,6 +12,7 @@
  * | 206 | §15.35l | `cache clean` reports what it removed |
  */
 
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -226,6 +227,11 @@ describe("§15.35l cache clean reports what it removed", () => {
     expect(first.exitCode).toBe(0);
     expect(first.stdout).toBe(`Removed 2 cached version(s) from ${join(fixture.home, "v1")}\n`);
     expect(first.stderr).toBe("");
+
+    // §15.35l is "report what you did", and a report is only worth having if it
+    // is true: a `cache clean` that printed the right count and removed nothing
+    // would satisfy every assertion above.
+    expect(existsSync(join(fixture.home, "v1"))).toBe(false);
 
     const second = await run(["cache", "clean"], { ...fixture, registry });
 
