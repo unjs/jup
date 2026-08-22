@@ -11,7 +11,7 @@
     "yarn"
   ],
   "license": "MIT",
-  "repository": "pi0/pipack",
+  "repository": "pithings/pipack",
   "bin": {
     "corepack": "./dist/bin.mjs",
     "pipack": "./dist/bin.mjs"
