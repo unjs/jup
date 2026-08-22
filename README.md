@@ -21,9 +21,10 @@ pnpm install   # runs pnpm 11.1.2 — the version this project pinned, not whate
 ```
 
 > [!NOTE]
-> **Early, but it runs.** Every module specified in [`.agents/`](./.agents/) is
+> **Early, but it runs.** The whole behavioural contract in [`.agents/`](./.agents/) is
 > implemented, the conformance suite passes, and the CLI works end to end. There is no
-> published release yet, so treat this as pre-1.0. See [Status](#status).
+> published release yet, so treat this as pre-1.0, and see [Status](#status) for the four
+> items still outstanding.
 
 ## Why
 
@@ -79,6 +80,81 @@ Both write a hash-bearing pin, computed from the bytes actually downloaded:
 }
 ```
 
+### Which file gets edited
+
+Every command that changes your project prints the path it changed:
+
+```console
+$ pipack use pnpm@11.1.2
+Installing pnpm@11.1.2 in the project...
+Updated /home/you/monorepo/package.json to use pnpm@11.1.2+sha512.b0c1…
+
+<pnpm install output>
+```
+
+That line exists because "corepack edited a file I did not expect" is a whole class of
+bug report ([#607]), and it is invisible without it. `pipack cache clean` reports the
+same way — `Removed 3 cached version(s) from …`, or `Nothing to remove` — so you can
+tell a successful clean from a no-op.
+
+The file itself is chosen by walking up from where you are standing, and the walk
+**stops at the repository**: a manifest declaring `workspaces`, or a directory holding a
+`pnpm-workspace.yaml`. Standing in `packages/app` of a monorepo, `pipack use` pins at
+the workspace root — which is what you want — and never climbs past it into a manifest
+that happens to live in your home directory.
+
+`--here` overrides that and writes `./package.json`, creating it if it does not exist:
+
+```sh
+pipack use --here pnpm@11.1.2   # pins packages/app/package.json, not the root
+```
+
+Reading is deliberately unchanged: a package with no pin of its own still inherits its
+ancestor's, which is what makes a monorepo work at all. Only *writing* stops early.
+
+### Which field gets the pin
+
+`packageManager` wins on read when both fields are present, but a command that writes a
+pin updates **every** field that encodes one — so a project can never be left in a state
+the next run refuses to read ([#874]).
+
+| The manifest declares | `use` / `up` writes |
+| --- | --- |
+| `packageManager` only, or neither | `packageManager` |
+| `devEngines.packageManager` only | `devEngines.packageManager.version`, plus an `integrity` beside it — and **no** `packageManager` is created |
+| both | `packageManager`; `devEngines` is updated too when it named an exact version |
+
+The distinction in the last row is between a *pin* and a *constraint*. An exact
+`devEngines.packageManager.version` says "this release", so it is replaced. A **range**
+says "anything in here", so it is honoured and left alone — collapsing `1.x || 2.x` into
+`2.4.3` would destroy the declaration `pipack up` relies on to cross a major boundary,
+and would silently narrow what the project accepts. A pin that violates a declared range
+is still refused, through that entry's own `onFail`.
+
+Because `devEngines.packageManager.version` stays a valid semver range, the digest goes
+into a sibling `integrity` field rather than a `+sha512.…` suffix inside it:
+
+```json
+{
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.1.2",
+      "integrity": "sha512-Nm9F…"
+    }
+  }
+}
+```
+
+Both fields are also **stop conditions for the upward walk**. A nested project declaring
+only `devEngines.packageManager` is no longer walked past in favour of a parent's pin
+([#779]), and a `"packageManager": null` counts as declared-and-invalid — it stops the
+walk and reports a spec error — rather than being read as absent.
+
+[#607]: https://github.com/nodejs/corepack/issues/607
+[#779]: https://github.com/nodejs/corepack/issues/779
+[#874]: https://github.com/nodejs/corepack/issues/874
+
 ### Ranges, and `.corepack.lock`
 
 An exact version is not the only thing either field may hold: a **semver range** or a
@@ -120,6 +196,28 @@ COREPACK_FROZEN_LOCKFILE=1 pnpm i    # refuse to resolve anything not already re
 managers do with their own lockfiles; set it to `0` to opt back out. A project that pins
 an exact version never involves the file at all — nothing is read, nothing is written.
 
+### Prereleases
+
+A version you did not spell out is never a prerelease.
+
+`pipack use pnpm` resolves to the newest **stable** release, even on the days when a
+`11.2.0-dev.1005` is the semver maximum of everything published. Corepack picks the dev
+build, every prerelease cycle, and has done since 2023 ([#473], [#774]).
+
+What still resolves to a prerelease, because you asked for one:
+
+```sh
+pipack use pnpm@11.2.0-dev.1005      # an exact pin
+pipack use 'pnpm@>=11.0.0-0'         # a range that names a prerelease
+COREPACK_ENABLE_PRERELEASES=1 pipack use pnpm
+```
+
+An already-pinned prerelease keeps running from the cache exactly as a stable release
+does; what narrowed is only the set of candidates the tool will choose *for* you.
+
+[#473]: https://github.com/nodejs/corepack/issues/473
+[#774]: https://github.com/nodejs/corepack/issues/774
+
 ### Running a package manager
 
 Once `pipack enable` has run, nothing is different — `yarn add x`, `pnpm install`, and
@@ -140,6 +238,30 @@ pipack install                       # cache the version this project pins
 pipack pack pnpm@11.1.2              # or: build a portable archive on a networked machine
 pipack install -g corepack.tgz       # and seed a cache from it elsewhere
 ```
+
+A cache miss with the network off names the two commands that would have filled it,
+which is what a Dockerfile author needs to read:
+
+```console
+$ COREPACK_ENABLE_NETWORK=0 pnpm install
+pnpm@11.1.2 is not in the cache and network access is disabled. Seed it with
+'corepack install -g --cache-only pnpm@11.1.2', or run 'corepack pack pnpm@11.1.2'
+on a networked machine.
+```
+
+A typo'd or yanked pin names itself too, rather than surfacing as a bare HTTP 404 on a
+tarball URL you never typed ([#204]):
+
+```console
+$ pnpm --version
+pnpm@11.9.9 does not exist in https://registry.npmjs.org. Run 'corepack info' to see the
+resolved spec and where it came from.
+```
+
+Both name `corepack` rather than `pipack`: error strings are matched verbatim by
+real-world scripts and CI, so they are reproduced byte for byte.
+
+[#204]: https://github.com/nodejs/corepack/issues/204
 
 ## Enabling the shims
 
@@ -228,8 +350,8 @@ version manager ([#751]) — is recognised as a shim rather than as a missing fi
 | `pipack <binary>[@<version>] [...]`  | Run a package manager at the project's version, or an explicit one        |
 | `pipack enable [...name]`            | Install shims for each package manager onto `PATH`                        |
 | `pipack disable [...name]`           | Remove them again                                                         |
-| `pipack use <name[@<version>]>`      | Resolve, install, pin into `package.json`, then run the install command   |
-| `pipack up`                          | Bump the project's pin within its current major line, or re-resolve its range |
+| `pipack use [--here] <name[@<version>]>` | Resolve, install, pin into `package.json`, then run the install command |
+| `pipack up [--here]`                 | Bump the project's pin within its current major line, or re-resolve its range |
 | `pipack install`                     | Download and cache the version this project pins                          |
 | `pipack install -g [...name\|<file>]`| Install globally, or seed the cache from a `pack` archive                 |
 | `pipack pack [...name]`              | Build a portable archive of cached versions                               |
@@ -238,8 +360,11 @@ version manager ([#751]) — is recognised as a shim rather than as a missing fi
 | `pipack cache clean [--all]`         | Empty the download cache, and with `--all` the recorded defaults too      |
 | `pipack --version`, `pipack --help`  | The usual                                                                 |
 
-`enable` and `disable` accept `--install-directory <path>`; `install -g` accepts
-`--cache-only`; `pack` accepts `-o/--output <path>` and `--json`.
+`enable` and `disable` accept `--install-directory <path>` and `--exclude <name>`, and
+`enable` also takes `--force`; `install -g` accepts `--cache-only`; `pack` accepts
+`-o/--output <path>` and `--json`. `use` and `up` accept `--here`, which confines the
+write to the manifest in the current directory — see
+[Which file gets edited](#which-file-gets-edited).
 
 Note that `pipack yarn --version` prints **Yarn's** version, not pipack's — proxy mode
 shadows the built-in commands, by design.
@@ -286,20 +411,33 @@ Environment
   variables       COREPACK_HOME=/home/you/.cache/node/corepack
 
 Package managers
-  npm             https://registry.npmjs.org  (built-in)
+  npm             https://npm.corp.example.com/api/npm/npm-remote  (.npmrc registry (/home/you/app/.npmrc))
                   binaries: npm, npx
                   default: 11.14.1+sha1.4a68… (built-in)
                   cached: (none)
-  pnpm            https://registry.npmjs.org  (built-in)
+  pnpm            https://npm.corp.example.com/api/npm/npm-remote  (.npmrc registry (/home/you/app/.npmrc))
                   binaries: pnpm, pnpx
                   default: 11.1.2+sha1.ed39… (built-in)
                   cached: 11.1.2
-  yarn            https://registry.npmjs.org  (built-in)
+  yarn            https://npm.corp.example.com/api/npm/npm-remote  (.npmrc registry (/home/you/app/.npmrc))
                   binaries: yarn, yarnpkg
                   default: 1.22.22 (recorded)
                   cached: (none)
-                  yarn@>=2.0.0 is fetched from https://repo.yarnpkg.com; setting COREPACK_NPM_REGISTRY switches it to @yarnpkg/cli-dist
-  .npmrc          .npmrc files are not read yet (§15.1); set COREPACK_NPM_REGISTRY to point at a mirror
+                  yarn@>=2.0.0 is fetched from https://npm.corp.example.com/api/npm/yarn-remote as @yarnpkg/cli-dist  (.npmrc @yarnpkg:registry (/home/you/.npmrc))
+
+.npmrc
+  files           /home/you/app/.npmrc  (project)
+                    read: registry
+                    refused (project-level): //npm.corp.example.com/:_authToken
+                  /home/you/.npmrc  (user)
+                    read: registry, @yarnpkg:registry, //npm.corp.example.com/api/npm/:_authToken, cafile
+  registry        https://npm.corp.example.com/api/npm/npm-remote  (/home/you/app/.npmrc)
+  @yarnpkg:registry https://npm.corp.example.com/api/npm/yarn-remote  (/home/you/.npmrc)
+  auth            //npm.corp.example.com/api/npm/  token  (/home/you/.npmrc)
+
+TLS
+  verify          yes
+  trust store     /etc/ssl/corp-ca.pem  (cafile (/home/you/.npmrc))
 
 Store
   home            /home/you/.cache/node/corepack
@@ -319,6 +457,12 @@ Shims
 The last line is the one that answers most "why is it running the wrong version?"
 questions: the shim is installed correctly and something earlier on `PATH` is winning
 anyway.
+
+The `.npmrc` section answers the other recurring one — "our mirror is configured and it
+is still reaching the public registry". Files are listed highest precedence first, so
+the winner is the top line, and each is followed by the keys it supplied and, for a
+project-level file, the keys that were **refused**. Credential values are never printed;
+only the prefix they are scoped to and whether they are a token or basic auth.
 
 A pin the tool cannot resolve is reported rather than resolved, because resolving it
 would need the network:
@@ -347,8 +491,9 @@ for a breaking change; new fields may be added without one.
 | `lockfile` | `path`, `present`, the `key` this project's spec uses, the recorded `resolution`, and whether writes are `frozen` (with `frozenSource`: `COREPACK_FROZEN_LOCKFILE`, `CI`, or `default`) |
 | `envFile` | The `.corepack.env` in effect and its variables sorted into `applied`, `overridden`, `refused` and `ignored` |
 | `environment` | Every `COREPACK_*` variable in the real environment; credentials are `<set>` and URLs are stripped of `user:pass@` |
-| `packageManagers` | Per package manager: `binaries`, the effective `registry` and its `registrySource`, `notes` about any band that a registry setting cannot redirect, the `builtinDefault`, the `recordedDefault`, and the `cached` versions |
-| `npmrc` | `{ consulted: false, note }` — `.npmrc` support is not implemented yet ([§15.1](./.agents/15-gaps.md)) and the report says so rather than implying your `.npmrc` was honoured |
+| `packageManagers` | Per package manager: `binaries`, the effective `registry` and its `registrySource`, `notes` about any band a registry setting redirects differently, the `builtinDefault`, the `recordedDefault`, and the `cached` versions. `registrySource` names the setting that actually decided it — `COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc <key> (<path>)`, or `built-in` — and is resolved **per package manager**, so mirroring Yarn alone shows up here |
+| `npmrc` | `files` (every `.npmrc` read, **lowest precedence first**, each with its `path`, `level` — `global` / `user` / `project` — the `keys` it supplied and the `refused` keys a project-level file was not allowed to supply), the effective `registry`, the `scopes` (`@scope` → registry), and `auth`: one entry per credential **scope**, as `{ prefix, type, source }`. Credential *values* are never included |
+| `tls` | `cafile` and `cafileSource` (the PEM bundle replacing the platform trust store, and whether `COREPACK_CAFILE` or an `.npmrc` `cafile`/`ca` set it), `verify`, and `verifySource` when verification has been switched off |
 | `store` | `home`, `path`, `writable`, and every complete install as `{ name, version }` |
 | `defaults` | The `lastKnownGood.json` path and its `entries` |
 | `shims` | The shim `directory` (or a `problem` explaining why it could not be determined) and, per binary name, whether a `shim` is installed, what `PATH` resolves it to, whether that is `ours`, and whether the shim is `shadowed` |
@@ -358,17 +503,22 @@ and `defaults` — for answering "did my container image actually get seeded?"
 
 ## Configuration
 
-Every knob is an environment variable. There is no config file, no plugin system, and no
-telemetry; the full list lives in [`.agents/11-environment.md`](./.agents/11-environment.md).
-The ones you are most likely to want:
+Every knob is an environment variable. There is no config format of pipack's own, no
+plugin system, and no telemetry — the only file it reads for configuration is the
+`.npmrc` you already wrote, and only for the handful of keys described
+[below](#the-npmrc-you-already-wrote). The full list lives in
+[`.agents/11-environment.md`](./.agents/11-environment.md); the ones you are most likely
+to want:
 
 | Variable                            | Effect                                                            |
 | ----------------------------------- | ----------------------------------------------------------------- |
 | `COREPACK_HOME`                     | Where the store and recorded defaults live                        |
 | `COREPACK_NPM_REGISTRY`             | Fetch package managers from a mirror                              |
+| `COREPACK_REGISTRY_<NAME>`          | Mirror **one** package manager — `COREPACK_REGISTRY_YARN`, `COREPACK_REGISTRY_PNPM`, `COREPACK_REGISTRY_NPM` — without redirecting the others |
 | `COREPACK_ENABLE_NETWORK=0`         | Refuse every network request; run from cache only                 |
 | `COREPACK_ENABLE_STRICT=0`          | Don't error when you invoke a package manager the project doesn't use |
 | `COREPACK_ENABLE_AUTO_PIN=1`        | Write a pin automatically when a project has none                 |
+| `COREPACK_ENABLE_PRERELEASES=1`     | Let an unspecified version resolve to a prerelease                |
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` | Announce (and on a TTY, confirm) each download                    |
 | `COREPACK_INTEGRITY_KEYS`           | Replace the built-in trust store, or set `0` to skip verification  |
 | `COREPACK_REQUIRE_SIGNATURES=1`     | Refuse a registry that publishes no signature, rather than warning |
@@ -384,7 +534,74 @@ A project may also ship a `.corepack.env` file supplying the *behavioural* varia
 Security-relevant ones are deliberately not settable that way — see
 [Divergences](#divergences). `COREPACK_CAFILE` and `COREPACK_STRICT_SSL` are among them:
 a repository you have just cloned does not get to choose which certificate authority its
-own downloads are checked against.
+own downloads are checked against. Nor does its `.npmrc` — see below.
+
+## The `.npmrc` you already wrote
+
+If your organisation runs a mirror, you have already configured it once. pipack reads a
+deliberately small part of that file rather than making you configure it again:
+
+| Key | Effect |
+| --- | --- |
+| `registry` | The registry package managers are fetched from |
+| `@scope:registry` | The registry for that scope — this is how Yarn Berry's `@yarnpkg/cli-dist` gets mirrored |
+| `//host/path/:_authToken` | Bearer token for URLs under that prefix |
+| `//host/path/:_auth` | Pre-encoded basic credentials for that prefix |
+| `//host/path/:username` + `:_password` | Basic credentials (`_password` is base64, as npm writes it) |
+| `cafile` / `ca` | PEM bundle to verify registry certificates against |
+| `strict-ssl` | `false` disables verification, loudly |
+
+Everything else in the file is ignored. This is not npm-config compatibility; it is one
+lookup table and a prefix matcher.
+
+Files are read from `<prefix>/etc/npmrc`, then `$HOME/.npmrc`, then `./.npmrc` walking up
+to the project root — closest wins. `${VAR}` is expanded in the keys above; a variable the
+environment does not define drops the key rather than sending the literal text `${VAR}` to
+a registry.
+
+The whole configuration space, highest precedence first:
+
+```
+1. COREPACK_REGISTRY_<NAME>                       per package manager
+2. COREPACK_NPM_REGISTRY / COREPACK_NPM_TOKEN / …
+3. .npmrc — @scope:registry, then registry        project > user > global
+4. the built-in default
+```
+
+**A project-level `.npmrc` may set `registry` and `@scope:registry`, and nothing else.**
+npm honours project-level auth; pipack does not, because unlike npm it runs *before* you
+have decided to trust the repository — `git clone && yarn install` executes this code with
+the clone's `.npmrc` already on disk. A project file's `_authToken`, `_auth`, `_password`,
+`ca`, `cafile` and `strict-ssl` are refused, and refused out loud:
+
+```console
+$ pipack pnpm --version
+! Ignoring //npm.corp.example.com/:_authToken from /home/you/app/.npmrc: a project-level .npmrc may only set registry and @scope:registry
+```
+
+Credentials from the user and global files are **prefix-scoped by construction**. A
+`//host/team/:_authToken` is attached only to requests whose host *and* path prefix fall
+inside it — `//host/team-other` does not match — which is stricter than the origin scoping
+`COREPACK_NPM_TOKEN` gets, and is what makes reading a credential out of a file safe.
+
+### Mirroring one package manager
+
+`COREPACK_NPM_REGISTRY` redirects everything that speaks the npm protocol, which is not
+always what you want: Yarn Berry lives on `repo.yarnpkg.com`, which is not an npm registry
+at all, and pointing `COREPACK_NPM_REGISTRY` at a mirror to reach it also redirects npm and
+pnpm as collateral.
+
+`COREPACK_REGISTRY_<NAME>` mirrors exactly one:
+
+```sh
+COREPACK_REGISTRY_YARN=https://mirror.corp.example.com/yarn pipack yarn --version
+```
+
+Every URL derived from that package manager's table entry moves — the download, the tag
+document, and the version list — by **origin replacement**, not string substitution, with
+the mirror's own path prefix prepended. npm and pnpm keep using whatever they were using.
+Credentials follow the per-package-manager registry, so an authenticated internal mirror
+works without widening anything.
 
 ## Networks that get in the way
 
@@ -442,7 +659,12 @@ The full list with rationale is in
 - **A project's `.corepack.env` cannot disable signature verification**, supply trust
   keys, allow arbitrary download URLs, or set registry credentials. Those come from the
   real environment only. Cloning a repository and running `yarn` should not hand it your
-  npm token.
+  npm token. A project-level `.npmrc` is held to the same line: it may redirect the
+  registry, and may not supply a credential or a certificate authority.
+- **The `.npmrc` you already have is honoured.** Corepack reads none, at any level
+  ([#540]): an organisation configures one registry, every other tool on the machine
+  obeys it, and corepack reaches the public internet anyway. See
+  [The `.npmrc` you already wrote](#the-npmrc-you-already-wrote).
 - **Credentials never leave the configured registry's origin**, on any request path.
 - **`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` just work.** Corepack leaves
   proxying to the host runtime, which needs `NODE_USE_ENV_PROXY=1` before any of them do
@@ -456,6 +678,18 @@ The full list with rationale is in
   a per-user directory, `npm` is shimmed like everything else, and `enable` verifies it
   actually won on `PATH` instead of exiting 0 in silence. See
   [Enabling the shims](#enabling-the-shims).
+- **An unspecified version never resolves to a prerelease** ([#473], [#774]), and a
+  mutating command prints the file it changed and stops its walk at the workspace root
+  ([#607], [#679]). See [Prereleases](#prereleases) and
+  [Which file gets edited](#which-file-gets-edited).
+- **A pin is one logical value** ([#874], [#779]). Whichever of `packageManager` and
+  `devEngines.packageManager` a project declares is what gets written, so the two can
+  never disagree — and either one stops the upward walk.
+- **`transparent.default` is a floor, not an override.** After
+  `pipack install -g yarn@4.9.0`, `yarn dlx` runs 4.9.0; corepack keeps running the
+  table's compiled-in pin with no way to change it ([#202]). A recorded default from an
+  older *major line* does not shadow the floor, so `yarn create` cannot fall back to Yarn
+  Classic ([#812]).
 - **Signing-key expiry is honoured** rather than stored and ignored.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
@@ -465,36 +699,49 @@ The full list with rationale is in
   entries, no setuid bits, and bounded output.
 - **The UTF-8 BOM survives** a `use` or `up` that rewrites your `package.json`.
 
+[#202]: https://github.com/nodejs/corepack/issues/202
+[#540]: https://github.com/nodejs/corepack/issues/540
+[#679]: https://github.com/nodejs/corepack/issues/679
+[#812]: https://github.com/nodejs/corepack/issues/812
+
 ## Status
 
-Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete:
+Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete, and phase 2
+([`.agents/15`](./.agents/15-gaps.md)) is most of the way there:
 
 | Area | State |
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
-| Implementation | 13 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, plus §15 rows so far) | Passing — 3 rows skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 762 passing |
+| Implementation | 29 modules, zero runtime dependencies |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 280 passing, 3 skipped (two Windows-only, one needs a real TTY) |
+| Unit tests | 1034 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
 Measured, not hoped for:
 
-- **22 kB** min+gzipped, **zero** runtime dependencies.
+- **39 kB** min+gzipped, **zero** runtime dependencies.
 - **~38 ms** for a warm proxy invocation against **~22 ms** for bare Node — so ~16 ms of
   actual work — and ~53 ms for corepack on the same machine.
 - A warm run makes **zero** network requests, never reads the recorded default, and never
   scans the store. That is asserted by a test which patches `fetch` and `readFileSync`
   and fails if either is touched, and was independently confirmed with `strace`.
 
-Not done, deliberately:
+Landed from [`.agents/15`](./.agents/15-gaps.md): the `.npmrc` subset and
+per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and proxies
+(§15.4–§15.6), registry-metadata tiering (§15.7, §15.8), shims and enablement (§15.13,
+§15.15, §15.16, §15.29), semver ranges in the pin with `.corepack.lock` (§15.23),
+prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
+`pipack info` (§15.30), stale and shadowed defaults (§15.33), and parts of §15.14,
+§15.19 and §15.35.
 
-- **Part of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, signing-key
-  rotation, per-package-manager registries, native (non-JavaScript) package managers, and
-  the rest. Done so far: semver ranges in the pin with `.corepack.lock` (§15.23),
-  `pipack info` (§15.30), proxies (§15.6), TLS diagnostics and retries (§15.4, §15.5),
-  registry-metadata tiering (§15.7, §15.8), and shims and enablement
-  (§15.13–§15.16, §15.29).
+Not done yet:
+
+- **Signing-key rotation** (§15.9) — key freshness is still tied to the release cadence.
+- **One verification tier for every source** (§15.11).
+- **Native, non-JavaScript package managers** (§15.28).
+- **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
+  the abbreviated packument the registry client requests does not carry.
 
 ### What the audit found
 
