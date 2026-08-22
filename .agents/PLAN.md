@@ -646,7 +646,7 @@ it. `NO_PROXY` must support `*`, bare hostnames, leading-dot suffixes, and `:por
 Honour `HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY` with **no** second opt-in flag — that
 second flag is the whole complaint behind #447 and #458.
 
-### P2 — Registry metadata robustness §15.7, §15.8
+### P2 — Registry metadata robustness §15.7, §15.8 — **done** (`42552f7`)
 Driven by #570 (9👍), #725, #808 — a raw `TypeError` when a private registry omits `dist`
 or `dist.signatures`, which Artifactory and Nexus do routinely. Phase 1 already avoids the
 crash; what remains is the three-outcome tiering: absent `dist` errors, absent
