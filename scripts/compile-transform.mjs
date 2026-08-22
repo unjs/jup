@@ -9,22 +9,39 @@
  * every `import("./x.ts")` turned into a hoisted static import plus a plain
  * object literal. Twelve sites. The whole program then compiles as one unit.
  *
- * The honest number that falls out: **259 blockers**, concentrated in
- * `cache/tar.ts` (44) and `net/registry.ts` (28). Roughly:
+ * The honest number that falls out: **315 blockers**, concentrated in
+ * `net/proxy.ts` (57), `cache/tar.ts` (42) and `commands/shims.ts` (25). Split
+ * by `scriptc`'s own error codes, which is the only cut that stays honest as
+ * the compiler moves:
  *
- *   - 62  mechanical call-site rewrites (`Object.hasOwn`, `URL.origin`,
- *         `.startsWith(x, n)`, `.replaceAll`, a spread in a tuple literal)
- *   - 37  cascades that vanish with whatever they inherit from
- *   - 78  type-shape blockers — the `unknown`-typed JSON layer §03 parses
- *         into, `Map`s keyed by objects, unions `scriptc` will not re-tag
- *   - ~78 missing lowerings (`fs/promises.lstat`, `O_NOFOLLOW`, generator
- *         methods, `for await`) that only FFI or `scriptc` itself can close
+ *   - 140  SC2020  a typed standard-library or `@types/node` member with no
+ *          lowering yet: `URL.canParse` ×9, `fs/promises.lstat` ×7,
+ *          `O_NOFOLLOW`, `Writable`, `createGzip`
+ *   -  85  SC1xxx  constructs unsupported so far — `Function.prototype.call`
+ *          ×13, assignment to non-variables ×7, checked casts of `unknown`
+ *          ×8, class values, generator methods, `for await`
+ *   -  46  SC2004  cascades that vanish with whatever they inherit from
+ *   -  32  SC2011/SC2012  what runs only in the embedded engine, so
+ *          `--dynamic` compiles it and a static build does not
+ *   -  12  SC2009/SC2003/SC2001  type-shape blockers: unions and `Promise`
+ *          arms `scriptc` will not re-tag
+ *
+ * Recount rather than trust: every number above is `grep -oE 'error SC[0-9]+'`
+ * over this script's own output.
+ *
+ * Two things that total hides. Fixing a blocker can *raise* it — the two errors
+ * on `nodeFetch`'s old `typeof globalThis.fetch` signature were masking the
+ * whole rest of `net/proxy.ts`, and clearing them took 254 to 315. And the
+ * mechanical-looking half is not always mechanical: `Object.hasOwn` and
+ * `Object.prototype.hasOwnProperty.call(o, k)` are one function to the spec and
+ * both unsupported here, so trading one for the other changed each error's code
+ * (`SC2020` to `SC1090`) and not the count.
  *
  * So a transform layer is worth exactly one thing — this rewrite, which is true
  * of the compiled target and false of Node, and which no source edit should
- * make. The 62 mechanical ones are one-line source changes that cost nothing in
- * Node, and doing them here instead would mean the code the tests run and the
- * code that compiles are different files.
+ * make. Anything that is a one-line source change costing nothing in Node
+ * belongs in `src/`: doing it here instead would mean the code the tests run
+ * and the code that compiles are different files.
  *
  * Prototype-grade, and deliberately so: export names are found by regex rather
  * than by parsing, which holds because every dynamic-import target in `src/`

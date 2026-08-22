@@ -57,10 +57,13 @@ export function preflight() {
 
 /**
  * The root `tsconfig.json`, inlined rather than `extends`ed — `scriptc` reads
- * `compilerOptions` without resolving `extends`, and the strictness matters:
- * with its defaults instead of ours the same source reports 226 errors rather
- * than 73, most of them noise about index access. `noEmit` has to go, because
- * `scriptc`'s program does emit.
+ * `compilerOptions` without resolving `extends`, and a project config has to be
+ * found at all: with none anywhere in the tree it falls back to its own narrow
+ * node declarations and reports 123 `SC0001` type errors (`Property 'origin'
+ * does not exist on type 'URL'`) in place of the 69 lowering diagnostics that
+ * say what actually does not compile. `strictNullChecks` it refuses to run
+ * without (`SC0002`); the rest of our strictness is worth about one error
+ * either way. `noEmit` has to go, because `scriptc`'s program does emit.
  */
 export async function flattenedTsconfig(include, overrides = {}) {
   const source = await readFile(join(root, "tsconfig.json"), "utf8");

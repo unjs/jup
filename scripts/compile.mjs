@@ -40,8 +40,8 @@
  *
  * **What this measures is the warm path only.** Everything past an `import()`
  * is unreachable to `scriptc` and therefore unjudged; `compile-transform.mjs`
- * makes those imports static and reports the whole-program number, which is
- * three times larger. Read that one for the honest total.
+ * makes those imports static and reports the whole-program number — 315
+ * against the 69 this path sees. Read that one for the honest total.
  *
  * `scriptc` is deliberately *not* a dependency of this package — it is an
  * experiment, and a zero-dependency tool should not grow an 86 MB devDependency
