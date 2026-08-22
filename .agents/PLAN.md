@@ -687,7 +687,7 @@ humans, a recorded resolution for reproducibility — is the substantive design 
 phase 2. A recorded resolution that still satisfies its range must resolve with **zero**
 network access, so the §01.3 budget extends to ranges.
 
-### P7 — The §15 defect cluster
+### P7 — The §15 defect cluster — **done** (`276e01d`)
 Each is a bug with a spec citation, and they are small enough to land together:
 §15.24 (a prerelease wins implicit resolution — recurs every release cycle, #473/#774, no
 maintainer response in two years), §15.25 (a `devEngines`-only manifest does not stop the
@@ -695,7 +695,7 @@ walk), §15.26 (a mutating command can create the very mismatch §03.3 then reje
 §15.33 (`transparent.default` outranks the user's own recorded default), §15.35j (a
 nonexistent version surfaces as a bare 404), §15.35g (idempotent `use`).
 
-### P8 — Write targets and reporting §15.27, §15.35l, §15.19
+### P8 — Write targets and reporting §15.27, §15.35l, §15.19 — **done** (`276e01d`)
 Stop at a workspace boundary, add `--here`, and **print the path every mutating command
 modified** — the one-line fix for the whole class of "corepack edited a file I did not
 expect" reports. Plus `cache clean --all` and `cache list`.
@@ -746,10 +746,8 @@ lockfile, no monorepo task-runner pinning. Only `install --project` is accepted.
 
 ## Carried follow-ups
 
-* Add `"npmrc.ts"` to `COLD_PATH_MODULES` in `test/unit/main.test.ts`. It is cold today —
-  verified two ways, module graph and `strace` showing zero `.npmrc` syscalls on a cache
-  hit — and the list is what keeps it that way. Deferred only because that file was
-  contended.
+* ~~Add `"npmrc.ts"` to `COLD_PATH_MODULES`~~ — done in `276e01d`, along with
+  `COREPACK_ENABLE_PRERELEASES`'s eligibility assertion.
 * `src/resolve.ts` still carries its own `hasRegistryOverride()` reading only
   `COREPACK_NPM_REGISTRY`. The consequence is neutralised (§05.2 rewrite 1 now also
   applies inside `registry.ts`'s fetchers, idempotently), but the redundant, incomplete
@@ -789,3 +787,23 @@ could do §14.15's `basename(argv[1])` dispatch on POSIX today: one shipped `dis
 and six symlinks to it, no generator, #751 closed at the root. It does not help on
 Windows, where the `.cmd`/`.ps1` wrappers pass the stub path to `node` and the invocation
 name is lost. Worth doing as its own item; it changes the shim contract, not enablement.
+
+## Blocked, and why
+
+* **§15.35e `COREPACK_MINIMUM_RELEASE_AGE`** needs per-version publish times.
+  `fetchAvailableVersions` returns `string[]`, and the abbreviated packument the client
+  asks for (`application/vnd.npm.install-v1+json`) carries no `time` map. It wants a
+  `fetchVersionTimes(spec)` in `src/registry.ts` plus a `time` map in the mock registry.
+  Not forced into the manifest layer, because duplicating URL construction there would
+  bypass §15.2's origin rewriting.
+* **`corepack use` and `install -g <spec>` never load `.corepack.env`.** Both call
+  `parseSpec` directly rather than going through §09.1's `envOnly` walk, so a project env
+  file's registry/auth/TLS settings are not applied during *their* resolve or download —
+  `writePin` loads it afterwards, too late. Pre-existing and consistent with §09.5's
+  pseudocode, so it is a spec question before it is a code one.
+* **§15.24's SHOULD** — a bare name or `*` still takes the semver maximum rather than the
+  registry's `latest` dist-tag. Honouring it would resolve `yarn@*` against the last
+  band's registry only, silently dropping the Yarn Classic candidates §04.1 step 6 unions
+  in. Row 184 does not require it.
+* **§15.12's `devEngines…integrity`** is now *written* by `use`/`up` but nothing reads it
+  back. That enforcement is P12's.
