@@ -36,16 +36,17 @@ import {
   statSync,
 } from "node:fs";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
-import { DEFAULT_REGISTRY } from "./config/keys.ts";
 import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "./config/table.ts";
 import { isCI, isEnvFileEligible, parseEnvFile } from "./env.ts";
 import { redactUserinfo, UsageError } from "./errors.ts";
 import { parseManifest } from "./json.ts";
 import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "./lockfile.ts";
 import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "./manifest.ts";
+import { loadNpmrc, type NpmrcLevel, registryVariableFor, resolveRegistry } from "./npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "./self.ts";
 import { isValidRange, isValidVersion, parse } from "./semver.ts";
 import { resolveInstallDirectory, SHIM_MARKER } from "./shims.ts";
+import { tlsSettings } from "./tls.ts";
 import {
   findInstalledVersion,
   getHomeFolder,
@@ -151,7 +152,13 @@ export interface PackageManagerInfo {
   binaries: string[];
   /** The npm registry metadata and tarballs would come from. */
   registry: string;
-  registrySource: "COREPACK_NPM_REGISTRY" | "built-in";
+  /**
+   * The setting that decided it: `COREPACK_REGISTRY_<NAME>`,
+   * `COREPACK_NPM_REGISTRY`, `.npmrc <key> (<path>)`, or `built-in` (§15.1,
+   * §15.2). Naming the *actual* source is the whole point of the field — "a
+   * mirror is not being honoured" is the report people run this command for.
+   */
+  registrySource: string;
   /** Anything about this package manager's fetch path worth saying out loud. */
   notes: string[];
   /** The compiled-in, hash-pinned fallback (§02.5). */
@@ -175,6 +182,47 @@ export interface ShimInfo {
   shadowed: boolean;
 }
 
+/** One `.npmrc`, and what §15.1 took from it. */
+export interface NpmrcFileInfo {
+  path: string;
+  level: NpmrcLevel;
+  /** Honoured keys, in file order. Values are never reported: some are secrets. */
+  keys: string[];
+  /**
+   * Keys refused because a project-level `.npmrc` may only set `registry` and
+   * `@scope:registry` (§15.1). This is the line that explains a token which
+   * "should" have been picked up and was not.
+   */
+  refused: string[];
+}
+
+export interface NpmrcInfo {
+  /** Files read, **lowest precedence first**: global, user, then project. */
+  files: NpmrcFileInfo[];
+  /** The effective `registry`, and the file that set it. */
+  registry: { value: string; source: string } | null;
+  /** `@scope` -> registry, with the file that set each. */
+  scopes: Array<{ scope: string; value: string; source: string }>;
+  /**
+   * Credential *scopes* only. The prefix and its kind say whether a request
+   * would be authenticated; the credential itself is never reported, and this
+   * report is pasted into issues.
+   */
+  auth: Array<{ prefix: string; type: "token" | "basic"; source: string }>;
+}
+
+/** §15.4 — what verification the next request would do, and who decided. */
+export interface TlsInfo {
+  /** A PEM bundle replacing the platform trust store, if one is configured. */
+  cafile: string | null;
+  /** `COREPACK_CAFILE`, or `.npmrc`'s `cafile`/`ca` with its path. */
+  cafileSource: string | null;
+  /** `false` only when verification has been switched off. */
+  verify: boolean;
+  /** What switched it off. */
+  verifySource: string | null;
+}
+
 export interface InfoReport {
   version: number;
   tool: { name: string; version: string; root: string };
@@ -185,8 +233,10 @@ export interface InfoReport {
   /** `COREPACK_*` as it stood in the *real* environment, credentials masked. */
   environment: Record<string, string>;
   packageManagers: PackageManagerInfo[];
-  /** §15.1 is not implemented; this says so rather than staying silent. */
-  npmrc: { consulted: boolean; note: string };
+  /** §15.1 — which files were read, what each contributed, what was refused. */
+  npmrc: NpmrcInfo;
+  /** §15.4 — the trust store in force, and where it was configured. */
+  tls: TlsInfo;
   store: {
     home: string;
     path: string;
@@ -238,12 +288,8 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
     envFile,
     environment: realEnvironment,
     packageManagers: describePackageManagers(versions, defaults),
-    npmrc: {
-      consulted: false,
-      // The seam §15.1 fills in. Saying nothing here would let a user conclude
-      // from a correct-looking report that their `.npmrc` registry was honoured.
-      note: `.npmrc files are not read yet (§15.1); set COREPACK_NPM_REGISTRY to point at a mirror`,
-    },
+    npmrc: describeNpmrc(cwd),
+    tls: describeTls(),
     store: {
       home: getHomeFolder(),
       path: installFolder,
@@ -657,54 +703,74 @@ function describeEnvFile(path: string, realEnvironment: Record<string, string>):
 /* -------------------------------------------------------------------------- */
 
 /**
- * The effective npm registry, and where the setting came from.
+ * The effective npm registry for one package manager, and the setting that
+ * decided it.
  *
- * Deliberately a mirror of `registry.getRegistryUrl` rather than an import:
- * `registry.ts` statically pulls in the HTTP and signature stack (and through it
- * `node:crypto`), and `info` is the command you reach for *because* downloads
- * are failing. §15.1 adds `.npmrc` as a third source here — that is the seam the
- * report's `npmrc` field marks — and a unit test pins this against the real
- * `getRegistryUrl` so the mirror cannot drift.
+ * `npmrc.resolveRegistry` is the single implementation of §15.1's and §15.2's
+ * precedence, and this imports it rather than mirroring it. That was worth
+ * doing the moment the chain grew past one environment variable: the previous
+ * hand-copied version had to be pinned against `getRegistryUrl` by a unit test
+ * to keep the two from drifting, and a *four*-tier chain copied twice would
+ * drift anyway. `npmrc.ts` reaches for nothing heavier than `node:fs`, so `info`
+ * still loads no HTTP or signature stack — which matters, because this is the
+ * command you run *because* downloads are failing.
+ *
+ * @param name Omitted, the answer ignores §15.2's per-package-manager tier.
+ * @param packageName The npm package, when §15.1's `@scope:registry` applies.
  */
-export function effectiveRegistry(): {
-  registry: string;
-  source: "COREPACK_NPM_REGISTRY" | "built-in";
-} {
-  const configured = process.env.COREPACK_NPM_REGISTRY;
-  if (configured === undefined || configured === "") {
-    return { registry: DEFAULT_REGISTRY, source: "built-in" };
-  }
-  return { registry: configured.replace(/\/+$/, ""), source: "COREPACK_NPM_REGISTRY" };
+export function effectiveRegistry(
+  name?: string,
+  packageName?: string,
+): { registry: string; source: string } {
+  const decision = resolveRegistry({ name, packageName });
+  return { registry: decision.registry, source: decision.source };
 }
 
 function describePackageManagers(
   versions: Array<{ name: string; version: string }>,
   defaults: Record<string, string>,
 ): PackageManagerInfo[] {
-  const { registry: configured, source } = effectiveRegistry();
-  const overridden = source === "COREPACK_NPM_REGISTRY";
-  // §11.2 lets the registry embed `user:pass@`, and a report is pasted into
-  // issues and CI logs far more often than an error message is.
-  const registry = redactUserinfo(configured);
-
   return SUPPORTED_NAMES.map((name) => {
     const definition = DEFINITIONS[name]!;
+    const { registry: configured, source } = effectiveRegistry(name);
+    // §11.2 lets the registry embed `user:pass@`, and a report is pasted into
+    // issues and CI logs far more often than an error message is.
+    const registry = redactUserinfo(configured);
     const notes: string[] = [];
 
     for (const [range, spec] of definition.ranges) {
-      // §05.3 — a band that is not an npm registry cannot be mirrored, so its
-      // fetch path does not follow `COREPACK_NPM_REGISTRY` unless the table
-      // gives it an npm fallback (§02.5's `@yarnpkg/cli-dist`).
+      // §05.3 — a band that is not an npm registry cannot be mirrored through
+      // the npm protocol, so its fetch path follows a configured npm registry
+      // only when the table gives it an npm fallback (§02.5's
+      // `@yarnpkg/cli-dist`) — or §15.2's per-source override, which mirrors the
+      // band's own origin and needs no fallback at all.
       if (spec.registry.type === "npm") continue;
 
-      if (overridden && spec.npmRegistry !== undefined) {
-        notes.push(`${name}@${range} is fetched from ${registry} as ${spec.npmRegistry.package}`);
-      } else {
-        const origin = URL.canParse(spec.url) ? new URL(spec.url).origin : spec.url;
+      const origin = URL.canParse(spec.url) ? new URL(spec.url).origin : spec.url;
+      const perSource = effectiveRegistry(name);
+
+      if (perSource.source === registryVariableFor(name)) {
         notes.push(
-          spec.npmRegistry === undefined
-            ? `${name}@${range} is fetched from ${origin}, which no registry setting redirects`
-            : `${name}@${range} is fetched from ${origin}; setting COREPACK_NPM_REGISTRY switches it to ${spec.npmRegistry.package}`,
+          `${name}@${range} is fetched from ${origin}, redirected to ${redactUserinfo(perSource.registry)} by ${perSource.source}`,
+        );
+        continue;
+      }
+
+      if (spec.npmRegistry === undefined) {
+        notes.push(
+          `${name}@${range} is fetched from ${origin}; only ${registryVariableFor(name)} redirects it`,
+        );
+        continue;
+      }
+
+      const alternative = effectiveRegistry(name, spec.npmRegistry.package);
+      if (alternative.source === "built-in") {
+        notes.push(
+          `${name}@${range} is fetched from ${origin}; a configured npm registry switches it to ${spec.npmRegistry.package}, and ${registryVariableFor(name)} mirrors it as it is`,
+        );
+      } else {
+        notes.push(
+          `${name}@${range} is fetched from ${redactUserinfo(alternative.registry)} as ${spec.npmRegistry.package}  (${alternative.source})`,
         );
       }
     }
@@ -720,6 +786,63 @@ function describePackageManagers(
       cached: versions.filter((entry) => entry.name === name).map((entry) => entry.version),
     };
   });
+}
+
+/* -------------------------------------------------------------------------- */
+/* §15.1 — the `.npmrc` files, and what each contributed                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The report people actually run this command for.
+ *
+ * #540's complaint is "my organisation's registry is configured and this tool
+ * ignores it". Once it stops ignoring it, the next question is *which* file won
+ * — so this lists every file read in precedence order, the keys each supplied,
+ * and the keys refused for coming from a project-level file, which is the single
+ * likeliest explanation for a token that "should" have been picked up.
+ *
+ * Values are never printed. `_authToken`, `_auth` and `_password` are
+ * credentials, and this output is pasted into issue trackers.
+ */
+function describeNpmrc(cwd: string): NpmrcInfo {
+  const config = loadNpmrc(cwd);
+
+  return {
+    files: config.files.map((file) => ({
+      path: file.path,
+      level: file.level,
+      keys: file.keys,
+      refused: file.refused,
+    })),
+    registry:
+      config.registry === undefined
+        ? null
+        : {
+            value: redactUserinfo(config.registry.value),
+            source: config.registry.origin.path,
+          },
+    scopes: [...config.scoped.entries()].map(([scope, entry]) => ({
+      scope,
+      value: redactUserinfo(entry.value),
+      source: entry.origin.path,
+    })),
+    auth: config.auth.map((entry) => ({
+      prefix: entry.prefix,
+      type: entry.type,
+      source: entry.origin.path,
+    })),
+  };
+}
+
+/** §15.4 — the trust store in force, and who configured it. */
+function describeTls(): TlsInfo {
+  const settings = tlsSettings();
+  return {
+    cafile: settings.cafile ?? null,
+    cafileSource: settings.cafileSource ?? settings.caSource ?? null,
+    verify: settings.verify,
+    verifySource: settings.verifySource ?? null,
+  };
 }
 
 /**
@@ -977,7 +1100,56 @@ export function formatReport(report: InfoReport): string {
     out.push(line(``, `cached: ${pm.cached.length > 0 ? pm.cached.join(`, `) : `(none)`}`));
     for (const note of pm.notes) out.push(line(``, note));
   }
-  out.push(line(`.npmrc`, report.npmrc.note));
+
+  out.push(section(`.npmrc`));
+  if (report.npmrc.files.length === 0) {
+    out.push(line(`files`, `(none found)`));
+  } else {
+    // Highest precedence first, which is the order a reader wants: the winner
+    // is the top line, not the bottom one.
+    const files = [...report.npmrc.files].reverse();
+    files.forEach((file, index) => {
+      out.push(line(index === 0 ? `files` : ``, `${file.path}  (${file.level})`));
+      if (file.keys.length > 0) out.push(line(``, `  read: ${file.keys.join(`, `)}`));
+      if (file.refused.length > 0) {
+        out.push(line(``, `  refused (project-level): ${file.refused.join(`, `)}`));
+      }
+    });
+  }
+  if (report.npmrc.registry !== null) {
+    out.push(line(`registry`, `${report.npmrc.registry.value}  (${report.npmrc.registry.source})`));
+  }
+  for (const scope of report.npmrc.scopes) {
+    out.push(line(`${scope.scope}:registry`, `${scope.value}  (${scope.source})`));
+  }
+  if (report.npmrc.auth.length === 0) {
+    out.push(line(`auth`, `(none)`));
+  } else {
+    report.npmrc.auth.forEach((entry, index) => {
+      // The prefix and its kind, never the credential.
+      out.push(
+        line(index === 0 ? `auth` : ``, `${entry.prefix}  ${entry.type}  (${entry.source})`),
+      );
+    });
+  }
+
+  out.push(section(`TLS`));
+  out.push(
+    line(
+      `verify`,
+      report.tls.verify
+        ? `yes`
+        : `no  (disabled by ${report.tls.verifySource ?? `the environment`})`,
+    ),
+  );
+  out.push(
+    line(
+      `trust store`,
+      report.tls.cafileSource === null
+        ? `(platform)`
+        : `${report.tls.cafile ?? `(inline)`}  (${report.tls.cafileSource})`,
+    ),
+  );
 
   out.push(section(`Store`));
   out.push(line(`home`, report.store.home));

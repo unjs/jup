@@ -1,19 +1,26 @@
 import { Buffer } from "node:buffer";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHash, generateKeyPairSync, type KeyObject, sign } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors.ts";
+import { resetNpmrcCache } from "../../src/npmrc.ts";
 import {
   applyRegistryOverride,
+  applySourceOverride,
   fetchAvailableTags,
   fetchAvailableVersions,
   fetchLatestStableVersion,
   fetchTarballURLAndSignature,
   getRegistryUrl,
   NPM_ACCEPT_HEADER,
+  resolveRegistrySpec,
   verifyRegistryTrust,
 } from "../../src/registry.ts";
+import { DEFINITIONS } from "../../src/config/table.ts";
 import type { NpmRegistrySpec, TrustedKey, UrlRegistrySpec } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *
@@ -87,11 +94,16 @@ const ENV_KEYS = [
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",
+  "COREPACK_REGISTRY_YARN",
+  "COREPACK_REGISTRY_PNPM",
+  "COREPACK_REGISTRY_NPM",
 ] as const;
 
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
+  // §15.1 is a filesystem input now; a stale parse would outlive the variables.
+  resetNpmrcCache();
   saved = {};
   for (const key of ENV_KEYS) {
     saved[key] = process.env[key];
@@ -804,7 +816,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
 
     const call = (): Promise<void> =>
       verifyRegistryTrust({
-        packageName,
+        spec: npm(packageName),
         version: "9.1.0",
         registryUrl: server.origin,
         signatures: undefined,
@@ -829,7 +841,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
 
     const error = await rejection(
       verifyRegistryTrust({
-        packageName,
+        spec: npm(packageName),
         version: "9.1.0",
         registryUrl: server.origin,
         signatures: undefined,
@@ -849,7 +861,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
 
     const error = await rejection(
       verifyRegistryTrust({
-        packageName,
+        spec: npm(packageName),
         version: "9.1.0",
         registryUrl: server.origin,
         signatures: undefined,
@@ -871,7 +883,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await verifyRegistryTrust({
-      packageName,
+      spec: npm(packageName),
       version: "9.1.0",
       registryUrl: server.origin,
       signatures: undefined,
@@ -904,7 +916,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await verifyRegistryTrust({
-      packageName,
+      spec: npm(packageName),
       version: "9.1.0",
       registryUrl: server.origin,
       signatures: undefined,
@@ -944,7 +956,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
 
     const error = await rejection(
       verifyRegistryTrust({
-        packageName,
+        spec: npm(packageName),
         version: "9.1.0",
         registryUrl: server.origin,
         signatures: undefined,
@@ -976,7 +988,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await verifyRegistryTrust({
-      packageName,
+      spec: npm(packageName),
       version: "9.1.0",
       registryUrl: server.origin,
       signatures: undefined,
@@ -998,7 +1010,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
 
     await verifyRegistryTrust({
-      packageName,
+      spec: npm(packageName),
       version: "9.1.0",
       registryUrl: server.origin,
       signatures: [signed(packageName, "9.1.0", sri, pair)] as never,
@@ -1007,5 +1019,162 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     });
 
     expect(server.requests).toHaveLength(0);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.2 / §15.3 — per-source registries and origin rewriting
+ * ------------------------------------------------------------------ */
+
+describe("per-source registries (§15.2)", () => {
+  it("gives each package manager its own base URL", () => {
+    process.env.COREPACK_NPM_REGISTRY = "https://shared.example.org";
+    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+
+    expect(getRegistryUrl({ name: "yarn" })).toBe("https://yarn.example.org");
+    expect(getRegistryUrl({ name: "pnpm" })).toBe("https://shared.example.org");
+    expect(getRegistryUrl({ name: "npm" })).toBe("https://shared.example.org");
+  });
+
+  it("moves a table URL off its own distribution origin — the thing #872 could not do", () => {
+    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+
+    // repo.yarnpkg.com is neither an npm registry nor the default registry, so
+    // §05.2 rewrite 2 has never been able to touch it.
+    expect(
+      applySourceOverride(
+        "https://repo.yarnpkg.com/4.9.0/packages/yarnpkg-cli/bin/yarn.js",
+        "yarn",
+      ),
+    ).toBe("https://yarn.example.org/4.9.0/packages/yarnpkg-cli/bin/yarn.js");
+    expect(applySourceOverride("https://repo.yarnpkg.com/tags", "yarn")).toBe(
+      "https://yarn.example.org/tags",
+    );
+  });
+
+  it("leaves every other package manager's URL alone", () => {
+    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+    expect(applySourceOverride("https://registry.npmjs.org/pnpm/-/pnpm-1.0.0.tgz", "pnpm")).toBe(
+      "https://registry.npmjs.org/pnpm/-/pnpm-1.0.0.tgz",
+    );
+  });
+
+  it("prepends the override's own path prefix, once", () => {
+    process.env.COREPACK_REGISTRY_YARN = "https://mirror.example.org/artifactory/yarn/";
+
+    const once = applySourceOverride("https://repo.yarnpkg.com/tags", "yarn");
+    expect(once).toBe("https://mirror.example.org/artifactory/yarn/tags");
+    // §15.38 row 152 — idempotent, so a second pass cannot double the prefix.
+    expect(applySourceOverride(once, "yarn")).toBe(once);
+  });
+
+  it("is a no-op with nothing configured", () => {
+    expect(applySourceOverride("https://repo.yarnpkg.com/tags", "yarn")).toBe(
+      "https://repo.yarnpkg.com/tags",
+    );
+  });
+});
+
+describe("applyRegistryOverride — origins, not substrings (§15.3)", () => {
+  it("normalises a differing host case and trailing slash (§15.38 row 152)", () => {
+    // `new URL` lower-cases the host and normalises the path, so both spellings
+    // of the same origin rewrite identically and neither doubles a slash.
+    expect(
+      applyRegistryOverride(
+        "https://registry.npmjs.org/pnpm/-/pnpm-6.6.2.tgz",
+        "https://REGISTRY.NPMJS.ORG/",
+      ),
+    ).toBe("https://registry.npmjs.org/pnpm/-/pnpm-6.6.2.tgz");
+
+    expect(
+      applyRegistryOverride(
+        "https://registry.npmjs.org/pnpm/-/pnpm-6.6.2.tgz",
+        "https://Mirror.Example.ORG/",
+      ),
+    ).toBe("https://mirror.example.org/pnpm/-/pnpm-6.6.2.tgz");
+  });
+
+  it("refuses to rewrite a URL that merely contains the default registry", () => {
+    // Corepack's `String.replace` rewrites the middle of this one.
+    const url = "https://evil.example.org/proxy/https://registry.npmjs.org/pnpm";
+    expect(applyRegistryOverride(url, "https://mirror.example.org")).toBe(url);
+  });
+
+  it("does not double a path prefix when applied twice", () => {
+    const once = applyRegistryOverride(
+      "https://registry.npmjs.org/pnpm/-/pnpm-6.6.2.tgz",
+      "https://mirror.example.org/npm-mirror",
+    );
+    expect(once).toBe("https://mirror.example.org/npm-mirror/pnpm/-/pnpm-6.6.2.tgz");
+    expect(applyRegistryOverride(once, "https://mirror.example.org/npm-mirror")).toBe(once);
+  });
+});
+
+describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
+  const berry: UrlRegistrySpec = {
+    type: "url",
+    url: "https://repo.yarnpkg.com/tags",
+    fields: { tags: "aliases", versions: "tags" },
+  };
+
+  it("leaves Berry on its own document with nothing configured", () => {
+    // Identity matters: the table's object is what carries the npm alternative.
+    const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
+    expect(resolveRegistrySpec(table)).toBe(table);
+  });
+
+  it("switches Berry to @yarnpkg/cli-dist once an npm registry is configured", () => {
+    process.env.COREPACK_NPM_REGISTRY = "https://mirror.example.org";
+    const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
+    expect(resolveRegistrySpec(table)).toEqual({
+      type: "npm",
+      package: "@yarnpkg/cli-dist",
+      bin: "bin/yarn.js",
+    });
+  });
+
+  it("keeps Berry on its own document for COREPACK_REGISTRY_YARN — that is a mirror", () => {
+    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+    const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
+    expect(resolveRegistrySpec(table)).toBe(table);
+  });
+
+  it("passes through a spec the table does not declare", () => {
+    expect(resolveRegistrySpec(berry)).toBe(berry);
+  });
+
+  it("is applied by the fetchers, so a tag lookup follows the same switch", async () => {
+    // `resolve.ts` performs this substitution for `COREPACK_NPM_REGISTRY` before
+    // it calls in here, but nothing there knows about `.npmrc`. Doing it inside
+    // the fetchers as well is what makes §15.38 row 150's configuration —
+    // `@yarnpkg:registry` and nothing else — move the *tag document* too, not
+    // only the download.
+    const root = mkdtempSync(join(tmpdir(), "pipack-registry-npmrc-"));
+    const home = join(root, "home");
+    mkdirSync(home, { recursive: true });
+    const savedHome = process.env.HOME;
+    const savedPrefix = process.env.PREFIX;
+
+    try {
+      const server = await startServer({
+        "/@yarnpkg/cli-dist": { "dist-tags": { stable: "4.9.0" }, versions: { "4.9.0": {} } },
+      });
+      writeFileSync(join(home, ".npmrc"), `@yarnpkg:registry=${server.origin}\n`);
+      process.env.HOME = home;
+      process.env.PREFIX = join(root, "prefix");
+      resetNpmrcCache();
+
+      const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
+      await expect(fetchAvailableTags(table)).resolves.toEqual({ stable: "4.9.0" });
+      // Not `https://repo.yarnpkg.com/tags`, which is what corepack asks for.
+      expect(server.requests.map((request) => request.url)).toEqual(["/@yarnpkg/cli-dist"]);
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedPrefix === undefined) delete process.env.PREFIX;
+      else process.env.PREFIX = savedPrefix;
+      resetNpmrcCache();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

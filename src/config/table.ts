@@ -13,7 +13,13 @@
 
 import { messages, UsageError } from "../errors.ts";
 import { parse, satisfiesWithPrereleases } from "../semver.ts";
-import type { Locator, PackageManagerDefinition, PackageManagerSpec } from "../types.ts";
+import type {
+  Locator,
+  NpmRegistrySpec,
+  PackageManagerDefinition,
+  PackageManagerSpec,
+  RegistrySpec,
+} from "../types.ts";
 
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   npm: {
@@ -203,6 +209,51 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
     }
   }
   BINARIES_BY_NAME.set(name, [...binNames]);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Which package manager does a registry spec belong to? — §15.2               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Registry spec -> the package manager that declares it, and (for a url-typed
+ * spec) the npm-protocol alternative its band offers.
+ *
+ * Identity, not equality: `getSpecFor` hands back the very objects declared
+ * above, so the lookup is a `Map` hit rather than a structural comparison. Both
+ * maps exist because §15.2 needs the *name* to find `COREPACK_REGISTRY_<NAME>`,
+ * and §05.2 rewrite 1 needs the alternative — and `registry.ts` is handed a
+ * `RegistrySpec` alone, with no way back to either.
+ *
+ * Built once at module load, from static data.
+ */
+const NAME_BY_REGISTRY = new Map<RegistrySpec, string>();
+const NPM_ALTERNATIVE_BY_REGISTRY = new Map<RegistrySpec, NpmRegistrySpec>();
+
+for (const [name, definition] of Object.entries(DEFINITIONS)) {
+  NAME_BY_REGISTRY.set(definition.fetchLatestFrom, name);
+  for (const [, spec] of definition.ranges) {
+    NAME_BY_REGISTRY.set(spec.registry, name);
+    if (spec.npmRegistry !== undefined) {
+      NAME_BY_REGISTRY.set(spec.npmRegistry, name);
+      NPM_ALTERNATIVE_BY_REGISTRY.set(spec.registry, spec.npmRegistry);
+    }
+  }
+}
+
+/** The package manager whose table entry declares this registry spec, if any. */
+export function packageManagerForRegistry(spec: RegistrySpec): string | undefined {
+  return NAME_BY_REGISTRY.get(spec);
+}
+
+/**
+ * §02.5's `npmRegistry` for the band that declares this registry spec.
+ *
+ * Only Yarn Berry has one: `repo.yarnpkg.com` is not an npm registry, so a
+ * configured npm registry switches it to the `@yarnpkg/cli-dist` package.
+ */
+export function npmAlternativeFor(spec: RegistrySpec): NpmRegistrySpec | undefined {
+  return NPM_ALTERNATIVE_BY_REGISTRY.get(spec);
 }
 
 /**

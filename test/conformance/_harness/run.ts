@@ -80,6 +80,18 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
   const env = cleanEnv();
   env.COREPACK_HOME = options.home;
   env.COREPACK_DEFAULT_TO_LATEST = "0";
+  // §15.1 makes `$HOME/.npmrc` a real input, so the developer's own — with the
+  // registry and token their day job needs — would otherwise leak into every
+  // row. Point `HOME` at the fresh, empty store directory instead. Rows that
+  // care about the home directory (the shim ones) set it themselves in
+  // `options.env`, which is applied below and wins.
+  env.HOME = options.home;
+  env.USERPROFILE = options.home;
+  // Same reasoning for §15.1's global tier, `<prefix>/etc/npmrc`: `PREFIX` is
+  // npm's own override for it, and pointing it at the fixture keeps a machine
+  // with a system-wide npm configuration from changing what the rows observe.
+  env.PREFIX = options.home;
+  env.npm_config_prefix = options.home;
 
   const nodeArgs: string[] = [];
   if (options.registry !== undefined) {

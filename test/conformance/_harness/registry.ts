@@ -76,6 +76,15 @@ export class MockRegistry {
   requiredAuthorization?: string;
   /** When set, `dist.tarball` is advertised on this origin instead (row 83). */
   tarballOrigin?: string;
+  /**
+   * A path the whole registry lives under, e.g. `/artifactory/api/npm/npm`.
+   *
+   * §15.3 requires the override's *path prefix* to be prepended when a URL is
+   * rebased, and row 152 asserts it is prepended exactly once. A mock that only
+   * ever served from the root could not tell a doubled prefix from a correct
+   * one — it would 404 either way, and both look like "the test failed".
+   */
+  basePath = "";
 
   constructor() {
     this.#server = createServer((request, response) => {
@@ -128,6 +137,7 @@ export class MockRegistry {
     this.mode = "ok";
     this.requiredAuthorization = undefined;
     this.tarballOrigin = undefined;
+    this.basePath = "";
   }
 
   publish(
@@ -162,12 +172,12 @@ export class MockRegistry {
   /* ------------------------------------------------------------------ */
 
   #handle(request: IncomingMessage, response: ServerResponse): void {
-    const path = request.url ?? "/";
+    const raw = request.url ?? "/";
     const original =
-      (request.headers["x-original-url"] as string | undefined) ?? `${this.#origin}${path}`;
+      (request.headers["x-original-url"] as string | undefined) ?? `${this.#origin}${raw}`;
 
     this.requests.push({
-      path,
+      path: raw,
       original,
       authorization: request.headers.authorization,
       accept: request.headers.accept,
@@ -183,6 +193,14 @@ export class MockRegistry {
       return;
     }
 
+    // Everything below is relative to the base path; a request outside it is a
+    // 404, which is what a doubled prefix produces.
+    if (!raw.startsWith(this.basePath)) {
+      this.#notFound(response);
+      return;
+    }
+    const path = raw.slice(this.basePath.length) || "/";
+
     const file = this.#files.get(path);
     if (file !== undefined) {
       response.writeHead(200, { "content-type": file.type });
@@ -193,7 +211,7 @@ export class MockRegistry {
     // The base every advertised URL is written against: whatever host the tool
     // believes it is talking to, so `dist.tarball` passes §14.9's host check in
     // both the default-registry and the COREPACK_NPM_REGISTRY mode.
-    const base = new URL(original).origin;
+    const base = `${new URL(original).origin}${this.basePath}`;
 
     const { name, rest } = splitPath(path);
     const entry = name === undefined ? undefined : this.#packages.get(name);

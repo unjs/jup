@@ -1,8 +1,12 @@
 import { Buffer } from "node:buffer";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, networkError, redactUserinfoAnywhere, UsageError } from "../../src/errors.ts";
+import { loadNpmrc, npmrcAuthorizationFor, resetNpmrcCache } from "../../src/npmrc.ts";
 import {
   assertSafeArtifactUrl,
   credentialsFor,
@@ -114,6 +118,8 @@ const ENV_KEYS = [
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
+  // §15.1 — the credential rule now has a filesystem tier, memoised per cwd.
+  resetNpmrcCache();
   saved = {};
   for (const key of ENV_KEYS) {
     saved[key] = process.env[key];
@@ -996,5 +1002,107 @@ describe("networkError (§15.5)", () => {
 
     expect(error.stack).toContain("Caused by: first");
     expect(error.stack).toContain("Caused by: second");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.1 — the `.npmrc` credential tier
+ * ------------------------------------------------------------------ */
+
+describe("credentialsFor — the .npmrc tier (§15.1)", () => {
+  const roots: string[] = [];
+  let home: string;
+  let project: string;
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.HOME;
+    const root = mkdtempSync(join(tmpdir(), "pipack-http-npmrc-"));
+    roots.push(root);
+    home = join(root, "home");
+    project = join(root, "project");
+    mkdirSync(home, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    writeFileSync(join(project, "package.json"), `{"packageManager":"pnpm@11.1.2"}\n`);
+    process.env.HOME = home;
+    process.env.PREFIX = join(root, "prefix");
+    resetNpmrcCache();
+  });
+
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    delete process.env.PREFIX;
+    resetNpmrcCache();
+    while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
+  });
+
+  function userNpmrc(content: string): void {
+    writeFileSync(join(home, ".npmrc"), content);
+    resetNpmrcCache();
+  }
+
+  function credentials(url: string, registryOrigin?: string): string | undefined {
+    // `loadNpmrc` reads from the working directory, which the process itself
+    // never changes; the fixture stands in for it via `HOME`, and the project
+    // walk finds nothing.
+    return credentialsFor(new URL(url), registryOrigin).authorization;
+  }
+
+  it("supplies a bearer token for a URL under the configured prefix", () => {
+    userNpmrc("//registry.example.org/:_authToken=abc\n");
+    expect(credentials("https://registry.example.org/pnpm")).toBe("Bearer abc");
+  });
+
+  it("does not supply it for a host the prefix does not name", () => {
+    userNpmrc("//registry.example.org/:_authToken=abc\n");
+    expect(credentials("https://cdn.example.org/pnpm.tgz")).toBeUndefined();
+  });
+
+  it("ranks below COREPACK_NPM_TOKEN on the registry's own origin (§15.1 precedence)", () => {
+    userNpmrc("//registry.example.org/:_authToken=from-npmrc\n");
+    process.env.COREPACK_NPM_TOKEN = "from-env";
+
+    expect(credentials("https://registry.example.org/pnpm", "https://registry.example.org")).toBe(
+      "Bearer from-env",
+    );
+  });
+
+  it("still applies off the configured registry's origin, because it carries its own scope", () => {
+    // §14.6 scopes the *environment* credentials to one origin. A `.npmrc`
+    // entry names its own scope, which is narrower, so the tarball CDN a
+    // registry redirects to can be authenticated without widening anything.
+    userNpmrc("//cdn.example.org/:_authToken=cdn-token\n");
+    expect(credentials("https://cdn.example.org/pnpm.tgz", "https://registry.example.org")).toBe(
+      "Bearer cdn-token",
+    );
+  });
+
+  it("is still outranked by userinfo in the URL itself", () => {
+    userNpmrc("//registry.example.org/:_authToken=abc\n");
+    expect(credentials("https://u:p@registry.example.org/pnpm")).toBe(
+      `Basic ${Buffer.from("u:p").toString("base64")}`,
+    );
+  });
+
+  it("never reaches the wire from a project-level file", async () => {
+    // `credentialsFor` reads the config for the *process's* working directory,
+    // which a worker thread cannot change, so the project tier is loaded
+    // explicitly here and the end-to-end proof lives in conformance row 149.
+    const server = await ok();
+    writeFileSync(join(project, ".npmrc"), `//127.0.0.1:1/:_authToken=stolen\n`);
+    resetNpmrcCache();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const config = loadNpmrc(project);
+    expect(config.auth).toEqual([]);
+    expect(config.files.at(-1)!.refused).toEqual(["//127.0.0.1:1/:_authToken"]);
+
+    // And with that config in hand, nothing is attached to a matching URL.
+    expect(npmrcAuthorizationFor(new URL("http://127.0.0.1:1/pnpm"), config)).toBeUndefined();
+
+    await httpGetJson(`${server.origin}/pnpm`, { registryOrigin: server.origin });
+    expect(server.last().headers.authorization).toBeUndefined();
+    vi.restoreAllMocks();
   });
 });

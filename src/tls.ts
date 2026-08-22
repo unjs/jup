@@ -25,6 +25,7 @@
 
 import { readFileSync } from "node:fs";
 import { messages } from "./errors.ts";
+import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";
 
 /** What the environment (and, later, `.npmrc`) says about TLS. */
 export interface TlsSettings {
@@ -32,6 +33,13 @@ export interface TlsSettings {
   cafile?: string;
   /** Where {@link cafile} came from, for diagnostics. */
   cafileSource?: string;
+  /**
+   * §15.1's `ca` — the certificates inline rather than by path. Same tier as
+   * {@link cafile} and the same semantics: it **replaces** the platform store.
+   */
+  ca?: string[];
+  /** Where {@link ca} came from, for diagnostics. */
+  caSource?: string;
   /** `false` disables certificate verification entirely. */
   verify: boolean;
   /** Where the decision to disable verification came from; names the source in the warning. */
@@ -42,11 +50,14 @@ export interface TlsSettings {
  * §15.4's precedence: `COREPACK_CAFILE`, then `.npmrc`'s `cafile`/`ca`, then the
  * platform trust store.
  *
- * **§15.1 seam.** The `.npmrc` middle tier is a separate work item; when it
- * lands it slots in here, *below* the environment and above the platform store,
- * and it must be read from the user/global files only — a project-level
- * `.npmrc` is attacker-controlled in a cloned repository, and `cafile` / `ca` /
- * `strict-ssl` are exactly the keys §15.1 forbids it from supplying.
+ * The `.npmrc` middle tier is §15.1's, and it is read from the **user and
+ * global files only** — a project-level `.npmrc` is attacker-controlled in a
+ * cloned repository, and `cafile` / `ca` / `strict-ssl` are exactly the keys
+ * §15.1 forbids it from supplying. `npmrc.ts` enforces that at parse time, so a
+ * project file's value never reaches this function at all.
+ *
+ * `ca` (inline PEM) and `cafile` (a path) are the same tier; `cafile` wins when
+ * a file sets both, matching npm.
  */
 export function tlsSettings(): TlsSettings {
   const settings: TlsSettings = { verify: true };
@@ -55,6 +66,15 @@ export function tlsSettings(): TlsSettings {
   if (cafile !== undefined && cafile !== "") {
     settings.cafile = cafile;
     settings.cafileSource = "COREPACK_CAFILE";
+  } else {
+    const npmrc = npmrcTlsSettings();
+    if (npmrc.cafile !== undefined) {
+      settings.cafile = npmrc.cafile.value;
+      settings.cafileSource = describe(npmrc.cafile.origin);
+    } else if (npmrc.ca !== undefined) {
+      settings.ca = npmrc.ca.value;
+      settings.caSource = describe(npmrc.ca.origin);
+    }
   }
 
   // §11's value table spells every flag as an exact string, and this one is no
@@ -62,20 +82,37 @@ export function tlsSettings(): TlsSettings {
   if (process.env.COREPACK_STRICT_SSL === "0") {
     settings.verify = false;
     settings.verifySource = "COREPACK_STRICT_SSL";
+  } else if (process.env.COREPACK_STRICT_SSL === undefined) {
+    // §15.4 — "`strict-ssl=false` MUST be honoured only from the user/global
+    // files, and MUST print a warning naming the file it came from".
+    const npmrc = npmrcTlsSettings();
+    if (npmrc.strictSsl?.value === false) {
+      settings.verify = false;
+      settings.verifySource = describe(npmrc.strictSsl.origin);
+    }
   }
 
   return settings;
 }
 
+/** `strict-ssl (/home/u/.npmrc)` — the setting *and* the file, as §15.4 asks. */
+function describe(origin: NpmrcOrigin): string {
+  return `${origin.key} (${origin.path})`;
+}
+
 /**
- * `true` when the environment says anything about TLS at all.
+ * `true` when anything at all says something about TLS.
  *
  * The hot question, asked once per request: `false` means the request stays on
  * native `fetch` with the platform trust store, having loaded no `node:tls` and
- * read no file.
+ * read no PEM. The `.npmrc` read behind it is memoised per working directory, so
+ * this stays one map lookup after the first request.
  */
 export function tlsConfigured(): boolean {
-  return process.env.COREPACK_STRICT_SSL === "0" || (process.env.COREPACK_CAFILE ?? "") !== "";
+  if (process.env.COREPACK_STRICT_SSL === "0") return true;
+  if ((process.env.COREPACK_CAFILE ?? "") !== "") return true;
+  const npmrc = npmrcTlsSettings();
+  return npmrc.cafile !== undefined || npmrc.ca !== undefined || npmrc.strictSsl?.value === false;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -99,7 +136,7 @@ let installed: string | undefined;
  * delimiter. Anything outside it — the human-readable subject dumps `openssl`
  * likes to interleave — is ignored, exactly as OpenSSL ignores it.
  */
-export function readCaBundle(path: string): string[] {
+export function readCaBundle(path: string, source = "COREPACK_CAFILE"): string[] {
   const cached = bundles.get(path);
   if (cached !== undefined) return cached;
 
@@ -107,12 +144,10 @@ export function readCaBundle(path: string): string[] {
   try {
     content = readFileSync(path, "utf8");
   } catch (error) {
-    throw new Error(messages.cafileUnreadable(path), { cause: error });
+    throw new Error(unreadable(path, source), { cause: error });
   }
 
-  const certificates = [
-    ...content.matchAll(/-----BEGIN CERTIFICATE-----[\S\s]*?-----END CERTIFICATE-----/g),
-  ].map((match) => match[0]);
+  const certificates = certificatesIn(content);
 
   if (certificates.length === 0) {
     throw new Error(messages.cafileEmpty(path));
@@ -123,21 +158,56 @@ export function readCaBundle(path: string): string[] {
 }
 
 /**
+ * §12's table words this failure as `(set by COREPACK_CAFILE)`, which is exactly
+ * right when the environment set it and a lie when `.npmrc`'s `cafile` did. The
+ * normative string is kept for the normative case; the other names the file.
+ */
+function unreadable(path: string, source: string): string {
+  return source === "COREPACK_CAFILE"
+    ? messages.cafileUnreadable(path)
+    : `Unable to read the TLS certificate bundle at ${path} (set by ${source})`;
+}
+
+/**
+ * The PEM blocks inside a bundle.
+ *
+ * A bundle is a concatenation, and both `tls.setDefaultCACertificates` and the
+ * `ca` request option want the certificates separated, so the armour is the
+ * delimiter. Anything outside it — the human-readable subject dumps `openssl`
+ * likes to interleave — is ignored, exactly as OpenSSL ignores it.
+ */
+function certificatesIn(content: string): string[] {
+  return [...content.matchAll(/-----BEGIN CERTIFICATE-----[\S\s]*?-----END CERTIFICATE-----/g)].map(
+    (match) => match[0],
+  );
+}
+
+/** §15.1's `ca`: the certificates are already in hand, so only the armour matters. */
+export function inlineCertificates(values: string[], source: string): string[] {
+  const certificates = values.flatMap((value) => certificatesIn(value));
+  if (certificates.length === 0) {
+    throw new Error(`The TLS certificates supplied by ${source} contain no PEM certificate`);
+  }
+  return certificates;
+}
+
+/**
  * Install the configured trust store and announce a disabled one. Idempotent.
  *
  * Called before the first request goes out, never during module load: a run that
  * never reaches the network reads no PEM file and prints nothing.
  */
 export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): void {
-  if (settings.cafile !== undefined && installed !== settings.cafile) {
-    const certificates = readCaBundle(settings.cafile);
+  const certificates = trustStoreFor(settings);
+  const key = settings.cafile ?? settings.caSource;
+  if (certificates !== undefined && key !== undefined && installed !== key) {
     // Replaces rather than extends: §15.4 states a *precedence* order ending at
-    // the platform store, and npm's own `cafile` — which §15.1 will feed into
-    // this same seam — replaces the default set too. A TLS-inspecting proxy
-    // re-signs everything with the CA being configured here, so replacement is
-    // also the shape that actually works behind one.
+    // the platform store, and npm's own `cafile`/`ca` — the §15.1 tier feeding
+    // this same seam — replace the default set too, as does `COREPACK_CAFILE`.
+    // A TLS-inspecting proxy re-signs everything with the CA being configured
+    // here, so replacement is also the shape that actually works behind one.
     process.getBuiltinModule("node:tls").setDefaultCACertificates(certificates);
-    installed = settings.cafile;
+    installed = key;
   }
 
   // §15.4, verbatim. Once per source per process: it is a standing property of
@@ -161,15 +231,27 @@ export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): vo
  */
 export function tlsConnectOptions(): { ca?: string[]; rejectUnauthorized?: boolean } | undefined {
   const settings = tlsSettings();
-  if (settings.verify && settings.cafile === undefined) return undefined;
+  const certificates = trustStoreFor(settings);
+  if (settings.verify && certificates === undefined) return undefined;
 
   const options: { ca?: string[]; rejectUnauthorized?: boolean } = {};
   // Passing `ca` explicitly as well as setting the process default costs
   // nothing and keeps this path correct on a runtime whose
   // `setDefaultCACertificates` we could not use.
-  if (settings.cafile !== undefined) options.ca = readCaBundle(settings.cafile);
+  if (certificates !== undefined) options.ca = certificates;
   if (!settings.verify) options.rejectUnauthorized = false;
   return options;
+}
+
+/** The configured trust store, from either spelling, or `undefined` for the platform's. */
+function trustStoreFor(settings: TlsSettings): string[] | undefined {
+  if (settings.cafile !== undefined) {
+    return readCaBundle(settings.cafile, settings.cafileSource ?? "COREPACK_CAFILE");
+  }
+  if (settings.ca !== undefined) {
+    return inlineCertificates(settings.ca, settings.caSource ?? ".npmrc ca");
+  }
+  return undefined;
 }
 
 /**
@@ -179,7 +261,9 @@ export function tlsConnectOptions(): { ca?: string[]; rejectUnauthorized?: boole
  * A custom CA does *not* force it — that is installed process-wide instead.
  */
 export function tlsTransportRequired(): boolean {
-  return process.env.COREPACK_STRICT_SSL === "0";
+  if (process.env.COREPACK_STRICT_SSL === "0") return true;
+  if (process.env.COREPACK_STRICT_SSL !== undefined) return false;
+  return npmrcTlsSettings().strictSsl?.value === false;
 }
 
 /* -------------------------------------------------------------------------- */

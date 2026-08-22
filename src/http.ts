@@ -21,6 +21,7 @@
 import { Buffer } from "node:buffer";
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, NetworkError, networkError, redactUserinfo, UsageError } from "./errors.ts";
+import { npmrcAuthorizationFor } from "./npmrc.ts";
 import { nodeFetch, proxyForUrl } from "./proxy.ts";
 import {
   applyTlsConfiguration,
@@ -203,13 +204,23 @@ export interface HttpOptions {
 
 /**
  * §14.6 — the single credential rule, used by metadata requests and downloads
- * alike. Corepack has two paths that disagree; this is the unified one.
+ * alike. Corepack has two paths that disagree; this is the unified one, with
+ * §15.1's `.npmrc` tier appended below the environment:
  *
- *     userinfo present            -> Basic from userinfo, stripped from the URL
- *     origin !== registryOrigin   -> none
- *     COREPACK_NPM_TOKEN present  -> Bearer
- *     USERNAME and PASSWORD both  -> Basic
- *     otherwise                   -> none
+ *     userinfo present                        -> Basic from userinfo, stripped from the URL
+ *     origin === registryOrigin, and:
+ *         COREPACK_NPM_TOKEN present          -> Bearer
+ *         registry URL carries user:pass@     -> Basic
+ *         USERNAME and PASSWORD both present  -> Basic
+ *     .npmrc entry whose prefix matches       -> Bearer or Basic
+ *     otherwise                               -> none
+ *
+ * The `.npmrc` tier is **not** gated on `registryOrigin`, and that is not a
+ * relaxation: `//host/path/:_authToken` names its own scope, and
+ * `npmrcAuthorizationFor` attaches it only to a URL whose host *and* path prefix
+ * fall inside it (§15.1). That is strictly narrower than an origin check, which
+ * is the reason §15.1 can read credentials out of a file at all without
+ * reopening §14.6's leak. Project-level files never contribute one.
  *
  * The returned URL is the one that MUST be sent and the one every error message
  * MUST be formatted from: it never carries userinfo.
@@ -234,7 +245,7 @@ export function credentialsFor(
   // COREPACK_NPM_USERNAME/PASSWORD to whatever host a request targets.
   const registry = originOf(registryOrigin);
   if (registry === undefined || url.origin !== registry) {
-    return { url };
+    return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
   }
 
   // Presence, not truthiness — an empty COREPACK_NPM_TOKEN still counts, and
@@ -265,7 +276,10 @@ export function credentialsFor(
     return { url, authorization: basic(username, password) };
   }
 
-  return { url };
+  // §15.1's tier, below every `COREPACK_*` one. This is the case #540 is
+  // actually about: an organisation whose `.npmrc` already carries the token
+  // for its internal registry, and a tool that ignored it.
+  return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
 }
 
 /** The `Basic` header a registry URL's own `user:pass@` implies, if it has one. */

@@ -20,10 +20,13 @@ import {
   parseSri,
   shouldSkipIntegrityCheck,
 } from "./integrity.ts";
+import { resolveRegistry } from "./npmrc.ts";
 import {
   applyRegistryOverride,
+  applySourceOverride,
   fetchTarballURLAndSignature,
   getRegistryUrl,
+  resolveRegistrySpec,
   verifyRegistryTrust,
   warnUnsignedRegistry,
 } from "./registry.ts";
@@ -55,6 +58,13 @@ interface ArtifactSource {
   binPath?: string;
   /** The registry in force for this download; it selects §06.1's row. */
   registry?: RegistrySpec;
+  /**
+   * The registry **base URL** in force, after §15.1's and §15.2's precedence.
+   * Carried rather than recomputed: `getRegistryUrl()` with no arguments answers
+   * for the *default* package manager, and §15.2 exists precisely so that yarn
+   * and pnpm can have different answers in the same run.
+   */
+  registryUrl: string;
   /** Reused by §06.3 rather than re-fetched, when §07.3 already asked for it. */
   integrity?: string;
   /** §15.7's legacy digest, used only when the registry publishes no `integrity`. */
@@ -143,7 +153,7 @@ export async function ensureInstalled(
 
   const tmp = createTempDir();
   try {
-    const response = await httpGet(source.url, { registryOrigin: getRegistryUrl() });
+    const response = await httpGet(source.url, { registryOrigin: source.registryUrl });
     const body = response.body;
     if (body === null) {
       throw new Error(messages.requestFailed(source.url));
@@ -262,44 +272,76 @@ export async function confirmDownload(url: string): Promise<void> {
 /* -------------------------------------------------------------------------- */
 
 /**
- * `COREPACK_NPM_REGISTRY` switches a package manager onto its `npmRegistry`
- * entry when it has one, which is how Yarn Berry becomes `@yarnpkg/cli-dist`
- * (and therefore a tarball with a `bin` filter) instead of a single `.js` file
- * from `repo.yarnpkg.com`.
+ * Where the artifact comes from, after §15.1's and §15.2's precedence.
+ *
+ * Two independent decisions live here, and keeping them apart is what makes
+ * §15.2 possible at all:
+ *
+ * * **Which registry spec.** A configured *npm-protocol* registry switches Yarn
+ *   Berry onto its `npmRegistry` entry — `@yarnpkg/cli-dist`, a tarball with a
+ *   `bin` filter — instead of the single `.js` file `repo.yarnpkg.com` serves.
+ * * **Which base URL.** `COREPACK_REGISTRY_<NAME>` replaces the origin of that
+ *   package manager's own table URLs without changing the protocol, which is the
+ *   only way to mirror Yarn without also redirecting npm and pnpm (#753).
  */
 async function chooseSource(
   locator: Locator,
   versionDir: string,
   version: string | undefined,
 ): Promise<ArtifactSource> {
-  const registryUrl = getRegistryUrl();
+  const { name } = locator;
 
   if (version === undefined) {
     // A URL reference. `versionDir` is `encodeURIComponent(url without fragment)`
     // (§07.2), so decoding it is exactly §07.3's `decodeURIComponent(version)`.
-    return { url: applyRegistryOverride(decodeURIComponent(versionDir), registryUrl) };
+    // It belongs to no package manager's table entry, so §15.2 does not touch
+    // it; only §05.2's default-origin rewrite applies.
+    const registryUrl = getRegistryUrl({ name });
+    return {
+      url: applyRegistryOverride(decodeURIComponent(versionDir), registryUrl),
+      registryUrl,
+    };
   }
 
   const spec = getSpecFor(locator.name, version);
-  const source: ArtifactSource = { url: spec.url.replace("{}", version) };
 
-  if (hasRegistryOverride()) {
-    const registry = spec.npmRegistry ?? spec.registry;
-    source.registry = registry;
+  // §05.2 rewrite 1, kept in one place (`registry.resolveRegistrySpec`): an
+  // npm-protocol registry configured for the band's `npmRegistry` package
+  // switches Yarn Berry onto `@yarnpkg/cli-dist`, while §15.2's
+  // `COREPACK_REGISTRY_YARN` deliberately does not — it mirrors
+  // `repo.yarnpkg.com` as it stands, which is exactly what #872 asked for.
+  const registry = resolveRegistrySpec(spec.registry);
+  const packageName = registry.type === "npm" ? registry.package : undefined;
+  const registryUrl = getRegistryUrl({ name, packageName });
 
-    if (registry.type === "npm") {
-      // `dist.tarball` verbatim — never synthesised — already rewritten onto the
-      // configured registry and validated by §14.9.
-      const metadata = await fetchTarballURLAndSignature(registry, version);
-      source.url = metadata.tarball;
-      source.integrity = metadata.integrity;
-      source.shasum = metadata.shasum;
-      source.signatures = metadata.signatures;
-      source.fetched = true;
-      if (registry.bin !== undefined) source.binPath = registry.bin;
-    }
+  const source: ArtifactSource = {
+    url: spec.url.replace("{}", version),
+    registry,
+    registryUrl,
+  };
+
+  // The packument path is taken only when a registry is actually configured for
+  // this package manager — through any of §15.1's or §15.2's tiers. Otherwise
+  // the download URL comes from the table (§05.2), and no metadata request is
+  // made until §06 needs one.
+  const configured = resolveRegistry({ name, packageName }).kind !== "built-in";
+  if (registry.type === "npm" && configured) {
+    // `dist.tarball` verbatim — never synthesised — already rewritten onto the
+    // configured registry and validated by §14.9.
+    const metadata = await fetchTarballURLAndSignature(registry, version);
+    source.url = metadata.tarball;
+    source.integrity = metadata.integrity;
+    source.shasum = metadata.shasum;
+    source.signatures = metadata.signatures;
+    source.fetched = true;
+    if (registry.bin !== undefined) source.binPath = registry.bin;
   } else {
-    source.registry = spec.registry;
+    // §15.2 — the table URL sits on this package manager's own distribution
+    // origin (`repo.yarnpkg.com`, `registry.yarnpkg.com`), and
+    // `COREPACK_REGISTRY_<NAME>` is the only thing that can move it. Corepack
+    // rewrites exactly one hardcoded prefix and so cannot mirror Yarn at all,
+    // which is #753 and #872.
+    source.url = applySourceOverride(source.url, name);
   }
 
   // §15.3 — origin comparison rather than corepack's substring `replace`, which
@@ -309,12 +351,6 @@ async function chooseSource(
   source.url = applyRegistryOverride(source.url, registryUrl);
 
   return source;
-}
-
-/** Corepack's truthiness test, which `getRegistryUrl` mirrors: `""` is "unset". */
-function hasRegistryOverride(): boolean {
-  const configured = process.env.COREPACK_NPM_REGISTRY;
-  return configured !== undefined && configured !== "";
 }
 
 /* -------------------------------------------------------------------------- */
@@ -342,7 +378,7 @@ async function resolveExpectedIntegrity(
   if (registry?.type !== "npm" || version === undefined) return undefined;
   if (shouldSkipIntegrityCheck()) return undefined;
 
-  const registryUrl = getRegistryUrl();
+  const registryUrl = source.registryUrl;
 
   // Row 1: an explicit pin is a stronger, user-chosen assertion than the
   // registry's claim about itself, and it turns signature verification off —
@@ -371,7 +407,7 @@ async function resolveExpectedIntegrity(
   // §15.7 tiers 2 and 3, plus §15.8's package-root retry: a verified signature,
   // a warned soft-fail onto the registry's own digest, or a refusal.
   await verifyRegistryTrust({
-    packageName: registry.package,
+    spec: registry,
     version,
     registryUrl,
     signatures: source.signatures,

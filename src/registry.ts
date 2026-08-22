@@ -7,22 +7,88 @@
  */
 
 import { DEFAULT_REGISTRY } from "./config/keys.ts";
+import { npmAlternativeFor, packageManagerForRegistry } from "./config/table.ts";
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, redactUserinfo, UsageError } from "./errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck, verifySignature } from "./integrity.ts";
+import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
 import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "./types.ts";
 
 /** The origin every table URL is written against, and the only one §07.3 rewrites. */
 const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;
 
-/** Base registry with **all** trailing slashes stripped — mirrors 404 on a doubled slash. */
-export function getRegistryUrl(): string {
-  const configured = process.env.COREPACK_NPM_REGISTRY;
-  const raw = configured === undefined || configured === "" ? DEFAULT_REGISTRY : configured;
-  // `registry.example.org//pkg` is a 404 on registry.npmmirror.com and friends,
-  // so strip every trailing slash, not just one.
-  return raw.replace(/\/+$/, "");
+/**
+ * The npm-protocol base for a request, with **all** trailing slashes stripped —
+ * mirrors 404 on a doubled slash.
+ *
+ * §15.1 and §15.2 turn what used to be one environment variable into a four-tier
+ * decision (`COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc`, the
+ * built-in default); `npmrc.resolveRegistry` owns it, so this is one call rather
+ * than a second copy of the precedence.
+ *
+ * @param options `name` selects §15.2's per-package-manager override;
+ * `packageName` selects §15.1's `@scope:registry`.
+ */
+export function getRegistryUrl(options?: { name?: string; packageName?: string }): string {
+  return resolveRegistry(options).registry;
+}
+
+/**
+ * §05.2 rewrite 1 — a band's `npmRegistry` replaces its `registry` once the user
+ * has configured an npm-protocol registry that would serve it.
+ *
+ * `resolve.ts` performs the same substitution for `COREPACK_NPM_REGISTRY`
+ * before it ever calls in here, and the two are idempotent: given an npm spec
+ * this returns it unchanged. What this adds is the `.npmrc` half — §15.38 row
+ * 150 configures nothing but `@yarnpkg:registry`, and that alone must switch
+ * Yarn Berry onto `@yarnpkg/cli-dist`.
+ *
+ * `COREPACK_REGISTRY_YARN` deliberately does **not** trigger the switch: §15.2
+ * defines it as an origin replacement on Yarn's own distribution URLs, i.e. a
+ * mirror of `repo.yarnpkg.com`, which is exactly what #872 could not have.
+ */
+export function resolveRegistrySpec(spec: RegistrySpec): RegistrySpec {
+  if (spec.type === "npm") return spec;
+
+  const alternative = npmAlternativeFor(spec);
+  if (alternative === undefined) return spec;
+
+  // A per-source mirror is a mirror of this very document, so it stays here.
+  const name = packageManagerForRegistry(spec);
+  if (name !== undefined && sourceOverrideFor(name) !== undefined) return spec;
+
+  return npmProtocolRegistry({ packageName: alternative.package }) === undefined
+    ? spec
+    : alternative;
+}
+
+/** §15.2's `COREPACK_REGISTRY_<NAME>`, trailing slashes stripped, or `undefined`. */
+function sourceOverrideFor(name: string): string | undefined {
+  const configured = process.env[registryVariableFor(name)];
+  if (configured === undefined || configured === "") return undefined;
+  return configured.replace(/\/+$/, "");
+}
+
+/**
+ * §15.2 — move a URL derived from a package manager's **own** table entry onto
+ * `COREPACK_REGISTRY_<NAME>`.
+ *
+ * Unconditional origin replacement, unlike {@link applyRegistryOverride}: the
+ * table URL is by construction on that package manager's distribution origin,
+ * whatever that origin happens to be, so there is nothing to match against.
+ * `repo.yarnpkg.com` is the case the whole item exists for — it is not an npm
+ * registry, it is not `registry.npmjs.org`, and before §15.2 nothing could
+ * redirect it.
+ *
+ * Idempotent: a URL already sitting under the override is returned untouched,
+ * so applying this twice cannot double the override's path prefix.
+ */
+export function applySourceOverride(url: string, name: string | undefined): string {
+  if (name === undefined) return url;
+  const override = sourceOverrideFor(name);
+  if (override === undefined) return url;
+  return rebase(url, override);
 }
 
 /** Requests the abbreviated packument; both response shapes must be parsed. */
@@ -47,45 +113,68 @@ export const NPM_ACCEPT_HEADER =
  * idempotent, since a rewritten URL no longer sits on the default origin.
  */
 export function applyRegistryOverride(url: string, registryUrl: string = getRegistryUrl()): string {
-  let target: URL;
-  let override: URL;
   try {
-    target = new URL(url);
-    override = new URL(registryUrl);
+    if (new URL(url).origin !== DEFAULT_REGISTRY_ORIGIN) return url;
   } catch {
     // Not our business to diagnose: the caller validates (§14.9) and reports.
     return url;
   }
+  return rebase(url, registryUrl);
+}
 
-  if (target.origin !== DEFAULT_REGISTRY_ORIGIN) {
+/**
+ * §15.3's rewrite, in one place: parse both, take the override's scheme, host,
+ * port and userinfo, and prepend the override's own path prefix.
+ *
+ * Never a string operation. Corepack's `url.replace("https://registry.npmjs.org",
+ * override)` misses a differing trailing slash or host case — `new URL` has
+ * already normalised both by the time these are compared — and would happily
+ * rewrite the *middle* of a URL that merely contains the literal.
+ */
+function rebase(url: string, base: string): string {
+  let target: URL;
+  let override: URL;
+  try {
+    target = new URL(url);
+    override = new URL(base);
+  } catch {
     return url;
   }
 
   const prefix = override.pathname.replace(/\/+$/, "");
+  // Already there: re-applying must not double the prefix (§15.38 row 152).
+  if (target.origin === override.origin && (prefix === "" || target.pathname.startsWith(prefix))) {
+    return url;
+  }
+
   // Resolving an absolute path against the override keeps its scheme, host,
   // port and userinfo, and drops its path — which `prefix` puts back.
   return new URL(`${prefix}${target.pathname}${target.search}${target.hash}`, override).href;
 }
 
-export async function fetchAvailableVersions(spec: RegistrySpec): Promise<string[]> {
+export async function fetchAvailableVersions(input: RegistrySpec): Promise<string[]> {
+  const spec = resolveRegistrySpec(input);
+
   if (spec.type === "npm") {
-    const body = asRecord(await npmGetJson(spec.package));
+    const body = asRecord(await npmGetJson(spec.package, spec));
     // Both packument shapes carry `versions` as an object keyed by version.
     return keysOrValues(body?.versions);
   }
 
-  const body = asRecord(await urlGetJson(spec.url));
+  const body = asRecord(await urlGetJson(spec.url, spec));
   // §05.3 — an array of versions *or* an object whose keys are versions.
   return keysOrValues(body?.[spec.fields.versions]);
 }
 
-export async function fetchAvailableTags(spec: RegistrySpec): Promise<Record<string, string>> {
+export async function fetchAvailableTags(input: RegistrySpec): Promise<Record<string, string>> {
+  const spec = resolveRegistrySpec(input);
+
   if (spec.type === "npm") {
-    const body = asRecord(await npmGetJson(spec.package));
+    const body = asRecord(await npmGetJson(spec.package, spec));
     return stringMap(body?.["dist-tags"]);
   }
 
-  const body = asRecord(await urlGetJson(spec.url));
+  const body = asRecord(await urlGetJson(spec.url, spec));
   // Yarn's document maps tags -> "aliases" and versions -> "tags"; follow the
   // mapping, not the names.
   return stringMap(body?.[spec.fields.tags]);
@@ -97,9 +186,11 @@ export async function fetchAvailableTags(spec: RegistrySpec): Promise<Record<str
  * not `latest`) and attach no hash. Any failure in the npm path is re-thrown
  * wrapped in `messages.cannotDownloadLatest`.
  */
-export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<string> {
+export async function fetchLatestStableVersion(input: RegistrySpec): Promise<string> {
+  const spec = resolveRegistrySpec(input);
+
   if (spec.type !== "npm") {
-    const body = asRecord(await urlGetJson(spec.url));
+    const body = asRecord(await urlGetJson(spec.url, spec));
     const stable = stringMap(body?.[spec.fields.tags]).stable;
     if (stable === undefined) {
       throw new Error(messages.tagNotFound("stable"));
@@ -107,12 +198,12 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
     return stable;
   }
 
-  const registryUrl = getRegistryUrl();
+  const registryUrl = registryUrlFor(spec);
 
   try {
     // `latest` is a dist-tag the registry resolves server-side, so this is one
     // request rather than two.
-    const metadata = asRecord(await npmGetJson(`${spec.package}/latest`));
+    const metadata = asRecord(await npmGetJson(`${spec.package}/latest`, spec));
     const version = asString(metadata?.version);
     if (version === undefined) {
       throw new Error(
@@ -130,7 +221,7 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
     // so "the bytes match the registry's claim" is enforced by §06.2 at download
     // time; what this decides is whether that claim was *signed*.
     await verifyRegistryTrust({
-      packageName: spec.package,
+      spec,
       version,
       registryUrl,
       signatures: readSignatures(dist),
@@ -176,8 +267,8 @@ export async function fetchTarballURLAndSignature(
   shasum?: string;
   signatures?: RegistrySignature[];
 }> {
-  const registryUrl = getRegistryUrl();
-  const metadata = asRecord(await npmGetJson(`${spec.package}/${version}`));
+  const registryUrl = registryUrlFor(spec);
+  const metadata = asRecord(await npmGetJson(`${spec.package}/${version}`, spec));
   const dist = requireDist(metadata, spec.package, version, registryUrl);
 
   const tarball = asString(dist.tarball);
@@ -252,7 +343,8 @@ export function warnUnsignedRegistry(
  * returns without a warning, a request, or a refusal.
  */
 export async function verifyRegistryTrust(input: {
-  packageName: string;
+  /** The npm registry spec in force; §15.8's fallback re-queries it. */
+  spec: NpmRegistrySpec;
   version: string;
   registryUrl: string;
   signatures: RegistrySignature[] | undefined;
@@ -260,7 +352,8 @@ export async function verifyRegistryTrust(input: {
   /** Whether the caller holds *some* digest to check the downloaded bytes against. */
   hasDigest: boolean;
 }): Promise<void> {
-  const { packageName, version, registryUrl, integrity, hasDigest } = input;
+  const { spec, version, registryUrl, integrity, hasDigest } = input;
+  const packageName = spec.package;
 
   if (shouldSkipIntegrityCheck()) return;
 
@@ -271,7 +364,7 @@ export async function verifyRegistryTrust(input: {
   // that string, so a recovered signature would have nothing to cover.
   const signatures =
     input.signatures ??
-    (integrity === undefined ? undefined : await fetchRootSignatures(packageName, version));
+    (integrity === undefined ? undefined : await fetchRootSignatures(spec, version));
 
   // Tier 3: a signature exists, so it decides. `verifySignature` reports an
   // untrusted keyid, an expired key and a bad signature distinctly (§06.3).
@@ -307,14 +400,14 @@ export async function verifyRegistryTrust(input: {
  * metadata quirk into an error.
  */
 async function fetchRootSignatures(
-  packageName: string,
+  spec: NpmRegistrySpec,
   version: string,
 ): Promise<RegistrySignature[] | undefined> {
   // Not a request we are allowed to make; the soft-fail applies unchanged.
   if (envDisabled("COREPACK_ENABLE_NETWORK")) return undefined;
 
   try {
-    const body = asRecord(await npmGetJson(packageName));
+    const body = asRecord(await npmGetJson(spec.package, spec));
     const doc = asRecord(asRecord(body?.versions)?.[version]);
     const dist = asRecord(doc?.dist);
     return dist === undefined ? undefined : readSignatures(dist);
@@ -328,11 +421,25 @@ async function fetchRootSignatures(
 /* -------------------------------------------------------------------------- */
 
 /**
+ * §15.1 + §15.2 — the base URL for one registry spec.
+ *
+ * The spec knows which package manager declared it (§15.2's
+ * `COREPACK_REGISTRY_<NAME>`) and which npm package is being fetched (§15.1's
+ * `@scope:registry`), which is everything the precedence chain needs.
+ */
+export function registryUrlFor(spec: NpmRegistrySpec): string {
+  return getRegistryUrl({
+    name: packageManagerForRegistry(spec),
+    packageName: spec.package,
+  });
+}
+
+/**
  * One npm-protocol GET. `path` is interpolated **without** percent-encoding, so
  * `@yarnpkg/cli-dist` appears literally — npm registry convention (§05.2).
  */
-function npmGetJson(path: string): Promise<unknown> {
-  const registryUrl = getRegistryUrl();
+function npmGetJson(path: string, spec: NpmRegistrySpec): Promise<unknown> {
+  const registryUrl = registryUrlFor(spec);
 
   // §05.2 — the registry layer checks the flag itself, and its message names the
   // *registry*; the transport layer's names the URL. Both are observable.
@@ -352,9 +459,15 @@ function npmGetJson(path: string): Promise<unknown> {
  * same HTTP layer. It is not the npm registry, so the network flag is left to
  * the transport layer (whose message names the URL), and credentials only go out
  * if the document happens to live on the configured registry's origin.
+ *
+ * §15.2 applies here too, and this is the half corepack has no answer for at
+ * all: `https://repo.yarnpkg.com/tags` is the *only* place Yarn Berry's version
+ * list comes from, and `COREPACK_REGISTRY_YARN` is what finally moves it.
  */
-function urlGetJson(url: string): Promise<unknown> {
-  return httpGetJson(url, { registryOrigin: getRegistryUrl() });
+function urlGetJson(url: string, spec: RegistrySpec): Promise<unknown> {
+  const name = packageManagerForRegistry(spec);
+  const target = applySourceOverride(url, name);
+  return httpGetJson(target, { registryOrigin: getRegistryUrl({ name }) });
 }
 
 /* -------------------------------------------------------------------------- */

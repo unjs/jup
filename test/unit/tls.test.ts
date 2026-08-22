@@ -13,7 +13,7 @@
  * (the module memoises by path, exactly as a real run wants).
  */
 
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpsServer, type Server } from "node:https";
 import { createServer as createHttpServer } from "node:http";
 import type { AddressInfo, Socket } from "node:net";
@@ -23,6 +23,7 @@ import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors.ts";
 import { httpGet, httpGetJson } from "../../src/http.ts";
+import { resetNpmrcCache } from "../../src/npmrc.ts";
 import {
   applyTlsConfiguration,
   classifyTlsFailure,
@@ -121,6 +122,7 @@ let defaultCertificates: string[];
 let realFetch: typeof globalThis.fetch;
 
 beforeEach(() => {
+  resetNpmrcCache();
   saved = {};
   for (const key of ENV_KEYS) {
     saved[key] = process.env[key];
@@ -523,5 +525,97 @@ describe("the warm path never reaches TLS (§16.3)", () => {
     );
 
     expect(importers.sort()).toEqual(["http.ts", "proxy.ts"]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.1's middle tier — `cafile` / `ca` / `strict-ssl` from `.npmrc`
+ * ------------------------------------------------------------------ */
+
+describe("tlsSettings — the .npmrc tier (§15.1, §15.4)", () => {
+  const roots: string[] = [];
+  let home: string;
+  let savedHome: string | undefined;
+
+  beforeEach(() => {
+    savedHome = process.env.HOME;
+    const root = mkdtempSync(join(tmpdir(), "pipack-tls-npmrc-"));
+    roots.push(root);
+    home = join(root, "home");
+    mkdirSync(home, { recursive: true });
+    process.env.HOME = home;
+    process.env.PREFIX = join(root, "prefix");
+    resetNpmrcCache();
+  });
+
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    delete process.env.PREFIX;
+    resetNpmrcCache();
+    while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });
+  });
+
+  function userNpmrc(content: string): void {
+    writeFileSync(join(home, ".npmrc"), content);
+    resetNpmrcCache();
+  }
+
+  it("reads `cafile`, naming the file it came from", () => {
+    userNpmrc("cafile=/etc/ssl/corp.pem\n");
+
+    const settings = tlsSettings();
+    expect(settings.cafile).toBe("/etc/ssl/corp.pem");
+    expect(settings.cafileSource).toBe(`cafile (${join(home, ".npmrc")})`);
+    expect(tlsConfigured()).toBe(true);
+  });
+
+  it("lets COREPACK_CAFILE outrank it (§15.4's precedence)", () => {
+    userNpmrc("cafile=/etc/ssl/corp.pem\n");
+    process.env.COREPACK_CAFILE = "/etc/ssl/env.pem";
+
+    expect(tlsSettings()).toMatchObject({
+      cafile: "/etc/ssl/env.pem",
+      cafileSource: "COREPACK_CAFILE",
+    });
+  });
+
+  it("reads inline `ca` when no `cafile` is set", () => {
+    userNpmrc(String.raw`ca="${CERT.replace(/\n/g, String.raw`\n`)}"` + "\n");
+
+    const settings = tlsSettings();
+    expect(settings.cafile).toBeUndefined();
+    expect(settings.ca).toEqual([CERT.trim()]);
+    expect(tlsConnectOptions()?.ca).toEqual([CERT.trim()]);
+  });
+
+  it("honours `strict-ssl=false` and names the file in the warning", () => {
+    userNpmrc("strict-ssl=false\n");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const settings = tlsSettings();
+    expect(settings.verify).toBe(false);
+    expect(settings.verifySource).toBe(`strict-ssl (${join(home, ".npmrc")})`);
+    // §15.4's verbatim sentence, naming the source rather than the setting.
+    applyTlsConfiguration(settings);
+    expect(warn).toHaveBeenCalledWith(
+      messages.strictSslDisabled(`strict-ssl (${join(home, ".npmrc")})`),
+    );
+    // And the request has to leave native `fetch`, which cannot express it.
+    expect(tlsTransportRequired()).toBe(true);
+    warn.mockRestore();
+  });
+
+  it("lets an explicit COREPACK_STRICT_SSL win in both directions", () => {
+    userNpmrc("strict-ssl=false\n");
+    process.env.COREPACK_STRICT_SSL = "1";
+    expect(tlsSettings().verify).toBe(true);
+    expect(tlsTransportRequired()).toBe(false);
+  });
+
+  it("costs nothing when the file says nothing about TLS", () => {
+    userNpmrc("registry=https://mirror.example.org\n");
+    expect(tlsConfigured()).toBe(false);
+    expect(tlsConnectOptions()).toBeUndefined();
   });
 });

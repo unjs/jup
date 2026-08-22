@@ -71,7 +71,18 @@ interface Report {
     recordedDefault: string | null;
     cached: string[];
   }>;
-  npmrc: { consulted: boolean; note: string };
+  npmrc: {
+    files: Array<{ path: string; level: string; keys: string[]; refused: string[] }>;
+    registry: { value: string; source: string } | null;
+    scopes: Array<{ scope: string; value: string; source: string }>;
+    auth: Array<{ prefix: string; type: string; source: string }>;
+  };
+  tls: {
+    cafile: string | null;
+    cafileSource: string | null;
+    verify: boolean;
+    verifySource: string | null;
+  };
   store: { home: string; path: string; writable: boolean; versions: Array<Record<string, string>> };
   defaults: { path: string; entries: Record<string, string> };
   shims: { directory: string | null; entries: Array<Record<string, unknown>> };
@@ -311,10 +322,10 @@ describe("§15.30 corepack info", () => {
       expect(entry.registry).toBe("https://registry.npmjs.org");
       expect(entry.registrySource).toBe("built-in");
     }
-    // §15.1 is not implemented, and the report says so rather than implying the
-    // user's `.npmrc` was honoured.
-    expect(builtin.npmrc.consulted).toBe(false);
-    expect(builtin.npmrc.note).toContain(".npmrc");
+    // §15.1 — no `.npmrc` is in scope for this fixture, and the report says so
+    // by listing nothing rather than by implying anything.
+    expect(builtin.npmrc.registry).toBeNull();
+    expect(builtin.npmrc.auth).toEqual([]);
 
     const mirrored = await info(fixture, {
       env: { COREPACK_NPM_REGISTRY: "https://mirror.example.org/" },

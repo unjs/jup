@@ -264,6 +264,11 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_ENABLE_NETWORK")).toBe(true);
     expect(isEnvFileEligible("COREPACK_HOME")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NPM_REGISTRY")).toBe(true);
+    // §15.37 marks the per-source overrides eligible, on the same footing as
+    // `COREPACK_NPM_REGISTRY`: they redirect a download, which a project may
+    // do, rather than deciding who is trusted, which it may not.
+    expect(isEnvFileEligible("COREPACK_REGISTRY_YARN")).toBe(true);
+    expect(isEnvFileEligible("COREPACK_REGISTRY_PNPM")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NODE_EXECPATH")).toBe(true);
     // §15.37 — mandating signed sources is a policy a project may state, unlike
     // the trust store itself (§14.5), which a cloned repo must never supply.

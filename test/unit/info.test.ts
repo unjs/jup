@@ -453,9 +453,11 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
     expect(mirrored.notes.join(" ")).toContain("@yarnpkg/cli-dist");
   });
 
-  it("marks .npmrc as an unimplemented seam rather than staying silent", () => {
-    expect(report().npmrc.consulted).toBe(false);
-    expect(report().npmrc.note).toContain(".npmrc");
+  it("reports no .npmrc files when the machine has none in scope", () => {
+    // The fixture home has no `.npmrc`, and §15.1's report says so with an empty
+    // list rather than a note about an unimplemented feature.
+    expect(report().npmrc.registry).toBeNull();
+    expect(report().npmrc.auth).toEqual([]);
   });
 });
 
