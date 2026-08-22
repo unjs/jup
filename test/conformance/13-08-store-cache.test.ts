@@ -12,6 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  hashOf,
   makeTarball,
   MockRegistry,
   packageManagerTarball,
@@ -20,6 +21,14 @@ import {
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
+
+/**
+ * §15.11 — Yarn Berry comes from `repo.yarnpkg.com`, which publishes no
+ * signatures and no digests, so every row here pins the hash of the bytes the
+ * mock serves. These rows are about the *store* — banners, atomicity, offline
+ * operation — and pinning changes only the reference they quote.
+ */
+const BERRY = `2.2.2+sha512.${hashOf(Buffer.from(pmScript("yarn", "2.2.2"), "utf8"))}`;
 
 /** Root ignores the mode bits, so the read-only-home rows cannot be run as root. */
 const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0;
@@ -54,18 +63,18 @@ beforeEach(() => registry.reset());
 
 describe("§13.8 store, cache and offline", () => {
   it("86: corepack install prints exactly the cache banner", async () => {
-    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
 
     const result = await run(["install"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("Adding yarn@2.2.2 to the cache...\n");
+    expect(result.stdout).toBe(`Adding yarn@${BERRY} to the cache...\n`);
     expect(result.stderr).toBe("");
     expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
   });
 
   it("86: corepack install leaves lastKnownGood.json untouched", async () => {
-    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
     // Same major and strictly below 2.2.2, so §04.7's guarded bump would fire —
     // §09.2 says this command does not touch the file, and being specific it
     // wins over §04.7's general rule.
@@ -86,7 +95,7 @@ describe("§13.8 store, cache and offline", () => {
   });
 
   it("87: the cached version then runs with COREPACK_ENABLE_NETWORK=0", async () => {
-    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
     expect((await run(["install"], { ...fixture, registry, env: trusted() })).exitCode).toBe(0);
 
     const result = await run(["yarn", "--version"], {
@@ -102,7 +111,7 @@ describe("§13.8 store, cache and offline", () => {
   it.skipIf(IS_ROOT)(
     "88: a corrupt lastKnownGood.json, a read-only home and no network still run",
     async () => {
-      const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+      const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
       expect((await run(["install"], { ...fixture, registry, env: trusted() })).exitCode).toBe(0);
 
       writeFileSync(join(fixture.home, "lastKnownGood.json"), "{");
@@ -124,13 +133,13 @@ describe("§13.8 store, cache and offline", () => {
     async () => {
       const fixture = createFixture();
 
-      const installed = await run(["install", "--global", "yarn@2.2.2"], {
+      const installed = await run(["install", "--global", `yarn@${BERRY}`], {
         ...fixture,
         registry,
         env: trusted(),
       });
       expect(installed.exitCode).toBe(0);
-      expect(installed.stdout).toBe("Installing yarn@2.2.2...\n");
+      expect(installed.stdout).toBe(`Installing yarn@${BERRY}...\n`);
       expect(installed.stderr).toBe("");
 
       // The recorded default is what makes this work with no project spec at all,
@@ -150,11 +159,11 @@ describe("§13.8 store, cache and offline", () => {
 
   it("90: pack, then install -g the archive into a fresh offline COREPACK_HOME", async () => {
     const source = createFixture();
-    const packed = await run(["pack", "yarn@2.2.2"], { ...source, registry, env: trusted() });
+    const packed = await run(["pack", `yarn@${BERRY}`], { ...source, registry, env: trusted() });
     expect(packed.exitCode).toBe(0);
     expect(source.exists("corepack.tgz")).toBe(true);
 
-    const target = createFixture({ packageManager: "yarn@2.2.2" });
+    const target = createFixture({ packageManager: `yarn@${BERRY}` });
     const hydrated = await run(["install", "-g", source.path("corepack.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
@@ -172,10 +181,10 @@ describe("§13.8 store, cache and offline", () => {
   it("91: the same works when the new COREPACK_HOME does not exist yet", async () => {
     const source = createFixture();
     expect(
-      (await run(["pack", "yarn@2.2.2"], { ...source, registry, env: trusted() })).exitCode,
+      (await run(["pack", `yarn@${BERRY}`], { ...source, registry, env: trusted() })).exitCode,
     ).toBe(0);
 
-    const target = createFixture({ packageManager: "yarn@2.2.2" });
+    const target = createFixture({ packageManager: `yarn@${BERRY}` });
     rmSync(target.home, { recursive: true, force: true });
 
     const hydrated = await run(["install", "-g", source.path("corepack.tgz")], {
@@ -191,7 +200,7 @@ describe("§13.8 store, cache and offline", () => {
 
   it("92: an archive holding two package managers hydrates both, offline", async () => {
     const source = createFixture();
-    const packed = await run(["pack", "yarn@2.2.2", "pnpm@5.8.0"], {
+    const packed = await run(["pack", `yarn@${BERRY}`, "pnpm@5.8.0"], {
       ...source,
       registry,
       env: trusted(),
@@ -228,7 +237,7 @@ describe("§13.8 store, cache and offline", () => {
   });
 
   it("94: three concurrent runs needing the same fresh download all succeed", async () => {
-    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
     const options = { ...fixture, registry, env: trusted() };
 
     const results = await Promise.all([
@@ -254,7 +263,7 @@ describe("§13.8 store, cache and offline", () => {
     for (const subcommand of ["clean", "clear"] as const) {
       const fixture = createFixture();
       expect(
-        (await run(["install", "-g", "yarn@2.2.2"], { ...fixture, registry, env: trusted() }))
+        (await run(["install", "-g", `yarn@${BERRY}`], { ...fixture, registry, env: trusted() }))
           .exitCode,
       ).toBe(0);
       expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2"))).toBe(true);
@@ -273,7 +282,7 @@ describe("§13.8 store, cache and offline", () => {
   });
 
   it("96: a warm run with an exact pin makes zero network requests (§01.3)", async () => {
-    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
     expect((await run(["install"], { ...fixture, registry, env: trusted() })).exitCode).toBe(0);
     registry.reset();
 

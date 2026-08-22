@@ -34,12 +34,22 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-/** A project pinned to {@link PIN} with `pnpm@6.6.2` already in its store. */
+/**
+ * A project pinned to {@link PIN} with `pnpm@6.6.2` already in its store.
+ *
+ * §15.11 — the seeded install has to stand for the reference the manifest pins,
+ * digest included: a cache hit is now checked against the pin, so a marker
+ * recording some other hash is a *miss* and these rows would go to the network
+ * for a version that is sitting in the store. Nothing about what they assert
+ * changes; the fixture simply stopped contradicting itself.
+ */
 function pinnedProject(devEngines: unknown, pin: unknown = PIN) {
   const manifest: Record<string, unknown> = { devEngines: { packageManager: devEngines } };
   if (pin !== undefined) manifest.packageManager = pin;
   const fixture = createFixture(manifest);
-  seedPackageManager(fixture.home, "pnpm", "6.6.2");
+  const reference =
+    typeof pin === "string" && pin.startsWith("pnpm@") ? pin.slice("pnpm@".length) : "6.6.2";
+  seedPackageManager(fixture.home, "pnpm", reference);
   return fixture;
 }
 

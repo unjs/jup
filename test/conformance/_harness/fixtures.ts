@@ -182,9 +182,16 @@ export function seedPackageManager(
     }
   }
 
+  // §15.11 — the marker's hash is what a cache hit is now checked against, so a
+  // seeded entry has to record the digest the reference it stands for pins.
+  // Writing a constant here would make every seeded fixture that pins a hash
+  // look like the collision §15.11 refuses to adopt.
+  const pinned = parse(reference)?.build ?? [];
+  const hash = pinned.length > 0 ? pinned.join(".") : "sha512.seeded";
+
   writeFileSync(
     join(location, ".corepack"),
-    JSON.stringify({ locator: { name, reference }, bin: spec.bin, hash: "sha512.seeded" }),
+    JSON.stringify({ locator: { name, reference }, bin: spec.bin, hash }),
   );
 
   return location;

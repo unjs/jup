@@ -21,6 +21,7 @@ import { getSpecFor, isSupportedPackageManager } from "./config/table.ts";
 import { envDisabled } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { compare, isValidVersion, lt, major, parse, satisfiesWithPrereleases } from "./semver.ts";
+import type { SemVer } from "./semver.ts";
 import type { BinList, BinSpec, CorepackMarker, InstallSpec, Locator } from "./types.ts";
 
 /** §07.2 — the file whose presence means "this install is complete and valid". */
@@ -91,7 +92,11 @@ export function getInstallFolder(): string {
  * `encodeURIComponent(url without fragment)`.
  */
 export function getVersionDir(locator: Locator): string {
-  const parsed = parse(locator.reference);
+  return versionDirFor(locator, parse(locator.reference));
+}
+
+/** {@link getVersionDir} with the parse already done — the probe needs both. */
+function versionDirFor(locator: Locator, parsed: SemVer | null): string {
   if (parsed !== null) return parsed.version;
 
   // A URL reference: the fragment carries the hash (§02.1), so it is stripped
@@ -136,10 +141,152 @@ export function readMarker(dir: string): CorepackMarker | null {
  * that a warm run never executes (§16.3).
  */
 export function readInstalledSpec(locator: Locator): InstallSpec | null {
-  const location = join(getInstallFolder(), locator.name, getVersionDir(locator));
+  return resolveInstallTarget(locator).installed;
+}
+
+/**
+ * The probe {@link readInstalledSpec} is the read-only half of: where this
+ * locator's artifact lives, and whether it is already there.
+ *
+ * ## §15.11 — a pinned hash that is never checked is not a verification tier
+ *
+ * §07.2 makes the directory name the plain semver version, so
+ * `pnpm@9.0.0+sha512.<A>` and `pnpm@9.0.0+sha512.<B>` name one directory and
+ * the second reference silently gets whatever the first installed. Corepack
+ * does the same — the marker's hash is *re-attached* to the locator (§07.6
+ * step 3), never compared against it — so it is not a regression, but it means
+ * a pin is decorative for every project that is not the one that warmed the
+ * cache. §15.11 requires every artifact to clear a tier, and this is the one
+ * place where the tier was recorded and then not enforced.
+ *
+ * The enforcement is one string comparison against the marker already being
+ * read: no network, no store scan, and no second file. §04.1 step 4's probe
+ * ({@link findInstalledVersion}) has to make the same comparison, because it
+ * answers *before* this does and its answer sheds the build suffix; there the
+ * `stat` §14.1 budgets becomes a read of that same file, which is the whole
+ * cost of §15.11 on the warm path.
+ *
+ * **When the marker does not prove the pin** the entry is not usable for *this*
+ * reference, and there are only three possible answers: run the wrong bytes
+ * (what happens today), refuse, or install the pinned artifact somewhere of its
+ * own. Refusing is wrong because the collision has a legitimate shape: the
+ * embedded defaults pin `sha1` (§02.5) while `corepack use` writes the
+ * registry's `sha512`, so a bare `yarn` followed by a `yarn@1.22.22+sha512.…`
+ * project is a mismatch nobody misconfigured and whose only remedy would be
+ * wiping the cache. So the install target becomes a **pin-qualified**
+ * directory, `<version>+<algo>.<hex>`, which is itself valid semver and
+ * therefore still a legal `<name>/<reference>` subtree for `pack` (§07.10),
+ * `cache list` and `info`.
+ *
+ * The cost is a second marker read, paid only by a reference that collides, and
+ * one extra download the first time it does. The plain directory keeps its
+ * §07.2 name, so nothing about the common case changes on disk.
+ */
+export function resolveInstallTarget(locator: Locator): {
+  location: string;
+  installed: InstallSpec | null;
+} {
+  const root = join(getInstallFolder(), locator.name);
+  const parsed = parse(locator.reference);
+  const versionDir = versionDirFor(locator, parsed);
+
+  const location = join(root, versionDir);
   const marker = readMarker(location);
-  if (marker === null) return null;
-  return { location, bin: marker.bin, hash: marker.hash };
+  const pin = readHashPin(locator.reference, parsed?.build);
+
+  if (pin.digest === undefined) {
+    return {
+      location,
+      installed: marker === null ? null : { location, bin: marker.bin, hash: marker.hash },
+    };
+  }
+
+  if (marker !== null && markerProvesPin(marker, pin)) {
+    return { location, installed: { location, bin: marker.bin, hash: marker.hash } };
+  }
+
+  // The plain directory holds something else — or nothing. Either way this
+  // reference's artifact belongs in a directory named after the digest it pins.
+  const qualified = join(root, `${versionDir}+${serializePin(pin)}`);
+  const other = readMarker(qualified);
+  if (other === null) {
+    // With the plain directory free, keep §07.2's layout: qualifying is for
+    // resolving a collision, not for every pinned project.
+    return { location: marker === null ? location : qualified, installed: null };
+  }
+  if (!markerProvesPin(other, pin)) {
+    // Only reachable if something outside the tool wrote this directory: it is
+    // named after the very digest its marker must carry. §06.2's message is the
+    // right one — the store holds bytes other than the ones the pin names.
+    throw new Error(messages.mismatchHashes(pin.digest, other.hash));
+  }
+  return {
+    location: qualified,
+    installed: { location: qualified, bin: other.bin, hash: other.hash },
+  };
+}
+
+/** `<algo>.<hex>`, the serialized form §07.2 stores in the marker. */
+function serializePin(pin: HashPin): string {
+  return `${pin.algo.toLowerCase()}.${pin.digest ?? ""}`;
+}
+
+/**
+ * Whether the marker's recorded hash is the one this reference pinned.
+ *
+ * Constant-time in the digest bytes. Lengths are public — they follow from the
+ * algorithm name, which is in the reference the attacker is trying to match —
+ * so returning early on a length difference leaks nothing, and `node:crypto`'s
+ * `timingSafeEqual` is deliberately not reached for: importing that module here
+ * would put twenty-odd native modules on the path that a warm run exists to
+ * keep empty (§16.3).
+ */
+function markerProvesPin(marker: CorepackMarker, pin: HashPin): boolean {
+  const expected = serializePin(pin);
+  const actual = marker.hash;
+  if (typeof actual !== "string" || actual.length !== expected.length) return false;
+
+  let diff = 0;
+  for (let index = 0; index < expected.length; index++) {
+    diff |= expected.charCodeAt(index) ^ actual.charCodeAt(index);
+  }
+  return diff === 0;
+}
+
+/** §02.1 — a reference's build suffix, from semver build metadata or a URL fragment. */
+export interface HashPin {
+  algo: string;
+  digest?: string;
+}
+
+/** §06.2 — `build[0]` absent means `sha512`. */
+const DEFAULT_HASH_ALGO = "sha512";
+
+/**
+ * §06.2 — `algo` from `build[0]`/the URL fragment, `digest` from `build[1]`.
+ *
+ * Lives beside the store rather than in `install` because §15.11's cache-hit
+ * check needs exactly the same reading of a reference, and a second copy of it
+ * would be a second chance to disagree about what counts as a pin.
+ */
+export function readHashPin(reference: string, build?: readonly string[]): HashPin {
+  if (build !== undefined) {
+    return { algo: build[0] ?? DEFAULT_HASH_ALGO, digest: build[1] };
+  }
+
+  // A URL reference carries the same information in its fragment:
+  // `https://example.com/yarn.js#sha256.deadbeef` (§02.1).
+  let fragment = "";
+  try {
+    fragment = new URL(reference).hash.slice(1);
+  } catch {
+    // Not a URL either; there is simply no pin to read.
+  }
+
+  const dot = fragment.indexOf(".");
+  if (fragment === "") return { algo: DEFAULT_HASH_ALGO };
+  if (dot === -1) return { algo: fragment };
+  return { algo: fragment.slice(0, dot), digest: fragment.slice(dot + 1) };
 }
 
 export function writeMarker(dir: string, marker: CorepackMarker): void {
@@ -271,15 +418,42 @@ export function findInstalledVersion(name: string, range: string): string | null
   // dropped because the directory name never carries one (§07.2), and the marker
   // hands the real hash back to the caller.
   if (isValidVersion(range)) {
-    const version = parse(range)!.version;
-    try {
-      statSync(join(installFolder, name, version, MARKER_NAME));
-      return version;
-    } catch (error) {
-      const code = errorCode(error);
-      if (code === "ENOENT" || code === "ENOTDIR") return null;
-      throw error;
+    const parsed = parse(range)!;
+    const version = parsed.version;
+    const pin = readHashPin(range, parsed.build);
+
+    // §15.11 — a reference with no digest has nothing to prove, so this stays
+    // the single `stat` §14.1 budgets.
+    if (pin.digest === undefined) {
+      try {
+        statSync(join(installFolder, name, version, MARKER_NAME));
+        return version;
+      } catch (error) {
+        const code = errorCode(error);
+        if (code === "ENOENT" || code === "ENOTDIR") return null;
+        throw error;
+      }
     }
+
+    // §15.11 — a hash-bearing reference is a cache *hit* only if the stored
+    // marker proves that hash.
+    //
+    // This has to happen here rather than in {@link resolveInstallTarget} alone,
+    // because §04.1 step 4 answers with the bare version and the pin is gone
+    // from the locator by the time anything reads the marker again — which is
+    // exactly how `pnpm@9.0.0+sha512.<A>` and `+sha512.<B>` came to share one
+    // directory with the second silently running the first's bytes. The stat
+    // becomes a read of the same file, and no other syscall is added.
+    const proven = readMarker(join(installFolder, name, version));
+    if (proven !== null && markerProvesPin(proven, pin)) return version;
+
+    // A previous collision may have put this reference's artifact in a
+    // directory of its own. Answering with the *pinned* reference is what
+    // routes the caller back to it; the bare version would send it to the
+    // directory that just failed to prove the pin.
+    const qualified = `${version}+${serializePin(pin)}`;
+    const other = readMarker(join(installFolder, name, qualified));
+    return other !== null && markerProvesPin(other, pin) ? qualified : null;
   }
 
   let entries: string[];

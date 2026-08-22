@@ -40,6 +40,7 @@ export const ENV_FILE_INELIGIBLE = new Set([
   "COREPACK_NPM_PASSWORD",
   "COREPACK_CAFILE",
   "COREPACK_STRICT_SSL",
+  "COREPACK_ALLOW_UNVERIFIED",
 ]);
 
 /**
@@ -66,6 +67,12 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set([
   // decisions.
   "COREPACK_CAFILE",
   "COREPACK_STRICT_SSL",
+  // §15.11 / §15.37 — the one opt-out from "every artifact clears a verification
+  // tier". A cloned repository that could set it from `.corepack.env` would be
+  // able to turn its own unsigned, unpinned download into a permitted one, which
+  // is the whole of what §15.11 refuses; the deny-list is what keeps the opt-out
+  // a decision the person running the tool makes.
+  "COREPACK_ALLOW_UNVERIFIED",
 ]);
 
 /**

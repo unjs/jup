@@ -179,11 +179,23 @@ async function startYarnServersWithoutMirror(): Promise<{ npm: TestServer; berry
   return servers;
 }
 
-/** A cached install: the directory, plus the `.corepack` marker §07.2 stats. */
-function seedInstalled(name: string, version: string): void {
+/**
+ * A cached install: the directory, plus the `.corepack` marker §07.2 stats.
+ *
+ * §15.11 — `hash` matters now: the probe checks a hash-bearing reference against
+ * the marker before answering, so an install standing for a *pinned* reference
+ * has to record that pin's digest or it is a miss.
+ */
+function seedInstalled(name: string, version: string, hash?: string): void {
   const dir = join(home, "v1", name, version);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, ".corepack"), JSON.stringify({ locator: { name, reference: version } }));
+  writeFileSync(
+    join(dir, ".corepack"),
+    JSON.stringify({
+      locator: { name, reference: version },
+      ...(hash === undefined ? {} : { hash }),
+    }),
+  );
 }
 
 function seedLastKnownGood(entries: Record<string, string>): void {
@@ -396,11 +408,14 @@ describe("resolveDescriptor step 4 — cache probe", () => {
 
   it("runs BEFORE the exact-version passthrough (step 4 precedes step 5)", async () => {
     await startYarnServers();
-    seedInstalled("yarn", "1.22.4");
+    // §15.11 redirected this row's fixture: the marker has to prove the pin the
+    // reference carries, or the probe answers "miss" and step 5 supplies the
+    // hash-bearing reference — which is what this row exists to rule out.
+    seedInstalled("yarn", "1.22.4", "sha224.0123456789ab");
 
-    // The store never records a build suffix (§07.2), so a cache hit answers
-    // with the bare directory name. Were step 5 to run first, the hash-bearing
-    // reference would come back verbatim.
+    // The store never records a build suffix in its *directory* name (§07.2), so
+    // a cache hit answers with the bare version. Were step 5 to run first, the
+    // hash-bearing reference would come back verbatim.
     await expect(
       resolveDescriptor({ name: "yarn", range: "1.22.4+sha224.0123456789ab" }),
     ).resolves.toEqual({ name: "yarn", reference: "1.22.4" });

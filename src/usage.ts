@@ -25,8 +25,8 @@ export const USAGE_LINES: Record<string, string> = {
   install: "$ corepack install [-g,--global] [--cache-only] ...",
   pack: "$ corepack pack [--json] [-o,--output <path>] ...",
   prepare: "$ corepack prepare [--activate] [--all] [-o,--output <path>] ...",
-  up: "$ corepack up [--here]",
-  use: "$ corepack use [--here] <pattern>",
+  up: "$ corepack up [--here] [--pin-style=suffix|sidecar]",
+  use: "$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>",
 };
 
 export const GENERIC_USAGE_LINE = "$ corepack <command>";
@@ -45,8 +45,8 @@ export const HELP_TEXT = `Usage: corepack <command>
   corepack install
   corepack install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
   corepack pack [--json] [-o|--output <path>] [...name[@<version>]]
-  corepack up [--here]
-  corepack use [--here] <name[@<version>]>
+  corepack up [--here] [--pin-style=suffix|sidecar]
+  corepack use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>
   corepack --version
   corepack --help
 
@@ -58,6 +58,11 @@ Deprecated, retained for compatibility:
 --here confines a project-mutating command to the manifest in the current
 directory; without it the walk stops at a workspace root (§15.27). Every
 mutating command prints the path it modified.
+
+--pin-style=sidecar writes the digest to devEngines.packageManager.integrity
+and leaves packageManager holding clean semver (§15.12). The default,
+--pin-style=suffix, writes <version>+<algo>.<hex>; both are read back
+identically.
 
 With no names, enable and disable target every supported package manager,
 npm included (§15.16) — pass --exclude npm to leave npm alone. Shims are

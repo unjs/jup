@@ -13,6 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  hashOf,
   MockRegistry,
   packageManagerTarball,
   pmScript,
@@ -20,6 +21,17 @@ import {
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
+
+/**
+ * §15.11 — `repo.yarnpkg.com` is a url-type registry: no signatures, no
+ * `dist.integrity`, nothing but TLS. A Berry artifact therefore clears a
+ * verification tier only through a pinned hash, so the rows that install one
+ * pin the digest of the bytes the mock serves. What they are about — which band
+ * a prerelease lands in — is unchanged.
+ */
+function berryPin(version: string): string {
+  return `${version}+sha512.${hashOf(Buffer.from(pmScript("yarn", version), "utf8"))}`;
+}
 
 /** Every download row needs the mock's key, since it is not in the embedded store. */
 function env(extra?: Record<string, string | undefined>): Record<string, string | undefined> {
@@ -76,13 +88,13 @@ describe("§13.3 version forms", () => {
   });
 
   it.for([
-    ["yarn", "2.0.0-rc.30", "yarn.js"],
-    ["yarn", "3.0.0-rc.2", "yarn.js"],
-    ["pnpm", "11.0.0-dev.1005", "bin/pnpm.mjs"],
+    ["yarn", "2.0.0-rc.30", "yarn.js", berryPin("2.0.0-rc.30")],
+    ["yarn", "3.0.0-rc.2", "yarn.js", berryPin("3.0.0-rc.2")],
+    ["pnpm", "11.0.0-dev.1005", "bin/pnpm.mjs", "11.0.0-dev.1005"],
   ])(
     "15: the prerelease %s@%s resolves and lands in its range band",
-    async ([name, version, entry]) => {
-      const fixture = createFixture({ packageManager: `${name}@${version}` });
+    async ([name, version, entry, reference]) => {
+      const fixture = createFixture({ packageManager: `${name}@${reference}` });
 
       const result = await run([name!, "--version"], { ...fixture, registry, env: env() });
 
@@ -136,12 +148,37 @@ describe("§13.3 version forms", () => {
     const result = await run([`yarn@${url}`, "--version"], {
       ...fixture,
       registry,
+      // §15.11 redirected this row: `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`
+      // permits the *host*, and §02.1's `#<algo>.<hex>` fragment (row 20) is
+      // how the user says what should arrive from it. With neither a fragment
+      // nor a signature the artifact clears no tier, so the URL form now needs
+      // the second, explicit opt-out — which announces itself.
+      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" }),
+    });
+
+    expect(result.stderr).toBe(
+      `! Installing yarn@${url} from ${registry.origin} with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)\n`,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.21\n");
+  });
+
+  it("18: without a fragment and without the opt-out, the URL form is refused (§15.11)", async () => {
+    const fixture = createFixture({});
+    const url = `${registry.origin}/yarn/-/yarn-1.22.21.tgz`;
+
+    const result = await run([`yarn@${url}`, "--version"], {
+      ...fixture,
+      registry,
       env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1" }),
     });
 
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("1.22.21\n");
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(
+      `Refusing to install yarn@${url}: ${registry.origin} provides no signature ` +
+        `and no hash was pinned. Pin a hash in the packageManager field, or set ` +
+        `COREPACK_ALLOW_UNVERIFIED=1.\n`,
+    );
   });
 
   it("19: an unknown package manager referenced by URL runs the downloaded package", async () => {
@@ -151,10 +188,13 @@ describe("§13.3 version forms", () => {
     const result = await run([`mypm@${url}`, "--version"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1" }),
+      // §15.11 redirected this row too, and for the same reason as row 18: an
+      // unknown package manager fetched from a bare URL has no signature and no
+      // pinned hash. Row 20 is the same row with a `#sha1.…` fragment instead.
+      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" }),
     });
 
-    expect(result.stderr).toBe("");
+    expect(result.stderr).toContain("COREPACK_ALLOW_UNVERIFIED=1");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.0.0\n");
   });

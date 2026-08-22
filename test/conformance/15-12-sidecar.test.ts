@@ -1,0 +1,213 @@
+/**
+ * §15.38 row 169 — the sidecar integrity (§15.12).
+ *
+ * `<version>+<algo>.<hex>` is valid semver build metadata, and corepack's
+ * maintainers defend it as a deliberate tradeoff (#316) — but it means
+ * `packageManager` no longer round-trips through tooling that reads the field as
+ * a version, which is what #726 and #620 keep asking about. §15.12's answer is
+ * to keep writing the suffixed form (it is the interoperable one, and §13
+ * asserts it) while *reading* an explicit sidecar as the same thing, and to add
+ * `--pin-style=sidecar` for projects that would rather hold a clean version.
+ *
+ * "Treated exactly like a build-suffix hash (§06.1)" is the requirement, so the
+ * rows below assert the consequence rather than the storage: a wrong sidecar
+ * must fail the download with §06.2's hash mismatch, in a run that is otherwise
+ * identical to one that succeeds.
+ */
+
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  cleanupFixtures,
+  createFixture,
+  type Fixture,
+  MockRegistry,
+  packageManagerTarball,
+  run,
+  sriOf,
+} from "./_harness/index.ts";
+
+const registry = new MockRegistry();
+
+const TARBALL = packageManagerTarball("pnpm", "6.6.2");
+/** What §15.12's `integrity` field holds: the SRI of the published tarball. */
+const INTEGRITY = sriOf(TARBALL);
+/** A validly shaped SRI describing something else entirely. */
+const WRONG = `sha512-${Buffer.alloc(64).toString("base64")}`;
+
+function trusted(extra?: Record<string, string | undefined>): Record<string, string | undefined> {
+  return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), ...extra };
+}
+
+function manifest(integrity?: string): unknown {
+  const packageManager: Record<string, unknown> = { name: "pnpm", version: "6.6.2" };
+  if (integrity !== undefined) packageManager.integrity = integrity;
+  return { packageManager: "pnpm@6.6.2", devEngines: { packageManager } };
+}
+
+function pinOf(fixture: Fixture): string | undefined {
+  return (fixture.json("package.json") as { packageManager?: string }).packageManager;
+}
+
+function sidecarOf(fixture: Fixture): Record<string, unknown> {
+  return (
+    fixture.json("package.json") as { devEngines?: { packageManager?: Record<string, unknown> } }
+  ).devEngines?.packageManager as Record<string, unknown>;
+}
+
+beforeAll(async () => {
+  await registry.start();
+  registry.publish("pnpm", "6.6.2", TARBALL, { distTags: { latest: "6.6.2" } });
+});
+
+afterAll(async () => {
+  cleanupFixtures();
+  await registry.stop();
+});
+
+beforeEach(() => registry.reset());
+
+describe("§15.12 — devEngines.packageManager.integrity", () => {
+  it("169: a correct sidecar beside a clean `packageManager` installs", async () => {
+    const fixture = createFixture(manifest(INTEGRITY));
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry });
+
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+    // §06.1 row 1: an explicit hash is the check, so no trust store was needed
+    // and no signature was consulted — the sidecar behaved as a build suffix
+    // down to which request the run made.
+    expect(registry.requests.map((request) => request.path)).toEqual(["/pnpm/-/pnpm-6.6.2.tgz"]);
+  });
+
+  it("169: a wrong sidecar is enforced, not ignored", async () => {
+    const fixture = createFixture(manifest(WRONG));
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("Mismatch hashes.");
+    expect(result.stdout).toBe("");
+    // §06.2 — nothing is cached on a mismatch, so the next run fails the same way.
+    expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
+  });
+
+  it("169: the same manifest with no sidecar installs, which is what makes the row mean something", async () => {
+    // The control. Without it, the row above would pass against a build that
+    // could not install this fixture at all.
+    const fixture = createFixture(manifest());
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+  });
+
+  it("169: a malformed sidecar is reported through devEngines' own onFail", async () => {
+    const fixture = createFixture({
+      packageManager: "pnpm@6.6.2",
+      devEngines: {
+        packageManager: { name: "pnpm", version: "6.6.2", integrity: "not-an-sri" },
+      },
+    });
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`Invalid "devEngines.packageManager.integrity" field`);
+  });
+
+  it("169: a sidecar disagreeing with an explicit build suffix is refused", async () => {
+    const fixture = createFixture({
+      packageManager: `pnpm@6.6.2+sha512.${Buffer.alloc(64).toString("hex")}`,
+      devEngines: { packageManager: { name: "pnpm", version: "6.6.2", integrity: INTEGRITY } },
+    });
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("pin different hashes");
+  });
+
+  it("169: `use` keeps writing the suffixed form by default", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const result = await run(["use", "pnpm@6.6.2"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toMatch(/^pnpm@6\.6\.2\+sha512\.[\da-f]{128}$/);
+    expect(fixture.json("package.json")).not.toHaveProperty("devEngines");
+  });
+
+  it("169: `--pin-style=sidecar` writes the clean version and the SRI, and it reads back", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const written = await run(["use", "--pin-style=sidecar", "pnpm@6.6.2"], {
+      ...fixture,
+      registry,
+      env: trusted(),
+    });
+
+    expect(written.exitCode).toBe(0);
+    expect(pinOf(fixture)).toBe("pnpm@6.6.2");
+    expect(sidecarOf(fixture)).toEqual({
+      name: "pnpm",
+      version: "6.6.2",
+      integrity: INTEGRITY,
+    });
+
+    // §15.26's "the result re-reads cleanly", and §15.12's "both forms MUST be
+    // accepted on read" — from a cold store, so the pin is actually checked.
+    const cold = createFixture();
+    const reread = await run(["pnpm", "--version"], {
+      cwd: fixture.cwd,
+      home: cold.home,
+      registry,
+    });
+    expect(reread.exitCode).toBe(0);
+    expect(reread.stdout).toBe("6.6.2\n");
+  });
+
+  it("169: `--pin-style=sidecar` updates an existing devEngines block in place", async () => {
+    const fixture = createFixture({
+      name: "project",
+      devEngines: { packageManager: { name: "pnpm", version: "5.0.0", onFail: "ignore" } },
+    });
+
+    const result = await run(["use", "--pin-style=sidecar", "pnpm@6.6.2"], {
+      ...fixture,
+      registry,
+      env: trusted(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    // §15.26 bullet 2: a devEngines-only project gets no top-level
+    // `packageManager` invented for it.
+    expect(pinOf(fixture)).toBeUndefined();
+    expect(sidecarOf(fixture)).toEqual({
+      name: "pnpm",
+      version: "6.6.2",
+      onFail: "ignore",
+      integrity: INTEGRITY,
+    });
+  });
+
+  it("169: an unknown --pin-style is rejected before anything is installed", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const result = await run(["use", "--pin-style=hash", "pnpm@6.6.2"], {
+      ...fixture,
+      registry,
+      env: trusted(),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`Option "--pin-style" accepts only "suffix" or "sidecar"`);
+    expect(fixture.exists("package.json")).toBe(true);
+    expect(pinOf(fixture)).toBeUndefined();
+    expect(registry.requests).toEqual([]);
+  });
+});

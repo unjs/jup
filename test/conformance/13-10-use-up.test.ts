@@ -14,8 +14,22 @@ import {
 
 const registry = new MockRegistry();
 
+/**
+ * §15.11 redirected these rows. Half of them resolve Yarn **Berry** from
+ * `repo.yarnpkg.com`, a url-type registry that publishes no signatures and no
+ * digests, so the artifact clears no verification tier and the install is now
+ * refused. The opt-out keeps every row about what it is about — which field
+ * `use`/`up` write, and what they write into it — and the refusal itself has
+ * its own rows (167). It is harmless on the npm-registry rows here: with a
+ * verified signature in hand nothing is downgraded and nothing is printed,
+ * which is why the rows asserting an empty stderr still do.
+ */
 function trusted(extra?: Record<string, string | undefined>): Record<string, string | undefined> {
-  return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), ...extra };
+  return {
+    COREPACK_INTEGRITY_KEYS: registry.trustStore(),
+    COREPACK_ALLOW_UNVERIFIED: "1",
+    ...extra,
+  };
 }
 
 function pinOf(fixture: { json(relative: string): unknown }): string | undefined {
@@ -152,7 +166,9 @@ describe("§13.10 use / up", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
     expect(result.stdout).toContain("Usage Error:");
-    expect(result.stdout).toContain("$ corepack use [--here] <pattern>");
+    expect(result.stdout).toContain(
+      "$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>",
+    );
     expect(result.stderr).toBe("");
   });
 

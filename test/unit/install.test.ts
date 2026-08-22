@@ -272,13 +272,48 @@ describe("marker hit (§07.2, test 96)", () => {
     await mkdir(location, { recursive: true });
     await writeFile(
       join(location, ".corepack"),
-      JSON.stringify({ locator: { name: "pnpm", reference: "9.1.0" }, bin: ["pnpm"], hash: "x.y" }),
+      // §15.11 redirected this row: the marker used to be allowed to record any
+      // hash at all, so a pinned reference adopted whatever was in the
+      // directory. §07.2's *directory* name still carries no build suffix —
+      // which is what this row is about — but the marker now has to prove the
+      // pin.
+      JSON.stringify({
+        locator: { name: "pnpm", reference: "9.1.0+sha256.deadbeef" },
+        bin: ["pnpm"],
+        hash: "sha256.deadbeef",
+      }),
     );
 
     const spec = await ensureInstalled({ name: "pnpm", reference: "9.1.0+sha256.deadbeef" });
 
     expect(spec.location).toBe(location);
     expect(requested).toEqual([]);
+  });
+
+  it("does not adopt an install whose marker records a different digest (§15.11)", async () => {
+    // Traced against the built binary and recorded against P12: §07.2 gives
+    // `pnpm@9.1.0+sha512.<A>` and `+sha512.<B>` one directory, so the second
+    // silently ran the first's bytes. The pinned reference now installs into a
+    // directory of its own — the download 404s here, which is exactly the point:
+    // the cache did not answer for it.
+    const location = join(home, "v1", "pnpm", "9.1.0");
+    await mkdir(location, { recursive: true });
+    await writeFile(
+      join(location, ".corepack"),
+      JSON.stringify({
+        locator: { name: "pnpm", reference: "9.1.0+sha256.aaaa" },
+        bin: ["pnpm"],
+        hash: "sha256.aaaa",
+      }),
+    );
+
+    const error = await rejection(
+      ensureInstalled({ name: "pnpm", reference: "9.1.0+sha256.bbbb" }),
+    );
+    expect(error.message).toContain("https://registry.npmjs.org/pnpm/-/pnpm-9.1.0.tgz");
+    // The entry that *is* proven still answers, from the same store.
+    const spec = await ensureInstalled({ name: "pnpm", reference: "9.1.0+sha256.aaaa" });
+    expect(spec.location).toBe(location);
   });
 });
 
@@ -339,7 +374,14 @@ describe("download shapes (§07.3, §07.4)", () => {
     const script = "#!/usr/bin/env node\nconsole.log('yarn 3')\n";
     routes["/3.0.0/packages/yarnpkg-cli/bin/yarn.js"] = bytesRoute(Buffer.from(script));
 
-    const spec = await ensureInstalled({ name: "yarn", reference: "3.0.0" });
+    // §15.11 redirected this row: `repo.yarnpkg.com` is a url-type registry and
+    // publishes no signatures at all, so the artifact clears a tier only
+    // through a pinned hash. What the row is about — the `.js` shape and the
+    // BinList — is unchanged.
+    const spec = await ensureInstalled({
+      name: "yarn",
+      reference: `3.0.0+sha512.${hashOf(Buffer.from(script))}`,
+    });
 
     expect(await readFile(join(spec.location, "yarn.js"), "utf8")).toBe(script);
     // §07.7 — a single-file download uses the table's BinList form.
@@ -840,20 +882,26 @@ describe("§14.10 — single-file extractions are verified too", () => {
  * ------------------------------------------------------------------ */
 
 describe("download prompt (§05.5, tests 46, 47)", () => {
+  /**
+   * §15.11 redirected these rows: Berry from `repo.yarnpkg.com` needs a pinned
+   * hash to clear a verification tier, and the opt-out would print a warning
+   * these rows are counting the absence of. The reference is what changed; the
+   * URL in the notice, which is what they assert, is not.
+   */
   function serveScript(): string {
     const script = "console.log('yarn 3')\n";
     routes["/3.0.0/packages/yarnpkg-cli/bin/yarn.js"] = bytesRoute(Buffer.from(script));
-    return script;
+    return `3.0.0+sha512.${hashOf(Buffer.from(script))}`;
   }
 
   it("prints exactly the notice when the variable is 1, and asks nothing off a TTY", async () => {
-    serveScript();
+    const reference = serveScript();
     process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "1";
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     const resume = vi.spyOn(process.stdin, "resume");
     const listen = vi.spyOn(process.stdin, "on");
 
-    await ensureInstalled({ name: "yarn", reference: "3.0.0" });
+    await ensureInstalled({ name: "yarn", reference });
 
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
       "! Corepack is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n",
@@ -864,11 +912,11 @@ describe("download prompt (§05.5, tests 46, 47)", () => {
   });
 
   it("stays silent when the variable is 0 (test 47)", async () => {
-    serveScript();
+    const reference = serveScript();
     process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "0";
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
-    await ensureInstalled({ name: "yarn", reference: "3.0.0" });
+    await ensureInstalled({ name: "yarn", reference });
 
     expect(stderr).not.toHaveBeenCalled();
   });

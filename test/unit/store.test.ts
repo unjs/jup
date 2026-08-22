@@ -24,8 +24,11 @@ import {
   getVersionDir,
   promote,
   readLastKnownGood,
+  readHashPin,
+  readInstalledSpec,
   readMarker,
   referenceWithHash,
+  resolveInstallTarget,
   resolveBin,
   writeLastKnownGood,
   writeMarker,
@@ -42,6 +45,7 @@ vi.mock("node:fs", async () => {
   return {
     ...actual,
     readdirSync: vi.fn(actual.readdirSync),
+    readFileSync: vi.fn(actual.readFileSync),
     opendirSync: vi.fn(actual.opendirSync),
     writeFileSync: vi.fn(actual.writeFileSync),
     renameSync: vi.fn(actual.renameSync),
@@ -188,6 +192,126 @@ describe("readMarker / writeMarker — §07.2", () => {
   });
 });
 
+/* -------------------------------------------------------------------------- */
+/* §15.11 — the cache hit checks the pin                                       */
+/* -------------------------------------------------------------------------- */
+
+/** How many of the recorded `readFileSync` calls asked for a `.corepack`. */
+function markerReads(mock: { mock: { calls: unknown[][] } }): number {
+  return mock.mock.calls.filter((call) => String(call[0]).endsWith(".corepack")).length;
+}
+
+describe("readHashPin — §02.1", () => {
+  it("reads a build suffix, defaulting the algorithm to sha512", () => {
+    expect(readHashPin("4.1.0", ["sha224", "abcd"])).toEqual({ algo: "sha224", digest: "abcd" });
+    expect(readHashPin("4.1.0", [])).toEqual({ algo: "sha512", digest: undefined });
+  });
+
+  it("reads a URL reference's fragment", () => {
+    expect(readHashPin("https://example.com/yarn.js#sha256.abcd")).toEqual({
+      algo: "sha256",
+      digest: "abcd",
+    });
+    expect(readHashPin("https://example.com/yarn.js")).toEqual({ algo: "sha512" });
+  });
+});
+
+describe("resolveInstallTarget — §15.11's cache-hit check", () => {
+  /** A complete install of `<name>/<version>` whose marker records `hash`. */
+  function seed(name: string, version: string, hash: string): string {
+    const dir = join(getInstallFolder(), name, version);
+    mkdirSync(dir, { recursive: true });
+    writeMarker(dir, { locator: { name, reference: version }, bin: { [name]: "./x.js" }, hash });
+    return dir;
+  }
+
+  it("is a hit when nothing is pinned", () => {
+    const dir = seed("pnpm", "9.0.0", "sha512.aaaa");
+    const found = resolveInstallTarget({ name: "pnpm", reference: "9.0.0" });
+    expect(found.location).toBe(dir);
+    expect(found.installed?.hash).toBe("sha512.aaaa");
+  });
+
+  it("is a hit when the marker carries exactly the pinned digest", () => {
+    const dir = seed("pnpm", "9.0.0", "sha512.aaaa");
+    const found = resolveInstallTarget({ name: "pnpm", reference: "9.0.0+sha512.aaaa" });
+    expect(found.location).toBe(dir);
+    expect(found.installed).not.toBeNull();
+  });
+
+  it("does not adopt an artifact installed under a different digest", () => {
+    // The hole traced against the built binary and recorded against P12:
+    // §07.2 gives both references one directory, and corepack re-attaches the
+    // marker's hash to the locator instead of comparing it, so the second
+    // project silently runs the first project's bytes.
+    seed("pnpm", "9.0.0", "sha512.aaaa");
+    const found = resolveInstallTarget({ name: "pnpm", reference: "9.0.0+sha512.bbbb" });
+
+    expect(found.installed).toBeNull();
+    expect(found.location).toBe(join(getInstallFolder(), "pnpm", "9.0.0+sha512.bbbb"));
+  });
+
+  it("does not adopt one recorded under a different algorithm either", () => {
+    seed("pnpm", "9.0.0", "sha512.aaaa");
+    const found = resolveInstallTarget({ name: "pnpm", reference: "9.0.0+sha256.aaaa" });
+    expect(found.installed).toBeNull();
+    expect(found.location).toBe(join(getInstallFolder(), "pnpm", "9.0.0+sha256.aaaa"));
+  });
+
+  it("hits the pin-qualified directory once it exists", () => {
+    seed("pnpm", "9.0.0", "sha512.aaaa");
+    const qualified = seed("pnpm", "9.0.0+sha512.bbbb", "sha512.bbbb");
+
+    const found = resolveInstallTarget({ name: "pnpm", reference: "9.0.0+sha512.bbbb" });
+    expect(found.location).toBe(qualified);
+    expect(found.installed?.hash).toBe("sha512.bbbb");
+    // And the unqualified reference still gets the unqualified entry.
+    expect(readInstalledSpec({ name: "pnpm", reference: "9.0.0" })?.hash).toBe("sha512.aaaa");
+  });
+
+  it("refuses a qualified directory whose marker was tampered with", () => {
+    seed("pnpm", "9.0.0", "sha512.aaaa");
+    seed("pnpm", "9.0.0+sha512.bbbb", "sha512.cccc");
+
+    expect(() => resolveInstallTarget({ name: "pnpm", reference: "9.0.0+sha512.bbbb" })).toThrow(
+      /Mismatch hashes/,
+    );
+  });
+
+  it("normalises the algorithm's case, since the marker is always lower case", () => {
+    const dir = seed("pnpm", "9.0.0", "sha512.aaaa");
+    expect(resolveInstallTarget({ name: "pnpm", reference: "9.0.0+SHA512.aaaa" }).location).toBe(
+      dir,
+    );
+  });
+
+  it("checks a URL reference's fragment the same way", () => {
+    const url = "https://example.com/yarn.js";
+    const dir = join(getInstallFolder(), "yarn", encodeURIComponent(url));
+    mkdirSync(dir, { recursive: true });
+    writeMarker(dir, { locator: { name: "yarn", reference: url }, hash: "sha256.aaaa" });
+
+    expect(readInstalledSpec({ name: "yarn", reference: `${url}#sha256.aaaa` })).not.toBeNull();
+    expect(readInstalledSpec({ name: "yarn", reference: `${url}#sha256.bbbb` })).toBeNull();
+  });
+
+  it("reads exactly one marker on the warm path (§01.3)", () => {
+    seed("pnpm", "9.0.0", "sha512.aaaa");
+
+    // §01.3 budgets one `.corepack` read for a warm, exactly-pinned run, and
+    // §15.11's check must not turn that into two. The second read exists only
+    // for a reference the cached marker cannot vouch for.
+    const readFileSyncMock = vi.mocked(readFileSync);
+    readFileSyncMock.mockClear();
+    expect(readInstalledSpec({ name: "pnpm", reference: "9.0.0+sha512.aaaa" })).not.toBeNull();
+    expect(markerReads(readFileSyncMock)).toBe(1);
+
+    readFileSyncMock.mockClear();
+    expect(readInstalledSpec({ name: "pnpm", reference: "9.0.0+sha512.bbbb" })).toBeNull();
+    expect(markerReads(readFileSyncMock)).toBe(2);
+  });
+});
+
 describe("referenceWithHash — §07.6 step 3", () => {
   it("attaches the installed artifact's hash to a bare version", () => {
     expect(referenceWithHash("4.1.0", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
@@ -246,9 +370,40 @@ describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
   });
 
   it("strips the build suffix before probing, and returns the plain version", () => {
-    seedInstall("yarn", "4.1.0");
+    // §15.11 redirected this row: the directory is still the plain version, but
+    // a hash-bearing reference is a *hit* only when the marker records that very
+    // digest — the probe used to answer from the directory name alone, which is
+    // how two references differing only in their hash came to share one install.
+    seedInstall("yarn", "4.1.0", {
+      locator: { name: "yarn", reference: "4.1.0+sha224.deadbeef" },
+      bin: ["yarn"],
+      hash: "sha224.deadbeef",
+    });
 
     expect(findInstalledVersion("yarn", "4.1.0+sha224.deadbeef")).toBe("4.1.0");
+    expectNoDirectoryRead();
+  });
+
+  it("answers a miss when the installed marker records a different digest (§15.11)", () => {
+    seedInstall("yarn", "4.1.0");
+
+    expect(findInstalledVersion("yarn", "4.1.0+sha224.deadbeef")).toBeNull();
+    // A miss, not a directory scan: the answer still costs one file, and the
+    // caller falls through to §04.1 step 5 with its pin intact.
+    expectNoDirectoryRead();
+  });
+
+  it("routes to the pin-qualified directory when that is where the artifact went", () => {
+    seedInstall("yarn", "4.1.0");
+    seedInstall("yarn", "4.1.0+sha224.deadbeef", {
+      locator: { name: "yarn", reference: "4.1.0+sha224.deadbeef" },
+      bin: ["yarn"],
+      hash: "sha224.deadbeef",
+    });
+
+    // The *pinned* reference comes back, because the bare version would send the
+    // caller to the directory that just failed to prove the pin.
+    expect(findInstalledVersion("yarn", "4.1.0+sha224.deadbeef")).toBe("4.1.0+sha224.deadbeef");
     expectNoDirectoryRead();
   });
 

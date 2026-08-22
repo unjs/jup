@@ -286,6 +286,15 @@ describe("isEnvFileEligible", () => {
     // it widens a candidate set rather than deciding who is trusted.
     expect(isEnvFileEligible("COREPACK_ENABLE_PRERELEASES")).toBe(true);
 
+    // §15.11 / §15.37 — the one opt-out from "every artifact clears a
+    // verification tier". Eligibility is a deny-list, so a new COREPACK_*
+    // variable is env-file eligible with no edit to `env.ts` at all; these two
+    // assertions are what make the omission fail a test rather than silently
+    // hand a cloned repository the ability to permit its own unverified
+    // download.
+    expect(isEnvFileEligible("COREPACK_ALLOW_UNVERIFIED")).toBe(false);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_ALLOW_UNVERIFIED")).toBe(true);
+
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);
     }

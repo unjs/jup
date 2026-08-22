@@ -9,6 +9,7 @@ import { DEFINITIONS } from "../../src/config/table.ts";
 import {
   cleanupFixtures,
   createFixture,
+  hashOf,
   MockRegistry,
   packageManagerTarball,
   pmScript,
@@ -23,6 +24,13 @@ const YARN_TRANSPARENT = DEFINITIONS.yarn!.transparent.default!;
 const PNPM_DEFAULT = DEFINITIONS.pnpm!.default;
 
 const registry = new MockRegistry();
+
+/**
+ * §15.11 — Berry from `repo.yarnpkg.com` has no signature and no published
+ * digest, so these rows pin the hash of the bytes the mock serves. The rows are
+ * about the download *notice*, and the URL in it is unchanged.
+ */
+const BERRY = `3.0.0+sha512.${hashOf(Buffer.from(pmScript("yarn", "3.0.0"), "utf8"))}`;
 
 beforeAll(async () => {
   await registry.start();
@@ -220,7 +228,7 @@ describe("§13.5 environment variables", () => {
   });
 
   it("46: COREPACK_ENABLE_DOWNLOAD_PROMPT=1 prints exactly the download notice", async () => {
-    const fixture = createFixture({ packageManager: "yarn@3.0.0" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
 
     const result = await run(["yarn", "--version"], {
       ...fixture,
@@ -236,7 +244,7 @@ describe("§13.5 environment variables", () => {
   });
 
   it("47: the second, cached run says nothing", async () => {
-    const fixture = createFixture({ packageManager: "yarn@3.0.0" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
     const options = {
       ...fixture,
       registry,
@@ -252,7 +260,7 @@ describe("§13.5 environment variables", () => {
   });
 
   it("48: .corepack.env cannot enable the download prompt", async () => {
-    const fixture = createFixture({ packageManager: "yarn@3.0.0" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
     fixture.write(".corepack.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
 
     const result = await run(["yarn", "--version"], { ...fixture, registry });

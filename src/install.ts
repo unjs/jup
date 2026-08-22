@@ -39,11 +39,12 @@ import { parse } from "./semver.ts";
 import {
   bumpLastKnownGood,
   createTempDir,
-  getInstallFolder,
   getVersionDir,
+  type HashPin,
   promote,
-  readInstalledSpec,
+  readHashPin,
   resolveBin,
+  resolveInstallTarget,
   writeMarker,
 } from "./store.ts";
 import { extract } from "./tar.ts";
@@ -52,9 +53,6 @@ import type { InstallSpec, Locator, RegistrySignature, RegistrySpec } from "./ty
 /** §07.4 — the two artifact shapes the table can produce. */
 const TARBALL_EXT = ".tgz";
 const SCRIPT_EXT = ".js";
-
-/** §06.2 — `build[0]` absent means `sha512`. */
-const DEFAULT_HASH_ALGO = "sha512";
 
 /** Everything §07.3 works out before a single artifact byte is fetched. */
 interface ArtifactSource {
@@ -83,12 +81,6 @@ interface ArtifactSource {
   fetched?: boolean;
 }
 
-/** §02.1 — a reference's build suffix, from semver build metadata or a URL fragment. */
-interface HashPin {
-  algo: string;
-  digest?: string;
-}
-
 /**
  * Returns the install spec, downloading only on a `.corepack` miss.
  *
@@ -106,13 +98,17 @@ export async function ensureInstalled(
   options?: { cacheOnly?: boolean },
 ): Promise<InstallSpec> {
   const versionDir = getVersionDir(locator);
-  const location = join(getInstallFolder(), locator.name, versionDir);
 
   // §07.2 / §01.3 — the entire warm path. No network, no directory scan, no
   // last-known-good read: one `open` of the marker and we are done. The proxy
   // path in `main` performs this same check *before* importing this module, so
   // reaching here at all normally means a miss.
-  const installed = readInstalledSpec(locator);
+  //
+  // §15.11 — `location` is the probe's answer, not `<name>/<version>` computed
+  // afresh: a reference whose pin the cached marker does not prove installs
+  // into a directory of its own rather than adopting bytes nothing checked
+  // against *its* digest.
+  const { location, installed } = resolveInstallTarget(locator);
   if (installed !== null) {
     return installed;
   }
@@ -123,7 +119,7 @@ export async function ensureInstalled(
   const isKnown = parsed !== null && isSupportedPackageManager(locator.name);
   const version = parsed?.version;
 
-  const pin = readHashPin(locator, parsed?.build);
+  const pin = readHashPin(locator.reference, parsed?.build);
   // A bad algorithm in the `packageManager` field must fail before the network,
   // not with an opaque crypto error halfway through the download (§14.11).
   //
@@ -151,6 +147,9 @@ export async function ensureInstalled(
   // §06.1 rows 2–5, decided *before* the stream opens because the digest has to
   // be taken as the bytes arrive (§16.5) and the algorithm comes from the SRI.
   const expected = await resolveExpectedIntegrity(source, pin, version);
+
+  // §15.11 — every artifact clears one verification tier before a byte moves.
+  assertVerificationTier(locator, source, pin, expected, version);
 
   // §05.5 — artifacts only. The metadata request above deliberately does not
   // prompt, which is also what makes tests 49/50 name the *tarball* URL.
@@ -431,25 +430,60 @@ async function resolveExpectedIntegrity(
   return source.shasum === undefined ? undefined : { algo: "sha1", hex: source.shasum };
 }
 
-/** §06.2 — `algo` from `build[0]`/the URL fragment, `digest` from `build[1]`. */
-function readHashPin(locator: Locator, build: string[] | undefined): HashPin {
-  if (build !== undefined) {
-    return { algo: build[0] ?? DEFAULT_HASH_ALGO, digest: build[1] };
+/**
+ * §15.11 — refuse an artifact that clears no verification tier.
+ *
+ * The three tiers are a **user-pinned hash** (`pin.digest`), a **verified
+ * registry signature** and the digest it covers, and §15.7's soft-fail onto a
+ * registry-published digest — all three of which arrive here as either
+ * `pin.digest` or `expected`. Nothing else counts: TLS says the bytes came from
+ * the host the URL named, not that the host is publishing what it published
+ * yesterday, and §06.6 records the two rows where TLS was all there was.
+ *
+ * What this actually closes:
+ *
+ * * Yarn Berry from `repo.yarnpkg.com` — a url-type registry publishes no
+ *   signatures and no digests at all (§02.5), so a version resolved from
+ *   `/tags` rather than pinned had *nothing* checking it. This is the breaking
+ *   half of §15.11: `packageManager: "yarn@4.x"` now needs a pinned hash, a
+ *   `.corepack.lock` resolution (§15.23 records one, with its integrity), or
+ *   the opt-out.
+ * * A custom `packageManager` URL with no `#<algo>.<hex>` fragment. That path
+ *   is already behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`, which permits the
+ *   *host*; §02.1's fragment is how the user says what should arrive from it.
+ *
+ * The built-in table pins a hash on `default` and on `transparent.default`
+ * (§02.5), and §04.5's `latest` lookup attaches the registry's own signed
+ * digest as a build suffix, so an unpinned `yarn`/`pnpm`/`npm` still clears a
+ * tier and this never fires for them.
+ *
+ * `COREPACK_INTEGRITY_KEYS` in {"", "0"} is honoured as an equivalent opt-out
+ * rather than as a way past this check: §06.4 defines those two values as
+ * "disable the mechanism", the variable is environment-only (§14.5), and making
+ * it refuse everything instead would turn one documented escape hatch into a
+ * second, differently-spelled failure.
+ */
+function assertVerificationTier(
+  locator: Locator,
+  source: ArtifactSource,
+  pin: HashPin,
+  expected: { algo: string; hex: string } | undefined,
+  version: string | undefined,
+): void {
+  if (pin.digest !== undefined || expected !== undefined) return;
+  if (shouldSkipIntegrityCheck()) return;
+
+  // The reference for a URL locator *is* the URL, which is the most useful
+  // thing to name; for everything else it is the plain version.
+  const shownVersion = version ?? locator.reference;
+  const origin = URL.canParse(source.url) ? new URL(source.url).origin : source.url;
+
+  if (envFlag("COREPACK_ALLOW_UNVERIFIED")) {
+    console.warn(messages.allowingUnverified(locator.name, shownVersion, origin));
+    return;
   }
 
-  // A URL reference carries the same information in its fragment:
-  // `https://example.com/yarn.js#sha256.deadbeef` (§02.1).
-  let fragment = "";
-  try {
-    fragment = new URL(locator.reference).hash.slice(1);
-  } catch {
-    // Not a URL either; there is simply no pin to read.
-  }
-
-  const dot = fragment.indexOf(".");
-  if (fragment === "") return { algo: DEFAULT_HASH_ALGO };
-  if (dot === -1) return { algo: fragment };
-  return { algo: fragment.slice(0, dot), digest: fragment.slice(dot + 1) };
+  throw new UsageError(messages.refusingUnverified(locator.name, shownVersion, origin));
 }
 
 /** §06.2 + §14.11 — constant-time, and the message format is load-bearing (§12.7). */

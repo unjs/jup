@@ -12,6 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  hashOf,
   type Fixture,
   MockRegistry,
   packageManagerTarball,
@@ -20,6 +21,13 @@ import {
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
+
+/**
+ * §15.11 — Berry from `repo.yarnpkg.com` clears a verification tier only
+ * through a pinned hash, so the rows that install one pin the digest of the
+ * bytes the mock serves.
+ */
+const BERRY = `2.2.2+sha512.${hashOf(Buffer.from(pmScript("yarn", "2.2.2"), "utf8"))}`;
 
 /** Nothing listens here; used to prove a step needed no network. */
 const DEAD = { COREPACK_NPM_REGISTRY: "http://127.0.0.1:1" };
@@ -112,7 +120,7 @@ describe("§13.9 default version and last-known-good", () => {
   });
 
   it("99: installing 2.2.2 does not move a default in another major", async () => {
-    sequence.write("package.json", `{"packageManager":"yarn@2.2.2"}\n`);
+    sequence.write("package.json", `{"packageManager":"yarn@${BERRY}"}\n`);
 
     const result = await run(["yarn", "--version"], {
       ...sequence,
@@ -141,7 +149,7 @@ describe("§13.9 default version and last-known-good", () => {
     const fixture = createFixture({});
 
     expect(
-      (await run(["install", "-g", "yarn@2.2.2"], { ...fixture, registry, env: trusted() }))
+      (await run(["install", "-g", `yarn@${BERRY}`], { ...fixture, registry, env: trusted() }))
         .exitCode,
     ).toBe(0);
     expect(lastKnownGood(fixture).yarn).toMatch(/^2\.2\.2/);
@@ -175,10 +183,20 @@ describe("§13.9 default version and last-known-good", () => {
   it("103: install -g yarn (bare) resolves the true latest, not the 1.x line", async () => {
     const fixture = createFixture({});
 
-    const result = await run(["install", "-g", "yarn"], { ...fixture, registry, env: trusted() });
+    // §15.11 redirected this row: a *bare* name resolves through Berry's
+    // `/tags` document, and `repo.yarnpkg.com` publishes neither signatures nor
+    // digests — so the version this row is about is precisely one that clears
+    // no verification tier. The opt-out keeps the row about resolution, which
+    // is its subject, and the refusal itself is covered by row 167.
+    const result = await run(["install", "-g", "yarn"], {
+      ...fixture,
+      registry,
+      env: trusted({ COREPACK_ALLOW_UNVERIFIED: "1" }),
+    });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Installing yarn@4.9.9...\n");
+    expect(result.stderr).toContain("COREPACK_ALLOW_UNVERIFIED=1");
     expect(lastKnownGood(fixture).yarn).toMatch(/^4\.9\.9/);
   });
 

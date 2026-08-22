@@ -10,7 +10,14 @@ import { dirname, join, relative, resolve } from "node:path";
 import { isSupportedPackageManager } from "./config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "./errors.ts";
-import { parseManifest, scanTopLevelFields, setNestedString, setTopLevelString } from "./json.ts";
+import {
+  detectFormat,
+  parseManifest,
+  scanTopLevelFields,
+  scanTopLevelKey,
+  setNestedString,
+  setTopLevelString,
+} from "./json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "./semver.ts";
 import type {
   Descriptor,
@@ -361,6 +368,9 @@ export function readSpecFromManifest(
   }
 
   const { name, version, onFail } = de as DevEnginesPackageManager;
+  // §15.12 — the sidecar spelling of the pin. Read here so the same `onFail`
+  // routing governs it as governs every other field of the block.
+  const integrity = (de as Record<string, unknown>).integrity;
 
   if (typeof name !== "string" || name.includes("@")) {
     warnOrThrow(messages.devEnginesBadName(name), onFail);
@@ -404,10 +414,102 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
     }
     // `packageManager` wins whenever it is present, even after a warning.
-    return { raw: pm, range, devEngines, hasPin };
+    return { raw: withSidecarIntegrity(pm, integrity, onFail), range, devEngines, hasPin };
   }
 
-  return { raw: `${name}@${version ?? "*"}`, range, devEngines, hasPin };
+  return {
+    raw: withSidecarIntegrity(`${name}@${version ?? "*"}`, integrity, onFail),
+    range,
+    devEngines,
+    hasPin,
+  };
+}
+
+/**
+ * §15.12 — fold `devEngines.packageManager.integrity` into the spec string.
+ *
+ * The sidecar exists because `<version>+<algo>.<hex>` is valid semver build
+ * metadata but stops `packageManager` round-tripping through tools that treat
+ * it as a version (#316, #726, #620). Both spellings MUST be accepted on read,
+ * and the cheapest way to *mean the same thing* is to make them literally the
+ * same thing: an SRI beside a clean `yarn@4.14.1` becomes `yarn@4.14.1+sha512.…`
+ * here, and from that point §06.1 row 1 treats it exactly as it treats a
+ * hand-written suffix — including §15.11's "a pinned hash is a verification
+ * tier".
+ *
+ * Three shapes are deliberately left alone:
+ *
+ * * a spec that already carries a build suffix — the explicit spelling wins,
+ *   and a *disagreeing* sidecar is reported through `onFail` rather than
+ *   silently discarded, because two digests for one artifact means at most one
+ *   of them describes what will run;
+ * * a range or a dist-tag, which no single digest can describe. §15.23's
+ *   `.corepack.lock` is where a range's resolved digest lives, and it records
+ *   one on the first resolve;
+ * * a URL reference, which carries its hash in the fragment (§02.1).
+ */
+function withSidecarIntegrity(raw: unknown, integrity: unknown, onFail: unknown): unknown {
+  if (integrity === undefined || integrity === null) return raw;
+  if (typeof raw !== "string") return raw;
+
+  if (typeof integrity !== "string") {
+    warnOrThrow(messages.devEnginesBadIntegrity(integrity), onFail);
+    return raw;
+  }
+
+  const hash = hashFromIntegrity(integrity);
+  if (hash === undefined) {
+    warnOrThrow(messages.devEnginesBadIntegrity(integrity), onFail);
+    return raw;
+  }
+
+  const at = raw.indexOf("@");
+  if (at <= 0) return raw;
+
+  const reference = raw.slice(at + 1);
+  const parsed = parse(reference);
+  // Not an exact version: a range, a dist-tag, or a URL. Nothing a single
+  // digest can describe, so the field is left where it is.
+  if (parsed === null) return raw;
+  const suffix = parsed.build.length === 0 ? "" : `+${parsed.build.join(".")}`;
+  // `parse` normalises (`v1.22.4` -> `1.22.4`); rewriting a reference into a
+  // different string than the manifest holds is not this function's business.
+  if (`${parsed.version}${suffix}` !== reference) return raw;
+
+  if (suffix !== "") {
+    if (parsed.build.join(".").toLowerCase() !== hash) {
+      warnOrThrow(messages.devEnginesIntegrityMismatch(raw, integrity), onFail);
+    }
+    return raw;
+  }
+
+  return `${raw.slice(0, at)}@${parsed.version}+${hash}`;
+}
+
+/**
+ * `sha512-<base64>` -> `sha512.<hex>`, the build-suffix spelling of §02.1.
+ *
+ * Duplicated from `lockfile.ts` for the same reason {@link integrityFromHash}
+ * is: `manifest.ts` is on the warm path and `lockfile.ts` is loaded only when a
+ * spec is a range, so importing it here would put it in every invocation's
+ * module graph to serve one field that almost no manifest carries. `integrity`
+ * is likewise not reached for, because it pulls `node:crypto` (§16.3); an
+ * algorithm this implementation does not support is rejected by `install` with
+ * §12's own message, and rejecting it twice would give one input two errors.
+ */
+function hashFromIntegrity(integrity: string): string | undefined {
+  const entry = integrity.trim().split(/\s+/)[0] ?? "";
+  const dash = entry.indexOf("-");
+  if (dash <= 0) return undefined;
+
+  const algo = entry.slice(0, dash).toLowerCase();
+  if (!/^[a-z][\da-z]*$/.test(algo)) return undefined;
+
+  const base64 = entry.slice(dash + 1).split("?")[0] ?? "";
+  if (!/^[\d+/A-Za-z]+={0,2}$/.test(base64)) return undefined;
+
+  const hex = Buffer.from(base64, "base64").toString("hex");
+  return hex === "" ? undefined : `${algo}.${hex}`;
 }
 
 /**
@@ -512,8 +614,8 @@ export function reconcile(
 export function writePin(
   cwd: string,
   info: { name: string; reference: string; hash?: string },
-  options?: { here?: boolean },
-): { previousPackageManager: string; target: string } {
+  options?: { here?: boolean; pinStyle?: PinStyle },
+): { previousPackageManager: string; target: string; written: string } {
   // 1 — re-run discovery: the file to edit is not necessarily in `cwd`. §15.27's
   // extra stop conditions apply here and only here, because this is the write.
   const lookup = discoverProjectSpec(cwd, { mutating: true, here: options?.here === true });
@@ -603,17 +705,34 @@ export function writePin(
   // other. A `devEngines` write that could not be made surgically falls back to
   // the top-level field: writing the pin somewhere is always better than writing
   // it nowhere and reporting success.
+  // §15.12 — `--pin-style=sidecar` moves the digest out of the version string
+  // and into `devEngines.packageManager.integrity`, creating the block when the
+  // manifest has none. The suffixed form stays the default: it is the
+  // interoperable spelling and §13 asserts it.
+  const sidecar = options?.pinStyle === "sidecar";
+
   let updated = content;
   let wroteDevEngines = false;
-  if (devEnginesTarget.write) {
-    const next = writeIntoDevEngines(updated, info);
+  if (devEnginesTarget.write || sidecar) {
+    const next = sidecar
+      ? writeSidecarPin(updated, data, info)
+      : writeIntoDevEngines(updated, info);
     if (next !== null) {
       updated = next;
       wroteDevEngines = true;
     }
   }
+  // What the pin field now holds, which is what the caller reports (§15.35l). It
+  // differs from `info.reference` only in §15.12's sidecar form, where the
+  // digest moved out of the version string and a line quoting the suffix would
+  // name a string that is nowhere in the file.
+  let written = info.reference;
   if (!devEnginesTarget.exclusive || !wroteDevEngines) {
-    updated = setTopLevelString(updated, "packageManager", `${info.name}@${info.reference}`);
+    // A sidecar write that landed is what makes the clean version *readable*
+    // again (§15.12 reads them as one pin); one that did not must keep the
+    // suffix, or the pin would be written nowhere at all.
+    if (sidecar && wroteDevEngines) written = parse(info.reference)?.version ?? info.reference;
+    updated = setTopLevelString(updated, "packageManager", `${info.name}@${written}`);
   }
 
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
@@ -623,7 +742,7 @@ export function writePin(
   // beside *this* file, not beside the cwd — in a monorepo those differ, and a
   // resolution recorded next to the wrong manifest would never be found again.
   // §15.27 also requires it to be *printed*, and printing is the caller's job.
-  return { previousPackageManager, target };
+  return { previousPackageManager, target, written };
 }
 
 /**
@@ -682,6 +801,96 @@ function devEnginesWriteTarget(
     exclusive: false,
     replacesDeclaredVersion: declaredExactVersion,
   };
+}
+
+/** §15.12 — where `use`/`up` put the digest. The suffixed form is the default. */
+export type PinStyle = "suffix" | "sidecar";
+
+/**
+ * §15.12 — write the pin as a clean version plus a sidecar `integrity`.
+ *
+ * Returns `null` when the sidecar cannot be written, in which case the caller
+ * falls back to the suffixed form: a pin written nowhere is worse than a pin
+ * written in the interoperable spelling the user did not ask for.
+ */
+function writeSidecarPin(
+  content: string,
+  data: Manifest,
+  info: { name: string; reference: string; hash?: string },
+): string | null {
+  const version = parse(info.reference)?.version;
+  if (version === undefined || info.hash === undefined) return null;
+
+  const integrity = integrityFromHash(info.hash);
+  if (integrity === undefined) return null;
+
+  const block = (data.devEngines as { packageManager?: unknown } | undefined)?.packageManager;
+
+  // No `devEngines` at all: create the block, name included — §03.3 reads
+  // `name` first and a block without one describes nothing.
+  if (!Object.hasOwn(data, "devEngines")) {
+    return createDevEnginesBlock(content, info.name, version, integrity);
+  }
+
+  // A block that is not an object, or that speaks for a different package
+  // manager, is not ours to rewrite.
+  if (typeof block !== "object" || block === null || Array.isArray(block)) return null;
+  const declaredName = (block as { name?: unknown }).name;
+  if (declaredName !== undefined && declaredName !== info.name) return null;
+
+  return writeIntoDevEngines(content, info);
+}
+
+/**
+ * Insert a whole `devEngines.packageManager` block, preserving the document's
+ * indentation, line endings and BOM.
+ *
+ * `json.ts` inserts *string* values only, which is all §15.26 ever needed. The
+ * two-step here — insert a placeholder string under the key, then swap its value
+ * span for the object literal — reuses that machinery rather than growing a
+ * JSON builder for one caller, and re-parses the result before returning it so
+ * a manifest is never left in a shape this could not read back.
+ */
+function createDevEnginesBlock(
+  content: string,
+  name: string,
+  version: string,
+  integrity: string,
+): string | null {
+  let seeded: string;
+  try {
+    seeded = setTopLevelString(content, "devEngines", "");
+  } catch {
+    return null;
+  }
+
+  const span = scanTopLevelKey(seeded, "devEngines");
+  if (span === null) return null;
+
+  // `json.ts` inserts a one-line entry into a one-line object and a
+  // freshly-indented one into a multi-line object; the value has to match, or a
+  // compact manifest gains a five-line block wedged into its single line.
+  const head = seeded.slice(0, span.start);
+  const inline = !head.slice(head.lastIndexOf("{")).includes("\n");
+
+  const { indent, eol } = detectFormat(seeded);
+  const at = (depth: number): string => indent.repeat(depth);
+  const literal = inline
+    ? JSON.stringify({ packageManager: { name, version, integrity } })
+    : `{${eol}${at(2)}"packageManager": {${eol}` +
+      `${at(3)}"name": ${JSON.stringify(name)},${eol}` +
+      `${at(3)}"version": ${JSON.stringify(version)},${eol}` +
+      `${at(3)}"integrity": ${JSON.stringify(integrity)}${eol}` +
+      `${at(2)}}${eol}${at(1)}}`;
+
+  const result = seeded.slice(0, span.start) + literal + seeded.slice(span.end);
+  try {
+    const parsed = parseManifest(result);
+    if (typeof parsed !== "object" || parsed === null) return null;
+  } catch {
+    return null;
+  }
+  return result;
 }
 
 /**

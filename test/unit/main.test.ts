@@ -74,7 +74,13 @@ function installFake(home: string, name: string, reference: string, body?: strin
 
   writeFileSync(
     join(location, ".corepack"),
-    JSON.stringify({ locator: { name, reference }, bin: spec.bin, hash: "sha512.fake" }),
+    // §15.11 — a cache hit is now checked against the pin, so a seeded install
+    // has to record the digest the reference it stands for actually names.
+    JSON.stringify({
+      locator: { name, reference },
+      bin: spec.bin,
+      hash: parse(reference)!.build.join(".") || "sha512.fake",
+    }),
   );
 
   return location;
@@ -326,7 +332,9 @@ describe("presentError — §08.4, §12.1", () => {
 
     expect(code).toBe(1);
     expect(sink.err.join("")).toBe("");
-    expect(sink.out.join("")).toBe("Usage Error: boom\n\n$ corepack use [--here] <pattern>\n");
+    expect(sink.out.join("")).toBe(
+      "Usage Error: boom\n\n$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>\n",
+    );
   });
 
   it("keeps the stack for anything that is not a UsageError", async () => {
@@ -439,8 +447,9 @@ describe("runProxy — auto-pin (tests 43, 44)", () => {
     };
     expect(manifest.packageManager).toMatch(/^yarn@/);
     // The pin is hash-bearing, and the hash is the *installed* artifact's — the
-    // fixture's marker — not the one the compiled-in default happens to carry.
-    const pinned = `${versionOf(YARN_DEFAULT)}+sha512.fake`;
+    // fixture's marker. Since §15.11 the marker must record the digest its own
+    // reference names, so for a seeded compiled-in default the two coincide.
+    const pinned = YARN_DEFAULT;
     expect(manifest.packageManager).toBe(`yarn@${pinned}`);
 
     // Verbatim, on stderr, followed by a blank line — then §15.35l's line naming

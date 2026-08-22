@@ -54,6 +54,7 @@ const ENV_KEYS = [
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
   "COREPACK_ENV_FILE",
   "COREPACK_MIGRATE_FROM",
+  "COREPACK_ALLOW_UNVERIFIED",
 ] as const;
 
 /** The origins the embedded table points at, all mapped onto `routes`. */
@@ -314,6 +315,11 @@ describe("install (§09.2, test 86)", () => {
    */
   it("does not bump last-known-good on a cold install either", async () => {
     routes["/2.2.2/packages/yarnpkg-cli/bin/yarn.js"] = { fake: "yarn" };
+    // §15.11 redirected this row: Berry from `repo.yarnpkg.com` has no
+    // signature and this fixture pins no hash, so the artifact clears no
+    // verification tier. The opt-out keeps the row about what it is about —
+    // §09.2 not touching `lastKnownGood.json` on a cold install.
+    process.env.COREPACK_ALLOW_UNVERIFIED = "1";
     await writeLastKnownGood({ yarn: "2.1.0" });
     await manifest({ packageManager: "yarn@2.2.2" });
 
@@ -702,7 +708,7 @@ describe("use (§09.5, tests 105-110)", () => {
     // appends the `Usage Error:` block to the same stream (§12.1).
     expect(stdout).toBe(`Installing yarn@1.22.4 in the project...\n`);
     expect(stderr).toBe("");
-    expect(USAGE_LINES.use).toBe("$ corepack use [--here] <pattern>");
+    expect(USAGE_LINES.use).toBe("$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>");
     expect(readManifest().packageManager).toBeUndefined();
   });
 
@@ -922,7 +928,9 @@ describe("--version, --help and dispatch (§09.9, test 146)", () => {
     for (const args of [["--help"], ["-h"], ["help"], []]) {
       stdout = "";
       await expect(runManagementCommand(args)).resolves.toBe(0);
-      expect(stdout).toContain(`corepack use [--here] <name[@<version>]>`);
+      expect(stdout).toContain(
+        `corepack use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>`,
+      );
       expect(stdout).toContain(`corepack cache clean`);
       expect(stderr).toBe("");
     }

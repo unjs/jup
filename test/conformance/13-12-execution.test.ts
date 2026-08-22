@@ -175,7 +175,12 @@ describe("§13.12 execution", () => {
     const result = await run([`evilpm@${url}`, "--version"], {
       ...fixture,
       registry,
-      env: { COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1" },
+      // §15.11 redirected this row: a bare custom URL now clears no
+      // verification tier, and the refusal would come *before* the download —
+      // leaving §14.13's containment check untested while the row still went
+      // red for the right exit code and the wrong reason. The opt-out is what
+      // keeps this row about the bin path.
+      env: { COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" },
     });
 
     expect(result.exitCode).toBe(1);

@@ -21,6 +21,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  hashOf,
   MockRegistry,
   packageManagerTarball,
   pmScript,
@@ -40,6 +41,13 @@ const BERRY = pmScript("yarn", "4.0.0");
 
 /** Where Berry's single `.js` artifact and its tag document live on any origin. */
 const BERRY_ARTIFACT = "/4.0.0/packages/yarnpkg-cli/bin/yarn.js";
+/**
+ * §15.11 — Berry's own distribution origin publishes no signature and no
+ * digest, so these rows pin the hash of the bytes every mock serves. What they
+ * assert — *which* origin was asked, and how the URL was rewritten — is
+ * untouched by the pin.
+ */
+const BERRY_PIN = `4.0.0+sha512.${hashOf(Buffer.from(BERRY, "utf8"))}`;
 const BERRY_TAGS = "/tags";
 const TAG_DOCUMENT = JSON.stringify({ aliases: { stable: "4.0.0" }, tags: ["4.0.0", "3.8.0"] });
 
@@ -74,7 +82,7 @@ beforeEach(() => {
 
 describe("§15.2 — one mirror mechanism for every source", () => {
   it("151: COREPACK_REGISTRY_YARN mirrors Yarn's own distribution origin", async () => {
-    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY_PIN}` });
 
     const result = await run(["yarn", "--version"], {
       ...fixture,
@@ -125,6 +133,12 @@ describe("§15.2 — one mirror mechanism for every source", () => {
       env: {
         COREPACK_REGISTRY_YARN: yarnMirror.origin,
         COREPACK_INTEGRITY_KEYS: trustAll(),
+        // §15.11 redirected this row: a *range* cannot carry a pin, and Berry's
+        // own origin publishes nothing to verify against, so the first resolve
+        // of `yarn@4.x` clears no tier. (§15.23's `.corepack.lock` records the
+        // digest once an install succeeds, so this is only the bootstrap run.)
+        // The row is about which origin the version list came from.
+        COREPACK_ALLOW_UNVERIFIED: "1",
       },
     });
 
@@ -138,7 +152,7 @@ describe("§15.2 — one mirror mechanism for every source", () => {
   });
 
   it("151: COREPACK_REGISTRY_YARN outranks COREPACK_NPM_REGISTRY, and only for yarn", async () => {
-    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY_PIN}` });
 
     const result = await run(["yarn", "--version"], {
       ...fixture,
@@ -284,7 +298,7 @@ describe("§15.3 — rewrite origins, not substrings", () => {
 
   it("152: a per-source override with a path prefix prepends it exactly once too", async () => {
     yarnMirror.basePath = "/mirror/yarn";
-    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
+    const fixture = createFixture({ packageManager: `yarn@${BERRY_PIN}` });
 
     const result = await run(["yarn", "--version"], {
       ...fixture,

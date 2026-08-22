@@ -494,6 +494,47 @@ export const messages = {
    */
   cannotExecute: (binPath: string, reason: string) => `Unable to execute ${binPath}: ${reason}`,
 
+  /* §15.11 — one verification tier ---------------------------------------- */
+
+  /**
+   * §15.11's refusal, byte-exact.
+   *
+   * `<source>` is the origin the artifact would have come from, because that is
+   * the thing that failed to vouch for it: `repo.yarnpkg.com` publishes no
+   * signatures at all (§06.6), and a custom URL publishes nothing by
+   * construction. TLS is not a verification tier, so neither clears one.
+   */
+  refusingUnverified: (name: string, version: string, source: string) =>
+    `Refusing to install ${name}@${version}: ${source} provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set COREPACK_ALLOW_UNVERIFIED=1.`,
+
+  /**
+   * The opt-out's warning half. §15.11 requires the escape hatch to be loud:
+   * a per-run downgrade that printed nothing would be indistinguishable from
+   * the verified path it replaces.
+   */
+  allowingUnverified: (name: string, version: string, source: string) =>
+    `! Installing ${name}@${version} from ${source} with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)`,
+
+  /* §15.12 — the sidecar integrity ---------------------------------------- */
+
+  /**
+   * `devEngines.packageManager.integrity` that is not an SRI string this
+   * implementation can turn into a build-suffix hash. Routed through `onFail`
+   * like every other `devEngines` complaint (§03.3): a pin nobody can check is
+   * exactly the state §15.11 exists to refuse, so silence is the wrong default.
+   */
+  devEnginesBadIntegrity: (value: unknown) =>
+    `Invalid "devEngines.packageManager.integrity" field: ${JSON.stringify(value) ?? String(value)}`,
+
+  /**
+   * Both spellings of the pin are present and they disagree. §15.12 requires
+   * both forms to be *accepted*; it does not make one silently outrank a
+   * conflicting other, and two different digests for one artifact means at most
+   * one of them describes what will run.
+   */
+  devEnginesIntegrityMismatch: (packageManager: string, integrity: string) =>
+    `The "packageManager" field (${packageManager}) and "devEngines.packageManager.integrity" (${integrity}) pin different hashes`,
+
   /* §14.5 — env-file eligibility ------------------------------------------ */
 
   ignoringEnvVar: (name: string, path: string) =>

@@ -36,7 +36,7 @@ import {
   usesLockfile,
   writeResolution,
 } from "./lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec, writePin } from "./manifest.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec, type PinStyle, writePin } from "./manifest.ts";
 import { resolveDescriptor, type ResolveOptions } from "./resolve.ts";
 import { isValidRange, isValidVersion, major, parse } from "./semver.ts";
 import {
@@ -507,13 +507,14 @@ async function installFromArchive(
 
 /** §09.4 — the two-step resolve is what confines the update to the current major line. */
 export async function cmdUp(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, { booleans: ["--here"] });
+  const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
   if (parsed.positionals.length > 0) {
     throw new UsageError(`The 'corepack up' command takes no arguments`);
   }
 
   // §15.27 — `--here` reads and writes `cwd`'s own manifest, ignoring the walk.
   const here = hasFlag(parsed, "--here");
+  const pinStyle = readPinStyle(parsed);
   const { descriptor, lookup } = resolveProjectSpec(false, { mutating: true, here });
   const { name, range } = descriptor;
 
@@ -575,7 +576,7 @@ export async function cmdUp(args: string[]): Promise<number> {
   }
   if (highest === null) throw new UsageError(messages.upNoHighest(name, line));
 
-  return pinToProject(highest, { here });
+  return pinToProject(highest, { here, pinStyle });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -584,7 +585,7 @@ export async function cmdUp(args: string[]): Promise<number> {
 
 /** §09.5 — writes the pin, then runs the package manager's `use` command. */
 export async function cmdUse(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, { booleans: ["--here"] });
+  const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
   const [pattern, ...extra] = parsed.positionals;
   if (pattern === undefined) {
     throw new UsageError(`The 'corepack use' command requires a package manager pattern`);
@@ -593,13 +594,16 @@ export async function cmdUse(args: string[]): Promise<number> {
     throw new UsageError(`The 'corepack use' command accepts a single package manager pattern`);
   }
 
+  // Read before anything is resolved or downloaded: see {@link readPinStyle}.
+  const pinStyle = readPinStyle(parsed);
+
   const descriptor = parseSpec(pattern, CLI_SOURCE, { requireVersion: false });
   // `useCache: false`: `corepack use yarn@stable` must ask what stable means
   // today, not what is lying around in the store.
   const resolved = await resolveOrThrow(descriptor, { allowTags: true, useCache: false });
 
   // §15.27 — `--here` mutates `cwd`'s own manifest, creating it if absent.
-  return pinToProject(resolved, { here: hasFlag(parsed, "--here") });
+  return pinToProject(resolved, { here: hasFlag(parsed, "--here"), pinStyle });
 }
 
 /**
@@ -654,9 +658,12 @@ async function applyToProject(
 }
 
 /** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */
-function pinToProject(locator: Locator, options?: { here?: boolean }): Promise<number> {
+function pinToProject(
+  locator: Locator,
+  options?: { here?: boolean; pinStyle?: PinStyle },
+): Promise<number> {
   return applyToProject(locator, (reference, spec) => {
-    const { previousPackageManager, target } = writePin(
+    const { previousPackageManager, target, written } = writePin(
       process.cwd(),
       { name: locator.name, reference, hash: spec.hash },
       options,
@@ -666,7 +673,10 @@ function pinToProject(locator: Locator, options?: { here?: boolean }): Promise<n
     // did not expect" class (#607) is a walk the user could not see, and this is
     // the line that makes it visible; it prints *after* the write, so it can
     // never claim a change that did not happen.
-    out(`${messages.updatedManifest(target, locator.name, reference)}\n`);
+    // §15.12 — `written`, not `reference`: under `--pin-style=sidecar` the field
+    // holds a clean version and the digest lives beside it, and a line claiming
+    // otherwise would name a string that is nowhere in the file.
+    out(`${messages.updatedManifest(target, locator.name, written)}\n`);
 
     // §15.23 — the field now names one exact version, so any resolution recorded
     // for the range it replaced answers a question nobody asks any more. Left
@@ -678,6 +688,23 @@ function pinToProject(locator: Locator, options?: { here?: boolean }): Promise<n
 
     return previousPackageManager;
   });
+}
+
+/**
+ * §15.12 — `--pin-style=suffix` (the default) or `--pin-style=sidecar`.
+ *
+ * Validated here rather than in `writePin` so a typo fails before the install
+ * runs and the banner is printed: a mutating command that has already
+ * downloaded and announced a version, then rejects its own flag, is the worst
+ * possible order to discover a typo in.
+ */
+function readPinStyle(parsed: ParsedArgs): PinStyle | undefined {
+  const value = firstValue(parsed, "--pin-style");
+  if (value === undefined) return undefined;
+  if (value !== "suffix" && value !== "sidecar") {
+    throw new UsageError(`Option "--pin-style" accepts only "suffix" or "sidecar"`);
+  }
+  return value;
 }
 
 /**

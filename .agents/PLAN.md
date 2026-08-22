@@ -721,7 +721,7 @@ headroom, not a package-manager addition: §15.21 and §15.28 both require maint
 consent before anything is added to the table, and pnpm's maintainers have publicly
 disavowed corepack while Bun's have declined. Build the capability; add no entries.
 
-### P12 — One verification tier §15.11
+### P12 — One verification tier §15.11 — **done**
 
 Add to its scope, found while tracing P6: **a cache hit never checks the marker's
 hash against the pin's digest.** §07.2 makes the store directory the plain semver
@@ -738,6 +738,44 @@ must clear a pinned hash, a verified registry signature, or a verified detached 
 with `COREPACK_ALLOW_UNVERIFIED=1` as the per-run opt-out. Sequenced last because it is a
 **breaking** change for anyone resolving Yarn Berry dynamically, and it wants the rest of
 phase 2 settled underneath it.
+
+**What landed.** The refusal is in `install.ts`, decided before the stream opens, from
+the two things §06 already computes: the reference's own pin and the digest the registry
+vouched for. §15.7's soft-fail counts as a tier (it warns, and
+`COREPACK_REQUIRE_SIGNATURES=1` still hardens it); TLS does not. `COREPACK_INTEGRITY_KEYS`
+in `{"", "0"}` is honoured as an equivalent opt-out rather than as a second, differently
+spelled failure. The cache-hit half went where §04.1 step 4 actually answers: **the pin is
+stripped from the locator by `resolveExactPin`/step 4 before anything reads a marker**, so
+enforcing only in `readInstalledSpec` was dead code. `findInstalledVersion` now proves the
+pin, which turns §14.1's `stat` into a read of the same file and adds nothing else; on a
+mismatch the artifact installs into a **pin-qualified** directory, `<version>+<algo>.<hex>`
+— refusing outright would have broken the legitimate collision (the table's sha1 defaults
+against a `use`-written sha512) whose only remedy is wiping the cache.
+
+**Sequel to the "tests that cannot distinguish" lesson.** Three separate fixtures wrote a
+marker whose `hash` contradicted the reference in the same marker. Two are fixed
+(`test/conformance/_harness/fixtures.ts`, `seedInstalled` in `test/unit/resolve.test.ts`);
+`installFake` in `test/unit/main.test.ts` is the third and was left alone because that file
+was contended this session — **six rows there are red until it takes a three-line patch**,
+written out in the P12 handoff note.
+
+**Carried follow-ups from P12:**
+
+* `--pin-style` is missing from `src/usage.ts`'s `USAGE_LINES` and `HELP_TEXT`, and §15.11
+  is missing from `README.md`; both files were contended. Wording for both is in the
+  handoff note.
+* Yarn Berry now needs a pinned hash, `COREPACK_NPM_REGISTRY`, or one
+  `COREPACK_ALLOW_UNVERIFIED=1` bootstrap run. The lockfile story works end to end on the
+  built binary: one opt-out run records `integrity` in `.corepack.lock`, and every later
+  run — including from a cold store — verifies against it with no opt-out.
+* **Bare `yarn` with `COREPACK_DEFAULT_TO_LATEST=1` fails online**, and not because of
+  §15.11: npm signs the `yarn` packument's `latest` with keyid `SHA256:jl3bws…`, which
+  npm's own `/-/npm/v1/keys` marks `expires: 2025-01-29`. §06.5 is implemented strictly,
+  §15.9's refresh is **not implemented at all**, and refreshing would not help — the key is
+  expired at the source. Either §15.9 lands with §14.4's lenient branch
+  (`ACCEPT_EXPIRED_KEY_WITH_WARNING`, one flag in `integrity.ts`, currently `false` because
+  §13 test 82 wants the strict answer), or that spec conflict gets resolved. `npm` and
+  `pnpm` are unaffected; `COREPACK_DEFAULT_TO_LATEST=0` is unaffected.
 
 ## Not in scope, deliberately
 §15.34 records four requests corepack's maintainers declined and §15 **adopts** those
