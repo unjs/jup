@@ -128,7 +128,7 @@ export function targetBinaries(names: string[]): string[] {
  * bundler may emit chunks into a subdirectory (obuild uses `dist/_chunks/`), in
  * which case this file's neighbour is not the entry.
  */
-export function resolveDistFolder(): string {
+function resolveDistFolder(): string {
   return findEntryModule(import.meta.url)?.directory ?? dirname(fileURLToPath(import.meta.url));
 }
 

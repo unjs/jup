@@ -7,32 +7,28 @@ import { dirname } from "node:path";
 import {
   getDefinition,
   getPackageManagerFor,
-  getSpecFor,
+  getSpecUrl,
+  getTableSpec,
   isSupportedPackageManager,
 } from "./config/table.ts";
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
-import { discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
 import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
-import { parse } from "./semver.ts";
-import { readInstalledSpec } from "./store.ts";
+import { readInstalledSpec, referenceWithHash } from "./store.ts";
 import type {
   Descriptor,
   InstallSpec,
   Invocation,
   LazyLocator,
   Locator,
-  PackageManagerSpec,
   SpecResult,
 } from "./types.ts";
 import { GENERIC_USAGE_LINE, USAGE_LINES } from "./usage.ts";
 
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
 const ARG0_RE = /^([^@]*)(?:@(.*))?$/;
-
-/** §03.4 — the `source` reported for anything the user typed on the command line. */
-const CLI_SOURCE = "CLI arguments";
 
 /**
  * §01.2 — match `arg0` against `/^([^@]*)(?:@(.*))?$/`.
@@ -294,7 +290,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // A download rewrites `locator.reference` itself; a cache hit does not, so the
   // marker's recorded hash supplies the same suffix. Both paths therefore pin
   // exactly the artifact that is on disk.
-  const reference = withHash(locator.reference, installSpec.hash);
+  const reference = referenceWithHash(locator.reference, installSpec.hash);
 
   process.stderr.write(
     `${messages.autoPinNotice(locator.name, reference)}\n${messages.autoPinDocs()}\n\n`,
@@ -303,39 +299,6 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
   writePin(dirname(specResult.target), { name: locator.name, reference });
-}
-
-/** `1.22.22` + `sha512.abc` → `1.22.22+sha512.abc`; an existing suffix is kept. */
-function withHash(reference: string, hash: string): string {
-  const parsed = parse(reference);
-  if (parsed === null || parsed.build.length > 0) return reference;
-  return `${parsed.version}+${hash}`;
-}
-
-/**
- * §08.1 — the package manager spec's **download URL**, with `{}` substituted.
- *
- * `exec.ts` needs the whole URL, not just its extension: a `bin` *list* resolves
- * to `<location>/<basename of the URL path>`. A URL reference is its own spec
- * URL, exactly as §07.3 treats it.
- */
-function getSpecUrl(locator: Locator): string {
-  const parsed = parse(locator.reference);
-  const spec = getTableSpec(locator);
-  if (spec !== undefined) {
-    return spec.url.replace("{}", parsed!.version);
-  }
-  return locator.reference;
-}
-
-/**
- * The embedded table's spec for this locator, or `undefined` when there is none
- * — an unknown package manager, or a URL reference, which is its own spec.
- */
-function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
-  const parsed = parse(locator.reference);
-  if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
-  return getSpecFor(locator.name, parsed.version);
 }
 
 /** Everything that is not a `UsageError` keeps its stack (§08.4). */

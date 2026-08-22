@@ -55,12 +55,6 @@ export interface CorepackMarker {
   hash: string;
 }
 
-/** §02.1 — a reference's build-metadata suffix, split into algorithm and digest. */
-export interface HashSuffix {
-  algo: string;
-  digest?: string;
-}
-
 /* -------------------------------------------------------------------------- */
 /* Registry specs — §02.2                                                     */
 /* -------------------------------------------------------------------------- */

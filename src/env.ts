@@ -10,25 +10,6 @@ import { resolve } from "node:path";
 import { parseEnv } from "node:util";
 import { messages } from "./errors.ts";
 
-/** §11 — every variable the tool reads, so the whole block is read in one pass. */
-export const ENV_VARS = [
-  "COREPACK_ENABLE_PROJECT_SPEC",
-  "COREPACK_ENABLE_STRICT",
-  "COREPACK_ENABLE_AUTO_PIN",
-  "COREPACK_DEFAULT_TO_LATEST",
-  "COREPACK_ENABLE_NETWORK",
-  "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
-  "COREPACK_ENABLE_DOWNLOAD_PROMPT",
-  "COREPACK_ENV_FILE",
-  "COREPACK_HOME",
-  "COREPACK_NPM_REGISTRY",
-  "COREPACK_NPM_TOKEN",
-  "COREPACK_NPM_USERNAME",
-  "COREPACK_NPM_PASSWORD",
-  "COREPACK_INTEGRITY_KEYS",
-  "COREPACK_NODE_EXECPATH",
-] as const;
-
 /**
  * §03.2 — the prefix filter is the entire sandbox against a hostile repository.
  * Keys without it (`HTTP_PROXY`, `PATH`, `NODE_OPTIONS`, …) are dropped before

@@ -142,6 +142,26 @@ export function writeMarker(dir: string, marker: CorepackMarker): void {
 }
 
 /**
+ * §07.6 step 3 — the reference that goes into `package.json` and the store's
+ * bookkeeping, carrying the hash of the bytes we actually have.
+ *
+ * `ensureInstalled` rewrites `locator.reference` on the download path, but the
+ * warm path returns from the `.corepack` marker without touching it, so the hash
+ * has to be re-attached here. The installed artifact's hash always wins:
+ * composing the result from `parse().version` rather than appending means a
+ * reference that already carries a suffix is rewritten, not grown a second one.
+ *
+ * It lives here because both callers — `main`'s auto-pin (§03.6) and the four
+ * `cli` commands that record a reference (§09) — already sit above `store`, and
+ * `main` must not import `cli`.
+ */
+export function referenceWithHash(reference: string, hash: string): string {
+  const parsed = parse(reference);
+  // A URL reference keeps its own `#algo.digest` notation and is never rewritten.
+  return parsed === null ? reference : `${parsed.version}+${hash}`;
+}
+
+/**
  * `mkdir -p`, mapping the one filesystem failure users actually hit to §12.8's
  * message. `target` names the directory reported to the user (§07.8).
  */
@@ -435,5 +455,3 @@ export function resolveBin(
 export function cacheClean(): void {
   rmSync(getInstallFolder(), { recursive: true, force: true });
 }
-
-export type { InstallSpec };

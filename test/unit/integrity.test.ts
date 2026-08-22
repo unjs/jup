@@ -1,10 +1,9 @@
 import { createHash, generateKeyPairSync, type KeyObject, sign } from "node:crypto";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../../src/errors.ts";
 import {
   assertSupportedAlgo,
   compareDigest,
-  expectedHashFromIntegrity,
   hashStream,
   parseSri,
   shouldSkipIntegrityCheck,
@@ -313,12 +312,10 @@ describe("parseSri — §14.12", () => {
     );
   });
 
-  it("exposes the hex digest through expectedHashFromIntegrity", () => {
+  it("exposes the hex digest of a verified SRI string", () => {
     const digest = createHash("sha512").update("hello").digest();
 
-    expect(expectedHashFromIntegrity(`sha512-${digest.toString("base64")}`)).toBe(
-      digest.toString("hex"),
-    );
+    expect(parseSri(`sha512-${digest.toString("base64")}`).hex).toBe(digest.toString("hex"));
   });
 });
 
@@ -334,6 +331,17 @@ describe("assertSupportedAlgo — §14.11", () => {
     expect(() => assertSupportedAlgo("blake3")).toThrow(
       "Unsupported hash algorithm 'blake3' in the packageManager field",
     );
+  });
+
+  it("stays quiet for an algorithm the user did not choose (§06.2)", () => {
+    // Every embedded default is sha1 (§02.5), so an unconditional warning means
+    // a plain `yarn` in an unpinned directory scolds the user about a hash we
+    // picked. §06.2 scopes the warning to a `packageManager` field.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(assertSupportedAlgo("sha1")).toBe("sha1");
+
+    expect(warn).not.toHaveBeenCalled();
   });
 });
 

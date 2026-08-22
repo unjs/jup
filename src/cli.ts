@@ -18,13 +18,18 @@ import { createReadStream, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, join, relative, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
-import { getSpecFor, isSupportedPackageManager, SUPPORTED_NAMES } from "./config/table.ts";
+import {
+  getSpecUrl,
+  getTableSpec,
+  isSupportedPackageManager,
+  SUPPORTED_NAMES,
+} from "./config/table.ts";
 import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
 import { ensureInstalled } from "./install.ts";
-import { discoverProjectSpec, parseSpec, writePin } from "./manifest.ts";
+import { CLI_SOURCE, discoverProjectSpec, parseSpec, writePin } from "./manifest.ts";
 import { resolveDescriptor, type ResolveOptions } from "./resolve.ts";
-import { isValidRange, isValidVersion, major, parse } from "./semver.ts";
+import { isValidRange, isValidVersion, major } from "./semver.ts";
 import {
   cacheClean,
   createTempDir,
@@ -32,18 +37,15 @@ import {
   MARKER_NAME,
   promote,
   readLastKnownGood,
+  referenceWithHash,
   writeLastKnownGood,
 } from "./store.ts";
 import { create, extract, listEntries } from "./tar.ts";
-import type { Descriptor, InstallSpec, Locator } from "./types.ts";
-
-/** §03.4 — the `source` reported for anything the user typed on the command line. */
-const CLI_SOURCE = "CLI arguments";
+import type { Descriptor, Locator } from "./types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
 
-export { USAGE_LINES } from "./usage.ts";
 import { HELP_TEXT } from "./usage.ts";
 import { getOwnRoot } from "./self.ts";
 
@@ -86,32 +88,6 @@ function setLastKnownGood(name: string, reference: string): void {
   lkg[name] = reference;
   // Swallows `EROFS` itself (§07.8): recording a default must never fail a run.
   writeLastKnownGood(lkg);
-}
-
-/**
- * §07.6 step 3 — the reference that goes into `package.json` and the store's
- * bookkeeping, carrying the hash of the bytes we actually have.
- *
- * `ensureInstalled` rewrites `locator.reference` on the download path, but the
- * warm path returns from the `.corepack` marker without touching it, so the hash
- * has to be re-attached here. Composing it from `parse().version` (rather than
- * appending) also makes it idempotent: a reference that already carries a suffix
- * never grows a second one.
- */
-function referenceWithHash(locator: Locator, spec: InstallSpec): string {
-  const parsed = parse(locator.reference);
-  // A URL reference keeps its own `#algo.digest` notation and is never rewritten.
-  return parsed === null ? locator.reference : `${parsed.version}+${spec.hash}`;
-}
-
-/**
- * §08.1 — the package manager spec's **download URL**, with `{}` substituted.
- *
- * `exec.ts` needs the whole URL, not just its extension: a `bin` *list* resolves
- * to `<location>/<basename of the URL path>`.
- */
-function getSpecUrl(name: string, version: string): string {
-  return getSpecFor(name, version).url.replace("{}", version);
 }
 
 function fileStream(path: string): ReadableStream<Uint8Array> {
@@ -350,7 +326,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
     );
 
     const spec = await ensureInstalled(locator, { cacheOnly });
-    if (!cacheOnly) setLastKnownGood(locator.name, referenceWithHash(locator, spec));
+    if (!cacheOnly) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }
 
   return 0;
@@ -543,18 +519,15 @@ async function pinToProject(locator: Locator): Promise<number> {
   out(`${messages.installingInProject(locator.name, locator.reference)}\n`);
 
   const spec = await ensureInstalled(locator);
-  const reference = referenceWithHash(locator, spec);
+  const reference = referenceWithHash(locator.reference, spec.hash);
 
   // §03.7 — may throw a `UsageError` through `warnOrThrow`; the banner above is
   // already on stdout, which is exactly what §09.5 describes.
   const { previousPackageManager } = writePin(process.cwd(), { name: locator.name, reference });
 
-  const parsed = parse(reference);
   // A URL reference has no table band, so it has no `commands.use` either.
-  const tableSpec =
-    parsed === null || !isSupportedPackageManager(locator.name)
-      ? undefined
-      : getSpecFor(locator.name, parsed.version);
+  const pinned: Locator = { name: locator.name, reference };
+  const tableSpec = getTableSpec(pinned);
   const useCommand = tableSpec?.commands?.use;
 
   if (useCommand === undefined || useCommand.length === 0) return 0;
@@ -570,7 +543,7 @@ async function pinToProject(locator: Locator): Promise<number> {
     useCommand[0]!,
     spec,
     useCommand.slice(1),
-    getSpecUrl(locator.name, parsed!.version),
+    getSpecUrl(pinned),
     // §08.1 — `installSpec.bin ?? spec.bin`; the marker may predate `bin`.
     tableSpec?.bin,
   );
@@ -601,7 +574,7 @@ export async function cmdPack(args: string[]): Promise<number> {
 
     // §09.6 — `pack` updates last-known-good as a side effect, intentionally:
     // you pack what you intend to run.
-    setLastKnownGood(locator.name, referenceWithHash(locator, spec));
+    setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }
 
   const output = resolvePath(
@@ -705,7 +678,7 @@ export async function cmdPrepare(args: string[]): Promise<number> {
 
     const spec = await ensureInstalled(locator, { cacheOnly: !activate });
     locations.push(spec.location);
-    if (activate) setLastKnownGood(locator.name, referenceWithHash(locator, spec));
+    if (activate) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }
 
   // §09.10 — `--output` tolerates a bare flag, defaulting to `corepack.tgz`.

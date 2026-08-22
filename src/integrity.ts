@@ -55,12 +55,20 @@ const warnedWeakAlgos = new Set<string>();
  */
 const ACCEPT_EXPIRED_KEY_WITH_WARNING: boolean = false;
 
-export function assertSupportedAlgo(algo: string): HashAlgo {
+/**
+ * @param userPinned Whether this algorithm came from the project's own
+ * `packageManager` field. §06.2/§14.11 scope the weak-algorithm warning to a
+ * *pin*, and that scoping is load-bearing: the embedded table's own defaults are
+ * sha1 (§02.5), so warning unconditionally means every default install scolds the
+ * user about a hash we chose and they cannot change. A warning nobody can act on
+ * is noise, and noise is how real warnings get ignored.
+ */
+export function assertSupportedAlgo(algo: string, userPinned = false): HashAlgo {
   const normalized = algo.toLowerCase();
   if (!(SUPPORTED_HASH_ALGOS as readonly string[]).includes(normalized)) {
     throw new UsageError(messages.unsupportedHashAlgo(algo));
   }
-  if (WEAK_HASH_ALGOS.has(normalized) && !warnedWeakAlgos.has(normalized)) {
+  if (userPinned && WEAK_HASH_ALGOS.has(normalized) && !warnedWeakAlgos.has(normalized)) {
     warnedWeakAlgos.add(normalized);
     console.warn(
       `! Corepack integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
@@ -125,11 +133,6 @@ export function parseSri(integrity: string): { algo: HashAlgo; hex: string } {
   }
 
   return { algo, hex: digest.toString("hex") };
-}
-
-/** §06.3 — the expected hex digest carried by a (verified) SRI string. */
-export function expectedHashFromIntegrity(integrity: string): string {
-  return parseSri(integrity).hex;
 }
 
 /** §14.11 — constant-time. */

@@ -25,6 +25,7 @@ import {
   promote,
   readLastKnownGood,
   readMarker,
+  referenceWithHash,
   resolveBin,
   writeLastKnownGood,
   writeMarker,
@@ -176,6 +177,25 @@ describe("readMarker / writeMarker — §07.2", () => {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, ".corepack"), "{ truncated");
     expect(() => readMarker(dir)).toThrow(SyntaxError);
+  });
+});
+
+describe("referenceWithHash — §07.6 step 3", () => {
+  it("attaches the installed artifact's hash to a bare version", () => {
+    expect(referenceWithHash("4.1.0", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
+  });
+
+  it("replaces an existing suffix rather than keeping it or appending a second", () => {
+    // §07.6 — the hash of the bytes actually on disk always wins, so a stale
+    // suffix carried in from `lastKnownGood.json` or the embedded table's
+    // `default` is overwritten, never doubled up.
+    expect(referenceWithHash("4.1.0+sha1.stale", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
+    expect(referenceWithHash("1.22.22+sha512.same", "sha512.same")).toBe("1.22.22+sha512.same");
+  });
+
+  it("leaves a URL reference alone — it carries its own `#algo.digest`", () => {
+    const url = "https://example.com/yarn.js#sha224.abcd";
+    expect(referenceWithHash(url, "sha512.other")).toBe(url);
   });
 });
 

@@ -23,38 +23,25 @@ export interface SemVer {
 // Grammar
 // --------------------------------------------------------------------------
 
-/** `<major>` in strict mode: no leading zeroes. */
-const NUM_STRICT = String.raw`0|[1-9]\d*`;
-const NUM_LOOSE = String.raw`\d+`;
+/** `<major>`: no leading zeroes. */
+const NUM = String.raw`0|[1-9]\d*`;
 
 /** One dot-separated prerelease identifier. */
-const PRE_ID_STRICT = String.raw`(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)`;
-const PRE_ID_LOOSE = String.raw`(?:[0-9a-zA-Z-]+)`;
+const PRE_ID = String.raw`(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)`;
 
 const BUILD = String.raw`[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*`;
 
-function fullPattern(loose: boolean): RegExp {
-  const n = loose ? NUM_LOOSE : NUM_STRICT;
-  const p = loose ? PRE_ID_LOOSE : PRE_ID_STRICT;
-  return new RegExp(
-    String.raw`^[v=]*(${n})\.(${n})\.(${n})(?:-(${p}(?:\.${p})*))?(?:\+(${BUILD}))?$`,
-  );
-}
+const FULL_RE = new RegExp(
+  String.raw`^[v=]*(${NUM})\.(${NUM})\.(${NUM})(?:-(${PRE_ID}(?:\.${PRE_ID})*))?(?:\+(${BUILD}))?$`,
+);
+
+/** `<major>` with the wildcard spellings a range may use in its place. */
+const NUM_OR_X = String.raw`(?:${NUM}|x|X|\*)`;
 
 /** A version with optional trailing wildcards, as used inside ranges. */
-function partialPattern(loose: boolean): RegExp {
-  const n = loose ? NUM_LOOSE : NUM_STRICT;
-  const x = String.raw`(?:${n}|x|X|\*)`;
-  const p = loose ? PRE_ID_LOOSE : PRE_ID_STRICT;
-  return new RegExp(
-    String.raw`^[v=]*(${x})(?:\.(${x}))?(?:\.(${x}))?(?:-(${p}(?:\.${p})*))?(?:\+(${BUILD}))?$`,
-  );
-}
-
-const FULL_STRICT = fullPattern(false);
-const FULL_LOOSE = fullPattern(true);
-const PARTIAL_STRICT = partialPattern(false);
-const PARTIAL_LOOSE = partialPattern(true);
+const PARTIAL_RE = new RegExp(
+  String.raw`^[v=]*(${NUM_OR_X})(?:\.(${NUM_OR_X}))?(?:\.(${NUM_OR_X}))?(?:-(${PRE_ID}(?:\.${PRE_ID})*))?(?:\+(${BUILD}))?$`,
+);
 
 const OPERATOR_RE = /^(<=|>=|<|>|=)?([^\s<>=]*)$/;
 
@@ -111,16 +98,11 @@ function makeSemVer(
  * from `version`, since it takes no part in comparison.
  */
 export function parse(version: string): SemVer | null {
-  return parseVersion(version, false);
-}
-
-/** Internal: `parse` with the loose flag threaded through from range parsing. */
-function parseVersion(version: string, loose: boolean): SemVer | null {
   if (typeof version !== "string") return null;
   const trimmed = version.trim();
   if (trimmed.length === 0 || trimmed.length > 256) return null;
 
-  const match = (loose ? FULL_LOOSE : FULL_STRICT).exec(trimmed);
+  const match = FULL_RE.exec(trimmed);
   if (!match) return null;
 
   const major = toNumber(match[1]!);
@@ -237,8 +219,8 @@ function isWildcard(raw: string | undefined): boolean {
   return raw === undefined || raw === "x" || raw === "X" || raw === "*";
 }
 
-function parsePartial(value: string, loose: boolean): Partial | null {
-  const match = (loose ? PARTIAL_LOOSE : PARTIAL_STRICT).exec(value);
+function parsePartial(value: string): Partial | null {
+  const match = PARTIAL_RE.exec(value);
   if (!match) return null;
 
   if (isWildcard(match[1])) {
@@ -352,9 +334,9 @@ function tildeComparators(p: Partial): ComparatorSet {
 }
 
 /** `1.2.3 - 2.3.4` → `>=1.2.3 <=2.3.4`, with partial bounds widened. */
-function hyphenComparators(from: string, to: string, loose: boolean): ComparatorSet | null {
-  const low = parsePartial(from, loose);
-  const high = parsePartial(to, loose);
+function hyphenComparators(from: string, to: string): ComparatorSet | null {
+  const low = parsePartial(from);
+  const high = parsePartial(to);
   if (!low || !high) return null;
 
   const set: ComparatorSet = [];
@@ -373,12 +355,12 @@ function hyphenComparators(from: string, to: string, loose: boolean): Comparator
   return set.length > 0 ? set : [ANY];
 }
 
-function parseComparatorToken(token: string, loose: boolean): ComparatorSet | null {
+function parseComparatorToken(token: string): ComparatorSet | null {
   const head = token[0];
   if (head === "^" || head === "~") {
     // `~>1.2.3` is the same as `~1.2.3`.
     const rest = token.slice(head === "~" && token[1] === ">" ? 2 : 1);
-    const p = parsePartial(rest, loose);
+    const p = parsePartial(rest);
     if (!p) return null;
     return head === "^" ? caretComparators(p) : tildeComparators(p);
   }
@@ -391,12 +373,12 @@ function parseComparatorToken(token: string, loose: boolean): ComparatorSet | nu
   // A bare operator (`>`) carries no constraint, matching node-semver.
   if (rest.length === 0) return [ANY];
 
-  const p = parsePartial(rest, loose);
+  const p = parsePartial(rest);
   if (!p) return null;
   return xRangeComparators(op, p);
 }
 
-function parseComparatorSet(input: string, loose: boolean): ComparatorSet | null {
+function parseComparatorSet(input: string): ComparatorSet | null {
   // Detach operators from their operand (`>= 1.2.3`) and normalise whitespace.
   const normalized = input.replaceAll(/(?<=[<>]=?|[~^]|=)\s+/g, "").trim();
   if (normalized.length === 0) return [ANY];
@@ -405,12 +387,12 @@ function parseComparatorSet(input: string, loose: boolean): ComparatorSet | null
   const hyphenAt = tokens.indexOf("-");
   if (hyphenAt !== -1) {
     if (tokens.length !== 3 || hyphenAt !== 1) return null;
-    return hyphenComparators(tokens[0]!, tokens[2]!, loose);
+    return hyphenComparators(tokens[0]!, tokens[2]!);
   }
 
   const set: ComparatorSet = [];
   for (const token of tokens) {
-    const comparators = parseComparatorToken(token, loose);
+    const comparators = parseComparatorToken(token);
     if (!comparators) return null;
     set.push(...comparators);
   }
@@ -421,16 +403,15 @@ const RANGE_CACHE = new Map<string, Range | null>();
 const RANGE_CACHE_LIMIT = 256;
 
 /** Parse a range into a union of comparator sets. `null` when malformed. */
-function parseRange(range: string, loose = false): Range | null {
+function parseRange(range: string): Range | null {
   if (typeof range !== "string") return null;
 
-  const key = loose ? `~${range}` : range;
-  const cached = RANGE_CACHE.get(key);
+  const cached = RANGE_CACHE.get(range);
   if (cached !== undefined) return cached;
 
   let parsed: Range | null = [];
   for (const part of range.split("||")) {
-    const set = parseComparatorSet(part, loose);
+    const set = parseComparatorSet(part);
     if (!set) {
       parsed = null;
       break;
@@ -439,7 +420,7 @@ function parseRange(range: string, loose = false): Range | null {
   }
 
   if (RANGE_CACHE.size >= RANGE_CACHE_LIMIT) RANGE_CACHE.clear();
-  RANGE_CACHE.set(key, parsed);
+  RANGE_CACHE.set(range, parsed);
   return parsed;
 }
 
@@ -504,11 +485,11 @@ export function satisfies(version: string, range: string): boolean {
  * behaviour corepack explicitly rejected. A user pinning `yarn@4.0.0-rc.1` must
  * still land in the `>=2.0.0` band.
  */
-export function satisfiesWithPrereleases(version: string, range: string, loose?: boolean): boolean {
-  const parsedRange = parseRange(range, loose);
+export function satisfiesWithPrereleases(version: string, range: string): boolean {
+  const parsedRange = parseRange(range);
   if (!parsedRange) return false;
   if (!version) return false;
-  const parsed = parseVersion(version, loose === true);
+  const parsed = parse(version);
   if (!parsed) return false;
 
   const v = stripPrerelease(parsed);

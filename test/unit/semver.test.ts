@@ -351,9 +351,4 @@ describe("satisfiesWithPrereleases (lenient — strips prereleases from both sid
     expect(satisfiesWithPrereleases(undefined as unknown as string, "*")).toBe(false);
     expect(satisfiesWithPrereleases("1.2.3", "latest")).toBe(false);
   });
-
-  it("accepts sloppier input in loose mode", () => {
-    expect(satisfiesWithPrereleases("01.2.3", ">=1.0.0")).toBe(false);
-    expect(satisfiesWithPrereleases("01.2.3", ">=1.0.0", true)).toBe(true);
-  });
 });

@@ -8,7 +8,7 @@
 
 import { open, rm } from "node:fs/promises";
 import { join, posix } from "node:path";
-import { getSpecFor, isSupportedPackageManager } from "./config/table.ts";
+import { getSpecFor, isEmbeddedReference, isSupportedPackageManager } from "./config/table.ts";
 import { envFlag } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { httpGet } from "./http.ts";
@@ -98,7 +98,14 @@ export async function ensureInstalled(
   const pin = readHashPin(locator, parsed?.build);
   // A bad algorithm in the `packageManager` field must fail before the network,
   // not with an opaque crypto error halfway through the download (§14.11).
-  const algo = assertSupportedAlgo(pin.algo);
+  //
+  // The weak-algorithm warning is scoped to a hash the *user* pinned, per §06.2:
+  // every embedded default is itself sha1 (§02.5), so warning unconditionally
+  // means a plain `yarn` in an unpinned directory scolds the user about an
+  // algorithm we picked for them and they cannot change.
+  const userPinned =
+    pin.digest !== undefined && !isEmbeddedReference(locator.name, locator.reference);
+  const algo = assertSupportedAlgo(pin.algo, userPinned);
 
   const source = await chooseSource(locator, versionDir, isKnown ? version : undefined);
   const pathname = new URL(source.url).pathname;

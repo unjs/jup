@@ -25,12 +25,12 @@ import {
   cmdUse,
   resolvePatternsToDescriptors,
   runManagementCommand,
-  USAGE_LINES,
 } from "../../src/cli.ts";
 import { messages, UsageError } from "../../src/errors.ts";
 import { execPackageManager } from "../../src/exec.ts";
 import { create } from "../../src/tar.ts";
 import type { CorepackMarker } from "../../src/types.ts";
+import { USAGE_LINES } from "../../src/usage.ts";
 
 /* ------------------------------------------------------------------ *
  * Harness

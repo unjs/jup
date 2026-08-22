@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { isSupportedPackageManager } from "./config/table.ts";
-import { applyEnvFile, envDisabled, loadEnvFileFrom } from "./env.ts";
+import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "./errors.ts";
 import { parseManifest, scanTopLevelFields, setTopLevelString } from "./json.ts";
 import { isValidRange, isValidVersion, satisfies } from "./semver.ts";
@@ -27,6 +27,9 @@ export const NODE_MODULES_RE = /[\\/]node_modules[\\/](@[^\\/]*[\\/])?([^@\\/][^
 
 /** The manifest file name the walk looks for in every directory. */
 const MANIFEST_NAME = "package.json";
+
+/** §03.4 — the `source` reported for anything the user typed on the command line. */
+export const CLI_SOURCE = "CLI arguments";
 
 /** §03.3 — every field of the manifest the discovery walk actually looks at. */
 const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
@@ -222,7 +225,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
 
   // 4 — a URL reference is a different thing entirely from a version.
   if (URL.canParse(range)) {
-    if (isSupportedPackageManager(name) && process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS !== "1") {
+    if (isSupportedPackageManager(name) && !envFlag("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS")) {
       throw new UsageError(messages.illegalUrl(raw));
     }
   } else {

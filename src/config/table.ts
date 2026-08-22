@@ -12,8 +12,8 @@
  */
 
 import { messages, UsageError } from "../errors.ts";
-import { satisfiesWithPrereleases } from "../semver.ts";
-import type { PackageManagerDefinition, PackageManagerSpec } from "../types.ts";
+import { parse, satisfiesWithPrereleases } from "../semver.ts";
+import type { Locator, PackageManagerDefinition, PackageManagerSpec } from "../types.ts";
 
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   npm: {
@@ -146,6 +146,42 @@ export function getSpecFor(name: string, version: string): PackageManagerSpec {
       definition.ranges.map(([range]) => range),
     ),
   );
+}
+
+/**
+ * The embedded table's spec for this locator, or `undefined` when there is none
+ * — an unknown package manager, or a URL reference, which is its own spec.
+ */
+export function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
+  const parsed = parse(locator.reference);
+  if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
+  return getSpecFor(locator.name, parsed.version);
+}
+
+/**
+ * §08.1 — the package manager spec's **download URL**, with `{}` substituted.
+ *
+ * `exec.ts` needs the whole URL, not just its extension: a `bin` *list* resolves
+ * to `<location>/<basename of the URL path>`. A URL reference is its own spec
+ * URL, exactly as §07.3 treats it.
+ */
+export function getSpecUrl(locator: Locator): string {
+  const spec = getTableSpec(locator);
+  if (spec === undefined) return locator.reference;
+  return spec.url.replace("{}", parse(locator.reference)!.version);
+}
+
+/**
+ * Is this exact reference one the embedded table ships?
+ *
+ * Used to scope §06.2's weak-algorithm warning. Every built-in default is
+ * currently sha1-pinned (§02.5), so without this check a plain `yarn` in a
+ * directory with no pin warns the user about an algorithm we chose for them.
+ */
+export function isEmbeddedReference(name: string, reference: string): boolean {
+  const definition = getDefinition(name);
+  if (definition === undefined) return false;
+  return reference === definition.default || reference === definition.transparent.default;
 }
 
 /**
