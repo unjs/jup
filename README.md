@@ -646,8 +646,75 @@ Every artifact must clear a check before it is allowed into the cache:
   signature nor a digest is always refused, and metadata with no `dist` section at all
   names the registry rather than crashing.
 
+**TLS is not one of those checks.** When none of the three is available the install is
+refused rather than trusted to the transport:
+
+```
+Refusing to install yarn@4.14.1: https://repo.yarnpkg.com provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set COREPACK_ALLOW_UNVERIFIED=1.
+```
+
+corepack's model has two tiers and [`.agents/06`](./.agents/06-integrity.md) §06.6 records
+where they run out: an npm-hosted package gets a signature chain, Yarn Berry from
+`repo.yarnpkg.com` gets TLS and nothing else, and Yarn Berry through a custom npm registry
+gets nothing at all. Open PR [#548] would have closed the first and has sat unmerged;
+[#495] is twenty-two comments of a Node.js TSC member arguing the asymmetry is a
+supply-chain risk.
+
+`COREPACK_ALLOW_UNVERIFIED=1` opts out for one run and says so. Like every other trust
+decision it can only be set in the real environment — a `.corepack.env` committed to a
+repository cannot open the hole that repository would benefit from.
+
+**This is a breaking change for Yarn Berry from `repo.yarnpkg.com`** — every form of it,
+since that origin publishes nothing to verify against: a range (`yarn@4.x`), a tag
+(`yarn@stable`), a bare `pipack use yarn`, and an exact version with no hash are all
+refused. The remedies, best first:
+
+1. **Point `COREPACK_NPM_REGISTRY` at an npm registry.** Berry then comes from
+   `@yarnpkg/cli-dist`, which npm signs, and nothing needs an opt-out at all.
+2. **Pin the digest.** `COREPACK_ALLOW_UNVERIFIED=1 pipack use yarn@4` once writes
+   `yarn@4.x.y+sha512.…` into `package.json`; every later run, on every machine, is
+   verified against it.
+3. **Keep the range and commit `.corepack.lock`.** It records the resolved version *and*
+   its integrity, which is a pin — but the run that creates it is itself the unverified
+   one, so the bootstrap still needs the opt-out exactly once.
+
+Nothing about a default install changes: the embedded table pins a hash on both `default`
+and `transparent.default`, so a bare `npm`, `pnpm` or `yarn dlx` clears a tier with no
+configuration.
+
+### The pin is checked on a cache hit too
+
+The store directory is named after the plain semver version, so `pnpm@9.0.0+sha512.<A>`
+and `pnpm@9.0.0+sha512.<B>` share one directory — and corepack re-attaches the marker's
+hash to the locator rather than comparing it, so the second project silently runs whatever
+the first installed. pipack compares them. When they disagree the pinned reference gets a
+directory of its own, `<version>+<algo>.<hex>`, so both projects get the bytes they asked
+for and neither has to wipe a cache. The cost on the warm path is one file: the probe that
+used to `stat` the marker now reads it. No request, no directory scan, nothing new loaded.
+
+### `--pin-style=sidecar`
+
+If you would rather `packageManager` held clean semver — which is what tools that parse it
+as a version expect ([#316]) — the digest can live beside it instead:
+
+```json
+{
+  "packageManager": "yarn@4.14.1",
+  "devEngines": {
+    "packageManager": { "name": "yarn", "version": "4.14.1", "integrity": "sha512-…" }
+  }
+}
+```
+
+Both spellings are read as the same pin and enforced identically. The suffixed form stays
+the default because it is the interoperable one.
+
 A failed check discards the download and caches nothing, so a re-run fails the same way
 rather than silently succeeding.
+
+[#316]: https://github.com/nodejs/corepack/issues/316
+[#495]: https://github.com/nodejs/corepack/issues/495
+[#548]: https://github.com/nodejs/corepack/pull/548
 
 ## Divergences
 
@@ -702,7 +769,17 @@ The full list with rationale is in
   still npm, pnpm and yarn — this is headroom, and adding an entry stays a data-only
   change, which the conformance suite demonstrates by adding exactly one table entry and
   no code at all.
-- **Signing-key expiry is honoured** rather than stored and ignored.
+- **Every artifact clears a verification tier.** corepack accepts TLS alone for Yarn
+  Berry, and nothing at all for Berry through a custom registry ([#548], [#495]); here a
+  pinned hash, a verified signature or a registry digest is required, and a cache hit is
+  checked against the pin rather than trusted. See
+  [How a version is verified](#how-a-version-is-verified).
+- **Signing-key expiry is honoured** rather than stored and ignored — which is why a bare
+  `pipack yarn` currently fails online, and corepack does not. npm signs the `yarn`
+  packument's `latest` with a key its own `/-/npm/v1/keys` marks
+  `expires: 2025-01-29`; corepack ships that key and ignores expiry, so the signature is
+  effectively unchecked. `COREPACK_DEFAULT_TO_LATEST=0` uses the table's hash-pinned
+  Yarn Classic instead, and `npm` and `pnpm` are unaffected.
 - **Tarball URLs are validated** against the configured registry rather than accepted for
   starting with the letters `http`.
 - **Digests are compared in constant time**, SRI strings are parsed properly rather than
@@ -719,15 +796,15 @@ The full list with rationale is in
 
 ## Status
 
-Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete, and phase 2
-([`.agents/15`](./.agents/15-gaps.md)) is most of the way there:
+Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete, and so is
+phase 2 ([`.agents/15`](./.agents/15-gaps.md)) apart from two items noted below:
 
 | Area | State |
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
-| Implementation | 29 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 280 passing, 3 skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 1034 passing |
+| Implementation | 30 modules, zero runtime dependencies |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 311 passing, 3 skipped (two Windows-only, one needs a real TTY) |
+| Unit tests | 1057 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
@@ -746,13 +823,13 @@ per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and p
 (§15.4–§15.6), registry-metadata tiering (§15.7, §15.8), shims and enablement (§15.13,
 §15.15, §15.16, §15.29), semver ranges in the pin with `.corepack.lock` (§15.23),
 prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
-`pipack info` (§15.30), stale and shadowed defaults (§15.33), native
-package-manager support (§15.28), and parts of §15.14, §15.19 and §15.35.
+`pipack info` (§15.30), stale and shadowed defaults (§15.33), native package-manager
+support (§15.28), one verification tier for every source with sidecar integrity
+(§15.11, §15.12), and parts of §15.14, §15.19 and §15.35.
 
 Not done yet:
 
 - **Signing-key rotation** (§15.9) — key freshness is still tied to the release cadence.
-- **One verification tier for every source** (§15.11).
 - **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
   the abbreviated packument the registry client requests does not carry.
 
