@@ -665,7 +665,7 @@ Confirmed against the built binary after P1: a proxy that answers `CONNECT` with
 
 ## Wave B — configuration the user already wrote
 
-### P4 — `.npmrc` subset §15.1
+### P4 — `.npmrc` subset §15.1 — **done** (`5640fe5`)
 #540 (25👍). A locked-down org configures one registry and expects every tool to honour
 it; corepack silently reaches the public registry instead. Read only the keys §15.1 lists,
 with its precedence chain — and its security constraints are the reason it is safe at all:
@@ -673,7 +673,7 @@ auth entries are prefix-scoped by construction, and a **project-level** `.npmrc`
 `registry`/`@scope:registry` but never auth or TLS keys, because unlike npm we run *before*
 the user has decided to trust the repo.
 
-### P5 — Per-source registries §15.2, §15.3
+### P5 — Per-source registries §15.2, §15.3 — **done** (`5640fe5`)
 #753 (15👍), #872. `COREPACK_REGISTRY_<NAME>` so Yarn can be mirrored without also
 redirecting npm and pnpm. Phase 1 already rewrites by origin rather than substring, so
 §15.3 is largely satisfied — verify rather than reimplement.
@@ -745,6 +745,21 @@ rulings: no `corepack run`, no package-manager passthrough, no writing into anot
 lockfile, no monorepo task-runner pinning. Only `install --project` is accepted.
 
 ## Carried follow-ups
+
+* Add `"npmrc.ts"` to `COLD_PATH_MODULES` in `test/unit/main.test.ts`. It is cold today —
+  verified two ways, module graph and `strace` showing zero `.npmrc` syscalls on a cache
+  hit — and the list is what keeps it that way. Deferred only because that file was
+  contended.
+* `src/resolve.ts` still carries its own `hasRegistryOverride()` reading only
+  `COREPACK_NPM_REGISTRY`. The consequence is neutralised (§05.2 rewrite 1 now also
+  applies inside `registry.ts`'s fetchers, idempotently), but the redundant, incomplete
+  copy should go once the file is free.
+* `messages.cafileUnreadable` hardcodes `(set by COREPACK_CAFILE)`, which is wrong for an
+  `.npmrc` `cafile`. §12 wants a parameterised message.
+* `COREPACK_REGISTRY_<NAME>` is `.corepack.env`-eligible per §15.37, so a cloned repo can
+  redirect one package manager's downloads. Spec-conformant and consistent with
+  `COREPACK_NPM_REGISTRY`, but it is a weaker form of what §14.5 guards against — worth a
+  line in §14.5's rationale.
 
 * ~~`COREPACK_SHIM_DIRECTORY` eligibility assertion~~ — done in `353a726`. Note what it
   taught: eligibility is a **deny-list**, so a new `COREPACK_*` variable is env-file
