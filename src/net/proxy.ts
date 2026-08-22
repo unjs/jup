@@ -207,10 +207,13 @@ function sniFor(hostname: string): string | undefined {
  * `COREPACK_STRICT_SSL=0` has to be honoured — `fetch` can express neither — so
  * the unconfigured path, which is every request on almost every machine, stays
  * on native `fetch` exactly as before.
+ *
+ * The signature is written out rather than borrowed from `typeof
+ * globalThis.fetch`: the sole caller passes a URL string, so the `Request` arm
+ * was never reachable and paid for itself in an unchecked cast to rule out.
  */
-export const nodeFetch: typeof globalThis.fetch = async (input, init) => {
-  const href =
-    typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+export const nodeFetch = async (input: string | URL, init?: RequestInit): Promise<Response> => {
+  const href = typeof input === "string" ? input : input.href;
   const target = new URL(href);
   return await follow(target, init ?? {});
 };
