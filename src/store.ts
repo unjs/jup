@@ -451,7 +451,61 @@ export function resolveBin(
   throw new Error(messages.unableToLocateBin());
 }
 
-/** §07.9 — `rm -rf <home>/v1`, forced. `lastKnownGood.json` is **not** removed. */
-export function cacheClean(): void {
+/**
+ * Every complete install in the store, sorted by name then version.
+ *
+ * "Complete" means §07.2's definition and nothing looser: a directory carrying a
+ * `.corepack` marker. A half-extracted temp folder (`corepack-<pid>-<rand>`) and
+ * a `.DS_Store` are both directory entries, and neither is a cached version —
+ * counting them would make `cache list` (§15.19) report an image as seeded when
+ * it is not.
+ *
+ * §15.19's "did my image get seeded correctly?" and §15.30's "the cached
+ * versions present" are the same directory listing, so there is one of it.
+ */
+export function listInstalled(): Array<{ name: string; version: string }> {
+  const installFolder = getInstallFolder();
+
+  const found: Array<{ name: string; version: string }> = [];
+  for (const name of readdirSafe(installFolder)) {
+    if (name.startsWith(".")) continue;
+    for (const version of readdirSafe(join(installFolder, name))) {
+      if (version.startsWith(".")) continue;
+      // The marker's *presence* is the signal (§07.2); its contents are not
+      // parsed here, so a corrupt one still lists rather than throwing out of a
+      // read-only command.
+      if (
+        statSync(join(installFolder, name, version, MARKER_NAME), { throwIfNoEntry: false }) ===
+        undefined
+      ) {
+        continue;
+      }
+      found.push({ name, version });
+    }
+  }
+
+  return found.sort((a, b) => a.name.localeCompare(b.name) || compare(a.version, b.version));
+}
+
+/** A directory listing where "not there" and "not a directory" are both empty. */
+function readdirSafe(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * §07.9 — `rm -rf <home>/v1`, forced. `lastKnownGood.json` is **not** removed.
+ *
+ * §15.18: the survival is deliberate — a recorded default is a preference, not a
+ * cache entry — but the documentation said otherwise, so `all` is the explicit
+ * way to ask for both. Nothing else may remove that file implicitly.
+ */
+export function cacheClean(options?: { all?: boolean }): void {
   rmSync(getInstallFolder(), { recursive: true, force: true });
+  if (options?.all === true) {
+    rmSync(join(getHomeFolder(), LAST_KNOWN_GOOD_NAME), { force: true });
+  }
 }

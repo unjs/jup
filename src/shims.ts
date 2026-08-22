@@ -44,7 +44,7 @@ const TOOL_ALIASES = [TOOL_NAME, "corepack"] as const;
  * §14.16 — how we recognise a stub we wrote. A regular file that does not carry
  * this marker is somebody else's binary and is never replaced without `--force`.
  */
-const SHIM_MARKER = "@pipack-shim";
+export const SHIM_MARKER = "@pipack-shim";
 
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;

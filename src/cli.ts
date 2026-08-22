@@ -14,7 +14,7 @@
  *   {@link setLastKnownGood}.
  */
 
-import { createReadStream, readFileSync } from "node:fs";
+import { createReadStream } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
@@ -41,7 +41,9 @@ import { isValidRange, isValidVersion, major } from "./semver.ts";
 import {
   cacheClean,
   createTempDir,
+  getHomeFolder,
   getInstallFolder,
+  listInstalled,
   MARKER_NAME,
   promote,
   readLastKnownGood,
@@ -55,7 +57,7 @@ import type { Descriptor, InstallSpec, Locator, SpecResult } from "./types.ts";
 const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
 
 import { HELP_TEXT } from "./usage.ts";
-import { getOwnRoot } from "./self.ts";
+import { getOwnVersion } from "./self.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Small shared helpers                                                        */
@@ -100,23 +102,6 @@ function setLastKnownGood(name: string, reference: string): void {
 
 function fileStream(path: string): ReadableStream<Uint8Array> {
   return Readable.toWeb(createReadStream(path)) as unknown as ReadableStream<Uint8Array>;
-}
-
-/** The tool's own version (§09.9), read from our own manifest. */
-function getOwnVersion(): string {
-  // Walks up to the nearest package.json rather than counting dirnames. Two
-  // fixed levels is right from `<root>/src/cli.ts` and wrong from
-  // `<root>/dist/_chunks/cli.mjs`, where a bundler puts this file — so the
-  // shipped package would answer `--version` with the 0.0.0 fallback forever.
-  const root = getOwnRoot(import.meta.url);
-  try {
-    const raw = readFileSync(join(root, "package.json"), "utf8");
-    const data = JSON.parse(raw) as { version?: unknown };
-    if (typeof data.version === "string") return data.version;
-  } catch {
-    // A package without a readable manifest still answers `--version`.
-  }
-  return "0.0.0";
 }
 
 /* -------------------------------------------------------------------------- */
@@ -703,18 +688,54 @@ async function writeArchive(locations: string[], output: string, json: boolean):
 /* §09.7 — cache                                                               */
 /* -------------------------------------------------------------------------- */
 
-/** §09.7 — `clean` and `clear` are the same command. */
+/**
+ * §09.7 — `clean` and `clear` are the same command, plus §15.18's `--all` and
+ * §15.19's `list`.
+ */
 export async function cmdCache(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, {});
+  const parsed = parseArgs(args, { booleans: ["--all", "--json"] });
   const [subcommand, ...extra] = parsed.positionals;
 
+  if (subcommand === "list" && extra.length === 0) {
+    // §15.30 — `cache list` is the store half of `info`, and says so: one
+    // report builder, one shape, no second listing to keep in step.
+    return import("./info.ts").then(({ cmdCacheList }) =>
+      cmdCacheList(hasFlag(parsed, "--json") ? ["--json"] : []),
+    );
+  }
+
   if ((subcommand !== "clean" && subcommand !== "clear") || extra.length > 0) {
-    throw new UsageError(`The 'corepack cache' command only accepts 'clean' or 'clear'`);
+    throw new UsageError(`The 'corepack cache' command only accepts 'clean', 'clear' or 'list'`);
+  }
+  // `--json` belongs to `list`; silently ignoring it here would let a script
+  // believe it was parsing output that never came.
+  if (hasFlag(parsed, "--json")) {
+    throw new UsageError(`The 'corepack cache ${subcommand}' command does not accept --json`);
   }
 
   // `rm -rf <home>/v1`, forced; `lastKnownGood.json` lives outside `v1` and
   // therefore survives, so the recorded default is simply re-downloaded.
-  cacheClean();
+  //
+  // §15.18 — the survival is deliberate, but corepack's documentation claimed
+  // otherwise and #675 is the resulting confusion. `--all` is the explicit
+  // "yes, the recorded defaults too", and unlike the silent default it reports
+  // what it removed, because a command that deletes things silently gives the
+  // user no way to tell a successful clean from a no-op.
+  const all = hasFlag(parsed, "--all");
+  if (!all) {
+    cacheClean();
+    return 0;
+  }
+
+  const removed = listInstalled().length;
+  const defaults = Object.keys(readLastKnownGood()).length;
+  cacheClean({ all: true });
+
+  out(
+    removed === 0 && defaults === 0
+      ? `Nothing to remove\n`
+      : `Removed ${removed} cached version(s) and ${defaults} recorded default(s) from ${getHomeFolder()}\n`,
+  );
   return 0;
 }
 
@@ -838,6 +859,11 @@ export async function runManagementCommand(args: string[]): Promise<number> {
     }
     case "disable": {
       return import("./shims.ts").then(({ cmdDisable }) => cmdDisable(rest));
+    }
+    case "info": {
+      // Lazily, like `enable`/`disable`: §15.30's report reaches for the shim
+      // resolver and the store listing, and no other command pays for either.
+      return import("./info.ts").then(({ cmdInfo }) => cmdInfo(rest));
     }
     case "install": {
       // `-g`/`--global` selects a different command, not a different flag.

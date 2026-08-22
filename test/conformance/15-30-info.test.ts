@@ -1,0 +1,492 @@
+/**
+ * §15.30 — `corepack info` (row 196), and §15.19's `cache list` (row 179).
+ *
+ * Both rows are about a command that has to work when nothing else does, so
+ * every case here is asserted through a real process:
+ *
+ * * **No network, ever.** The mock registry is wired in for every run and its
+ *   request log must come back empty — including for a project whose spec could
+ *   only be resolved by asking it.
+ * * **No failure on a broken project.** Every invalid-spec shape §03 and §12
+ *   define is exercised, and each must exit 0 carrying the diagnosis.
+ *
+ * §15.18's `cache clean --all` rides along (row 177): it is the one other
+ * command that touches the recorded defaults.
+ */
+
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  cleanupFixtures,
+  copyTool,
+  createFixture,
+  MockRegistry,
+  run,
+  seedPackageManager,
+} from "./_harness/index.ts";
+
+const registry = new MockRegistry();
+
+interface Report {
+  version: number;
+  tool: { name: string; version: string; root: string };
+  project: {
+    status: string;
+    manifest: string | null;
+    field: string | null;
+    spec: string | null;
+    kind: string | null;
+    problem: string | null;
+  };
+  resolution: {
+    status: string;
+    name: string | null;
+    version: string | null;
+    hash: string | null;
+    source: string | null;
+    reason: string | null;
+    installed: boolean | null;
+  };
+  lockfile: {
+    path: string;
+    present: boolean;
+    key: string | null;
+    resolution: { resolved: string; integrity?: string } | null;
+    frozen: boolean;
+    frozenSource: string;
+  };
+  envFile: {
+    path: string;
+    applied: string[];
+    overridden: string[];
+    refused: string[];
+    ignored: string[];
+  } | null;
+  environment: Record<string, string>;
+  packageManagers: Array<{
+    name: string;
+    registry: string;
+    registrySource: string;
+    recordedDefault: string | null;
+    cached: string[];
+  }>;
+  npmrc: { consulted: boolean; note: string };
+  store: { home: string; path: string; writable: boolean; versions: Array<Record<string, string>> };
+  defaults: { path: string; entries: Record<string, string> };
+  shims: { directory: string | null; entries: Array<Record<string, unknown>> };
+}
+
+beforeAll(async () => {
+  await registry.start();
+});
+
+afterAll(async () => {
+  cleanupFixtures();
+  await registry.stop();
+});
+
+beforeEach(() => registry.reset());
+
+/** `info --json`, parsed, with the exit code and streams asserted. */
+async function info(
+  fixture: { cwd: string; home: string },
+  options?: { env?: Record<string, string | undefined>; cwd?: string },
+): Promise<Report> {
+  const result = await run(["info", "--json"], {
+    ...fixture,
+    ...(options?.cwd === undefined ? {} : { cwd: options.cwd }),
+    registry,
+    env: options?.env,
+  });
+
+  expect(result.exitCode).toBe(0);
+  // Row 196's load-bearing half: not one request, whatever the project says.
+  expect(registry.requests).toEqual([]);
+  return JSON.parse(result.stdout) as Report;
+}
+
+describe("§15.30 corepack info", () => {
+  it("196: reports the file, the field and the resolution, and makes no request", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2+sha512.abcd" });
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+
+    const report = await info(fixture);
+
+    expect(report.version).toBe(1);
+    expect(report.tool.name).toBe("pipack");
+    expect(report.project).toMatchObject({
+      status: "found",
+      // Absolute (§15.30): a relative path is useless in a pasted report.
+      manifest: join(fixture.cwd, "package.json"),
+      field: "packageManager",
+      spec: "pnpm@11.1.2+sha512.abcd",
+      kind: "exact",
+    });
+    expect(report.resolution).toMatchObject({
+      status: "pinned",
+      name: "pnpm",
+      version: "11.1.2",
+      hash: "sha512.abcd",
+      installed: true,
+    });
+    expect(report.store.path).toBe(join(fixture.home, "v1"));
+    expect(report.store.versions).toEqual([{ name: "pnpm", version: "11.1.2" }]);
+  });
+
+  it("196: succeeds and diagnoses every invalid project spec §03/§12 defines", async () => {
+    const cases: Array<[label: string, manifest: unknown, expected: RegExp]> = [
+      ["a missing version", { packageManager: "pnpm" }, /No version specified/],
+      ["a malformed field", { packageManager: "pnpm@" }, /No version specified/],
+      ["an unsupported name", { packageManager: "bun@1.0.0" }, /Unsupported package manager/],
+      ["a wrong type", { packageManager: 42 }, /expected a string/],
+      ["a null pin", { packageManager: null }, /expected a string/],
+      ["unparseable JSON", "{ not json", /Invalid package\.json/],
+      [
+        "a devEngines name mismatch",
+        {
+          packageManager: "yarn@1.22.4",
+          devEngines: { packageManager: { name: "pnpm", version: "11.x" } },
+        },
+        /does not match the "devEngines\.packageManager" field/,
+      ],
+      [
+        "a devEngines version mismatch",
+        {
+          packageManager: "pnpm@11.1.2",
+          devEngines: { packageManager: { name: "pnpm", version: "10.x" } },
+        },
+        /does not match the value defined in "devEngines\.packageManager"/,
+      ],
+      [
+        "an unsupported package manager in devEngines",
+        { devEngines: { packageManager: { name: "bun", version: "1.x" } } },
+        /Unsupported package manager/,
+      ],
+    ];
+
+    for (const [label, manifest, expected] of cases) {
+      const fixture = createFixture(manifest);
+      registry.reset();
+
+      const result = await run(["info", "--json"], { ...fixture, registry });
+
+      // Exit 0 in every one of them: reporting *why* the project is invalid is
+      // the point of the command, and failing the way every other command
+      // already fails would make it useless in exactly this case.
+      expect(result.exitCode, label).toBe(0);
+      expect(registry.requests, label).toEqual([]);
+
+      const report = JSON.parse(result.stdout) as Report;
+      expect(report.project.status, label).toBe("invalid");
+      expect(report.project.problem ?? "", label).toMatch(expected);
+      expect(report.project.manifest, label).toBe(join(fixture.cwd, "package.json"));
+      expect(report.resolution.status, label).toBe("unknown");
+    }
+  });
+
+  it("196: prints the same diagnosis in the human form", async () => {
+    const fixture = createFixture({ packageManager: "pnpm" });
+
+    const result = await run(["info"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("status          invalid");
+    expect(result.stdout).toContain("No version specified");
+    expect(result.stdout).toContain(join(fixture.cwd, "package.json"));
+    expect(registry.requests).toEqual([]);
+  });
+
+  it("196: reports a range as unresolved rather than resolving it (§15.23)", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+
+    const report = await info(fixture, { env: { CI: undefined } });
+
+    expect(report.project.kind).toBe("range");
+    expect(report.project.spec).toBe("pnpm@^11.0.0");
+    expect(report.lockfile).toMatchObject({
+      path: join(fixture.cwd, ".corepack.lock"),
+      present: false,
+      key: "pnpm@^11.0.0",
+      resolution: null,
+    });
+    expect(report.resolution.status).toBe("network");
+    expect(report.resolution.version).toBeNull();
+    expect(report.resolution.reason).toContain("needs a registry request");
+  });
+
+  it("196: reports the recorded resolution, its integrity, and the lockfile path", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    fixture.write(
+      ".corepack.lock",
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", integrity: "sha512-AQI=" } },
+      })}\n`,
+    );
+
+    const report = await info(fixture);
+
+    expect(report.lockfile).toMatchObject({
+      path: join(fixture.cwd, ".corepack.lock"),
+      present: true,
+      key: "pnpm@^11.0.0",
+      resolution: { resolved: "11.1.2", integrity: "sha512-AQI=" },
+    });
+    expect(report.resolution).toMatchObject({
+      status: "locked",
+      version: "11.1.2",
+      hash: "sha512.0102",
+      source: join(fixture.cwd, ".corepack.lock"),
+      installed: true,
+    });
+  });
+
+  it("196: reports the frozen-lockfile state and where it came from", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+
+    const ci = await info(fixture, { env: { CI: "1" } });
+    expect(ci.lockfile).toMatchObject({ frozen: true, frozenSource: "CI" });
+    expect(ci.resolution.status).toBe("frozen");
+    expect(ci.resolution.reason).toContain("lockfile updates are disabled");
+
+    const explicit = await info(fixture, { env: { CI: "1", COREPACK_FROZEN_LOCKFILE: "0" } });
+    expect(explicit.lockfile).toMatchObject({
+      frozen: false,
+      frozenSource: "COREPACK_FROZEN_LOCKFILE",
+    });
+  });
+
+  it("196: finds the lockfile beside the manifest, from a nested directory", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    fixture.write("packages/app/keep.txt", "");
+    fixture.write(
+      ".corepack.lock",
+      `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2" } } })}\n`,
+    );
+
+    const report = await info(fixture, { cwd: fixture.path("packages/app") });
+
+    expect(report.project.manifest).toBe(join(fixture.cwd, "package.json"));
+    expect(report.lockfile.path).toBe(join(fixture.cwd, ".corepack.lock"));
+    expect(report.resolution.version).toBe("11.1.2");
+  });
+
+  it("196: names the env file and the variables it contributed", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    fixture.write(
+      ".corepack.env",
+      [
+        "COREPACK_ENABLE_STRICT=0",
+        "COREPACK_NPM_REGISTRY=https://from-the-file.example.org",
+        "COREPACK_NPM_TOKEN=hunter2",
+        "SHELL=/bin/false",
+        "",
+      ].join("\n"),
+    );
+
+    const report = await info(fixture, {
+      env: { COREPACK_NPM_REGISTRY: "https://from-the-environment.example.org" },
+    });
+
+    expect(report.envFile).toMatchObject({
+      path: join(fixture.cwd, ".corepack.env"),
+      applied: ["COREPACK_ENABLE_STRICT"],
+      // §11.6 — the real environment wins over the file.
+      overridden: ["COREPACK_NPM_REGISTRY"],
+      // §14.5 — a project file may never supply a credential.
+      refused: ["COREPACK_NPM_TOKEN"],
+      ignored: ["SHELL"],
+    });
+    // And the credential never appears anywhere in the report.
+    expect(JSON.stringify(report)).not.toContain("hunter2");
+  });
+
+  it("196: reports the effective registry for each package manager and its source", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+
+    const builtin = await info(fixture);
+    for (const entry of builtin.packageManagers) {
+      expect(entry.registry).toBe("https://registry.npmjs.org");
+      expect(entry.registrySource).toBe("built-in");
+    }
+    // §15.1 is not implemented, and the report says so rather than implying the
+    // user's `.npmrc` was honoured.
+    expect(builtin.npmrc.consulted).toBe(false);
+    expect(builtin.npmrc.note).toContain(".npmrc");
+
+    const mirrored = await info(fixture, {
+      env: { COREPACK_NPM_REGISTRY: "https://mirror.example.org/" },
+    });
+    for (const entry of mirrored.packageManagers) {
+      expect(entry.registry).toBe("https://mirror.example.org");
+      expect(entry.registrySource).toBe("COREPACK_NPM_REGISTRY");
+    }
+  });
+
+  it("196: reports the store, its writability, and the recorded global defaults", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+    writeFileSync(join(fixture.home, "lastKnownGood.json"), `{"yarn":"1.22.4"}\n`);
+
+    const report = await info(fixture);
+
+    expect(report.store).toMatchObject({ home: fixture.home, writable: true });
+    expect(report.store.versions).toEqual([
+      { name: "pnpm", version: "11.1.2" },
+      { name: "yarn", version: "1.22.4" },
+    ]);
+    expect(report.defaults).toEqual({
+      path: join(fixture.home, "lastKnownGood.json"),
+      entries: { yarn: "1.22.4" },
+    });
+    expect(report.packageManagers.find((entry) => entry.name === "yarn")?.recordedDefault).toBe(
+      "1.22.4",
+    );
+  });
+
+  it("196: reports, for each binary name, the shim and what PATH resolves to", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    // A real `enable` against a copy of the tool, so the shims under test are
+    // the ones the tool actually writes (§10.1).
+    const bin = copyTool();
+    const shimDirectory = join(fixture.root, "shims");
+    mkdirSync(shimDirectory, { recursive: true });
+    expect(
+      (await run(["enable", "--install-directory", shimDirectory], { ...fixture, bin })).exitCode,
+    ).toBe(0);
+
+    const report = await info(fixture, {
+      env: { PATH: `${shimDirectory}:${process.env.PATH ?? ""}` },
+    });
+
+    expect(report.shims.entries.map((entry) => entry.binary)).toEqual([
+      "npm",
+      "npx",
+      "pnpm",
+      "pnpx",
+      "yarn",
+      "yarnpkg",
+    ]);
+
+    const yarn = report.shims.entries.find((entry) => entry.binary === "yarn")!;
+    expect(yarn.shim).toBe(join(shimDirectory, "yarn"));
+    expect(yarn.path).toBe(join(shimDirectory, "yarn"));
+    expect(yarn.ours).toBe(true);
+    expect(yarn.shadowed).toBe(false);
+
+    // `enable` with no names skips npm (§10.5), so its shim is absent and the
+    // report must not claim otherwise.
+    const npm = report.shims.entries.find((entry) => entry.binary === "npm")!;
+    expect(npm.shim).toBeNull();
+  });
+
+  it("196: --json and the human form describe the same run", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2+sha512.abcd" });
+
+    const human = await run(["info"], { ...fixture, registry });
+    const json = await run(["info", "--json"], { ...fixture, registry });
+
+    expect(human.exitCode).toBe(0);
+    expect(json.exitCode).toBe(0);
+    const report = JSON.parse(json.stdout) as Report;
+    expect(human.stdout).toContain(report.project.manifest!);
+    expect(human.stdout).toContain("11.1.2");
+    expect(human.stdout).toContain("sha512.abcd");
+    expect(registry.requests).toEqual([]);
+  });
+
+  it("rejects an unrecognised flag", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+
+    const result = await run(["info", "--everything"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`Usage Error: The 'corepack info' command only accepts --json`);
+    expect(result.stdout).toContain(`$ corepack info [--json]`);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §15.19 — cache list, and §15.18 — cache clean --all                         */
+/* -------------------------------------------------------------------------- */
+
+describe("§15.19 cache list", () => {
+  it("179: --json lists the installed pairs and the recorded defaults", async () => {
+    const fixture = createFixture();
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+    writeFileSync(join(fixture.home, "lastKnownGood.json"), `{"yarn":"1.22.4"}\n`);
+
+    const result = await run(["cache", "list", "--json"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toEqual({
+      version: 1,
+      store: {
+        home: fixture.home,
+        path: join(fixture.home, "v1"),
+        writable: true,
+        versions: [
+          { name: "pnpm", version: "11.1.2" },
+          { name: "yarn", version: "1.22.4" },
+        ],
+      },
+      defaults: {
+        path: join(fixture.home, "lastKnownGood.json"),
+        entries: { yarn: "1.22.4" },
+      },
+    });
+    expect(registry.requests).toEqual([]);
+  });
+
+  it("179: lists the same pairs in the human form, and says so when there are none", async () => {
+    const seeded = createFixture();
+    seedPackageManager(seeded.home, "pnpm", "11.1.2");
+
+    const listed = await run(["cache", "list"], { ...seeded, registry });
+    expect(listed.exitCode).toBe(0);
+    expect(listed.stdout).toContain("pnpm@11.1.2");
+
+    const empty = await run(["cache", "list"], { ...createFixture(), registry });
+    expect(empty.exitCode).toBe(0);
+    expect(empty.stdout).toContain("(none)");
+    expect(empty.stdout).toContain("(none recorded)");
+  });
+});
+
+describe("§15.18 cache clean --all", () => {
+  it("177: the defaults survive a plain clean and are removed by --all", async () => {
+    const fixture = createFixture();
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    writeFileSync(join(fixture.home, "lastKnownGood.json"), `{"pnpm":"11.1.2"}\n`);
+
+    const first = await run(["cache", "clean"], { ...fixture, registry });
+    expect(first.exitCode).toBe(0);
+    expect(existsSync(join(fixture.home, "v1"))).toBe(false);
+    // §14.21 — a recorded default is a preference, not a cache entry.
+    expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(true);
+
+    const second = await run(["cache", "clean", "--all"], { ...fixture, registry });
+    expect(second.exitCode).toBe(0);
+    expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(false);
+    // §15.35l — a command that deletes things must say what it deleted.
+    expect(second.stdout).toContain("Removed 0 cached version(s) and 1 recorded default(s)");
+
+    const third = await run(["cache", "clean", "--all"], { ...fixture, registry });
+    expect(third.exitCode).toBe(0);
+    expect(third.stdout).toBe("Nothing to remove\n");
+  });
+
+  it("refuses --json on clean rather than ignoring it", async () => {
+    const result = await run(["cache", "clean", "--json"], { ...createFixture(), registry });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Usage Error: The 'corepack cache clean' command does not accept --json`,
+    );
+  });
+});

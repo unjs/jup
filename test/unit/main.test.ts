@@ -649,6 +649,10 @@ const COLD_PATH_MODULES = [
   "tar.ts",
   "cli.ts",
   "shims.ts",
+  // §15.30's report is management-mode only, and it reaches for the shim
+  // resolver and a full store listing — none of which a `yarn --version` may pay
+  // for.
+  "info.ts",
 ];
 
 /**
