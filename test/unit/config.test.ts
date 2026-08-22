@@ -11,7 +11,7 @@ import {
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
-import type { BinSpec, PackageManagerSpec } from "../../src/types.ts";
+import type { BinSpec, PackageManagerSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
   it("supports exactly npm, pnpm and yarn", () => {
@@ -202,15 +202,75 @@ describe("trust store (§02.6, §14.4)", () => {
     // returns nothing for a custom registry, which turns that defence into a
     // hard failure on exactly the deployments it exists for.
     //
-    // The store stays keyed by origin as the §15.10 seam — but §15.10 pairs
-    // per-origin trust with a soft-fail for unknown origins, and the two arrive
-    // together or not at all.
+    // Note that this assertion alone cannot establish §15.10 — the embedded
+    // store holds one origin, so "keyed by origin" and "flattened" agree on
+    // every line of it. The two-origin test below is the one that separates
+    // them.
     const embedded = TRUST_KEYS[DEFAULT_REGISTRY]!;
 
     expect(getTrustedKeys()).toEqual(embedded);
     expect(getTrustedKeys("https://registry.npmjs.org/")).toEqual(embedded);
     expect(getTrustedKeys("https://npm.internal.example")).toEqual(embedded);
     expect(getTrustedKeys("https://artifactory.corp/api/npm/npm-remote/")).toEqual(embedded);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §15.10 — per-origin trust                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe("getTrustedKeys — §15.10 origin scoping", () => {
+  const key = (keyid: string): TrustedKey => ({
+    expires: null,
+    keyid,
+    keytype: "ecdsa-sha2-nistp256",
+    scheme: "ecdsa-sha2-nistp256",
+    key: "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE",
+  });
+
+  /**
+   * Two custom origins and npm's, which is the smallest store that can tell
+   * per-origin selection from a flattened one. The recorded lesson in
+   * `.agents/PLAN.md` is precisely this: the trust-store test that came before
+   * used the one shape — a single origin — under which every implementation
+   * agrees.
+   */
+  const store: TrustStore = {
+    [DEFAULT_REGISTRY]: [key("SHA256:npm")],
+    "https://a.example": [key("SHA256:a")],
+    "https://b.example": [key("SHA256:b")],
+  };
+
+  const keyids = (registry: string): string[] =>
+    getTrustedKeys(registry, store).map((entry) => entry.keyid);
+
+  it("offers an origin its own keys, and npm's, and nobody else's", () => {
+    expect(keyids("https://a.example")).toEqual(["SHA256:a", "SHA256:npm"]);
+    expect(keyids("https://b.example")).toEqual(["SHA256:b", "SHA256:npm"]);
+    // §06.6 — npm's own registry is not vouched for by anyone's private keys.
+    expect(keyids(DEFAULT_REGISTRY)).toEqual(["SHA256:npm"]);
+    // An origin nobody configured falls back to npm's keys alone, which is what
+    // keeps an unconfigured mirror verifying.
+    expect(keyids("https://unknown.example")).toEqual(["SHA256:npm"]);
+  });
+
+  it("compares parsed origins, so a path or a trailing slash still selects", () => {
+    expect(keyids("https://a.example/")).toEqual(["SHA256:a", "SHA256:npm"]);
+    expect(keyids("https://a.example/api/npm/npm-remote")).toEqual(["SHA256:a", "SHA256:npm"]);
+    expect(keyids("https://A.EXAMPLE")).toEqual(["SHA256:a", "SHA256:npm"]);
+    // A different port is a different origin.
+    expect(keyids("https://a.example:8443")).toEqual(["SHA256:npm"]);
+  });
+
+  it("keeps a keyid configured for both at its most specific position", () => {
+    const shared: TrustStore = {
+      [DEFAULT_REGISTRY]: [key("SHA256:shared"), key("SHA256:npm")],
+      "https://a.example": [key("SHA256:shared")],
+    };
+    expect(getTrustedKeys("https://a.example", shared).map((entry) => entry.keyid)).toEqual([
+      "SHA256:shared",
+      "SHA256:npm",
+    ]);
   });
 });
 

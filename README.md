@@ -520,7 +520,7 @@ to want:
 | `COREPACK_ENABLE_AUTO_PIN=1`        | Write a pin automatically when a project has none                 |
 | `COREPACK_ENABLE_PRERELEASES=1`     | Let an unspecified version resolve to a prerelease                |
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` | Announce (and on a TTY, confirm) each download                    |
-| `COREPACK_INTEGRITY_KEYS`           | Replace the built-in trust store, or set `0` to skip verification  |
+| `COREPACK_INTEGRITY_KEYS`           | Replace the built-in trust store (per registry origin), or set `0` to skip verification; either way, key refresh is off |
 | `COREPACK_REQUIRE_SIGNATURES=1`     | Refuse a registry that publishes no signature, rather than warning |
 | `COREPACK_FROZEN_LOCKFILE=1`        | Never resolve or record a range that `.corepack.lock` does not already answer (default in CI) |
 | `COREPACK_CAFILE`                   | PEM bundle to verify registry certificates against, replacing the platform trust store |
@@ -646,6 +646,67 @@ Every artifact must clear a check before it is allowed into the cache:
   signature nor a digest is always refused, and metadata with no `dist` section at all
   names the registry rather than crashing.
 
+### When npm rotates its signing keys
+
+The trust store ships inside the binary, which is why npm's February 2025 key rotation
+[broke every released corepack at once][#612] and the remedy was "upgrade". pipack keeps
+the built-in keys and adds one repair on top of them:
+
+- The **only** thing that triggers it is a signature whose key id matches nothing in the
+  trust store. An expired key, a signature that does not verify, and a registry that
+  publishes no signature at all are all answers, not questions — refreshing keys would
+  change none of them.
+- The refresh is one `GET https://registry.npmjs.org/-/npm/v1/keys`, whatever registry
+  served the package. Asking a *mirror* which keys to trust would hand it the one thing
+  it does not have, and npm's signature travelling with the package is the entire reason
+  a compromised mirror is defended against in the first place.
+- The result is written to `<COREPACK_HOME>/keys.json` with a timestamp and **merged**
+  with the built-in keys — never substituted for them. A refresh can add key ids; it
+  cannot retire or re-date one this binary shipped. The file is a cache: deleting it is
+  always safe, and `cache clean` leaves it alone.
+- Once a key id is on disk, it is used at any age, so the steady state after a rotation
+  costs nothing. A refresh that did *not* explain the signature is retried at most every
+  five minutes, so a failing build in a loop cannot hammer the endpoint.
+- `COREPACK_INTEGRITY_KEYS` disables the whole mechanism: a pinned trust store is final,
+  and neither the cache nor the endpoint is consulted. `COREPACK_ENABLE_NETWORK=0`
+  disables the fetch alone — a machine that refreshed while it had a network keeps
+  working after it loses one.
+
+**A successful verification never reads that file and never makes that request**, so
+neither the warm path nor an ordinary install is affected. Tests count the requests
+rather than the outcomes, and `strace` confirms it on the built binary.
+
+There is a visible consequence today. npm currently signs `yarn@latest` — and much else —
+with a key its own endpoint marks `expires: 2025-01-29`. Before the refresh the failure
+read *"The package was not signed by any trusted keys"*, which sounds like a bug in the
+tool; now it reads:
+
+```
+The package was signed with an expired key (SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA, expired 2025-01-29T00:00:00.000Z)
+```
+
+Same outcome, honest reason. corepack ships that expired key and never looks at the field.
+
+### Trust for a registry that signs its own packages
+
+A private registry that re-signs what it serves (Cloudsmith and similar) fails against
+npm's keys, and corepack has [no way to say otherwise][#884]. pipack's trust store is
+keyed by registry origin:
+
+```jsonc
+COREPACK_INTEGRITY_KEYS='{
+  "https://npm.internal.example": [{ "expires": null, "keyid": "SHA256:…", "keytype": "ecdsa-sha2-nistp256", "scheme": "ecdsa-sha2-nistp256", "key": "<base64 SPKI>" }]
+}'
+```
+
+corepack's `{"npm": [...]}` shape is still accepted and means the default registry. An
+origin gets its own keys **and** npm's — because a mirror serving npm-signed packages must
+keep verifying — but never another origin's, so configuring keys for one private registry
+does not let them vouch for anything else. Origins are compared parsed, so a trailing
+slash, a differing host case and a path-scoped registry URL all select the same entry.
+Keys for a non-default origin come from the environment only: a `.corepack.env` committed
+to a repository cannot introduce one, and no registry is ever asked for its own keys.
+
 **TLS is not one of those checks.** When none of the three is available the install is
 refused rather than trusted to the transport:
 
@@ -715,6 +776,8 @@ rather than silently succeeding.
 [#316]: https://github.com/nodejs/corepack/issues/316
 [#495]: https://github.com/nodejs/corepack/issues/495
 [#548]: https://github.com/nodejs/corepack/pull/548
+[#612]: https://github.com/nodejs/corepack/issues/612
+[#884]: https://github.com/nodejs/corepack/issues/884
 
 ## Divergences
 
@@ -797,14 +860,14 @@ The full list with rationale is in
 ## Status
 
 Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)–[`14`](./.agents/14-divergences.md) — is complete, and so is
-phase 2 ([`.agents/15`](./.agents/15-gaps.md)) apart from two items noted below:
+phase 2 ([`.agents/15`](./.agents/15-gaps.md)) apart from one item noted below:
 
 | Area | State |
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
-| Implementation | 32 modules, zero runtime dependencies |
-| Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 311 passing, 3 skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 1157 passing |
+| Implementation | 33 modules, zero runtime dependencies |
+| Conformance suite (§13 rows 1–147, §15.38 rows 148–203) | 326 passing, 3 skipped (two Windows-only, one needs a real TTY) |
+| Unit tests | 1186 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
@@ -828,11 +891,11 @@ per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and p
 prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
 `pipack info` (§15.30), stale and shadowed defaults (§15.33), native package-manager
 support (§15.28), one verification tier for every source with sidecar integrity
-(§15.11, §15.12), and parts of §15.14, §15.19 and §15.35.
+(§15.11, §15.12), signing-key rotation and per-origin trust (§15.9, §15.10), and parts of
+§15.14, §15.19 and §15.35.
 
 Not done yet:
 
-- **Signing-key rotation** (§15.9) — key freshness is still tied to the release cadence.
 - **`COREPACK_MINIMUM_RELEASE_AGE`** (§15.35e) — it needs per-version publish times, which
   the abbreviated packument the registry client requests does not carry.
 
@@ -851,7 +914,8 @@ fixed:
   the `npmRegistry` substitution was applied only when downloading, not when resolving.
 - Signature verification **hard-failed for every custom npm registry**, because the trust
   store was keyed by origin — breaking exactly the mirrored deployments that
-  verification exists to protect.
+  verification exists to protect. (§15.10 has since landed the shape that satisfies both
+  requirements: an origin gets its own keys *and* npm's, and never a third party's.)
 - Registry credentials embedded in `COREPACK_NPM_REGISTRY` were **printed to stderr**,
   including on a successful run.
 - `use` checked the `devEngines` version but not its name, so pinning the wrong package

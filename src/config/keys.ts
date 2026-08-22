@@ -30,22 +30,80 @@ export const TRUST_KEYS: TrustStore = {
 };
 
 /**
- * §06.3 step 2 — the embedded key list, unconditionally.
+ * §06.3 step 2 / §15.10 — the keys that may vouch for an artifact served by one
+ * registry origin: **that origin's own keys, then the npm origin's**.
  *
- * The store is *keyed* by origin as a §15.10 seam, but phase 1 must not select
- * by it. §06.3 reads `<embedded config>.keys.npm` with no origin involved, and
- * §06.6's threat table depends on that: a compromised mirror serving unpinned
- * versions is defended precisely because npm's signature travels with the
- * package and the mirror cannot forge it. Selecting by origin instead returned
- * an empty list for every custom registry, so signature verification hard-failed
- * on exactly the deployments the defence exists for.
+ * Two rules, pulling in opposite directions, and both are load-bearing.
  *
- * §15.10 makes trust per-origin *and* adds a soft-fail for unknown origins; the
- * two arrive together or not at all.
+ * *Every* origin gets npm's keys, because §06.6's threat table depends on it: a
+ * compromised mirror serving unpinned versions is defended precisely because
+ * npm's signature travels with the package and the mirror cannot forge it.
+ * Selecting *only* by origin returned an empty list for every custom registry,
+ * so verification hard-failed on exactly the deployments the defence exists for
+ * — the bug this function was corrected for once already.
+ *
+ * No origin gets *another custom origin's* keys, because that is what §15.10
+ * means by "keyed by registry origin, not by the literal string `npm`". A user
+ * who configures keys for their Cloudsmith mirror has said nothing about who may
+ * sign packages from `registry.npmjs.org`, and flattening the store — the shape
+ * this had while §15.10 was outstanding — silently widened every configured key
+ * to every registry. Note that the *embedded* store carries the npm origin
+ * alone, so on a machine that configures nothing the two rules produce exactly
+ * the same list, and a test built on the embedded store alone cannot tell them
+ * apart (`test/unit/config.test.ts` uses a two-origin store for precisely that
+ * reason).
+ *
+ * Comparison is by parsed **origin**, so a trailing slash, a registry URL with a
+ * path (`https://artifactory.corp/api/npm/npm-remote`) and a differing host case
+ * all land on the same entry. An unparseable key or registry falls back to a
+ * literal string comparison rather than being dropped.
+ *
+ * Order is §06.3 step 3's walk order: the origin's own keys first — the more
+ * specific statement — then npm's, with a keyid seen twice kept only at its
+ * first position.
  */
 export function getTrustedKeys(
-  _registry: string = DEFAULT_REGISTRY,
+  registry: string = DEFAULT_REGISTRY,
   store: TrustStore = TRUST_KEYS,
 ): TrustedKey[] {
-  return Object.values(store).flat();
+  const wanted = originOf(registry);
+
+  const selected: TrustedKey[] = [];
+  const seen = new Set<string>();
+
+  const take = (origin: string): void => {
+    for (const [configured, keys] of Object.entries(store)) {
+      if (originOf(configured) !== origin || !Array.isArray(keys)) continue;
+      for (const key of keys) {
+        const keyid = (key as TrustedKey | undefined)?.keyid;
+        if (typeof keyid === "string") {
+          if (seen.has(keyid)) continue;
+          seen.add(keyid);
+        }
+        selected.push(key);
+      }
+    }
+  };
+
+  take(wanted);
+  if (wanted !== DEFAULT_REGISTRY) take(DEFAULT_REGISTRY);
+
+  return selected;
+}
+
+/**
+ * The origin a store key or a registry URL denotes.
+ *
+ * Falls back to the raw string when it does not parse: a store written with a
+ * bare hostname still selects for a registry written the same way, which is
+ * friendlier than dropping the entry and pretending nothing was configured.
+ */
+function originOf(value: string): string {
+  try {
+    const { origin } = new URL(value);
+    // Opaque origins ("null") all compare equal, which must not read as a match.
+    return origin === "null" ? value : origin;
+  } catch {
+    return value;
+  }
 }

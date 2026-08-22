@@ -191,6 +191,21 @@ export function getTrustedKeys(registryOrigin?: string): TrustedKey[] {
 }
 
 /**
+ * §15.9 — "no trusted key matched the signature's keyid", distinguishably.
+ *
+ * The one failure a key *refresh* can repair, and the trigger `trust.ts` gates
+ * on. Every other outcome of §06.3 is left as it was: a matched-but-unusable
+ * signature, an expired key and a failed ECDSA check all describe a key we
+ * already hold, so fetching more of them would only add a request to an answer
+ * that is not going to change.
+ *
+ * A subclass rather than a flag, so §12.1's presentation is untouched:
+ * `UsageError`'s `name` is inherited, the message is byte-identical, and
+ * `main.ts` cannot tell the two apart.
+ */
+export class UntrustedKeyidError extends UsageError {}
+
+/**
  * §06.3 — verify npm's ECDSA signature over `<packageName>@<version>:<integrity>`.
  *
  * Walks trusted keys **in order**, taking the first whose `keyid` matches a
@@ -204,6 +219,14 @@ export function verifySignature(input: {
   packageName: string;
   version: string;
   registryOrigin?: string;
+  /**
+   * §15.9 — the trust store to walk, when it is not the configured one.
+   *
+   * `trust.ts` passes the embedded set merged with the keys it just refreshed,
+   * for the retry. Nothing else supplies it, so the ordinary path still reads
+   * {@link getTrustedKeys} and the env override keeps its §06.4 meaning.
+   */
+  trustedKeys?: TrustedKey[];
 }): void {
   const { signatures, integrity, packageName, version, registryOrigin } = input;
 
@@ -211,7 +234,7 @@ export function verifySignature(input: {
     throw new Error(messages.noCompatibleSignature());
   }
 
-  const trustedKeys = getTrustedKeys(registryOrigin);
+  const trustedKeys = input.trustedKeys ?? getTrustedKeys(registryOrigin);
 
   let selected: { key: TrustedKey; signature: RegistrySignature } | undefined;
   let expired: { key: TrustedKey; signature: RegistrySignature; expires: string } | undefined;
@@ -259,7 +282,14 @@ export function verifySignature(input: {
       }
       throw new Error(messages.expiredKey(expired.key.keyid, expired.expires));
     }
-    throw new UsageError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
+    // §15.9's one repairable failure — see {@link UntrustedKeyidError}. Note
+    // that the branch above is deliberately *not* repairable: the keyid matched,
+    // so a refresh would return the same key with the same expiry. (A packument
+    // carrying both an expired and a fresh signature would be repairable in
+    // principle; npm publishes one signature per version, and §15.9 scopes the
+    // refresh to "no trusted key matched" rather than to "nothing usable
+    // matched".)
+    throw new UntrustedKeyidError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
   }
 
   // §06.3 step 4 — "the matched signature has no `.sig`". A non-string `sig` is

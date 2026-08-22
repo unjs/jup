@@ -17,6 +17,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { sriOf } from "./tarball.ts";
 
+/** §15.9 — the document npm publishes its signing keys at. */
+export const KEYS_PATH = "/-/npm/v1/keys";
+
+/** One entry of a trust store, as both `/-/npm/v1/keys` and §02.6 spell it. */
+export interface TrustedKeyEntry {
+  expires: string | null;
+  keyid: string;
+  keytype: string;
+  scheme: string;
+  key: string;
+}
+
 export type RegistryMode =
   | "ok"
   | "invalid_signature"
@@ -77,6 +89,14 @@ export class MockRegistry {
   /** When set, `dist.tarball` is advertised on this origin instead (row 83). */
   tarballOrigin?: string;
   /**
+   * §15.9 — what `GET /-/npm/v1/keys` publishes.
+   *
+   * `undefined` is a 404, and it is the default on purpose: a row that has not
+   * opted in must not accidentally acquire a working key refresh, or the rows
+   * asserting that *no* refresh happened would pass for the wrong reason.
+   */
+  publishedKeys?: TrustedKeyEntry[];
+  /**
    * A path the whole registry lives under, e.g. `/artifactory/api/npm/npm`.
    *
    * §15.3 requires the override's *path prefix* to be prepended when a URL is
@@ -102,21 +122,29 @@ export class MockRegistry {
   }
 
   /**
+   * One trust-store entry for the key this mock signs with.
+   *
+   * §15.9's `/-/npm/v1/keys` document and §15.10's origin-keyed
+   * `COREPACK_INTEGRITY_KEYS` are both built from these, so a row can put the
+   * *same* key under a different origin, or under a keyid that does not match
+   * what was signed, and tell the two selectors apart.
+   */
+  keyEntry(options?: { expires?: string | null; keyid?: string; key?: string }): TrustedKeyEntry {
+    return {
+      expires: options?.expires ?? null,
+      keyid: options?.keyid ?? this.keyid,
+      keytype: "ecdsa-sha2-nistp256",
+      scheme: "ecdsa-sha2-nistp256",
+      key: options?.key ?? this.#trusted.spki,
+    };
+  }
+
+  /**
    * A `COREPACK_INTEGRITY_KEYS` value trusting this mock, in corepack's legacy
    * `{"npm": [...]}` shape so it applies whatever registry origin is in force.
    */
   trustStore(options?: { expires?: string | null; keyid?: string }): string {
-    return JSON.stringify({
-      npm: [
-        {
-          expires: options?.expires ?? null,
-          keyid: options?.keyid ?? this.keyid,
-          keytype: "ecdsa-sha2-nistp256",
-          scheme: "ecdsa-sha2-nistp256",
-          key: this.#trusted.spki,
-        },
-      ],
-    });
+    return JSON.stringify({ npm: [this.keyEntry(options)] });
   }
 
   async start(): Promise<void> {
@@ -137,6 +165,7 @@ export class MockRegistry {
     this.mode = "ok";
     this.requiredAuthorization = undefined;
     this.tarballOrigin = undefined;
+    this.publishedKeys = undefined;
     this.basePath = "";
   }
 
@@ -200,6 +229,17 @@ export class MockRegistry {
       return;
     }
     const path = raw.slice(this.basePath.length) || "/";
+
+    // §15.9's key document, ahead of package routing: `/-/npm/v1/keys` would
+    // otherwise be read as a package named `-`.
+    if (path === KEYS_PATH) {
+      if (this.publishedKeys === undefined) {
+        this.#notFound(response);
+        return;
+      }
+      this.#json(response, { keys: this.publishedKeys });
+      return;
+    }
 
     const file = this.#files.get(path);
     if (file !== undefined) {

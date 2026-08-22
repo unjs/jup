@@ -11,8 +11,9 @@ import { npmAlternativeFor, packageManagerForRegistry } from "./config/table.ts"
 import { envDisabled, envFlag } from "./env.ts";
 import { messages, networkError, redactUserinfo, UsageError } from "./errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
-import { parseSri, shouldSkipIntegrityCheck, verifySignature } from "./integrity.ts";
+import { parseSri, shouldSkipIntegrityCheck } from "./integrity.ts";
 import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
+import { verifySignatureWithRefresh } from "./trust.ts";
 import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "./types.ts";
 
 /** The origin every table URL is written against, and the only one §07.3 rewrites. */
@@ -376,9 +377,17 @@ export async function verifyRegistryTrust(input: {
     (integrity === undefined ? undefined : await fetchRootSignatures(spec, version));
 
   // Tier 3: a signature exists, so it decides. `verifySignature` reports an
-  // untrusted keyid, an expired key and a bad signature distinctly (§06.3).
+  // untrusted keyid, an expired key and a bad signature distinctly (§06.3), and
+  // §15.9's wrapper turns the first of those three — and only the first — into
+  // one key refresh and one retry.
   if (signatures !== undefined && integrity !== undefined) {
-    verifySignature({ signatures, integrity, packageName, version, registryOrigin: registryUrl });
+    await verifySignatureWithRefresh({
+      signatures,
+      integrity,
+      packageName,
+      version,
+      registryOrigin: registryUrl,
+    });
     return;
   }
 
