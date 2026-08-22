@@ -11,9 +11,10 @@ import {
   getTableSpec,
   isSupportedPackageManager,
 } from "./config/table.ts";
-import { envDisabled, envFlag } from "./env.ts";
+import { envDisabled, envFlag, isFrozenLockfile } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
+import { readResolution, usesLockfile, writeResolution } from "./lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile, writePin } from "./manifest.ts";
 import { getFallbackLocator, resolveDescriptor } from "./resolve.ts";
 import { readInstalledSpec, referenceWithHash } from "./store.ts";
@@ -149,18 +150,35 @@ export async function runProxy(
   // unknown package manager through untouched (§04.1 step 1).
   if (!isSupportedPackageManager(descriptor.name)) {
     parseSpec(`${descriptor.name}@${descriptor.range}`, CLI_SOURCE, {
-      enforceExactVersion: false,
+      requireVersion: false,
     });
   }
 
-  // Step 5 — resolution. For an exact pin this is a single `stat` of the store.
-  const locator = await resolveDescriptor(descriptor, { allowTags: true });
+  // §15.23 — a project spec that is a range or a tag resolves through
+  // `.corepack.lock`; an exact pin never touches it at all.
+  const lockDir = lockfileDirFor(specResult, reconciled, descriptor, binaryVersion);
+
+  // Step 5 — resolution. For an exact pin this is a single `stat` of the store;
+  // for a recorded range it is one `.corepack.lock` read and nothing else.
+  const recorded = lockDir === undefined ? null : readResolution(lockDir, descriptor);
+  if (recorded === null && lockDir !== undefined && isFrozenLockfile()) {
+    throw new UsageError(messages.lockfileUnresolved(descriptor.name, descriptor.range));
+  }
+
+  const locator = recorded ?? (await resolveDescriptor(descriptor, { allowTags: true }));
   if (locator === null) {
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
   // Step 6 — one `.corepack` read on a hit; download, verify and promote on a miss.
   const installSpec = await ensureInstalledLazily(locator);
+
+  // §15.23 — record only what we had to go and resolve. The hash comes from the
+  // artifact that is now on disk, whether it was downloaded here or already in
+  // the store, so the recorded resolution pins the same bytes either way.
+  if (recorded === null && lockDir !== undefined) {
+    writeResolution(lockDir, descriptor, locator, installSpec.hash);
+  }
 
   // Step 7 — hand over. Nothing after this point may write to the store: the
   // package manager owns the process from here (§08.2).
@@ -253,6 +271,37 @@ async function ensureInstalledLazily(locator: Locator): Promise<InstallSpec> {
 
   const { ensureInstalled } = await import("./install.ts");
   return ensureInstalled(locator);
+}
+
+/**
+ * §15.23 — the directory whose `.corepack.lock` governs this run, or `undefined`
+ * when no lockfile is involved.
+ *
+ * Three conditions, all necessary:
+ *
+ * * The spec came from the **project**. A fallback descriptor (`NoProject`,
+ *   `NoSpec`, or a transparent-command mismatch) is the machine's default, not
+ *   the project's statement, and recording it in the project would pin a version
+ *   the project never asked for. `reconcile` returns the manifest's descriptor
+ *   as a `Descriptor` and the fallback as a `LazyLocator`, so the `range in`
+ *   test distinguishes them exactly.
+ * * No CLI version override. `corepack yarn@1.22.4 …` is a one-invocation
+ *   override (§04.6) and must leave the project's recorded resolution alone.
+ * * The spec is not already exact (or a URL) — {@link usesLockfile}.
+ *
+ * The directory is the manifest's own, not the cwd: in a monorepo those differ,
+ * and §03.7 already places project-level writes beside the selected manifest.
+ */
+function lockfileDirFor(
+  specResult: SpecResult,
+  reconciled: Descriptor | LazyLocator,
+  descriptor: Descriptor,
+  binaryVersion: string | undefined,
+): string | undefined {
+  if (specResult.type !== "Found" || binaryVersion !== undefined) return undefined;
+  if (!("range" in reconciled)) return undefined;
+  if (!usesLockfile(descriptor)) return undefined;
+  return dirname(specResult.target);
 }
 
 /**

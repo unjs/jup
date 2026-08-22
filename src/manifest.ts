@@ -176,7 +176,7 @@ export function discoverProjectSpec(
 
   // devEngines validation is eager (a bad `onFail: "error"` must fail the run);
   // only `parseSpec` is deferred.
-  const { raw, range } = readSpecFromManifest(selection.data, selection.target);
+  const { raw, range, hasPin } = readSpecFromManifest(selection.data, selection.target);
   if (raw === undefined) {
     return { type: "NoSpec", target: selection.target, envFilePath };
   }
@@ -187,6 +187,7 @@ export function discoverProjectSpec(
     type: "Found",
     target: selection.target,
     range,
+    hasPin,
     envFilePath,
     getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, opts),
   };
@@ -205,10 +206,12 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
     throw new UsageError(messages.invalidSpecNotString(source));
   }
 
-  // 2 — `yarn` or `yarn@`: a name with no version at all.
+  // 2 — `yarn` or `yarn@`: a name with no version at all. §15.23 widened what a
+  // version may *be*, not whether a pin has to carry one, so this is untouched:
+  // a manifest that names no version at all is still §12.2's error.
   const atIndex = raw.indexOf("@");
   if (atIndex === -1 || atIndex === raw.length - 1) {
-    if (options.enforceExactVersion) {
+    if (options.requireVersion) {
       throw new UsageError(messages.noVersionSpecified(raw, source));
     }
     const bareName = atIndex === -1 ? raw : raw.slice(0, -1);
@@ -229,9 +232,17 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
       throw new UsageError(messages.illegalUrl(raw));
     }
   } else {
-    if (options.enforceExactVersion && !isValidVersion(range)) {
-      throw new UsageError(messages.invalidSpecExpectedVersion(source, raw));
-    }
+    // §15.23 — an exact version, a semver range, and a dist-tag are all valid
+    // here; §04.1 classifies which is which, and a range or a tag additionally
+    // has its resolution recorded in `.corepack.lock`. Corepack's
+    // exact-version-only rule lived at exactly this line, and is the whole of
+    // #95 (121👍), #402 and #729 — the rule that broke Dependabot, Renovate and
+    // Netlify, and that pnpm 11.21's generated `devEngines` ranges trip over.
+    //
+    // Nothing is left to reject: what is neither a version nor a range is a tag,
+    // and a tag that names nothing fails later with §12.4's `Tag not found`,
+    // which says considerably more than "expected a semver version" did.
+    //
     // Version-bearing form reports the whole raw string.
     if (!isSupportedPackageManager(name)) {
       throw new UsageError(messages.unsupportedSpec(raw));
@@ -250,38 +261,42 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
 export function readSpecFromManifest(
   manifest: unknown,
   manifestPath: string,
-): { raw: unknown; range?: { name: string; range: string; onFail?: string } } {
+): { raw: unknown; range?: { name: string; range: string; onFail?: string }; hasPin: boolean } {
   void manifestPath; // Reserved: §15.25/§15.26 need it to report *which* file is at fault.
 
   const data = (manifest ?? {}) as Manifest;
   const pm = data.packageManager;
   const de = data.devEngines?.packageManager;
 
+  // Only a *string* counts as a declared pin: `packageManager: 42` is a spec
+  // error waiting to be reported, not a range `up` could refresh.
+  const hasPin = typeof pm === "string";
+
   if (de === undefined || de === null) {
-    return { raw: pm };
+    return { raw: pm, hasPin };
   }
 
   // These first two never throw, whatever `onFail` says: the field is too
   // malformed for its own `onFail` to be trustworthy.
   if (typeof de !== "object") {
     console.warn(messages.devEnginesNotObject(de));
-    return { raw: pm };
+    return { raw: pm, hasPin };
   }
   if (Array.isArray(de)) {
     console.warn(messages.devEnginesArray());
-    return { raw: pm };
+    return { raw: pm, hasPin };
   }
 
   const { name, version, onFail } = de as DevEnginesPackageManager;
 
   if (typeof name !== "string" || name.includes("@")) {
     warnOrThrow(messages.devEnginesBadName(name), onFail);
-    return { raw: pm };
+    return { raw: pm, hasPin };
   }
   if (version !== undefined && version !== null) {
     if (typeof version !== "string" || !isValidRange(version)) {
       warnOrThrow(messages.devEnginesBadVersion(version), onFail);
-      return { raw: pm };
+      return { raw: pm, hasPin };
     }
   }
 
@@ -295,6 +310,15 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesNameMismatch(pm, name), onFail);
     } else if (
       typeof version === "string" &&
+      // §15.23 — the cross-check compares a *version* against a range, so it
+      // only applies when the pin carries one. Once the pin may itself be a
+      // range or a tag (`pnpm@^11.0.0` beside a declared `>=11`), asking
+      // `satisfies("^11.0.0", ">=11")` answers `false` for every input and would
+      // turn the pnpm-generated shape §15.23 exists to support into a hard
+      // error. Comparing two ranges properly means range containment, which
+      // neither §03.3 nor §04.2 defines; the name check still applies, and the
+      // resolved version still has to satisfy the pin's own range.
+      isValidVersion(pm.slice(name.length + 1)) &&
       !satisfies(pm.slice(name.length + 1), version)
       // Strict satisfaction (§04.2): a prerelease pin does *not* silently pass a
       // plain range here, unlike the band lookup in §02.3.
@@ -302,10 +326,10 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
     }
     // `packageManager` wins whenever it is present, even after a warning.
-    return { raw: pm, range };
+    return { raw: pm, range, hasPin };
   }
 
-  return { raw: `${name}@${version ?? "*"}`, range };
+  return { raw: `${name}@${version ?? "*"}`, range, hasPin };
 }
 
 /**
@@ -361,7 +385,7 @@ export function reconcile(
       return withBinaryVersion(fallback);
     }
     case "Found": {
-      const spec = result.getSpec({ enforceExactVersion: binaryVersion === undefined });
+      const spec = result.getSpec({ requireVersion: binaryVersion === undefined });
       if (spec.name !== requestedName) {
         if (transparent) {
           return withBinaryVersion(fallback);
@@ -380,7 +404,7 @@ export function reconcile(
 export function writePin(
   cwd: string,
   info: { name: string; reference: string },
-): { previousPackageManager: string } {
+): { previousPackageManager: string; target: string } {
   // 1 — re-run discovery: the file to edit is not necessarily in `cwd`.
   const lookup = discoverProjectSpec(cwd);
   const target = pinTarget(lookup);
@@ -440,5 +464,8 @@ export function writePin(
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
   writeFileSync(target, updated);
 
-  return { previousPackageManager };
+  // `target` goes back to the caller because §15.23's `.corepack.lock` lives
+  // beside *this* file, not beside the cwd — in a monorepo those differ, and a
+  // resolution recorded next to the wrong manifest would never be found again.
+  return { previousPackageManager, target };
 }

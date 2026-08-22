@@ -131,6 +131,14 @@ export const messages = {
   upNoHighest: (name: string, major: number) =>
     `Failed to find the highest release for ${name} ${major}.x`,
 
+  /**
+   * §15.23 — verbatim. The file name is spelled out rather than imported from
+   * `lockfile.ts` because every module imports this one, and it must stay free
+   * of the imports that would make it a cycle.
+   */
+  lockfileUnresolved: (name: string, range: string) =>
+    `${name}@${range} is not resolved in .corepack.lock and lockfile updates are disabled.`,
+
   /* §12.5 — project enforcement ------------------------------------------ */
 
   projectConfigured: (name: string, manifestPath: string) =>

@@ -44,25 +44,44 @@ describe("§13.2 spec parsing and discovery", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("3: packageManager yarn@stable -> expected a semver version", async () => {
+  // Rows 3 and 4 are superseded by §15.23: a dist-tag and a semver range are both
+  // valid pins now, and what used to be their rejection is asserted here as
+  // acceptance. Their §13 wording ("expected a semver version") survives only in
+  // rows 2 and 5, where the pin names no version at all.
+  it("3: packageManager yarn@stable resolves from its recorded resolution", async () => {
     const fixture = createFixture({ packageManager: "yarn@stable" });
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+    // No mock registry is wired into this file, so a tag lookup would have to
+    // reach the real repo.yarnpkg.com — exit 0 is therefore also the assertion
+    // that the recorded resolution answered without any network at all.
+    fixture.write(
+      ".corepack.lock",
+      `${JSON.stringify({ version: 1, resolutions: { "yarn@stable": { resolved: "1.22.4" } } })}\n`,
+    );
 
     const result = await run(["yarn", "--version"], fixture);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("expected a semver version");
-    expect(result.stderr).toBe(
-      `Invalid package manager specification in package.json (yarn@stable); expected a semver version\n`,
-    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+    expect(result.stderr).toBe("");
   });
 
-  it("4: packageManager yarn@^1.0.0 -> expected a semver version", async () => {
+  it("4: packageManager yarn@^1.0.0 resolves, and records what it resolved to", async () => {
     const fixture = createFixture({ packageManager: "yarn@^1.0.0" });
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
 
     const result = await run(["yarn", "--version"], fixture);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("expected a semver version");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+    expect(result.stderr).toBe("");
+    // No `integrity`: this store entry was hand-planted with a placeholder hash
+    // rather than downloaded, and an unusable digest is recorded as none at all.
+    // Row 181 covers the real thing, against bytes that were actually fetched.
+    expect(fixture.json(".corepack.lock")).toEqual({
+      version: 1,
+      resolutions: { "yarn@^1.0.0": { resolved: "1.22.4" } },
+    });
   });
 
   it("5: packageManager yarn@ -> No version specified", async () => {

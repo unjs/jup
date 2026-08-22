@@ -16,7 +16,7 @@
 
 import { createReadStream, readFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { basename, join, relative, resolve as resolvePath } from "node:path";
+import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
 import {
   getSpecUrl,
@@ -24,9 +24,17 @@ import {
   isSupportedPackageManager,
   SUPPORTED_NAMES,
 } from "./config/table.ts";
+import { isFrozenLockfile } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./exec.ts";
 import { ensureInstalled } from "./install.ts";
+import {
+  readResolution,
+  removeResolution,
+  resolutionKey,
+  usesLockfile,
+  writeResolution,
+} from "./lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, writePin } from "./manifest.ts";
 import { resolveDescriptor, type ResolveOptions } from "./resolve.ts";
 import { isValidRange, isValidVersion, major } from "./semver.ts";
@@ -41,7 +49,7 @@ import {
   writeLastKnownGood,
 } from "./store.ts";
 import { create, extract, listEntries } from "./tar.ts";
-import type { Descriptor, Locator } from "./types.ts";
+import type { Descriptor, InstallSpec, Locator, SpecResult } from "./types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
@@ -235,12 +243,24 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
     // not, because it can carry the registry and network settings the
     // resolution below needs.
     discoverProjectSpec(cwd, { envOnly: true });
-    return patterns.map((pattern) =>
-      parseSpec(pattern, CLI_SOURCE, { enforceExactVersion: false }),
-    );
+    return patterns.map((pattern) => parseSpec(pattern, CLI_SOURCE, { requireVersion: false }));
   }
 
-  const lookup = discoverProjectSpec(cwd);
+  return [resolveProjectSpec(legacy).descriptor];
+}
+
+/**
+ * The project's own spec, plus the lookup that produced it.
+ *
+ * `up` needs both halves: the descriptor to resolve, and the lookup to tell a
+ * declared `packageManager` range (which §15.23 refreshes in `.corepack.lock`)
+ * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
+ */
+function resolveProjectSpec(legacy: boolean): {
+  descriptor: Descriptor;
+  lookup: Extract<SpecResult, { type: "Found" }>;
+} {
+  const lookup = discoverProjectSpec(process.cwd());
   switch (lookup.type) {
     case "NoProject": {
       throw new UsageError(messages.couldntFindProject());
@@ -253,10 +273,10 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
       // outranks the exact `packageManager` pin, which is what makes `corepack
       // up` follow a declared range across a major boundary (§09.4).
       //
-      // `enforceExactVersion: false` because these commands legitimately accept
+      // `requireVersion: false` because these commands legitimately accept
       // a range-valued pin — §09.4's own error message says "a semver version or
       // semver range", and that check is only reachable if parsing got this far.
-      return [lookup.range ?? lookup.getSpec({ enforceExactVersion: false })];
+      return { descriptor: lookup.range ?? lookup.getSpec({ requireVersion: false }), lookup };
     }
   }
 }
@@ -274,8 +294,19 @@ export async function cmdInstall(args: string[]): Promise<number> {
     );
   }
 
-  const [descriptor] = resolvePatternsToDescriptors([]);
-  const locator = await resolveOrThrow(descriptor!, { allowTags: true });
+  const { descriptor, lookup } = resolveProjectSpec(false);
+
+  // §15.23 — warm the cache with the version the project will actually run.
+  // `install` exists to fill a Docker layer, and resolving a range afresh here
+  // can legitimately answer something newer than `.corepack.lock` records — which
+  // would cache one version and then run another, offline, in the layer that has
+  // no network to fix it with. The recorded resolution is consulted under the
+  // same key the proxy path uses: the pin itself, not the `devEngines` range that
+  // §09.1 lets outrank it for `up`.
+  const pinned = lookup.getSpec({ requireVersion: false });
+  const recorded = usesLockfile(pinned) ? readResolution(dirname(lookup.target), pinned) : null;
+
+  const locator = recorded ?? (await resolveOrThrow(descriptor, { allowTags: true }));
 
   out(`${messages.addingToCache(locator.name, locator.reference)}\n`);
   // `cacheOnly` suppresses §04.7's guarded last-known-good bump.
@@ -314,7 +345,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
       continue;
     }
 
-    const descriptor = parseSpec(target, CLI_SOURCE, { enforceExactVersion: false });
+    const descriptor = parseSpec(target, CLI_SOURCE, { requireVersion: false });
     const locator = await resolveOrThrow(descriptor, { allowTags: true });
 
     out(
@@ -462,11 +493,40 @@ export async function cmdUp(args: string[]): Promise<number> {
     throw new UsageError(`The 'corepack up' command takes no arguments`);
   }
 
-  const [descriptor] = resolvePatternsToDescriptors([]);
-  const { name, range } = descriptor!;
+  const { descriptor, lookup } = resolveProjectSpec(false);
+  const { name, range } = descriptor;
 
   if (!isValidVersion(range) && !isValidRange(range)) {
     throw new UsageError(messages.upNotSemver());
+  }
+
+  // §15.23 — when the `packageManager` field itself holds a range, that range is
+  // the user's statement of intent and `up` must not overwrite it with a version:
+  // what it refreshes is the recorded resolution. A pin synthesised from
+  // `devEngines` is a different case and still becomes a real pin (row 114).
+  const pin = lookup.hasPin === true ? lookup.getSpec({ requireVersion: false }) : undefined;
+  if (pin !== undefined && usesLockfile(pin)) {
+    if (!isValidRange(pin.range)) {
+      // A dist-tag pin. §09.4 has always refused these, and recording a tag's
+      // current expansion is `use`'s job, not `up`'s.
+      throw new UsageError(messages.upNotSemver());
+    }
+    if (isFrozenLockfile({ refresh: true })) {
+      throw new UsageError(messages.lockfileUnresolved(pin.name, pin.range));
+    }
+
+    // No second, major-confining resolve here: for an exact pin that step is what
+    // keeps `up` inside the current major, but a declared range already says how
+    // far the user is willing to move — and `^2.0.0` derived from a `~2.1.0` pin
+    // would pick a version the range itself rejects, which the next run would
+    // then discard as unsatisfying.
+    const refreshed = await resolveOrThrow(pin, { useCache: false });
+    const dir = dirname(lookup.target);
+    return applyToProject(refreshed, (reference, spec) => {
+      writeResolution(dir, pin, { name: pin.name, reference }, spec.hash);
+      // The field is unchanged, so that is what the package manager migrates from.
+      return `${pin.name}@${pin.range}`;
+    });
   }
 
   // Both resolves pass `useCache: false`: with the cache consulted they would
@@ -500,7 +560,7 @@ export async function cmdUse(args: string[]): Promise<number> {
     throw new UsageError(`The 'corepack use' command accepts a single package manager pattern`);
   }
 
-  const descriptor = parseSpec(pattern, CLI_SOURCE, { enforceExactVersion: false });
+  const descriptor = parseSpec(pattern, CLI_SOURCE, { requireVersion: false });
   // `useCache: false`: `corepack use yarn@stable` must ask what stable means
   // today, not what is lying around in the store.
   const resolved = await resolveOrThrow(descriptor, { allowTags: true, useCache: false });
@@ -514,8 +574,15 @@ export async function cmdUse(args: string[]): Promise<number> {
  * Order is observable and test-asserted: the banner reaches stdout **before**
  * the install and before `writePin`'s devEngines check, so a mismatch surfaces
  * underneath a banner that has already been printed (test 110).
+ *
+ * `record` is what the command does with the installed version — write the pin,
+ * or (§15.23) refresh the recorded resolution — and returns the value
+ * `COREPACK_MIGRATE_FROM` carries into the package manager's own `use` command.
  */
-async function pinToProject(locator: Locator): Promise<number> {
+async function applyToProject(
+  locator: Locator,
+  record: (reference: string, spec: InstallSpec) => string,
+): Promise<number> {
   out(`${messages.installingInProject(locator.name, locator.reference)}\n`);
 
   const spec = await ensureInstalled(locator);
@@ -523,7 +590,7 @@ async function pinToProject(locator: Locator): Promise<number> {
 
   // §03.7 — may throw a `UsageError` through `warnOrThrow`; the banner above is
   // already on stdout, which is exactly what §09.5 describes.
-  const { previousPackageManager } = writePin(process.cwd(), { name: locator.name, reference });
+  const previousPackageManager = record(reference, spec);
 
   // A URL reference has no table band, so it has no `commands.use` either.
   const pinned: Locator = { name: locator.name, reference };
@@ -549,6 +616,38 @@ async function pinToProject(locator: Locator): Promise<number> {
   );
 
   return 0;
+}
+
+/** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */
+function pinToProject(locator: Locator): Promise<number> {
+  return applyToProject(locator, (reference) => {
+    const { previousPackageManager, target } = writePin(process.cwd(), {
+      name: locator.name,
+      reference,
+    });
+
+    // §15.23 — the field now names one exact version, so any resolution recorded
+    // for the range it replaced answers a question nobody asks any more. Left
+    // behind, it would come back to life the moment someone edited the pin back
+    // to that same range, pinning a version chosen for a project state that no
+    // longer exists.
+    const stale = staleResolutionKey(previousPackageManager);
+    if (stale !== undefined) removeResolution(dirname(target), stale);
+
+    return previousPackageManager;
+  });
+}
+
+/**
+ * The `.corepack.lock` key a replaced `packageManager` value used to own, or
+ * `undefined` when it owned none (the literal `unknown`, or an exact pin).
+ */
+function staleResolutionKey(previous: string): string | undefined {
+  const at = previous.indexOf("@");
+  if (at <= 0 || at === previous.length - 1) return undefined;
+
+  const descriptor = { name: previous.slice(0, at), range: previous.slice(at + 1) };
+  return usesLockfile(descriptor) ? resolutionKey(descriptor) : undefined;
 }
 
 /* -------------------------------------------------------------------------- */

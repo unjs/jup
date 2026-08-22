@@ -9,7 +9,9 @@ import {
   SECURITY_ONLY_FROM_ENVIRONMENT,
   envDisabled,
   envFlag,
+  isCI,
   isEnvFileEligible,
+  isFrozenLockfile,
   loadEnvFileFrom,
   parseEnvFile,
 } from "../../src/env.ts";
@@ -257,5 +259,54 @@ describe("envFlag / envDisabled", () => {
     delete process.env.COREPACK_ENABLE_AUTO_PIN;
     expect(envFlag("COREPACK_ENABLE_AUTO_PIN")).toBe(false);
     expect(envDisabled("COREPACK_ENABLE_AUTO_PIN")).toBe(false);
+  });
+});
+
+describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
+  beforeEach(() => {
+    delete process.env.CI;
+  });
+
+  it("treats any non-empty CI value as CI, and an empty one as unset", () => {
+    expect(isCI()).toBe(false);
+    process.env.CI = "";
+    expect(isCI()).toBe(false);
+    process.env.CI = "true";
+    expect(isCI()).toBe(true);
+  });
+
+  it("defaults to thawed outside CI and frozen inside it", () => {
+    expect(isFrozenLockfile()).toBe(false);
+
+    process.env.CI = "1";
+    expect(isFrozenLockfile()).toBe(true);
+    // ...but a command the user ran *to* refresh the file is not what the CI
+    // default is guarding against.
+    expect(isFrozenLockfile({ refresh: true })).toBe(false);
+  });
+
+  it("lets an explicit value win in both directions, refresh included", () => {
+    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    expect(isFrozenLockfile()).toBe(true);
+    expect(isFrozenLockfile({ refresh: true })).toBe(true);
+
+    process.env.CI = "1";
+    process.env.COREPACK_FROZEN_LOCKFILE = "0";
+    expect(isFrozenLockfile()).toBe(false);
+
+    // An empty value is "unset", as everywhere else in this module.
+    process.env.COREPACK_FROZEN_LOCKFILE = "";
+    expect(isFrozenLockfile()).toBe(true);
+  });
+
+  // §15.37 marks it env-file eligible: it is a behavioural preference, not a
+  // security decision, so a project may ship it in `.corepack.env`.
+  it("is settable from an env file", () => {
+    expect(isEnvFileEligible("COREPACK_FROZEN_LOCKFILE")).toBe(true);
+
+    applyEnvFile({ COREPACK_FROZEN_LOCKFILE: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
+
+    expect(process.env.COREPACK_FROZEN_LOCKFILE).toBe("1");
+    expect(isFrozenLockfile()).toBe(true);
   });
 });

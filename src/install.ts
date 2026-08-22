@@ -9,7 +9,7 @@
 import { open, rm } from "node:fs/promises";
 import { join, posix } from "node:path";
 import { getSpecFor, isEmbeddedReference, isSupportedPackageManager } from "./config/table.ts";
-import { envFlag } from "./env.ts";
+import { envFlag, isCI } from "./env.ts";
 import { messages, UsageError } from "./errors.ts";
 import { httpGet } from "./http.ts";
 import {
@@ -243,8 +243,7 @@ export async function confirmDownload(url: string): Promise<void> {
 
   // §08.6 — stdin is never touched unless we are actually going to ask. An
   // empty `CI` counts as unset, matching the reference implementation.
-  const ci = process.env.CI;
-  if (process.stdin.isTTY !== true || (ci !== undefined && ci !== "")) return;
+  if (process.stdin.isTTY !== true || isCI()) return;
 
   process.stderr.write(messages.downloadPrompt());
 

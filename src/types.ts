@@ -182,8 +182,18 @@ export interface DevEnginesRange {
   onFail?: string;
 }
 
+/**
+ * §03.4 — how strict `parseSpec` is about the version half of a spec.
+ *
+ * `requireVersion` is what used to be `enforceExactVersion`, and the change of
+ * meaning is §15.23: a `packageManager` pin must still *name* a version (a bare
+ * `yarn` is still the "No version specified" error), but that version may now be
+ * a semver range or a dist-tag as well as an exact release. Nothing in the
+ * pipeline demands an exact version any more; what a range costs instead is a
+ * recorded resolution in `.corepack.lock`.
+ */
 export interface ParseSpecOptions {
-  enforceExactVersion: boolean;
+  requireVersion: boolean;
 }
 
 /** §03.1 — the three outcomes of the upward walk. */
@@ -196,6 +206,14 @@ export type SpecResult =
       /** Lazy: parses and validates only when called, so `use` can overwrite a malformed field. */
       getSpec: (opts: ParseSpecOptions) => Descriptor;
       range?: DevEnginesRange;
+      /**
+       * Whether the manifest itself declares `packageManager`, as opposed to the
+       * spec having been synthesised from `devEngines.packageManager` (§03.3).
+       * §15.23's `up` needs the distinction: a declared range is the user's own
+       * statement of intent and must survive an update, while a synthesised one
+       * is what row 114 turns into a fresh pin.
+       */
+      hasPin?: boolean;
       envFilePath?: string;
     };
 

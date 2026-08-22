@@ -163,3 +163,36 @@ export function envFlag(name: string): boolean {
 export function envDisabled(name: string): boolean {
   return process.env[name] === "0";
 }
+
+/**
+ * §08.6 — "an unset `CI`", the way every other tool spells it: any non-empty
+ * value means a non-interactive automated environment.
+ *
+ * It gates two unrelated things, which is why it lives here rather than in
+ * either caller: the interactive half of the download prompt (§05.5), and
+ * §15.23's frozen-lockfile default.
+ */
+export function isCI(): boolean {
+  const ci = process.env.CI;
+  return ci !== undefined && ci !== "";
+}
+
+/**
+ * §15.23 / §15.37 — whether `.corepack.lock` may be written or refreshed.
+ *
+ * `COREPACK_FROZEN_LOCKFILE` wins in **both** directions when it is set: `1`
+ * freezes, anything else thaws, including inside CI. With it unset, CI defaults
+ * to frozen — the convention every package manager's own `--frozen-lockfile`
+ * follows, and the behaviour that makes a CI run fail loudly instead of quietly
+ * resolving a range to something the developer never saw.
+ *
+ * @param options `refresh` marks a command the user ran *in order to* update the
+ * resolution (`corepack up`). The CI default must not block that — it exists to
+ * stop an *implicit* update — but an explicit `COREPACK_FROZEN_LOCKFILE=1` still
+ * does, because §15.37 defines it as "refuse to write/refresh".
+ */
+export function isFrozenLockfile(options?: { refresh?: boolean }): boolean {
+  const raw = process.env.COREPACK_FROZEN_LOCKFILE;
+  if (raw !== undefined && raw !== "") return raw === "1";
+  return options?.refresh === true ? false : isCI();
+}

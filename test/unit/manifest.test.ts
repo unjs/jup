@@ -73,12 +73,14 @@ function lazyFallback(name = "yarn"): LazyLocator {
   return { name, reference: () => Promise.resolve("9.9.9") };
 }
 
-const EXACT = { enforceExactVersion: true };
-const LOOSE = { enforceExactVersion: false };
+/** A manifest pin in proxy mode: it must name a version, but §15.23 lets that version be a range. */
+const PINNED = { requireVersion: true };
+/** A CLI pattern, or a pin with a CLI version override: a bare name is allowed too. */
+const LOOSE = { requireVersion: false };
 
 describe("parseSpec — §03.4", () => {
   it("splits on the first @", () => {
-    expect(parseSpec("yarn@1.22.4", "package.json", EXACT)).toEqual({
+    expect(parseSpec("yarn@1.22.4", "package.json", PINNED)).toEqual({
       name: "yarn",
       range: "1.22.4",
     });
@@ -87,7 +89,7 @@ describe("parseSpec — §03.4", () => {
   it("rejects a non-string field", () => {
     for (const raw of [42, null, {}, ["yarn@1.22.4"]]) {
       expectUsageError(
-        () => parseSpec(raw, "package.json", EXACT),
+        () => parseSpec(raw, "package.json", PINNED),
         messages.invalidSpecNotString("package.json"),
       );
     }
@@ -96,11 +98,11 @@ describe("parseSpec — §03.4", () => {
   // Test 2 / test 5.
   it("rejects a name with no version when an exact version is required", () => {
     expectUsageError(
-      () => parseSpec("yarn", "package.json", EXACT),
+      () => parseSpec("yarn", "package.json", PINNED),
       `No version specified for yarn in "packageManager" of package.json`,
     );
     expectUsageError(
-      () => parseSpec("yarn@", "package.json", EXACT),
+      () => parseSpec("yarn@", "package.json", PINNED),
       `No version specified for yarn@ in "packageManager" of package.json`,
     );
   });
@@ -121,20 +123,20 @@ describe("parseSpec — §03.4", () => {
     );
   });
 
-  // Test 3 / test 4.
-  it("rejects tags and ranges in a pin", () => {
-    expectUsageError(
-      () => parseSpec("yarn@stable", "package.json", EXACT),
-      messages.invalidSpecExpectedVersion("package.json", "yarn@stable"),
-    );
-    expectUsageError(
-      () => parseSpec("yarn@^1.0.0", "package.json", EXACT),
-      messages.invalidSpecExpectedVersion("package.json", "yarn@^1.0.0"),
-    );
-    expect(parseSpec("yarn@^1.0.0", "CLI arguments", LOOSE)).toEqual({
-      name: "yarn",
-      range: "^1.0.0",
-    });
+  // Tests 3 / 4, rewritten by §15.23: a pin may now be a range or a dist-tag, and
+  // only the *absence* of a version is still an error. `requireVersion` is
+  // therefore the only thing separating the two modes.
+  it("accepts tags and ranges in a pin", () => {
+    for (const options of [PINNED, LOOSE]) {
+      expect(parseSpec("yarn@stable", "package.json", options)).toEqual({
+        name: "yarn",
+        range: "stable",
+      });
+      expect(parseSpec("yarn@^1.0.0", "package.json", options)).toEqual({
+        name: "yarn",
+        range: "^1.0.0",
+      });
+    }
   });
 
   it("reports the raw string for an unsupported version-bearing spec", () => {
@@ -149,9 +151,11 @@ describe("parseSpec — §03.4", () => {
       () => parseSpec("@scope/pkg@1.0.0", "CLI arguments", LOOSE),
       messages.unsupportedSpec("@scope/pkg@1.0.0"),
     );
+    // §15.23 removed the exact-version check that used to fire first here, so
+    // both modes now reach the same unsupported-name error.
     expectUsageError(
-      () => parseSpec("@scope/pkg@1.0.0", "package.json", EXACT),
-      messages.invalidSpecExpectedVersion("package.json", "@scope/pkg@1.0.0"),
+      () => parseSpec("@scope/pkg@1.0.0", "package.json", PINNED),
+      messages.unsupportedSpec("@scope/pkg@1.0.0"),
     );
   });
 
@@ -190,7 +194,7 @@ describe("the upward walk — §03.1", () => {
 
     expect(result.type).toBe("Found");
     expect(result.target).toBe(target);
-    expect((result as Extract<SpecResult, { type: "Found" }>).getSpec(EXACT)).toEqual({
+    expect((result as Extract<SpecResult, { type: "Found" }>).getSpec(PINNED)).toEqual({
       name: "yarn",
       range: "1.22.4",
     });
@@ -229,7 +233,7 @@ describe("the upward walk — §03.1", () => {
 
     const result = discoverProjectSpec(join(root, "foo")) as Extract<SpecResult, { type: "Found" }>;
     expect(result.target).toBe(closest);
-    expect(result.getSpec(EXACT)).toEqual({ name: "npm", range: "6.14.2" });
+    expect(result.getSpec(PINNED)).toEqual({ name: "npm", range: "6.14.2" });
   });
 
   it("climbs past a manifest without a pin", () => {
@@ -241,7 +245,7 @@ describe("the upward walk — §03.1", () => {
       { type: "Found" }
     >;
     expect(result.target).toBe(rootManifest);
-    expect(result.getSpec(EXACT)).toEqual({ name: "yarn", range: "1.22.4" });
+    expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
   });
 
   it("targets the ROOT manifest when nothing in a monorepo declares a pin", () => {
@@ -300,16 +304,17 @@ describe("the upward walk — §03.1", () => {
     );
 
     const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
-    expect(result.getSpec(EXACT)).toEqual({ name: "yarn", range: "1.22.4" });
+    expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
   });
 
   it("defers spec validation until getSpec is called (test 109)", () => {
-    for (const packageManager of ["yarn@^1", "yarn", "yarn@", 42]) {
+    // `yarn@^1` is no longer among these: §15.23 makes a range a valid pin.
+    for (const packageManager of ["yarn", "yarn@", 42]) {
       manifest(".", { packageManager });
       // Discovery itself must not throw — `use` overwrites this field.
       const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
       expect(result.type).toBe("Found");
-      expect(() => result.getSpec(EXACT)).toThrow(UsageError);
+      expect(() => result.getSpec(PINNED)).toThrow(UsageError);
     }
   });
 
@@ -437,21 +442,29 @@ describe("devEngines — §03.3", () => {
   const read = (data: unknown) => readSpecFromManifest(data, join(root, "package.json"));
 
   it("ignores an absent or null devEngines.packageManager", () => {
-    expect(read({ packageManager: "yarn@1.22.4" })).toEqual({ raw: "yarn@1.22.4" });
-    expect(read({ devEngines: {} })).toEqual({ raw: undefined });
-    expect(read({ devEngines: { packageManager: null } })).toEqual({ raw: undefined });
+    // `hasPin` reports whether the manifest declares `packageManager` itself:
+    // §15.23's `up` refreshes a declared range in place, but still creates a pin
+    // from a spec synthesised out of `devEngines`.
+    expect(read({ packageManager: "yarn@1.22.4" })).toEqual({
+      raw: "yarn@1.22.4",
+      hasPin: true,
+    });
+    expect(read({ devEngines: {} })).toEqual({ raw: undefined, hasPin: false });
+    expect(read({ devEngines: { packageManager: null } })).toEqual({
+      raw: undefined,
+      hasPin: false,
+    });
   });
 
-  // Test 22.
+  // Test 22, as §15.23 leaves it: the derived spec is a range, and a range is a
+  // valid pin, so it parses instead of failing.
   it("derives `<name>@*` when only a name is declared", () => {
     manifest(".", { devEngines: { packageManager: { name: "yarn" } } });
 
     const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
     expect(result.range).toBeUndefined();
-    expectUsageError(
-      () => result.getSpec(EXACT),
-      messages.invalidSpecExpectedVersion("package.json", "yarn@*"),
-    );
+    expect(result.hasPin).toBe(false);
+    expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "*" });
   });
 
   // Test 23.
@@ -460,10 +473,8 @@ describe("devEngines — §03.3", () => {
 
     const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
     expect(result.range).toEqual({ name: "pnpm", range: "6.x", onFail: undefined });
-    expectUsageError(
-      () => result.getSpec(EXACT),
-      messages.invalidSpecExpectedVersion("package.json", "pnpm@6.x"),
-    );
+    expect(result.hasPin).toBe(false);
+    expect(result.getSpec(PINNED)).toEqual({ name: "pnpm", range: "6.x" });
   });
 
   // Test 24.
@@ -477,6 +488,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: pm,
       range: { name: "pnpm", range: "6.x", onFail: undefined },
+      hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -487,6 +499,7 @@ describe("devEngines — §03.3", () => {
     expect(read({ packageManager: pm, devEngines: { packageManager: { name: "pnpm" } } })).toEqual({
       raw: pm,
       range: undefined,
+      hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -536,7 +549,7 @@ describe("devEngines — §03.3", () => {
         packageManager: pm,
         devEngines: { packageManager: [{ name: "yarn", onFail: "error" }] },
       }),
-    ).toEqual({ raw: pm });
+    ).toEqual({ raw: pm, hasPin: true });
     expect(warn).toHaveBeenCalledWith(messages.devEnginesArray());
   });
 
@@ -546,13 +559,17 @@ describe("devEngines — §03.3", () => {
       read({ packageManager: "pnpm@6.6.2", devEngines: { packageManager: "pnpm@10.x" } }),
     ).toEqual({
       raw: "pnpm@6.6.2",
+      hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(
       `! Corepack only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
     );
 
     warn.mockClear();
-    expect(read({ devEngines: { packageManager: 10 } })).toEqual({ raw: undefined });
+    expect(read({ devEngines: { packageManager: 10 } })).toEqual({
+      raw: undefined,
+      hasPin: false,
+    });
     expect(warn).toHaveBeenCalledWith(
       `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
     );
@@ -566,13 +583,21 @@ describe("devEngines — §03.3", () => {
 
   // Test 30.
   it("stays silent on a mismatch with onFail: ignore", () => {
-    expect(read(nameMismatch("ignore"))).toEqual({ raw: "pnpm@6.6.2", range: undefined });
+    expect(read(nameMismatch("ignore"))).toEqual({
+      raw: "pnpm@6.6.2",
+      range: undefined,
+      hasPin: true,
+    });
     expect(warn).not.toHaveBeenCalled();
   });
 
   // Test 31.
   it("warns on a name mismatch with onFail: warn", () => {
-    expect(read(nameMismatch("warn"))).toEqual({ raw: "pnpm@6.6.2", range: undefined });
+    expect(read(nameMismatch("warn"))).toEqual({
+      raw: "pnpm@6.6.2",
+      range: undefined,
+      hasPin: true,
+    });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
   });
 
@@ -583,7 +608,11 @@ describe("devEngines — §03.3", () => {
   });
 
   it("degrades an unrecognised onFail to a warning", () => {
-    expect(read(nameMismatch("explode"))).toEqual({ raw: "pnpm@6.6.2", range: undefined });
+    expect(read(nameMismatch("explode"))).toEqual({
+      raw: "pnpm@6.6.2",
+      range: undefined,
+      hasPin: true,
+    });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
   });
 
@@ -611,6 +640,7 @@ describe("devEngines — §03.3", () => {
     expect(read(versionMismatch("warn"))).toEqual({
       raw: "pnpm@6.6.2",
       range: { name: "pnpm", range: "10.x", onFail: "warn" },
+      hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${versionMismatchMessage}`);
   });
@@ -618,6 +648,37 @@ describe("devEngines — §03.3", () => {
   // Test 35.
   it("throws on a version mismatch with no onFail", () => {
     expectUsageError(() => read(versionMismatch()), versionMismatchMessage);
+  });
+
+  // §15.23 — the shape pnpm 11.21 generates: a range in `packageManager` beside
+  // a range in `devEngines`. `satisfies` takes a *version* on its left, so
+  // comparing the two ranges answers `false` for every input; the check is
+  // skipped rather than turned into a hard error on a perfectly ordinary
+  // manifest. Range containment is what would be needed, and no section defines
+  // it.
+  it("skips the version cross-check when the pin is itself a range", () => {
+    expect(
+      read({
+        packageManager: "pnpm@^11.0.0",
+        devEngines: { packageManager: { name: "pnpm", version: ">=11" } },
+      }),
+    ).toEqual({
+      raw: "pnpm@^11.0.0",
+      range: { name: "pnpm", range: ">=11", onFail: undefined },
+      hasPin: true,
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("still applies the name check to a range pin", () => {
+    expectUsageError(
+      () =>
+        read({
+          packageManager: "yarn@^1.0.0",
+          devEngines: { packageManager: { name: "pnpm", version: ">=11" } },
+        }),
+      messages.devEnginesNameMismatch("yarn@^1.0.0", "pnpm"),
+    );
   });
 
   // Test 37 — build metadata is ignored, so conflicting hashes are not a
@@ -631,6 +692,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: "pnpm@6.6.2+sha1.11111",
       range: { name: "pnpm", range: "6.6.2+sha1.22222", onFail: undefined },
+      hasPin: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });

@@ -44,28 +44,40 @@ function pinnedProject(devEngines: unknown, pin: unknown = PIN) {
 }
 
 describe("§13.4 devEngines", () => {
-  it("22: {name: yarn} with no packageManager needs an exact version", async () => {
+  // Rows 22 and 23 are superseded by §15.23, whose first requirement is that
+  // `devEngines.packageManager.version` accept a range: the derived `yarn@*` and
+  // `pnpm@6.x` specs are now usable rather than rejected. This is the shape pnpm
+  // 11.21 generates, and rejecting it is why pnpm dropped corepack from its docs.
+  it("22: {name: yarn} with no packageManager resolves as yarn@*", async () => {
     const fixture = createFixture({ devEngines: { packageManager: { name: "yarn" } } });
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
 
     const result = await run(["yarn", "--version"], fixture);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe(
-      `Invalid package manager specification in package.json (yarn@*); expected a semver version\n`,
-    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+    expect(result.stderr).toBe("");
+    expect((fixture.json(".corepack.lock") as { resolutions: unknown }).resolutions).toEqual({
+      // Seeded, not downloaded: its placeholder hash is not a usable digest, so
+      // none is recorded. Row 181 asserts the recorded digest of real bytes.
+      "yarn@*": { resolved: "1.22.4" },
+    });
   });
 
-  it("23: {name: pnpm, version: 6.x} with no packageManager needs an exact version", async () => {
+  it("23: {name: pnpm, version: 6.x} with no packageManager resolves as pnpm@6.x", async () => {
     const fixture = createFixture({
       devEngines: { packageManager: { name: "pnpm", version: "6.x" } },
     });
+    seedPackageManager(fixture.home, "pnpm", "6.6.2");
 
     const result = await run(["pnpm", "--version"], fixture);
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe(
-      `Invalid package manager specification in package.json (pnpm@6.x); expected a semver version\n`,
-    );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+    expect(result.stderr).toBe("");
+    expect((fixture.json(".corepack.lock") as { resolutions: unknown }).resolutions).toEqual({
+      "pnpm@6.x": { resolved: "6.6.2" },
+    });
   });
 
   it("24: the same, plus a matching hash-bearing packageManager, runs 6.6.2", async () => {

@@ -79,6 +79,47 @@ Both write a hash-bearing pin, computed from the bytes actually downloaded:
 }
 ```
 
+### Ranges, and `.corepack.lock`
+
+An exact version is not the only thing either field may hold: a **semver range** or a
+**dist-tag** works too, which is what Dependabot, Renovate and pnpm's own generated
+`devEngines` block write.
+
+```jsonc
+{ "packageManager": "pnpm@^11.0.0" }
+```
+
+The version a range resolves to is recorded next to your manifest, with the digest of
+the bytes it produced:
+
+`.corepack.lock`:
+
+```json
+{
+  "version": 1,
+  "resolutions": {
+    "pnpm@^11.0.0": {
+      "resolved": "11.1.2",
+      "integrity": "sha512-…"
+    }
+  }
+}
+```
+
+Commit that file. From then on the range costs nothing: every run uses the recorded
+version with **no network access at all**, and the recorded digest is enforced exactly
+like a hash you pinned by hand. The resolution changes only when you run `pipack up`, or
+when the recorded version stops satisfying the range.
+
+```sh
+pipack up                            # re-resolve the range, keeping the range
+COREPACK_FROZEN_LOCKFILE=1 pnpm i    # refuse to resolve anything not already recorded
+```
+
+`COREPACK_FROZEN_LOCKFILE` defaults to on in CI (`CI` set), matching what package
+managers do with their own lockfiles; set it to `0` to opt back out. A project that pins
+an exact version never involves the file at all — nothing is read, nothing is written.
+
 ### Running a package manager
 
 Once `pipack enable` has run, nothing is different — `yarn add x`, `pnpm install`, and
@@ -108,7 +149,7 @@ pipack install -g corepack.tgz       # and seed a cache from it elsewhere
 | `pipack enable [...name]`            | Install shims for each package manager onto `PATH`                        |
 | `pipack disable [...name]`           | Remove them again                                                         |
 | `pipack use <name[@<version>]>`      | Resolve, install, pin into `package.json`, then run the install command   |
-| `pipack up`                          | Bump the project's pin within its current major line                      |
+| `pipack up`                          | Bump the project's pin within its current major line, or re-resolve its range |
 | `pipack install`                     | Download and cache the version this project pins                          |
 | `pipack install -g [...name\|<file>]`| Install globally, or seed the cache from a `pack` archive                 |
 | `pipack pack [...name]`              | Build a portable archive of cached versions                               |
@@ -137,6 +178,7 @@ The ones you are most likely to want:
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` | Announce (and on a TTY, confirm) each download                    |
 | `COREPACK_INTEGRITY_KEYS`           | Replace the built-in trust store, or set `0` to skip verification  |
 | `COREPACK_REQUIRE_SIGNATURES=1`     | Refuse a registry that publishes no signature, rather than warning |
+| `COREPACK_FROZEN_LOCKFILE=1`        | Never resolve or record a range that `.corepack.lock` does not already answer (default in CI) |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
 Security-relevant ones are deliberately not settable that way — see
@@ -196,8 +238,8 @@ Phase 1 — the behavioural contract in [`.agents/01`](./.agents/01-overview.md)
 | --- | --- |
 | Specification (`.agents/`) | 16 normative documents |
 | Implementation | 13 modules, zero runtime dependencies |
-| Conformance suite (§13, rows 1–147) | Passing — 3 rows skipped (two Windows-only, one needs a real TTY) |
-| Unit tests | 732 passing |
+| Conformance suite (§13 rows 1–147, plus §15 rows so far) | Passing — 3 rows skipped (two Windows-only, one needs a real TTY) |
+| Unit tests | 762 passing |
 | Audit (correctness / speed / security / simplicity) | Complete, findings applied |
 | Published release | Not yet |
 
@@ -212,9 +254,10 @@ Measured, not hoped for:
 
 Not done, deliberately:
 
-- **Most of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, semver ranges
-  in the pin, `pipack info`, signing-key rotation, per-package-manager registries, native
-  (non-JavaScript) package managers, and the rest.
+- **Most of [`.agents/15`](./.agents/15-gaps.md)** — `.npmrc` support, `pipack info`,
+  signing-key rotation, per-package-manager registries, native (non-JavaScript) package
+  managers, and the rest. Semver ranges in the pin, with `.corepack.lock`
+  ([§15.23](./.agents/15-gaps.md)), are done.
 
 ### What the audit found
 
