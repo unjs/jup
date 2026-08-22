@@ -1045,4 +1045,4 @@ a file between directories is free; making a warm module import a cold one is no
 
 ## License
 
-Published under the [MIT](https://github.com/pithings/pipack/blob/main/LICENSE) license 💛.
+Published under the [MIT](https://github.com/pithings/jup/blob/main/LICENSE) license 💛.
