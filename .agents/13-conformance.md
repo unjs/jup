@@ -69,12 +69,17 @@ new here (they would fail against corepack today) — see §14/§15 for rational
 
 ## 13.5 Environment variables
 
+Every row below names a variable in its `COREPACK_` spelling and applies
+unchanged to its `JUP_` spelling (§11.6): a conforming implementation passes each
+row under either name. Row 41b covers the pair itself.
+
 | # | Setup | Expected |
 |---|---|---|
 | 38 | `COREPACK_ENABLE_STRICT` unset, project pins npm | `yarn --version` → exit 1, stderr `This project is configured to use npm…` |
 | 39 | Project pins `yarn@1.0.0` | `pnpm --version` → exit 1, stderr exactly `This project is configured to use yarn because <abs path>/package.json has a "packageManager" field` |
 | 40 | `COREPACK_ENABLE_STRICT=0`, project pins yarn | `pnpm --version` → exit 0, pnpm's default version; `yarn --version` → still `1.0.0` |
 | 41 | `COREPACK_ENABLE_PROJECT_SPEC=0`, project pins `yarn@1.0.0` | `yarn --version` → the *default* version, not `1.0.0` |
+| 41b | `JUP_ENABLE_PROJECT_SPEC=0`; then both spellings set to opposite values | the `JUP_` spelling drives the behaviour, and wins over `COREPACK_` (§11.6, §14.22) |
 | 42 | Project pins npm | `yarn dlx --help` → exit 0, empty stderr (transparent command) |
 | 43 | `COREPACK_ENABLE_AUTO_PIN=1`, `package.json` is `{}` | after `yarn`, `packageManager` matches `/^yarn@/`; stderr carries the two `!` notices |
 | 44 | Same without the variable | `packageManager` is **not** written |
@@ -84,7 +89,7 @@ new here (they would fail against corepack today) — see §14/§15 for rational
 | 48 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` only in `.corepack.env` | stderr empty — the file cannot set it |
 | 49 | `COREPACK_NPM_REGISTRY` + prompt, no project spec | stderr matches `! Corepack is about to download <registry>/yarn/-/yarn-1.x.y.tgz` |
 | 50 | Same with `packageManager: yarn@3.0.0-rc.2+sha224.…` | stderr names `<registry>/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz` |
-| 51 | Project pins `npm@6.14.2` | `npm run env` output contains `COREPACK_ROOT=<tool root>` |
+| 51 | Project pins `npm@6.14.2` | `npm run env` output contains `COREPACK_ROOT=<tool root>` — and `JUP_ROOT=<tool root>`, since §11.3's exports are written under both spellings |
 
 ## 13.6 Env files
 
@@ -97,7 +102,10 @@ new here (they would fail against corepack today) — see §14/§15 for rational
 | 56 | `.corepack.env` inside `node_modules/pkg`, run from there | ignored |
 | 57 | Real env var and `.corepack.env` both set the same key | real env var wins |
 | 58 | `COREPACK_ENV_FILE=.other.env` | `.other.env` is read, `.corepack.env` ignored |
-| 59 | `.corepack.env` sets a non-`COREPACK_` key | ignored |
+| 59 | `.corepack.env` sets a key with neither prefix (§11.6) | ignored |
+| 59b | `.corepack.env` sets `JUP_ENABLE_AUTO_PIN=1` | applied — a `JUP_` key is eligible on exactly the terms its `COREPACK_` twin is |
+| 59c | `.corepack.env` sets `JUP_INTEGRITY_KEYS=0` | refused and warned, as `COREPACK_INTEGRITY_KEYS` is: the deny-list is checked against the canonical spelling (§03.2, §14.5) |
+| 59d | Real `COREPACK_HOME` set, `.corepack.env` sets `JUP_HOME` | the real environment wins; the file's value is not applied (§11.6) |
 | 60 ⊕ | `.corepack.env` sets `COREPACK_INTEGRITY_KEYS=0` | **ignored** — verification still runs (§14.5) |
 | 61 ⊕ | `.corepack.env` sets `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1` | **ignored** (§14.5) |
 | 62 ⊕ | `.corepack.env` sets `COREPACK_NPM_TOKEN` | **ignored** (§14.5) |

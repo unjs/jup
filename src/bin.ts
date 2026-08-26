@@ -8,7 +8,9 @@
  * `??=` so a real environment variable still wins.
  */
 
-process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";
+import { defaultEnv, ENV } from "./config/env-vars.ts";
+
+defaultEnv(ENV.ENABLE_DOWNLOAD_PROMPT, "0");
 
 const { runMain } = await import("./main.ts");
 

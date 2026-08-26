@@ -28,6 +28,7 @@
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { envDisabled } from "../project/env.ts";
 import { httpGetJson } from "../net/http.ts";
@@ -135,7 +136,7 @@ export async function verifySignatureWithRefresh(input: {
  * merge. `COREPACK_ENABLE_NETWORK=0` stops the fetch alone (see above).
  */
 function refreshable(): boolean {
-  return process.env.COREPACK_INTEGRITY_KEYS === undefined;
+  return readEnv(ENV.INTEGRITY_KEYS) === undefined;
 }
 
 /**
@@ -155,7 +156,7 @@ export function shouldRefresh(
   cached: CachedKeys,
   signatures: RegistrySignature[] | undefined,
 ): boolean {
-  if (envDisabled("COREPACK_ENABLE_NETWORK")) return false;
+  if (envDisabled(ENV.ENABLE_NETWORK)) return false;
   if (matchesSignature(cached.keys, signatures)) return false;
   return cached.fetchedAt === undefined || Date.now() - cached.fetchedAt >= REFRESH_INTERVAL;
 }

@@ -6,6 +6,7 @@
  * and both must be reproduced.
  */
 
+import { ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { npmAlternativeFor, packageManagerForRegistry } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
@@ -67,7 +68,7 @@ export function resolveRegistrySpec(spec: RegistrySpec): RegistrySpec {
 
 /** §15.2's `COREPACK_REGISTRY_<NAME>`, trailing slashes stripped, or `undefined`. */
 function sourceOverrideFor(name: string): string | undefined {
-  const configured = process.env[registryVariableFor(name)];
+  const configured = readEnv(registryVariableFor(name));
   if (configured === undefined || configured === "") return undefined;
   return configured.replace(/\/+$/, "");
 }
@@ -189,7 +190,7 @@ function rebase(url: string, base: string): string {
  * can never act on.
  */
 export function minimumReleaseAge(): number | undefined {
-  const raw = process.env.COREPACK_MINIMUM_RELEASE_AGE;
+  const raw = readEnv(ENV.MINIMUM_RELEASE_AGE);
   if (raw === undefined || raw.trim() === "") return undefined;
 
   const hours = Number(raw.trim());
@@ -241,7 +242,7 @@ export function undatedSourceError(url: string): UsageError {
 
 function noEligibleReleaseError(packageName: string): UsageError {
   return new UsageError(
-    `No release of ${packageName} is old enough for COREPACK_MINIMUM_RELEASE_AGE=${process.env.COREPACK_MINIMUM_RELEASE_AGE}`,
+    `No release of ${packageName} is old enough for ${envEntry(ENV.MINIMUM_RELEASE_AGE)?.name ?? ENV.MINIMUM_RELEASE_AGE}=${readEnv(ENV.MINIMUM_RELEASE_AGE)}`,
   );
 }
 
@@ -597,7 +598,7 @@ export async function verifyRegistryTrust(input: {
   // same position: the signed statement is *about* the integrity string, so
   // without one there is nothing signed to check, and the same soft-fail
   // applies.
-  if (envFlag("COREPACK_REQUIRE_SIGNATURES")) {
+  if (envFlag(ENV.REQUIRE_SIGNATURES)) {
     throw new UsageError(messages.noCompatibleSignature());
   }
 
@@ -624,7 +625,7 @@ async function fetchRootSignatures(
   version: string,
 ): Promise<RegistrySignature[] | undefined> {
   // Not a request we are allowed to make; the soft-fail applies unchanged.
-  if (envDisabled("COREPACK_ENABLE_NETWORK")) return undefined;
+  if (envDisabled(ENV.ENABLE_NETWORK)) return undefined;
 
   try {
     const body = asRecord(await npmGetJson(spec.package, spec));
@@ -667,7 +668,7 @@ function npmGetJson(
 
   // §05.2 — the registry layer checks the flag itself, and its message names the
   // *registry*; the transport layer's names the URL. Both are observable.
-  if (envDisabled("COREPACK_ENABLE_NETWORK")) {
+  if (envDisabled(ENV.ENABLE_NETWORK)) {
     throw new UsageError(messages.networkDisabledRegistry(registryUrl));
   }
 

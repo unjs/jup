@@ -977,6 +977,21 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * of source and **nothing** at runtime — the emitted `warm.mjs` was
    * byte-identical at 76,005 before and after. Specifier text is the one kind
    * of growth this measure over-counts, so it was corrected for once, here.
+   *
+   * It was raised again, from 191,000 to 202,000, when every environment
+   * variable name moved into `config/env-vars.ts` (§11) and each grew a `JUP_`
+   * spelling. That file is 9.8 kB of source — a table of names, four accessors,
+   * and the prose explaining why the set of names is contract — but only the
+   * names and the accessors survive into the chunk: measured, `warm.mjs` went
+   * 76,005 -> 79,050, +3.0 kB, or +4.0%.
+   *
+   * Two things are being bought. A variable name misspelt at a read site is
+   * `undefined`, which is also its unset value, so the bug is silent; the table
+   * makes it a compile error, and makes the inventory auditable against §11 in
+   * one place. And a variable now has two spellings, so a bare
+   * `process.env[name]` is *wrong* — it sees one of them — which is what the
+   * accessors exist to make unavailable. Neither can move off the warm path: it
+   * is the warm path that reads the environment.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -988,6 +1003,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(191_000);
+    ).toBeLessThanOrEqual(202_000);
   });
 });

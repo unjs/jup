@@ -4,6 +4,7 @@
  * Descriptor in, Locator out (or `null`, meaning "no release matches").
  */
 
+import { ENV, readEnv } from "../config/env-vars.ts";
 import { getDefinition, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { messages, UsageError } from "../errors.ts";
@@ -58,7 +59,7 @@ function registryFor(spec: PackageManagerSpec): RegistrySpec {
 
 /** Whether the user pointed us at a registry other than the built-in default. */
 function hasRegistryOverride(): boolean {
-  const configured = process.env.COREPACK_NPM_REGISTRY;
+  const configured = readEnv(ENV.NPM_REGISTRY);
   return configured !== undefined && configured !== "";
 }
 
@@ -89,7 +90,7 @@ export async function resolveDescriptor(
   // for whatever the field points at), so it takes an explicit opt-in. An
   // unknown name has no table entry to subvert and is always allowed through.
   if (URL.canParse(range)) {
-    if (isSupportedPackageManager(name) && !envFlag("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS")) {
+    if (isSupportedPackageManager(name) && !envFlag(ENV.ENABLE_UNSAFE_CUSTOM_URLS)) {
       throw new UsageError(messages.illegalUrl(`${name}@${range}`));
     }
     return { name, reference: range };
@@ -161,7 +162,7 @@ export async function resolveDescriptor(
   // prerelease is admitted only when the range names one, or when the user opted
   // in. That keeps `yarn@4.0.0-rc.1` resolving (step 5 returns it before this
   // code runs) and `>=4.0.0-rc.1` matching, while `*` no longer does.
-  const wantsPrereleases = envFlag("COREPACK_ENABLE_PRERELEASES") || rangeNamesPrerelease(range);
+  const wantsPrereleases = envFlag(ENV.ENABLE_PRERELEASES) || rangeNamesPrerelease(range);
 
   // §15.35e — `fetchResolvableVersions` is `fetchAvailableVersions` with the
   // minimum-release-age gate applied: same request, same `Accept` header, same
@@ -213,7 +214,7 @@ export async function getDefaultVersion(name: string): Promise<string> {
   }
 
   // 2 — the compiled-in, hash-pinned version. Still no network.
-  if (envDisabled("COREPACK_DEFAULT_TO_LATEST")) {
+  if (envDisabled(ENV.DEFAULT_TO_LATEST)) {
     return definition.default;
   }
 

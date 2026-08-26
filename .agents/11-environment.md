@@ -1,7 +1,17 @@
 # 11 — Environment Variables (Normative)
 
+**Every variable in this file has two spellings.** The tool is `jup`; the tables
+below are written in corepack's `COREPACK_` spelling because that is what
+existing projects, CI configuration and §13's rows already set. For each
+`COREPACK_<NAME>` an implementation MUST also honour `JUP_<NAME>`, naming the
+same setting: same accepted values, same default, same env-file eligibility,
+same §14.5 deny-list entry. `JUP_` wins when both are set (§11.6). The full rule,
+including what this means for the env file and for diagnostics, is §11.6; the
+rationale is §14.22.
+
 Legend for **Env file** column: whether the variable may be supplied by
-`.corepack.env` (§03.2). A real environment variable always wins over the file.
+`.corepack.env` (§03.2), under either spelling. A real environment variable
+always wins over the file.
 
 ## 11.1 Behaviour
 
@@ -52,13 +62,28 @@ Legend for **Env file** column: whether the variable may be supplied by
 
 ## 11.6 Precedence
 
+Every variable in this file has **two spellings**. The tables are written in
+corepack's, because that is what existing projects, CI configuration and §13's
+rows already set; the implementation is `jup`, and answers to `JUP_<NAME>` for
+each `COREPACK_<NAME>` above. The pair is one variable: the same default, the
+same env-file eligibility, the same deny-list entry (§14.5's list is keyed by the
+`COREPACK_` spelling and canonicalised before it is checked, so renaming a key is
+not a way past it). The two variables §11.3 *sets* are written under both names.
+
 For any variable:
 
 ```
-1. real process environment            (highest)
-2. .corepack.env, if the variable is env-file-eligible
-3. the tool's built-in default          (lowest)
+1. real process environment, JUP_<NAME>            (highest)
+2. real process environment, COREPACK_<NAME>
+3. .corepack.env, either spelling, if the variable is env-file-eligible
+4. the tool's built-in default                     (lowest)
 ```
+
+Presence decides, not truthiness: `JUP_NPM_PASSWORD=` shadows a
+`COREPACK_NPM_PASSWORD` that is set, because §11.2 makes the empty string a
+meaningful value. A diagnostic that names the variable that supplied a value
+(§15.4's `set by COREPACK_CAFILE`, `info`'s `frozenSource`) MUST name the
+spelling the user actually set.
 
 Only the **closest** env file to `cwd` is consulted, and only directories at or below
 the project root are searched (the walk stops once a manifest with a `packageManager`
@@ -73,6 +98,11 @@ block that is already in memory at startup, which is what keeps the cold path fr
 I/O.
 
 Practical guidance: read the whole environment block once into a small struct at
-startup rather than doing repeated lookups. There are 15 variables; a single pass
-with a perfect-hash or a sorted-prefix scan over `COREPACK_` is measurably cheaper
-than 15 `getenv` calls in the hot path, and it makes the env-file merge trivial.
+startup rather than doing repeated lookups. A single pass with a perfect-hash or a
+sorted-prefix scan over the two prefixes is measurably cheaper than a `getenv` per
+variable in the hot path, and it makes the env-file merge trivial. Resolve the
+`JUP_`/`COREPACK_` pair into one slot during that pass, `JUP_` winning, so that
+nothing downstream can read one spelling and miss the other — a bare lookup on a
+single spelling is the defect §14.22 exists to prevent, and it fails silently,
+because a variable that is not set and a variable whose name is wrong are the
+same observation.

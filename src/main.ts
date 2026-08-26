@@ -4,6 +4,7 @@
  */
 
 import { dirname } from "node:path";
+import { ENV } from "./config/env-vars.ts";
 import {
   getDefinition,
   getPackageManagerFor,
@@ -190,8 +191,8 @@ export async function runProxy(
   // -mode-only behaviour, so `reconcile` deliberately leaves it to this caller.
   if (
     specResult.type === "NoSpec" &&
-    envFlag("COREPACK_ENABLE_AUTO_PIN") &&
-    !envDisabled("COREPACK_ENABLE_PROJECT_SPEC")
+    envFlag(ENV.ENABLE_AUTO_PIN) &&
+    !envDisabled(ENV.ENABLE_PROJECT_SPEC)
   ) {
     await autoPin(specResult, fallback);
   }

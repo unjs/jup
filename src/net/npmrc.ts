@@ -36,6 +36,7 @@ import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
+import { ENV, jupSpelling, registryVariableFor, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 
 /* -------------------------------------------------------------------------- */
@@ -144,7 +145,7 @@ const SCOPED_REGISTRY = /^@[^\s:@]+:registry$/;
  * lifecycle script — overrides it, with a bare `PREFIX` as the fallback.
  */
 export function globalNpmrcPath(): string {
-  const configured = process.env.npm_config_prefix ?? process.env.PREFIX;
+  const configured = process.env[SYSTEM_ENV.NPM_CONFIG_PREFIX] ?? process.env[SYSTEM_ENV.PREFIX];
   const prefix =
     configured !== undefined && configured !== ""
       ? configured
@@ -166,7 +167,10 @@ export function globalNpmrcPath(): string {
  * unexercised.
  */
 function homeDirectory(): string {
-  const configured = process.platform === "win32" ? process.env.USERPROFILE : process.env.HOME;
+  const configured =
+    process.platform === "win32"
+      ? process.env[SYSTEM_ENV.USERPROFILE]
+      : process.env[SYSTEM_ENV.HOME];
   if (configured !== undefined && configured !== "") return configured;
   return homedir();
 }
@@ -584,18 +588,25 @@ export interface RegistryDecision {
 }
 
 /**
- * §15.2's `COREPACK_REGISTRY_<NAME>`: the *upper-cased package manager name*.
- *
- * Non-alphanumerics are folded to `_` so an unknown, hyphenated package-manager
- * name still has a spellable variable rather than an unreachable one.
+ * Re-exported from `config/env-vars.ts`, where every variable name lives (§11).
+ * `registry.ts` and `info.ts` ask this module for registry configuration, and a
+ * per-package-manager variable name is part of that answer.
  */
-export function registryVariableFor(name: string): string {
-  return `COREPACK_REGISTRY_${name.toUpperCase().replace(/[^\dA-Z]/g, "_")}`;
-}
+export { registryVariableFor };
 
-function envValue(name: string): string | undefined {
-  const value = process.env[name];
-  return value === undefined || value === "" ? undefined : value;
+/**
+ * A configured, non-empty value under either spelling, with the name that set it.
+ *
+ * An empty value means "not configured" for a registry URL — unlike a token,
+ * where §11.2 makes the empty string meaningful — so both spellings are skipped
+ * when empty rather than the empty one shadowing the other.
+ */
+function envSetting(name: string): { name: string; value: string } | undefined {
+  for (const spelling of [jupSpelling(name), name]) {
+    const value = process.env[spelling];
+    if (value !== undefined && value !== "") return { name: spelling, value };
+  }
+  return undefined;
 }
 
 /** The `@scope` of an npm package name, with the `@`, or `undefined`. */
@@ -631,12 +642,11 @@ export function resolveRegistry(options?: {
 }): RegistryDecision {
   const name = options?.name;
   if (name !== undefined) {
-    const variable = registryVariableFor(name);
-    const configured = envValue(variable);
+    const configured = envSetting(registryVariableFor(name));
     if (configured !== undefined) {
       return {
-        registry: stripTrailingSlashes(configured),
-        source: variable,
+        registry: stripTrailingSlashes(configured.value),
+        source: configured.name,
         kind: "per-source",
       };
     }
@@ -660,11 +670,11 @@ export function npmProtocolRegistry(options?: {
   packageName?: string;
   cwd?: string;
 }): RegistryDecision | undefined {
-  const environment = envValue("COREPACK_NPM_REGISTRY");
+  const environment = envSetting(ENV.NPM_REGISTRY);
   if (environment !== undefined) {
     return {
-      registry: stripTrailingSlashes(environment),
-      source: "COREPACK_NPM_REGISTRY",
+      registry: stripTrailingSlashes(environment.value),
+      source: environment.name,
       kind: "environment",
     };
   }

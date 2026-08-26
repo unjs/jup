@@ -23,6 +23,7 @@ import { defineBuildConfig } from "obuild/config";
  */
 export const WARM_MODULES = [
   "cache/store.ts",
+  "config/env-vars.ts",
   "config/table.ts",
   "errors.ts",
   "main.ts",

@@ -36,13 +36,28 @@ import {
   statSync,
 } from "node:fs";
 import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
+import {
+  corepackSpelling,
+  ENV,
+  envEntry,
+  isToolEnvName,
+  jupSpelling,
+  type JupSpelling,
+  SYSTEM_ENV,
+} from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../config/table.ts";
 import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
 import { redactUserinfo, UsageError } from "../errors.ts";
 import { parseManifest } from "../utils/json.ts";
 import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "../project/lockfile.ts";
 import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "../project/manifest.ts";
-import { loadNpmrc, type NpmrcLevel, registryVariableFor, resolveRegistry } from "../net/npmrc.ts";
+import {
+  loadNpmrc,
+  type NpmrcLevel,
+  type RegistryDecision,
+  registryVariableFor,
+  resolveRegistry,
+} from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
 import { resolveInstallDirectory, SHIM_MARKER } from "./shims.ts";
@@ -66,11 +81,7 @@ import type { Descriptor, Manifest } from "../types.ts";
 export const INFO_REPORT_VERSION = 1;
 
 /** Variables whose value is a credential: reported as present, never printed. */
-const SECRET_VARIABLES = new Set([
-  "COREPACK_NPM_TOKEN",
-  "COREPACK_NPM_PASSWORD",
-  "COREPACK_NPM_USERNAME",
-]);
+const SECRET_VARIABLES = new Set<string>([ENV.NPM_TOKEN, ENV.NPM_PASSWORD, ENV.NPM_USERNAME]);
 
 /** Long values (a trust store, a proxy list) are elided rather than dumped. */
 const MAX_VALUE_LENGTH = 120;
@@ -132,7 +143,11 @@ export interface LockfileInfo {
   resolution: { resolved: string; integrity?: string } | null;
   /** §15.23 / §15.37 — whether the file may be written or refreshed. */
   frozen: boolean;
-  frozenSource: "COREPACK_FROZEN_LOCKFILE" | "CI" | "default";
+  frozenSource:
+    | typeof ENV.FROZEN_LOCKFILE
+    | JupSpelling<typeof ENV.FROZEN_LOCKFILE>
+    | typeof SYSTEM_ENV.CI
+    | "default";
 }
 
 export interface EnvFileInfo {
@@ -505,9 +520,9 @@ function locateManifest(cwd: string): string | undefined {
 
 /** §15.23 — the recorded resolution for this project's spec, and whether it may move. */
 function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
-  const raw = process.env.COREPACK_FROZEN_LOCKFILE;
+  const frozen = envEntry(ENV.FROZEN_LOCKFILE);
   const frozenSource =
-    raw !== undefined && raw !== "" ? "COREPACK_FROZEN_LOCKFILE" : isCI() ? "CI" : "default";
+    frozen !== undefined && frozen.value !== "" ? frozen.name : isCI() ? SYSTEM_ENV.CI : "default";
 
   const descriptor = descriptorOf(project);
   const usable = project.name !== null && project.range !== null && usesLockfile(descriptor);
@@ -521,7 +536,7 @@ function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
     key,
     resolution: key === null || data === null ? null : (data.resolutions[key] ?? null),
     // Mirrors `env.isFrozenLockfile()` with no `refresh`: `info` never writes.
-    frozen: raw !== undefined && raw !== "" ? raw === "1" : isCI(),
+    frozen: frozen !== undefined && frozen.value !== "" ? frozen.value === "1" : isCI(),
     frozenSource,
   };
 }
@@ -645,7 +660,7 @@ function hashOfIntegrity(integrity: string): string | null {
 function snapshotEnvironment(): Record<string, string> {
   const snapshot: Record<string, string> = {};
   for (const name of Object.keys(process.env).sort()) {
-    if (!name.startsWith("COREPACK_")) continue;
+    if (!isToolEnvName(name)) continue;
     const value = process.env[name];
     if (value === undefined) continue;
     snapshot[name] = displayValue(name, value);
@@ -662,7 +677,7 @@ function snapshotEnvironment(): Record<string, string> {
  * across the terminal.
  */
 function displayValue(name: string, value: string): string {
-  if (SECRET_VARIABLES.has(name)) return value === "" ? `<set, empty>` : `<set>`;
+  if (SECRET_VARIABLES.has(corepackSpelling(name))) return value === "" ? `<set, empty>` : `<set>`;
   const redacted = redactUserinfo(value);
   return redacted.length > MAX_VALUE_LENGTH
     ? `${redacted.slice(0, MAX_VALUE_LENGTH)}… (${redacted.length} chars)`
@@ -678,6 +693,20 @@ function displayValue(name: string, value: string): string {
  * was shadowed by a real environment variable (§11.6), or it was never
  * `COREPACK_`-prefixed in the first place.
  */
+/**
+ * §11.6 — whether the real environment already sets this variable, under either
+ * spelling. `JUP_HOME` in the file is shadowed by a real `COREPACK_HOME` just as
+ * surely as by a real `JUP_HOME`; `applyEnvFile` refuses both, so `info` has to
+ * report both, or the two would disagree about why a line did nothing.
+ */
+function isShadowed(realEnvironment: Record<string, string>, name: string): boolean {
+  const corepack = corepackSpelling(name);
+  return (
+    Object.hasOwn(realEnvironment, corepack) ||
+    Object.hasOwn(realEnvironment, jupSpelling(corepack))
+  );
+}
+
 function describeEnvFile(path: string, realEnvironment: Record<string, string>): EnvFileInfo {
   const info: EnvFileInfo = { path, applied: [], overridden: [], refused: [], ignored: [] };
 
@@ -689,9 +718,9 @@ function describeEnvFile(path: string, realEnvironment: Record<string, string>):
   }
 
   for (const name of Object.keys(vars).sort()) {
-    if (!name.startsWith("COREPACK_")) info.ignored.push(name);
+    if (!isToolEnvName(name)) info.ignored.push(name);
     else if (!isEnvFileEligible(name)) info.refused.push(name);
-    else if (Object.hasOwn(realEnvironment, name)) info.overridden.push(name);
+    else if (isShadowed(realEnvironment, name)) info.overridden.push(name);
     else info.applied.push(name);
   }
 
@@ -721,9 +750,9 @@ function describeEnvFile(path: string, realEnvironment: Record<string, string>):
 export function effectiveRegistry(
   name?: string,
   packageName?: string,
-): { registry: string; source: string } {
+): { registry: string; source: string; kind: RegistryDecision["kind"] } {
   const decision = resolveRegistry({ name, packageName });
-  return { registry: decision.registry, source: decision.source };
+  return { registry: decision.registry, source: decision.source, kind: decision.kind };
 }
 
 function describePackageManagers(
@@ -749,7 +778,7 @@ function describePackageManagers(
       const origin = URL.canParse(spec.url) ? new URL(spec.url).origin : spec.url;
       const perSource = effectiveRegistry(name);
 
-      if (perSource.source === registryVariableFor(name)) {
+      if (perSource.kind === "per-source") {
         notes.push(
           `${name}@${range} is fetched from ${origin}, redirected to ${redactUserinfo(perSource.registry)} by ${perSource.source}`,
         );
@@ -971,9 +1000,11 @@ function readHead(file: string, length: number): string | undefined {
 /** §10.4 — `which(name)`, returning the file rather than its directory. */
 function lookupOnPath(name: string): string | null {
   const extensions =
-    process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";") : [""];
+    process.platform === "win32"
+      ? (process.env[SYSTEM_ENV.PATHEXT] ?? ".COM;.EXE;.BAT;.CMD").split(";")
+      : [""];
 
-  for (const entry of (process.env.PATH ?? "").split(delimiter)) {
+  for (const entry of (process.env[SYSTEM_ENV.PATH] ?? "").split(delimiter)) {
     if (entry === "") continue;
     for (const extension of extensions) {
       const candidate = join(entry, `${name}${extension}`);

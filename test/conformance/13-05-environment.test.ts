@@ -128,6 +128,32 @@ describe("§13.5 environment variables", () => {
     expect(result.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
   });
 
+  it("40/41: the JUP_ spelling drives the same behaviour, and wins over COREPACK_", async () => {
+    // Every variable in §11 answers to both `JUP_X` and `COREPACK_X` — the tool
+    // is `jup`, the table is written in corepack's spelling because that is what
+    // projects and CI already set. This row runs the whole pipeline on the new
+    // spelling, rather than trusting the unit tests' view of `readEnv`.
+    const fixture = createFixture({ packageManager: "yarn@1.0.0" });
+    seedPackageManager(fixture.home, "yarn", "1.0.0");
+    seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
+
+    const jup = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { JUP_ENABLE_PROJECT_SPEC: "0" },
+    });
+    expect(jup.exitCode).toBe(0);
+    expect(jup.stdout).toBe(`${versionOf(YARN_DEFAULT)}\n`);
+
+    // Set against each other, the tool's own name is the more specific statement
+    // and wins: the pin is honoured because JUP_ turns the ignore back off.
+    const both = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { COREPACK_ENABLE_PROJECT_SPEC: "0", JUP_ENABLE_PROJECT_SPEC: "1" },
+    });
+    expect(both.exitCode).toBe(0);
+    expect(both.stdout).toBe("1.0.0\n");
+  });
+
   it("41: COREPACK_ENABLE_PROJECT_SPEC=0 survives a manifest that cannot be parsed", async () => {
     // §03.5 / §11.1: "never look at the project at all", "entirely". The escape
     // hatch users reach for *because* their manifest is broken must not be
@@ -333,13 +359,17 @@ describe("§13.5 environment variables", () => {
     expect(result.stdout).toBe("3.0.0-rc.2\n");
   });
 
-  it("51: COREPACK_ROOT is exported to the package manager", async () => {
+  it("51: COREPACK_ROOT is exported to the package manager, under both spellings", async () => {
     const fixture = createFixture({ packageManager: "npm@6.14.2" });
     seedPackageManager(fixture.home, "npm", "6.14.2");
 
     const result = await run(["npm", "run", "env"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toContain(`COREPACK_ROOT=${REPO_ROOT.replace(/\/$/, "")}\n`);
+    const root = REPO_ROOT.replace(/\/$/, "");
+    expect(result.stdout).toContain(`COREPACK_ROOT=${root}\n`);
+    // §11.3 / §14.22 — a corepack-aware package manager looks for the first; one
+    // that has learnt this tool's name finds the second.
+    expect(result.stdout).toContain(`JUP_ROOT=${root}\n`);
   });
 });

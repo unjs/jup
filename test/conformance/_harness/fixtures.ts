@@ -117,7 +117,8 @@ export function copyTool(): string {
 /**
  * The stand-in entry point. It answers `--version` with the bare version — which
  * is what rows 1 and 137 assert, decoration and all — echoes its argv otherwise,
- * and dumps the `COREPACK_*` environment for `run env` (row 51).
+ * and dumps this tool's environment — both prefixes, §11.6 — for `run env`
+ * (row 51).
  */
 export function pmScript(name: string, version: string): string {
   return [
@@ -128,7 +129,8 @@ export function pmScript(name: string, version: string): string {
     `  process.stdout.write(VERSION + "\\n");`,
     `} else if (args[0] === "run" && args[1] === "env") {`,
     `  for (const key of Object.keys(process.env).sort()) {`,
-    `    if (key.startsWith("COREPACK_")) process.stdout.write(key + "=" + process.env[key] + "\\n");`,
+    `    if (key.startsWith("COREPACK_") || key.startsWith("JUP_"))`,
+    `      process.stdout.write(key + "=" + process.env[key] + "\\n");`,
     `  }`,
     `} else {`,
     `  process.stdout.write(NAME + "@" + VERSION + (args.length ? " " + args.join(" ") : "") + "\\n");`,

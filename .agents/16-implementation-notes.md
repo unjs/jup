@@ -43,7 +43,8 @@ An exactly-pinned project with the version already in the store should look like
 
 ```
 readlink/proc-self-exe            (locate self, only if enable/disable)
-getenv × N                        (one pass over environ, in-process)
+getenv × N                        (one pass over environ, in-process; the
+                                   JUP_/COREPACK_ pair resolves in that pass)
 openat  ./package.json            → read → close
   ...plus one openat per ancestor directory until found
 openat  ./.corepack.env           → ENOENT (cheap; only until a manifest is found)

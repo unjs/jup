@@ -9,6 +9,7 @@
 import { readFileSync } from "node:fs";
 import { open, rm } from "node:fs/promises";
 import { join, posix, resolve, sep } from "node:path";
+import { ENV, SYSTEM_ENV } from "../config/env-vars.ts";
 import {
   getSpecFor,
   hasRangeBand,
@@ -259,7 +260,7 @@ export async function ensureInstalled(
 export async function confirmDownload(url: string): Promise<void> {
   // §15.20 — `0` (and anything that is not `1`) suppresses both the notice and
   // the confirmation, from every entry point, unconditionally.
-  if (!envFlag("COREPACK_ENABLE_DOWNLOAD_PROMPT")) return;
+  if (!envFlag(ENV.ENABLE_DOWNLOAD_PROMPT)) return;
 
   process.stderr.write(`${messages.aboutToDownload(url)}\n`);
 
@@ -481,7 +482,7 @@ function confine(
  * — so this is the one place a message is allowed to be conditional on it.
  */
 function debugNote(message: string): void {
-  const debug = process.env.DEBUG;
+  const debug = process.env[SYSTEM_ENV.DEBUG];
   if (debug === "*" || (debug !== undefined && debug.includes("corepack"))) {
     console.warn(`! ${message}`);
   }
@@ -605,7 +606,7 @@ function assertVerificationTier(
   const shownVersion = version ?? locator.reference;
   const origin = URL.canParse(source.url) ? new URL(source.url).origin : source.url;
 
-  if (envFlag("COREPACK_ALLOW_UNVERIFIED")) {
+  if (envFlag(ENV.ALLOW_UNVERIFIED)) {
     console.warn(messages.allowingUnverified(locator.name, shownVersion, origin));
     return;
   }

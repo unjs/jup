@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled } from "../project/env.ts";
 import { messages, UsageError } from "../errors.ts";
@@ -76,13 +77,13 @@ function randomSuffix(): string {
  * honoured verbatim, exactly as corepack honours it.
  */
 export function getHomeFolder(): string {
-  const home = process.env.COREPACK_HOME;
+  const home = readEnv(ENV.HOME);
   if (home !== undefined) return home;
 
   const isWindows = process.platform === "win32";
   const cacheRoot =
-    process.env.XDG_CACHE_HOME ??
-    (isWindows ? process.env.LOCALAPPDATA : undefined) ??
+    process.env[SYSTEM_ENV.XDG_CACHE_HOME] ??
+    (isWindows ? process.env[SYSTEM_ENV.LOCALAPPDATA] : undefined) ??
     join(homedir(), isWindows ? join("AppData", "Local") : ".cache");
 
   return join(cacheRoot, "node", "corepack");
@@ -558,7 +559,7 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
  * upward import from the other.
  */
 export function bumpLastKnownGood(locator: Locator): void {
-  if (envDisabled("COREPACK_DEFAULT_TO_LATEST")) {
+  if (envDisabled(ENV.DEFAULT_TO_LATEST)) {
     return;
   }
 

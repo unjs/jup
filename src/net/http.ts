@@ -19,6 +19,7 @@
  */
 
 import { Buffer } from "node:buffer";
+import { ENV, readEnv } from "../config/env-vars.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { messages, NetworkError, networkError, redactUserinfo, UsageError } from "../errors.ts";
 import { npmrcAuthorizationFor } from "./npmrc.ts";
@@ -115,7 +116,7 @@ class TimeoutError extends Error {
 
 /** `COREPACK_NETWORK_TIMEOUT` / `COREPACK_NETWORK_RETRIES` — a positive integer or the default. */
 function envInteger(name: string, fallback: number, minimum: number, maximum: number): number {
-  const raw = process.env[name];
+  const raw = readEnv(name);
   if (raw === undefined || !/^\d+$/.test(raw.trim())) return fallback;
   return Math.min(Math.max(Number(raw.trim()), minimum), maximum);
 }
@@ -250,7 +251,7 @@ export function credentialsFor(
 
   // Presence, not truthiness — an empty COREPACK_NPM_TOKEN still counts, and
   // still suppresses Basic.
-  const token = process.env.COREPACK_NPM_TOKEN;
+  const token = readEnv(ENV.NPM_TOKEN);
   if (token !== undefined) {
     return { url, authorization: `Bearer ${token}` };
   }
@@ -270,8 +271,8 @@ export function credentialsFor(
     return { url, authorization: registryUserinfo };
   }
 
-  const username = process.env.COREPACK_NPM_USERNAME;
-  const password = process.env.COREPACK_NPM_PASSWORD;
+  const username = readEnv(ENV.NPM_USERNAME);
+  const password = readEnv(ENV.NPM_PASSWORD);
   if (username !== undefined && password !== undefined) {
     return { url, authorization: basic(username, password) };
   }
@@ -334,7 +335,7 @@ export function assertSafeArtifactUrl(url: string, registryUrl: string): URL {
     );
   }
 
-  if (parsed.host !== registry.host && !envFlag("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS")) {
+  if (parsed.host !== registry.host && !envFlag(ENV.ENABLE_UNSAFE_CUSTOM_URLS)) {
     throw new Error(messages.refusingToDownload(parsed.host, shownRegistry));
   }
 
@@ -361,7 +362,7 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
   const href = target.href;
 
   // Before any socket is opened.
-  if (envDisabled("COREPACK_ENABLE_NETWORK")) {
+  if (envDisabled(ENV.ENABLE_NETWORK)) {
     throw new UsageError(messages.networkDisabledUrl(href));
   }
 
@@ -377,10 +378,10 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
   }
 
   const timeout =
-    options.timeout ?? envInteger("COREPACK_NETWORK_TIMEOUT", DEFAULT_TIMEOUT, 1, 2 ** 31 - 1);
+    options.timeout ?? envInteger(ENV.NETWORK_TIMEOUT, DEFAULT_TIMEOUT, 1, 2 ** 31 - 1);
   const attempts = Math.max(
     1,
-    options.attempts ?? envInteger("COREPACK_NETWORK_RETRIES", DEFAULT_ATTEMPTS, 0, MAX_ATTEMPTS),
+    options.attempts ?? envInteger(ENV.NETWORK_RETRIES, DEFAULT_ATTEMPTS, 0, MAX_ATTEMPTS),
   );
   const sleep = options.sleep ?? wait;
 

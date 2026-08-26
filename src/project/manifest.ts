@@ -8,6 +8,7 @@
 import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import { ENV, readEnv } from "../config/env-vars.ts";
 import { isSupportedPackageManager } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
@@ -185,7 +186,7 @@ export function discoverProjectSpec(
     // honour an env file at all. From this point the walk is exactly `envOnly`:
     // it keeps climbing for an env file and records no manifest, so the result is
     // `NoProject` and §03.5 falls back.
-    if (projectSpecFlag && envDisabled("COREPACK_ENABLE_PROJECT_SPEC")) {
+    if (projectSpecFlag && envDisabled(ENV.ENABLE_PROJECT_SPEC)) {
       envOnly = true;
     }
 
@@ -242,7 +243,7 @@ export function discoverProjectSpec(
     }
   }
 
-  const specDisabled = projectSpecFlag && envDisabled("COREPACK_ENABLE_PROJECT_SPEC");
+  const specDisabled = projectSpecFlag && envDisabled(ENV.ENABLE_PROJECT_SPEC);
 
   // §15.35d — the external file is the project's declaration and outranks the
   // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
@@ -292,7 +293,7 @@ function describe(
 
 /** §15.35d — `COREPACK_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
 function externalSpecFile(initialCwd: string): string | undefined {
-  const configured = process.env.COREPACK_SPEC_FILE;
+  const configured = readEnv(ENV.SPEC_FILE);
   return configured === undefined || configured === ""
     ? undefined
     : resolve(initialCwd, configured);
@@ -364,7 +365,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
 
   // 4 — a URL reference is a different thing entirely from a version.
   if (URL.canParse(range)) {
-    if (isSupportedPackageManager(name) && !envFlag("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS")) {
+    if (isSupportedPackageManager(name) && !envFlag(ENV.ENABLE_UNSAFE_CUSTOM_URLS)) {
       throw new UsageError(messages.illegalUrl(raw));
     }
   } else {
@@ -631,12 +632,12 @@ export function reconcile(
     binaryVersion === undefined ? descriptor : { name: descriptor.name, range: binaryVersion };
 
   // Never look at the project at all.
-  if (envDisabled("COREPACK_ENABLE_PROJECT_SPEC")) {
+  if (envDisabled(ENV.ENABLE_PROJECT_SPEC)) {
     return withBinaryVersion(fallback);
   }
 
   // "Treats it like transparent": a mismatch falls back instead of erroring.
-  const transparent = options.transparent || envDisabled("COREPACK_ENABLE_STRICT");
+  const transparent = options.transparent || envDisabled(ENV.ENABLE_STRICT);
 
   switch (result.type) {
     case "NoProject": {

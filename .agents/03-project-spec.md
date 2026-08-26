@@ -73,17 +73,25 @@ Before reading each directory's manifest, and only until one is found:
 * Path = `resolve(d, COREPACK_ENV_FILE ?? ".corepack.env")`.
 * If `COREPACK_ENV_FILE === "0"` → env files are disabled entirely; skip.
 * Parse as a dotenv-style file (Node's `util.parseEnv` semantics).
-* **Filter**: keep only keys with the prefix `COREPACK_`. Everything else is dropped.
+* **Filter**: keep only keys carrying one of the tool's two prefixes — `JUP_` or
+  `COREPACK_` (§11.6). Everything else is dropped.
 * **Merge**: `{...filteredFileVars, ...process.env}` — i.e. the **real environment
   wins**. A `.corepack.env` value can only supply a variable the ambient environment
-  has not set.
+  has not set. "Has not set" means *neither* spelling of it (§11.6): a file's
+  `JUP_HOME` must not out-rank a real `COREPACK_HOME`, which a plain key-wise merge
+  would let it do, since the two keys do not collide and `JUP_` is the one that
+  wins on read. Drop a file variable whose pair is present in the real
+  environment, then merge.
 * `ENOENT` → not an error, continue walking. Any other error → propagate.
 * Only the **closest** env file is loaded; once one is found, no further directories
   are checked for env files (`!localEnv` guard). *(This is the behaviour of commit
   `70bb9c5`/#891 "only load closest env file, for every commands".)*
 
-Variables that MUST NOT be honoured from an env file, even though they carry the
-prefix:
+Variables that MUST NOT be honoured from an env file, even though they carry a
+prefix. The list is keyed by the `COREPACK_` spelling and a key MUST be
+canonicalised to it before being checked (§11.6), so `JUP_ENV_FILE` is refused
+exactly as `COREPACK_ENV_FILE` is — otherwise the deny-list is one rename away
+from useless:
 
 | Variable | Why |
 |---|---|
@@ -91,10 +99,10 @@ prefix:
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT` | Its default depends on *how the tool was invoked*, which a project file must not be able to override — otherwise a repo could silently suppress the download confirmation. |
 
 > **Security note.** The env file is read from directories the tool walks, which in a
-> `cd`-into-untrusted-repo scenario is attacker-controlled. The `COREPACK_` prefix
+> `cd`-into-untrusted-repo scenario is attacker-controlled. The two-prefix
 > filter is the whole sandbox. A conforming implementation MUST apply the filter
 > before merging, and MUST NOT allow the file to set proxy/registry variables that
-> are not `COREPACK_`-prefixed (`HTTP_PROXY` etc. are therefore *not* settable this
+> carry neither prefix (`HTTP_PROXY` etc. are therefore *not* settable this
 > way — correct, and MUST be preserved).
 >
 > **See §14.5** — this spec additionally recommends refusing to honour

@@ -39,6 +39,7 @@ import { Buffer } from "node:buffer";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { Readable } from "node:stream";
+import { PROXY_ENV } from "../config/env-vars.ts";
 import { NetworkError, networkError } from "../errors.ts";
 import { classifyTlsFailure, tlsConnectOptions, tlsTransportRequired } from "./tls.ts";
 
@@ -91,7 +92,7 @@ function fromEnv(name: string): string | undefined {
  * corporate proxy.
  */
 export function bypassesProxy(target: URL): boolean {
-  const raw = fromEnv("no_proxy");
+  const raw = fromEnv(PROXY_ENV.NO);
   if (raw === undefined) return false;
 
   const host = target.hostname.toLowerCase();
@@ -140,8 +141,8 @@ export function proxyForUrl(target: URL): ProxySelection | undefined {
   if (target.protocol !== "http:" && target.protocol !== "https:") return undefined;
   if (bypassesProxy(target)) return undefined;
 
-  const scheme = target.protocol === "https:" ? "https_proxy" : "http_proxy";
-  const configured = fromEnv(scheme) ?? fromEnv("all_proxy");
+  const scheme = target.protocol === "https:" ? PROXY_ENV.HTTPS : PROXY_ENV.HTTP;
+  const configured = fromEnv(scheme) ?? fromEnv(PROXY_ENV.ALL);
   if (configured === undefined) return undefined;
 
   let url: URL;

@@ -24,6 +24,7 @@
  */
 
 import { readFileSync } from "node:fs";
+import { corepackSpelling, ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { messages } from "../errors.ts";
 import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";
 
@@ -62,10 +63,10 @@ export interface TlsSettings {
 export function tlsSettings(): TlsSettings {
   const settings: TlsSettings = { verify: true };
 
-  const cafile = process.env.COREPACK_CAFILE;
-  if (cafile !== undefined && cafile !== "") {
-    settings.cafile = cafile;
-    settings.cafileSource = "COREPACK_CAFILE";
+  const cafile = envEntry(ENV.CAFILE);
+  if (cafile !== undefined && cafile.value !== "") {
+    settings.cafile = cafile.value;
+    settings.cafileSource = cafile.name;
   } else {
     const npmrc = npmrcTlsSettings();
     if (npmrc.cafile !== undefined) {
@@ -79,10 +80,11 @@ export function tlsSettings(): TlsSettings {
 
   // §11's value table spells every flag as an exact string, and this one is no
   // different: only `0` disables verification. A typo must fail closed.
-  if (process.env.COREPACK_STRICT_SSL === "0") {
+  const strictSsl = envEntry(ENV.STRICT_SSL);
+  if (strictSsl?.value === "0") {
     settings.verify = false;
-    settings.verifySource = "COREPACK_STRICT_SSL";
-  } else if (process.env.COREPACK_STRICT_SSL === undefined) {
+    settings.verifySource = strictSsl.name;
+  } else if (strictSsl === undefined) {
     // §15.4 — "`strict-ssl=false` MUST be honoured only from the user/global
     // files, and MUST print a warning naming the file it came from".
     const npmrc = npmrcTlsSettings();
@@ -109,8 +111,8 @@ function describe(origin: NpmrcOrigin): string {
  * this stays one map lookup after the first request.
  */
 export function tlsConfigured(): boolean {
-  if (process.env.COREPACK_STRICT_SSL === "0") return true;
-  if ((process.env.COREPACK_CAFILE ?? "") !== "") return true;
+  if (readEnv(ENV.STRICT_SSL) === "0") return true;
+  if ((readEnv(ENV.CAFILE) ?? "") !== "") return true;
   const npmrc = npmrcTlsSettings();
   return npmrc.cafile !== undefined || npmrc.ca !== undefined || npmrc.strictSsl?.value === false;
 }
@@ -136,7 +138,7 @@ let installed: string | undefined;
  * delimiter. Anything outside it — the human-readable subject dumps `openssl`
  * likes to interleave — is ignored, exactly as OpenSSL ignores it.
  */
-export function readCaBundle(path: string, source = "COREPACK_CAFILE"): string[] {
+export function readCaBundle(path: string, source: string = ENV.CAFILE): string[] {
   const cached = bundles.get(path);
   if (cached !== undefined) return cached;
 
@@ -163,7 +165,7 @@ export function readCaBundle(path: string, source = "COREPACK_CAFILE"): string[]
  * normative string is kept for the normative case; the other names the file.
  */
 function unreadable(path: string, source: string): string {
-  return source === "COREPACK_CAFILE"
+  return corepackSpelling(source) === ENV.CAFILE
     ? messages.cafileUnreadable(path)
     : `Unable to read the TLS certificate bundle at ${path} (set by ${source})`;
 }
@@ -246,7 +248,7 @@ export function tlsConnectOptions(): { ca?: string[]; rejectUnauthorized?: boole
 /** The configured trust store, from either spelling, or `undefined` for the platform's. */
 function trustStoreFor(settings: TlsSettings): string[] | undefined {
   if (settings.cafile !== undefined) {
-    return readCaBundle(settings.cafile, settings.cafileSource ?? "COREPACK_CAFILE");
+    return readCaBundle(settings.cafile, settings.cafileSource ?? ENV.CAFILE);
   }
   if (settings.ca !== undefined) {
     return inlineCertificates(settings.ca, settings.caSource ?? ".npmrc ca");
@@ -261,8 +263,9 @@ function trustStoreFor(settings: TlsSettings): string[] | undefined {
  * A custom CA does *not* force it — that is installed process-wide instead.
  */
 export function tlsTransportRequired(): boolean {
-  if (process.env.COREPACK_STRICT_SSL === "0") return true;
-  if (process.env.COREPACK_STRICT_SSL !== undefined) return false;
+  const strictSsl = readEnv(ENV.STRICT_SSL);
+  if (strictSsl === "0") return true;
+  if (strictSsl !== undefined) return false;
   return npmrcTlsSettings().strictSsl?.value === false;
 }
 

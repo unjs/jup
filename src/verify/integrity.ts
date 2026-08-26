@@ -18,6 +18,7 @@
 
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
 import { createReadStream } from "node:fs";
+import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "../config/keys.ts";
 import { messages, UsageError } from "../errors.ts";
 import type { RegistrySignature, TrustedKey, TrustStore } from "../types.ts";
@@ -150,7 +151,7 @@ export function compareDigest(expected: string, actual: string): boolean {
 
 /** §06.4 — true for exactly `""` and `"0"`. Any other value replaces the trust store. */
 export function shouldSkipIntegrityCheck(): boolean {
-  const raw = process.env.COREPACK_INTEGRITY_KEYS;
+  const raw = readEnv(ENV.INTEGRITY_KEYS);
   return raw === "" || raw === "0";
 }
 
@@ -167,7 +168,7 @@ export function shouldSkipIntegrityCheck(): boolean {
  * before it can reach `process.env`, so reading it here is safe.
  */
 export function getTrustedKeys(registryOrigin?: string): TrustedKey[] {
-  const raw = process.env.COREPACK_INTEGRITY_KEYS;
+  const raw = readEnv(ENV.INTEGRITY_KEYS);
 
   // `""` / `"0"` disable verification outright; callers gate on
   // `shouldSkipIntegrityCheck()`, and neither value is a trust store, so fall

@@ -39,7 +39,8 @@ not be able to tell the difference from a directly-installed Yarn, except that t
 version is now correct.
 
 It is a drop-in re-implementation of [corepack](https://github.com/nodejs/corepack): the
-same `packageManager` field, the same `COREPACK_*` environment variables, the same cache
+same `packageManager` field, the same `COREPACK_*` environment variables (each also
+spelled `JUP_*`), the same cache
 layout, the same error messages. Where it deliberately differs — mostly to close security
 holes — those differences are listed under [Divergences](#divergences).
 
@@ -490,7 +491,7 @@ for a breaking change; new fields may be added without one.
 | `resolution` | `status` (`pinned`, `locked`, `cache`, `network`, `frozen`, `fallback`, `unknown`), the `version` and `hash`, the `source` it came from, whether it is `installed`, and a `reason` when nothing could be decided offline |
 | `lockfile` | `path`, `present`, the `key` this project's spec uses, the recorded `resolution`, and whether writes are `frozen` (with `frozenSource`: `COREPACK_FROZEN_LOCKFILE`, `CI`, or `default`) |
 | `envFile` | The `.corepack.env` in effect and its variables sorted into `applied`, `overridden`, `refused` and `ignored` |
-| `environment` | Every `COREPACK_*` variable in the real environment; credentials are `<set>` and URLs are stripped of `user:pass@` |
+| `environment` | Every `COREPACK_*` and `JUP_*` variable in the real environment; credentials are `<set>` and URLs are stripped of `user:pass@` |
 | `packageManagers` | Per package manager: `binaries`, the effective `registry` and its `registrySource`, `notes` about any band a registry setting redirects differently, the `builtinDefault`, the `recordedDefault`, and the `cached` versions. `registrySource` names the setting that actually decided it — `COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc <key> (<path>)`, or `built-in` — and is resolved **per package manager**, so mirroring Yarn alone shows up here |
 | `npmrc` | `files` (every `.npmrc` read, **lowest precedence first**, each with its `path`, `level` — `global` / `user` / `project` — the `keys` it supplied and the `refused` keys a project-level file was not allowed to supply), the effective `registry`, the `scopes` (`@scope` → registry), and `auth`: one entry per credential **scope**, as `{ prefix, type, source }`. Credential *values* are never included |
 | `tls` | `cafile` and `cafileSource` (the PEM bundle replacing the platform trust store, and whether `COREPACK_CAFILE` or an `.npmrc` `cafile`/`ca` set it), `verify`, and `verifySource` when verification has been switched off |
@@ -507,8 +508,13 @@ Every knob is an environment variable. There is no config format of jup's own, n
 plugin system, and no telemetry — the only file it reads for configuration is the
 `.npmrc` you already wrote, and only for the handful of keys described
 [below](#the-npmrc-you-already-wrote). The full list lives in
-[`.agents/11-environment.md`](./.agents/11-environment.md); the ones you are most likely
-to want:
+[`.agents/11-environment.md`](./.agents/11-environment.md).
+
+**Every one of them has two spellings.** `JUP_<NAME>` and `COREPACK_<NAME>` name the
+same setting — the table below is written in the `COREPACK_` spelling because that is
+what projects and CI already set, and dropping it would silently stop configuring
+anything. Set either. When both are set, `JUP_` wins, being the more specific
+statement about *this* tool. The ones you are most likely to want:
 
 | Variable                            | Effect                                                            |
 | ----------------------------------- | ----------------------------------------------------------------- |
@@ -532,7 +538,8 @@ to want:
 | `COREPACK_MINIMUM_RELEASE_AGE`      | Hours a release must have been published for before jup will choose it *for* you; `0` or unset means no minimum |
 | `XDG_BIN_HOME`                      | Per-user shim directory on Linux and BSD; not consulted on macOS or Windows |
 
-A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
+A project may also ship a `.corepack.env` file supplying the *behavioural* variables,
+under either spelling.
 Security-relevant ones are deliberately not settable that way — see
 [Divergences](#divergences). `COREPACK_CAFILE` and `COREPACK_STRICT_SSL` are among them:
 a repository you have just cloned does not get to choose which certificate authority its

@@ -276,3 +276,31 @@ For the record, these corepack behaviours look like bugs and are not:
   recorded default" rather than breaking the tool.
 * **Tags resolve against the newest range band only** (§04.1). Tags describe the
   current channel; resolving them per-band would make `yarn@latest` ambiguous.
+
+---
+
+## 14.22 Every variable answers to `JUP_` as well — [correct]
+
+**Corepack:** the variables are named after the tool, `COREPACK_*`, and there is
+exactly one spelling of each.
+
+**Consequence:** a re-implementation under a different name has two bad options.
+Keep `COREPACK_*` only, and every variable in its own documentation is named
+after a different program. Rename them, and every project, CI file and shell
+profile that already sets one silently stops configuring anything — the failure
+mode of a misspelt environment variable is that it reads as unset, which is also
+its default, so nothing fails loudly.
+
+**Required:** each variable in §11 has both spellings, `JUP_<NAME>` and
+`COREPACK_<NAME>`, naming one setting. `JUP_` wins when both are set, as the more
+specific statement about *this* tool. The pair shares its default, its env-file
+eligibility and its §14.5 deny-list entry — the deny-lists are keyed by the
+`COREPACK_` spelling and a name is canonicalised before it is checked, so
+`JUP_INTEGRITY_KEYS` in a `.corepack.env` is refused exactly as
+`COREPACK_INTEGRITY_KEYS` is. §03.2's prefix sandbox admits both prefixes and
+nothing else. §11.3's two exported variables are written under both names, so a
+package manager looking for `COREPACK_ROOT` still finds it.
+
+An implementation MUST NOT read a variable with a bare environment lookup, which
+sees one spelling; §11.6's precedence is the contract, including the rule that a
+diagnostic names the spelling the user actually set.

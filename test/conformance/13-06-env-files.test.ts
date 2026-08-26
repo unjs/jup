@@ -138,14 +138,16 @@ describe("§13.6 env files", () => {
     expect(pinned(other)).toMatch(/^yarn@/);
   });
 
-  it("59: keys without the COREPACK_ prefix are dropped before anything is merged", async () => {
+  it("59: keys without one of the tool's prefixes are dropped before anything is merged", async () => {
     const fixture = createFixture({ packageManager: "yarn@1.0.0" });
     seedPackageManager(fixture.home, "yarn", "1.0.0", {
-      script: `process.stdout.write("LEAK=" + process.env.JUP_LEAK + " OPTIONS=" + process.env.NODE_OPTIONS + "\\n");\n`,
+      script: `process.stdout.write("LEAK=" + process.env.LEAK + " OPTIONS=" + process.env.NODE_OPTIONS + "\\n");\n`,
     });
     fixture.write(
       ".corepack.env",
-      "JUP_LEAK=leaked\nNODE_OPTIONS=--not-a-real-flag\nCOREPACK_ENABLE_STRICT=1\n",
+      // `JUP_` and `COREPACK_` are the two prefixes §03.2 admits; anything else —
+      // a bare name, or one belonging to the runtime — is dropped before the merge.
+      "LEAK=leaked\nNODE_OPTIONS=--not-a-real-flag\nCOREPACK_ENABLE_STRICT=1\n",
     );
 
     const result = await run(["yarn"], fixture);

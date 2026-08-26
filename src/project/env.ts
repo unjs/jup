@@ -7,14 +7,26 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+  COREPACK_PREFIX,
+  corepackSpelling,
+  ENV,
+  isToolEnvName,
+  jupSpelling,
+  readEnv,
+  SYSTEM_ENV,
+} from "../config/env-vars.ts";
 import { messages } from "../errors.ts";
 
 /**
  * §03.2 — the prefix filter is the entire sandbox against a hostile repository.
  * Keys without it (`HTTP_PROXY`, `PATH`, `NODE_OPTIONS`, …) are dropped before
- * anything is merged.
+ * anything is merged. Every name it admits is inventoried in `config/env-vars.ts`.
+ *
+ * `JUP_` is admitted on the same terms — `isToolEnvName` is the filter actually
+ * applied, and this constant remains the §03.2 spelling of it.
  */
-export const ENV_FILE_PREFIX = "COREPACK_";
+export const ENV_FILE_PREFIX = COREPACK_PREFIX;
 
 /** §03.2 — the file looked for when `COREPACK_ENV_FILE` is unset. */
 export const DEFAULT_ENV_FILE_NAME = ".corepack.env";
@@ -29,18 +41,18 @@ export const DEFAULT_ENV_FILE_NAME = ".corepack.env";
  * arbitrary host, pair a token with a hostile registry to exfiltrate it, or
  * switch off (or redirect) TLS certificate verification.
  */
-export const ENV_FILE_INELIGIBLE = new Set([
-  "COREPACK_ENV_FILE",
-  "COREPACK_ENABLE_DOWNLOAD_PROMPT",
-  "COREPACK_INTEGRITY_KEYS",
-  "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
-  "COREPACK_NPM_TOKEN",
-  "COREPACK_NPM_USERNAME",
-  "COREPACK_NPM_PASSWORD",
-  "COREPACK_CAFILE",
-  "COREPACK_STRICT_SSL",
-  "COREPACK_ALLOW_UNVERIFIED",
-  "COREPACK_SPEC_FILE",
+export const ENV_FILE_INELIGIBLE = new Set<string>([
+  ENV.ENV_FILE,
+  ENV.ENABLE_DOWNLOAD_PROMPT,
+  ENV.INTEGRITY_KEYS,
+  ENV.ENABLE_UNSAFE_CUSTOM_URLS,
+  ENV.NPM_TOKEN,
+  ENV.NPM_USERNAME,
+  ENV.NPM_PASSWORD,
+  ENV.CAFILE,
+  ENV.STRICT_SSL,
+  ENV.ALLOW_UNVERIFIED,
+  ENV.SPEC_FILE,
 ]);
 
 /**
@@ -53,31 +65,31 @@ export const ENV_FILE_INELIGIBLE = new Set([
  * These are the ones worth telling the user about; the other two entries in
  * {@link ENV_FILE_INELIGIBLE} are refused silently, as corepack refuses them.
  */
-export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set([
-  "COREPACK_INTEGRITY_KEYS",
-  "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
-  "COREPACK_NPM_TOKEN",
-  "COREPACK_NPM_USERNAME",
-  "COREPACK_NPM_PASSWORD",
+export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
+  ENV.INTEGRITY_KEYS,
+  ENV.ENABLE_UNSAFE_CUSTOM_URLS,
+  ENV.NPM_TOKEN,
+  ENV.NPM_USERNAME,
+  ENV.NPM_PASSWORD,
   // §15.37 marks both TLS variables env-file INELIGIBLE, and for the same
   // reason as the rest of this list: a cloned repository must not be able to
   // switch certificate verification off, or to nominate the certificate
   // authority its downloads are checked against. `COREPACK_NETWORK_TIMEOUT` and
   // `COREPACK_NETWORK_RETRIES` are eligible — they are preferences, not trust
   // decisions.
-  "COREPACK_CAFILE",
-  "COREPACK_STRICT_SSL",
+  ENV.CAFILE,
+  ENV.STRICT_SSL,
   // §15.11 / §15.37 — the one opt-out from "every artifact clears a verification
   // tier". A cloned repository that could set it from `.corepack.env` would be
   // able to turn its own unsigned, unpinned download into a permitted one, which
   // is the whole of what §15.11 refuses; the deny-list is what keeps the opt-out
   // a decision the person running the tool makes.
-  "COREPACK_ALLOW_UNVERIFIED",
+  ENV.ALLOW_UNVERIFIED,
   // §15.35d / §15.37 — the file that supplies the project spec. Eligibility is a
   // *deny*-list, so a variable is project-settable until it is named here: a
   // cloned repository whose `.corepack.env` set this could point the spec at a
   // file of its own and run a package manager the manifest never names.
-  "COREPACK_SPEC_FILE",
+  ENV.SPEC_FILE,
 ]);
 
 /**
@@ -309,7 +321,7 @@ function withoutExport(key: string): string {
 export function loadEnvFileFrom(
   dir: string,
 ): { vars: Record<string, string>; path: string } | null {
-  const configured = process.env.COREPACK_ENV_FILE;
+  const configured = readEnv(ENV.ENV_FILE);
   if (configured === "0") {
     return null;
   }
@@ -339,7 +351,7 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
 
   for (const name of Object.keys(vars)) {
     // §03.2 security note: the prefix filter runs *before* anything is merged.
-    if (!name.startsWith(ENV_FILE_PREFIX)) {
+    if (!isToolEnvName(name)) {
       continue;
     }
 
@@ -349,7 +361,7 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
       // conformance row 48 asserts stderr is empty when a project's env file
       // tries to turn the download prompt on — so announcing those two would
       // break a row while telling the user nothing they can act on.
-      if (SECURITY_ONLY_FROM_ENVIRONMENT.has(name)) {
+      if (SECURITY_ONLY_FROM_ENVIRONMENT.has(corepackSpelling(name))) {
         const seen = `${path}\0${name}`;
         if (!warnedIneligible.has(seen)) {
           warnedIneligible.add(seen);
@@ -360,27 +372,42 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     }
 
     const value = vars[name];
-    if (value !== undefined) {
-      eligible[name] = value;
-    }
+    if (value === undefined) continue;
+
+    // §11.6 — the real process environment always wins over the file, and a
+    // variable has two spellings, so the *pair* is what has to be checked. The
+    // spread below only shadows a file value with the same key; without this, a
+    // file's `JUP_HOME` would out-rank a real `COREPACK_HOME`, because `readEnv`
+    // prefers `JUP_` and cannot tell which of the two came from the file.
+    if (isSetInEnvironment(name)) continue;
+
+    eligible[name] = value;
   }
 
-  // §11.6 — the real process environment always wins over the file.
   process.env = { ...eligible, ...process.env };
 }
 
+/** Whether either spelling of `name` is set in the real process environment. */
+function isSetInEnvironment(name: string): boolean {
+  const corepack = corepackSpelling(name);
+  return process.env[corepack] !== undefined || process.env[jupSpelling(corepack)] !== undefined;
+}
+
 export function isEnvFileEligible(name: string): boolean {
-  return name.startsWith(ENV_FILE_PREFIX) && !ENV_FILE_INELIGIBLE.has(name);
+  // The deny-lists are keyed by the `COREPACK_` spelling, so `JUP_NPM_TOKEN` is
+  // canonicalised before it is checked: a variable that a project file may not
+  // supply may not be supplied under its other name either.
+  return isToolEnvName(name) && !ENV_FILE_INELIGIBLE.has(corepackSpelling(name));
 }
 
 /** `true` only for the exact string `"1"`, matching the spec's value tables. */
 export function envFlag(name: string): boolean {
-  return process.env[name] === "1";
+  return readEnv(name) === "1";
 }
 
 /** `true` only for the exact string `"0"`. */
 export function envDisabled(name: string): boolean {
-  return process.env[name] === "0";
+  return readEnv(name) === "0";
 }
 
 /**
@@ -392,7 +419,7 @@ export function envDisabled(name: string): boolean {
  * §15.23's frozen-lockfile default.
  */
 export function isCI(): boolean {
-  const ci = process.env.CI;
+  const ci = process.env[SYSTEM_ENV.CI];
   return ci !== undefined && ci !== "";
 }
 
@@ -411,7 +438,7 @@ export function isCI(): boolean {
  * does, because §15.37 defines it as "refuse to write/refresh".
  */
 export function isFrozenLockfile(options?: { refresh?: boolean }): boolean {
-  const raw = process.env.COREPACK_FROZEN_LOCKFILE;
+  const raw = readEnv(ENV.FROZEN_LOCKFILE);
   if (raw !== undefined && raw !== "") return raw === "1";
   return options?.refresh === true ? false : isCI();
 }

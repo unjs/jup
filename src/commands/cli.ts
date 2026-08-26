@@ -18,6 +18,7 @@ import { createReadStream } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { Readable } from "node:stream";
+import { ENV, writeEnv } from "../config/env-vars.ts";
 import {
   getSpecUrl,
   getTableSpec,
@@ -640,7 +641,7 @@ async function applyToProject(
 
   // §09.5 — what the package manager's own `use` command is told to migrate
   // from; the literal `unknown` when the project had no previous value.
-  process.env.COREPACK_MIGRATE_FROM = previousPackageManager;
+  writeEnv(ENV.MIGRATE_FROM, previousPackageManager);
   out(`\n`);
 
   // From here the package manager owns the process and its output is passed

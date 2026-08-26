@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
 import type { BinList, BinSpec, InstallSpec } from "../types.ts";
@@ -44,7 +45,7 @@ function getOwnRoot(): string {
  */
 export function perUserShimDirectory(): string | undefined {
   if (process.platform === "win32") {
-    const localAppData = process.env.LOCALAPPDATA;
+    const localAppData = process.env[SYSTEM_ENV.LOCALAPPDATA];
     if (localAppData !== undefined && localAppData !== "") {
       return join(localAppData, "node", "corepack", "bin");
     }
@@ -54,7 +55,7 @@ export function perUserShimDirectory(): string | undefined {
 
   // macOS has no XDG convention; Linux and the BSDs do.
   if (process.platform !== "darwin") {
-    const xdg = process.env.XDG_BIN_HOME;
+    const xdg = process.env[SYSTEM_ENV.XDG_BIN_HOME];
     if (xdg !== undefined && xdg !== "") return xdg;
   }
 
@@ -64,7 +65,7 @@ export function perUserShimDirectory(): string | undefined {
 
 /** §15.13 point 1 — `COREPACK_SHIM_DIRECTORY`, else the per-user default. */
 function defaultShimDirectory(): string | undefined {
-  const configured = process.env.COREPACK_SHIM_DIRECTORY;
+  const configured = readEnv(ENV.SHIM_DIRECTORY);
   if (configured !== undefined && configured !== "") return resolve(configured);
   return perUserShimDirectory();
 }
@@ -110,9 +111,9 @@ export function pathWith(directory: string, current: string | undefined): string
  */
 function setPath(env: Record<string, string | undefined>, value: string): void {
   for (const key of Object.keys(env)) {
-    if (key !== "PATH" && key.toLowerCase() === "path") delete env[key];
+    if (key !== SYSTEM_ENV.PATH && key.toLowerCase() === "path") delete env[key];
   }
-  env.PATH = value;
+  env[SYSTEM_ENV.PATH] = value;
 }
 
 /**
@@ -234,7 +235,7 @@ export function execPackageManager(
   // §08.7 — the only variable we add, and it is added the same way for both
   // models: a native child inherits `process.env` wholesale. Package managers
   // use it purely as an "am I running under a version manager?" flag.
-  process.env.COREPACK_ROOT = getOwnRoot();
+  writeEnv(ENV.ROOT, getOwnRoot());
 
   if (execMode === "native") {
     // §15.32 — what goes in front of `PATH` for a native artifact is the
@@ -243,7 +244,7 @@ export function execPackageManager(
     // never touched, which is "MUST NOT leak into the tool's own process" in its
     // literal form.
     const env = { ...process.env };
-    const path = pathWith(dirname(binPath), process.env.PATH);
+    const path = pathWith(dirname(binPath), process.env[SYSTEM_ENV.PATH]);
     if (path !== undefined) setPath(env, path);
 
     // Imported here and nowhere else: `node:child_process` must not enter the
@@ -260,8 +261,8 @@ export function execPackageManager(
   // the modified value.
   const shimDirectory = shimDirectoryFor(binName);
   if (shimDirectory !== undefined) {
-    const path = pathWith(shimDirectory, process.env.PATH);
-    if (path !== undefined) process.env.PATH = path;
+    const path = pathWith(shimDirectory, process.env[SYSTEM_ENV.PATH]);
+    if (path !== undefined) process.env[SYSTEM_ENV.PATH] = path;
   }
 
   process.argv = [process.execPath, binPath, ...args];
