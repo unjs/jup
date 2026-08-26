@@ -153,6 +153,13 @@ export function isSupportedPackageManager(name: string): boolean {
 export const ROLE_ORDER: readonly Role[] = ["package-manager", "runtime"];
 
 /**
+ * §10.5 / §17.6 C5 — the role `enable` and `disable` target with no scope word.
+ * Here, not in `shims.ts`, because R3 keeps roles data; spelled out rather than
+ * `ROLE_ORDER[0]`, because shim policy is not a presentation order.
+ */
+export const DEFAULT_SHIM_ROLE: Role = "package-manager";
+
+/**
  * §17.3 R1 — the roles this tool fills, or `undefined` for a name the table
  * does not carry.
  *

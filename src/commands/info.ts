@@ -27,11 +27,8 @@
 
 import {
   accessSync,
-  closeSync,
   constants as fsConstants,
-  openSync,
   readFileSync,
-  readSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -60,8 +57,9 @@ import {
   resolveRegistry,
 } from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
+import { isShimFile } from "../utils/shim-id.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
-import { resolveInstallDirectory, SHIM_MARKER } from "./shims.ts";
+import { resolveInstallDirectory } from "./shims.ts";
 import { tlsSettings } from "../net/tls.ts";
 import {
   findInstalledVersion,
@@ -931,7 +929,9 @@ function describeShims(): InfoReport["shims"] {
   for (const name of SUPPORTED_NAMES) {
     for (const binary of getBinariesFor(name)) {
       const onPath = lookupOnPath(binary);
-      const ours = onPath !== null && isOurShim(onPath);
+      // §17.6 C7's recognition rule, shared with `enable`/`disable` and with the
+      // interpreter search a generated shim performs — `utils/shim-id.ts`.
+      const ours = onPath !== null && isShimFile(onPath, binary);
 
       // `PATH` first, because `enable --install-directory` puts shims somewhere
       // `resolveInstallDirectory` will never guess — and a shim that is on
@@ -939,7 +939,11 @@ function describeShims(): InfoReport["shims"] {
       // default directory is the fallback, and it is what turns up the case
       // that matters: a shim that exists and is being shadowed.
       const candidate = directory === null ? null : join(directory, binary);
-      const shim = ours ? onPath : candidate !== null && isOurShim(candidate) ? candidate : null;
+      const shim = ours
+        ? onPath
+        : candidate !== null && isShimFile(candidate, binary)
+          ? candidate
+          : null;
 
       entries.push({
         binary,
@@ -962,41 +966,6 @@ function samePath(left: string, right: string): boolean {
     return realpathSync(left) === realpathSync(right);
   } catch {
     return false;
-  }
-}
-
-/**
- * §14.16 — a file is one of ours iff it carries the generated-stub marker.
- *
- * The read follows symlinks, which is what makes it work for a POSIX shim: the
- * link in the shim directory points at a stub next to the library entry, and the
- * marker lives in the stub. Only the head is read, because the same question
- * gets asked of whatever `PATH` turned up — which may be a large native binary.
- */
-function isOurShim(file: string): boolean {
-  const head = readHead(file, 1024);
-  if (head === undefined) return false;
-  if (head.includes(SHIM_MARKER)) return true;
-  // §10.3 — on Windows the entry on PATH is a `.cmd`/`.ps1`/sh wrapper that
-  // *invokes* the marked stub rather than carrying the marker itself.
-  return process.platform === "win32" && head.includes("node") && /[\w-]+\.js/.test(head);
-}
-
-function readHead(file: string, length: number): string | undefined {
-  let fd: number;
-  try {
-    fd = openSync(file, "r");
-  } catch {
-    return undefined;
-  }
-  try {
-    const buffer = Buffer.allocUnsafe(length);
-    const bytes = readSync(fd, buffer, 0, length, 0);
-    return buffer.toString("utf8", 0, bytes);
-  } catch {
-    return undefined;
-  } finally {
-    closeSync(fd);
   }
 }
 

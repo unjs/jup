@@ -4,14 +4,14 @@
 breakdown: what is left, in what order, and which conformance rows prove each piece.
 Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
 
-## Where things stand — D0 + D1 + D2 + D3, 2026-08-26
+## Where things stand — §17 is complete (D0–D4), 2026-08-26
 
 * **§01–§16 are implemented.** Every row of §13 (1–147) and §15.38 (148–207) has a test
-  whose title names it. `pnpm vitest run`: **1746 passed, 3 skipped**, the skips all
+  whose title names it. `pnpm vitest run`: **1754 passed, 3 skipped**, the skips all
   platform-conditional (Windows, root, no TTY). `pnpm test:corepack` (corepack's own
   suite): **100 passed, 1 expected fail, 40 skipped**, each skip a §14/§17 divergence with
   a stated reason.
-* **§17 is partly implemented.** Two pieces landed early: the one-executable
+* **§17 is implemented.** Two pieces landed early: the one-executable
   / two-names packaging (`bin.corepack` and `bin.jup` are the same file, C1′) and the
   `JUP_`/`COREPACK_` pair resolution in `src/config/env-vars.ts`. The latter is **tier 1
   only** — C4's second tier, under which §11.5's and §15.37's invented variables are named
@@ -19,21 +19,23 @@ Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
   every variable as an equal pair — **superseded by D3**, which split `ENV` into §11.6's
   two closed tiers. D0 landed §17.3's noun and its roles as data plus §17.9's table
   fixture, D1 the command router, the entry-point name, and C6/C10, D2 the role-sensitive
-  behaviour (R4, R9, R10, R11, R14–R16), and D3 the renames (C2, C3, C8, C9) and C4's
-  second tier. What is left is the shim policy and the interpreter guard (D4). Rows
-  208–221 and 225–233 have tests; 222–224 do not.
+  behaviour (R4, R9, R10, R11, R14–R16), D3 the renames (C2, C3, C8, C9) and C4's second
+  tier, and D4 the shim policy and the interpreter guard (C5, C7). **Rows 208–233 all have
+  tests.** What remains is not implementation: §17.7's eight undecided questions, the open
+  follow-ups below, and the release decisions at the foot of this file.
 * **Nothing is published**; `package.json` is at `0.0.0`.
 
-## Remaining work — §17
+## The §17 work, as landed
 
-Order is dependency order. D0 unblocks D2 and D4; the rest are independent.
+Order was dependency order: D0 unblocked D2 and D4; the rest were independent. All five
+are done, and each section below is the record of what was decided and why.
 
 ### D0 — The test-only table fixture §17.9 — **done**
 
 `Role`, `Tool` and `ToolSpec` are in `src/types.ts` (§17.3's rename, no aliases kept), every
 §02.5 entry carries `roles: ["package-manager"]`, and `config/table.ts` exports `getRoles`
 and `hasRole`. Nothing branched on a role at the time: R4's enforcement, R10's inference
-and R11 landed in D2, and C5's `enable` default set is still D4's.
+and R11 landed in D2, and C5's `enable` default set in D4.
 
 The seam, for the steps that use it:
 
@@ -207,17 +209,57 @@ marker written and `.corepack` still accepted; `.jup.env`, `.jup.lock`, `jup.tgz
 `test/unit/env.test.ts`, including a scan that fails if `errors.ts` or `usage.ts` prints a
 tier-2 variable under its legacy spelling.
 
-### D4 — Shim policy and the interpreter guard C5, C7
+### D4 — Shim policy and the interpreter guard C5, C7 — **done**
 
-C5: `jup enable` with no names shims the `package-manager` role only; a runtime shim needs
-an explicit name or `jup runtime enable`. C7 is the one genuinely new failure mode the
-extension introduces, and it is silent-and-fatal: **no interpreter lookup may resolve to a
-shim.** Guard all four paths (§08.3.1's sibling preference, the generated shims' own `node`
-lookup, `#!/usr/bin/env node`, our own `PATH` search), recognising a shim from the
-§15.15 record rather than by identity with our own executable — under §10.1's generated-
-script model the identity test never fires. §15.32's `PATH` prepending is what makes this
-reachable without any `PATH` of the user's.
-**Rows:** 222–224.
+**C5 is one filter and one argument.** `targetBinaries` takes the role in effect and, with
+no names, selects the tools that have it; `DEFAULT_SHIM_ROLE` lives in `config/table.ts`
+beside `ROLE_ORDER` so that `shims.ts` never spells a role (R3). An explicit name is not
+second-guessed — §10.5 shims a runtime "when it is named explicitly *or* the command is
+scoped", so `jup enable node` works without a scope word — and `--exclude` is untouched.
+`disable` reads the same target set: §10.5 defines one, `jup disable` is the inverse of
+`jup enable`, and `jup runtime disable` takes what `jup runtime enable` wrote.
+
+**C7 needed a decision before it needed code.** §08.3 is written for a native
+implementation and this one hands over **in process**, so §08.3.1's numbered lookup has no
+caller in the tool: by the time any of our code runs, `process.execPath` is already a
+runtime. Guarding a lookup that never happens would have produced two rows that pass for
+the wrong reason. The four paths of C7's table, honestly classified for *this*
+implementation:
+
+| C7 row | Here |
+| --- | --- |
+| §08.3.1's sibling preference | **Unreachable** — no caller; `win32ShSource`'s comment records why. |
+| §08.3.1 step 3's `PATH` search | **Unreachable** — same. |
+| §10.3's generated wrappers | **Live, and ours.** The one place this implementation picks an interpreter, so §08.3.1's search lives there — steps 1–4, both step-4 errors included. |
+| `#!/usr/bin/env node` | **Live, and not fixable here** — see the follow-up below. |
+
+The sh wrapper *is* §08.3.1: `JUP_NODE_EXECPATH` (either spelling) first, no sibling
+preference at all, then `PATH` in order skipping every candidate carrying the shim marker,
+then the two errors — `Every 'node' on PATH is a jup shim…` when candidates existed and
+were all ours, `Unable to locate a Node.js runtime…` when none existed. The `.cmd` and
+`.ps1` name `node.exe` explicitly, which `enable` never writes (a Windows shim is `node`,
+`node.cmd`, `node.ps1`), so neither can select a shim anywhere on `PATH` — which also
+retires §10.3's `PATHEXT` surgery, whose only purpose was to stop a bare `node` resolving
+into a `node.js` and which handed the package manager a doctored `PATHEXT` on the way past.
+
+**The recognition rule is content, and it is in one place** (`utils/shim-id.ts`): the
+`@jup-shim` marker in the file's head, following symlinks so a POSIX shim is answered by
+its stub; an older build's §10.3 wrapper by shebang plus the `<binName>.js` it invokes; and
+*then* identity with our own entry module, C7's stated fallback for §14.15's link model —
+never with `process.execPath`, which in a JavaScript implementation is the runtime and
+would exclude the real `node`. `enable`, `disable`, `info` and the wrapper's own scan share
+it, and all three wrappers now carry the marker, which is what lets that scan be one
+`grep`. **§15.15's record is not the instrument C7 assumes:** it records what `enable`
+*displaced*, and a name that was free — the usual case, and the certain case for `node` —
+leaves no entry at all.
+
+**Rows:** 222–224, in `test/conformance/17-04-shims.test.ts`. 222 goes through the spawned
+CLI. 223 and 224 run a **generated shim** with a generated `node` shim planted beside it
+and assert which interpreter it chose; `generateWin32Link` is platform-independent by
+design and row 131 already leans on that. Each row was verified to fail with the guard
+reverted: 222 by dropping `hasRole` from `targetBinaries`'s default set, 223 and 224 by
+restoring §10.3's `if [ -x "$basedir/node" ]` preference — which makes 223 report
+`["node", "<dist>/pnpm.js", …]` and hangs 224 in the recursion the row exists to prevent.
 
 ## Standing hazards
 
@@ -232,11 +274,13 @@ reachable without any `PATH` of the user's.
   deliberately, with a reason. It is a tripwire, not a budget. The
   companion assertion — the modules statically reachable from `src/shim.ts` **equal**
   `build.config.ts`'s `WARM_MODULES` — is what pins the emitted chunk; a new static import
-  on the warm path fails until the build config is updated.
+  on the warm path fails until the build config is updated. D4 spent 597 of the remaining
+  bytes (`config/table.ts`'s `DEFAULT_SHIM_ROLE`, `errors.ts`'s C7 message) and left
+  **1,106**; its own machinery — `utils/shim-id.ts` and the generator — is cold.
 * **`test/conformance/15-28-native.test.ts` flakes under full-suite load.** The §08.5
   row asserting `exitCode 55` / `signal null` — the child stayed in the process group and
   the tool did not die of the same signal — failed once in two consecutive full runs and
-  passes alone every time. 1746 passed / 3 skipped is the green baseline; a single failure
+  passes alone every time. 1754 passed / 3 skipped is the green baseline; a single failure
   in that file is the flake, not a regression. Worth a timing fix before it costs someone
   an afternoon.
 * **The sandbox has live network and the conformance harness does not disable it.** A row
@@ -291,12 +335,32 @@ reachable without any `PATH` of the user's.
   registry's `latest` dist-tag. Honouring it would resolve `yarn@*` against the last band's
   registry only, silently dropping the Yarn Classic candidates §04.1 step 6 unions in. Row
   184 asserts the decision rather than leaving it invisible.
-* **§15.14's native half.** Verified, against corepack's stated reason for avoiding it:
-  `process.argv[1]` is **not** realpathed, so a JS distribution could do §14.15's
-  `basename(argv[1])` dispatch on POSIX today — one shipped `dist/shim.mjs` and six
-  symlinks, no generator, #751 closed at the root. It does not help on Windows, where the
-  `.cmd`/`.ps1` wrappers pass the stub path to `node` and the invocation name is lost. It
-  changes the shim contract, not enablement, so it is its own item — and C7 interacts.
+* **§15.14's native half — now also C7's third row, and the only part of C7 left open.**
+  `#!/usr/bin/env node` at the top of every §10.1 stub resolves through `PATH` before the
+  tool gets control, and the shim `env` would find is itself a `#!/usr/bin/env node`
+  script: the loop is in the kernel and `env`, and no guard we can write is ever reached.
+  D4 could not close it and did not pretend to — `shimSource`'s comment says so at the
+  source, and no row asserts it. C7's own table defers this row to §15.14 ("§15.14 already
+  requires replacing these; this is a second reason"), and the mitigation until then is C5:
+  no `node` shim exists unless a user asks for one by name.
+  D1 has since proved the mechanism §15.14 needs. `process.argv[1]` is **not** realpathed,
+  so `entryNameFrom` already dispatches on `basename(argv[1])` for the tool's own two
+  names; extending that to the shimmed binaries is one shipped `dist/shim.mjs` plus a
+  symlink per name, no generator, no shebang of ours in the loop, and #751 closed at the
+  root. It does not help on Windows, where the `.cmd`/`.ps1` wrappers pass the stub path to
+  `node` and the invocation name is lost — but those two are guarded by naming `node.exe`,
+  so what is left there is the extensionless sh wrapper's scan. **What D4 makes cheaper:**
+  the recognition rule is already one function, the sh wrapper's search is already written,
+  and both survive the change; what moves is `generatePosixLink`'s target and the six
+  shipped stubs.
+
+* **A runtime shim cannot work under §10.1 in a JavaScript implementation, and no row says
+  so.** The generated stub for binary `B` is a JavaScript file run by `node` — so the stub
+  for `node` itself needs the very runtime it exists to select. `jup enable node` writes
+  it (row 222's second half requires that), and running it would recurse. Nothing breaks
+  today because §02.5 ships no runtime, and §17.7 #7 already reserves "Windows shim
+  behaviour for a runtime"; this is the POSIX half of the same question, and it wants
+  either §15.14's model or a spec ruling on what a runtime shim *is*.
 * **Bare `yarn` with `COREPACK_DEFAULT_TO_LATEST=1` fails online.** npm signs the `yarn`
   packument's `latest` with a keyid its own `/-/npm/v1/keys` marks `expires: 2025-01-29`;
   §15.9's refresh cannot help because the key is expired at the source. Either §14.4's

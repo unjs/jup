@@ -566,6 +566,13 @@ export const messages = {
   noNodeRuntime: (binName: string) =>
     `Unable to locate a Node.js runtime to execute ${binName}; set JUP_NODE_EXECPATH to point at one`,
 
+  /**
+   * §08.3.1 step 4 / §17.6 C7. Not run through `toolName()`: §12.12 freezes the
+   * spelling, and a generated shim (§10.3) emits this long after any invocation.
+   */
+  everyInterpreterIsShim: () =>
+    `Every 'node' on PATH is a jup shim; set JUP_NODE_EXECPATH to a real runtime`,
+
   noShimDirectory: () => `Unable to determine where to install the shims; pass --install-directory`,
 
   shimNotOurs: (binName: string, file: string) =>

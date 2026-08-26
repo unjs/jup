@@ -1,5 +1,6 @@
 /**
- * Shims and PATH integration — §10, §15.13, §15.14, §15.15, §15.16, §15.29.
+ * Shims and PATH integration — §10, §15.13, §15.14, §15.15, §15.16, §15.29,
+ * §17.6 C5 and C7.
  *
  * `enable` puts our names on PATH; `disable` takes them off.
  *
@@ -20,6 +21,13 @@
  * * **§15.16** — npm is shimmed by default; `--exclude npm` opts out.
  * * **§15.29** — after writing, `enable` checks that the shims actually won on
  *   `PATH` and names whatever beat them.
+ *
+ * §17 adds two more: **C5** scopes the no-names target set to one role (see
+ * {@link targetBinaries}), and **C7** forbids any interpreter lookup from
+ * resolving to a shim — which in this implementation means the lookup §10.3's
+ * generated wrappers perform, since the tool's own handover is in process (see
+ * {@link win32ShSource}). Recognising a shim is `utils/shim-id.ts`'s job and is
+ * shared with `info` and with those wrappers' own scan.
  */
 
 import {
@@ -53,36 +61,22 @@ import {
 import { basename, delimiter, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
-import { DEFINITIONS, getBinariesFor } from "../config/table.ts";
+import { DEFAULT_SHIM_ROLE, DEFINITIONS, getBinariesFor, hasRole } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors.ts";
 import { perUserShimDirectory as perUserDefault } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
+import { HEAD_BYTES, headIsShim, SHIM_MARKER } from "../utils/shim-id.ts";
 import { getHomeFolder } from "../cache/store.ts";
+import type { Role } from "../types.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
 const TOOL_NAME = "jup";
-
-/**
- * §14.16 — how we recognise a stub we wrote. A regular file that does not carry
- * this marker is somebody else's binary and is never replaced without `--force`.
- */
-export const SHIM_MARKER = "@jup-shim";
 
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;
 
 /** Windows writes three files per binary name (§10.3); `disable` removes all three. */
 const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
-
-/**
- * The first line of each §10.3 wrapper.
- *
- * The wrappers cannot carry {@link SHIM_MARKER}: §10.3 fixes their bodies byte
- * for byte and the conformance suite compares them literally. They are
- * recognised instead by their shebang plus the `<binName>.js` stub they invoke,
- * which no unrelated binary of the same name would contain.
- */
-const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
 
 /** §15.15 — where the record of displaced entries lives, under `<home>`. */
 const DISPLACED_RECORD_NAME = "shims.json";
@@ -206,20 +200,43 @@ function assertKnownName(name: string): void {
 }
 
 /**
- * §10.5 as amended by §15.16 — with no names, **every** supported package
- * manager, npm included; each name then expands to its full binary set, so
- * `disable yarn` takes `yarnpkg` with it.
+ * §10.5 as amended by §15.16 and §17.6 C5 — with no names, every tool **in the
+ * role in effect**, npm included; each name then expands to its full binary set,
+ * so `disable yarn` takes `yarnpkg` with it.
  *
  * npm used to be excluded on the grounds that it ships with Node. §15.16 rejects
  * that: the exclusion is inter-team policy corepack is party to and we are not,
  * and its consequence is that a yarn-pinned project correctly blocks `pnpm`
  * while `npm install` silently works anyway. `--exclude npm` restores it.
+ *
+ * **C5 confines the default set to one role.** `jup enable` shims the
+ * package-manager role only; a runtime shim needs an explicit name
+ * (`jup enable node`) or a scoped command (`jup runtime enable`). Occupying
+ * `node` on `PATH` intercepts every program a user or another tool launches,
+ * which is an intervention of a different order from occupying `yarn`, and a
+ * user who typed `jup enable` did not ask for it. The second reason is C7's:
+ * a `node` shim is what every interpreter lookup on the machine can then find,
+ * and while C7's exclusion is the correctness guard, not creating the shim by
+ * default is the ordinary-care version of the same concern.
+ *
+ * `scope` is the role a scope word put the command in — `DEFAULT_SHIM_ROLE`
+ * when there was none. It filters the **default** set only: §10.5 says a
+ * runtime-role tool is shimmed "when it is named explicitly *or* the command is
+ * scoped", so an explicit name is never second-guessed here. `--exclude` is
+ * unaffected either way, and `disable` reads this same target set — it is the
+ * inverse of `enable`, and `jup runtime disable` takes the shims
+ * `jup runtime enable` wrote.
  */
-export function targetBinaries(names: string[], exclude: string[] = []): string[] {
+export function targetBinaries(
+  names: string[],
+  exclude: string[] = [],
+  scope: Role = DEFAULT_SHIM_ROLE,
+): string[] {
   for (const name of exclude) assertKnownName(name);
   const excluded = new Set(exclude);
 
-  const selected = (names.length > 0 ? names : Object.keys(DEFINITIONS)).filter((name) => {
+  const defaults = Object.keys(DEFINITIONS).filter((name) => hasRole(name, scope));
+  const selected = (names.length > 0 ? names : defaults).filter((name) => {
     assertKnownName(name);
     return !excluded.has(name);
   });
@@ -394,6 +411,16 @@ function realpathOr(directory: string): string {
  * (§05.5): the user asked for `yarn`, not for a download. `??=` in both, so a
  * real environment variable still wins.
  *
+ * **§17.6 C7's third row is open here, and cannot be closed from inside this
+ * file.** `#!/usr/bin/env node` resolves through `PATH` before any of our code
+ * runs, so once a `node` shim exists it is what `env` finds — and that shim is
+ * itself a `#!/usr/bin/env node` script, so the loop is in the kernel and `env`,
+ * never reaching a guard we could write. The fix is §15.14's: a shim that is not
+ * an interpreted script needing a runtime on `PATH` to start. Until then the
+ * mitigations are C5 (no `node` shim unless the user asks for one by name) and
+ * this note. §10.3's wrappers, which *are* ours to guard, are guarded — see
+ * {@link win32ShSource}.
+ *
  * The exit code is assigned only when it is non-zero, exactly as `bin.ts` does
  * it and for the same reason (§08.4): the in-process handover answers `0` before
  * the package manager's module body has run, and writing that would replace
@@ -502,8 +529,14 @@ async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
  * * a **dangling** symlink that still names a `<binName>.js` stub — #751's stale
  *   shim, which `enable` must replace and `disable` must remove rather than skip
  *   (§15.14);
- * * a regular file carrying the marker, or one of §10.3's three Windows
- *   wrappers, which cannot carry it (see {@link WIN32_WRAPPER_HEADS}).
+ * * a regular file recognised by {@link headIsShim} — the marker, or an older
+ *   build's §10.3 wrapper.
+ *
+ * The *rule* is `utils/shim-id.ts`'s and is shared with `info` and with §17.6
+ * C7's interpreter guard; only the `lstat`-shaped cases around it are local,
+ * because this is the one caller that must tell a dangling symlink from a
+ * missing file. The I/O stays async here: `enable` processes every binary name
+ * concurrently (§10.5).
  */
 async function isOurEntry(file: string, binName: string, stats?: Stats): Promise<boolean> {
   const entry = stats ?? (await lstat(file).catch(() => undefined));
@@ -512,20 +545,15 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
   if (entry.isSymbolicLink()) {
     const link = await readlink(file).catch(() => undefined);
     if (link === undefined) return false;
-    const head = await readHead(resolvePath(dirname(file), link), 1024);
+    const head = await readHead(resolvePath(dirname(file), link), HEAD_BYTES);
     // A live link is ours iff what it points at is ours; a dangling one is ours
     // iff it still names our stub (§15.14 / #751).
-    return head === undefined ? basename(link) === `${binName}.js` : head.includes(SHIM_MARKER);
+    return head === undefined ? basename(link) === `${binName}.js` : headIsShim(head, binName);
   }
 
   if (!entry.isFile()) return false;
 
-  const head = await readHead(file, 1024);
-  if (head === undefined) return false;
-  if (head.includes(SHIM_MARKER)) return true;
-  return (
-    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) && head.includes(`${binName}.js`)
-  );
+  return headIsShim(await readHead(file, HEAD_BYTES), binName);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -820,51 +848,131 @@ export async function removePosixLink(
 /* -------------------------------------------------------------------------- */
 
 /**
- * The `.cmd` body of §10.3, byte for byte.
+ * The banner the generated artifacts carry, so that {@link headIsShim} — and
+ * the interpreter search below — can recognise them by content.
  *
- * The double spaces are real — an empty interpolated argument slot — and the
- * `PATHEXT` line drops `.JS` from the executable-extension list so that `node`
- * resolves to `node.exe` instead of recursing into a `node.js` file.
+ * `<comment>` is the host language's line-comment introducer. §10.3 wrote its
+ * three wrappers byte for byte from corepack and they carried no marker; C7
+ * changes those bodies anyway (see {@link win32ShSource}), so there is no longer
+ * a reason for the wrappers to be the one thing `enable` writes that cannot say
+ * who wrote it.
+ */
+function banner(comment: string): string {
+  return `${comment} ${SHIM_MARKER} — generated by \`${TOOL_NAME} enable\`; edits are overwritten.`;
+}
+
+/**
+ * The `.cmd` body — §10.3 as amended by §17.6 C7.
+ *
+ * §10.3's body preferred `%~dp0\node.exe`, a **sibling** of the shim. Once
+ * `node` is a name this tool can shim that sibling is the tool itself, which
+ * makes a `node` shim the interpreter for every other shim beside it and
+ * re-enters the tool without bound. C7 requires a form that cannot select a
+ * sibling shim; this one names `node.exe` explicitly, which no `enable` of ours
+ * ever writes — a Windows shim is `node`, `node.cmd` and `node.ps1`, never
+ * `node.exe`. That also retires §10.3's `PATHEXT` surgery, which existed only to
+ * stop a bare `node` resolving into a `node.js` file and had the side effect of
+ * handing the package manager a doctored `PATHEXT`.
+ *
+ * (§14.15's model *does* write `<B>.exe`, and a distribution that switches to it
+ * has to revisit this line. It has no generated wrapper at all, so the question
+ * disappears with the file.)
+ *
+ * The double spaces are real — an empty interpolated argument slot.
  */
 function win32CmdSource(rel: string): string {
   const windowsRel = rel.replaceAll("/", "\\");
-  return [
-    `@SETLOCAL`,
-    `@IF EXIST "%~dp0\\node.exe" (`,
-    `  "%~dp0\\node.exe"  "%~dp0\\${windowsRel}" %*`,
-    `) ELSE (`,
-    `  @SET PATHEXT=%PATHEXT:;.JS;=;%`,
-    `  node  "%~dp0\\${windowsRel}" %*`,
-    `)`,
-    ``,
-  ].join("\n");
+  return [banner("@REM"), `@node.exe  "%~dp0\\${windowsRel}" %*`, ``].join("\n");
 }
 
-/** The extensionless sh body of §10.3, for Git Bash / MSYS / Cygwin. */
-function win32ShSource(rel: string): string {
+/**
+ * The extensionless sh body of §10.3, for Git Bash / MSYS / Cygwin — and the one
+ * place this implementation performs §08.3.1's interpreter lookup.
+ *
+ * §08.3 is written for a native implementation, and this one hands the package
+ * manager over **in process** (`run/exec.ts`), so the tool itself never chooses
+ * an interpreter: `process.execPath` already is one. The generated shims are the
+ * exception. This wrapper has to find a `node` before any of our code runs, and
+ * §10.3's body asked for `$basedir/node` first and a bare `node` second — the
+ * first is the sibling shim C7 forbids outright, and the second is *any* jup
+ * shim earlier on `PATH`, which §15.32 makes likely because it prepends the shim
+ * directory for every process the package manager spawns.
+ *
+ * So the search here is §08.3.1's, step for step:
+ *
+ * 1. `JUP_NODE_EXECPATH` (or its legacy spelling) wins outright;
+ * 2. no sibling preference at all — §10.3's blockquote offers "omit it or test
+ *    that the sibling is not a shim", and omitting it is one line rather than
+ *    two, because step 3 already tests every candidate including that one;
+ * 3. `PATH` in order, skipping every candidate carrying {@link SHIM_MARKER};
+ * 4. and the two §08.3.1 step-4 errors, told apart by whether any `node` was
+ *    found at all. §17.9 rows 223 and 224.
+ *
+ * The scan is `head | grep` rather than the shell's own `read`, which would
+ * consume a real runtime's binary a byte at a time looking for a newline, and
+ * rather than `$(head …)`, whose NUL bytes make bash warn on stderr on every
+ * invocation. It costs two processes per candidate *ahead of* the first real
+ * runtime, and neither tool is a new dependency: §10.3's own preamble already
+ * requires `dirname`, `sed` and `uname`, so an environment that can run this
+ * file at all has coreutils.
+ */
+function win32ShSource(rel: string, binName: string): string {
   const posixRel = rel.replaceAll("\\", "/");
   return [
     `#!/bin/sh`,
+    banner("#"),
     `basedir=$(dirname "$(echo "$0" | sed -e 's,\\\\,/,g')")`,
     ``,
     `case \`uname\` in`,
     `    *CYGWIN*) basedir=\`cygpath -w "$basedir"\`;;`,
     `esac`,
     ``,
-    `if [ -x "$basedir/node" ]; then`,
-    `  exec "$basedir/node"  "$basedir/${posixRel}" "$@"`,
-    `else`,
-    `  exec node  "$basedir/${posixRel}" "$@"`,
+    `# §08.3.1 + §17.6 C7 — an interpreter that is not one of our own shims.`,
+    `jup_shim() { head -c ${HEAD_BYTES} "$1" 2>/dev/null | grep -q '${SHIM_MARKER}'; }`,
+    `node_exe=\${${jupSpelling(ENV.NODE_EXECPATH)}:-\${${ENV.NODE_EXECPATH}:-}}`,
+    `seen=`,
+    `if [ -z "$node_exe" ]; then`,
+    `  jup_ifs=$IFS`,
+    `  IFS=:`,
+    `  for dir in $PATH; do`,
+    `    [ -n "$dir" ] || dir=.`,
+    `    [ -x "$dir/node" ] || continue`,
+    `    seen=1`,
+    `    jup_shim "$dir/node" && continue`,
+    `    node_exe=$dir/node`,
+    `    break`,
+    `  done`,
+    `  IFS=$jup_ifs`,
     `fi`,
+    `if [ -z "$node_exe" ]; then`,
+    `  if [ -n "$seen" ]; then`,
+    `    echo "${messages.everyInterpreterIsShim()}" >&2`,
+    `  else`,
+    `    echo "${messages.noNodeRuntime(binName)}" >&2`,
+    `  fi`,
+    `  exit 1`,
+    `fi`,
+    ``,
+    `exec "$node_exe"  "$basedir/${posixRel}" "$@"`,
     ``,
   ].join("\n");
 }
 
-/** The `.ps1` body of §10.3. */
+/**
+ * The `.ps1` body — §10.3 as amended by §17.6 C7.
+ *
+ * The sibling preference is gone for {@link win32CmdSource}'s reason. What is
+ * left names `node$exe`, and `$exe` is `.exe` on every Windows PowerShell, so
+ * the same argument holds: `enable` never writes a `node.exe`. On a
+ * *non*-Windows PowerShell `$exe` is empty and a bare `node` could in principle
+ * find the extensionless sh wrapper — a configuration `enable` cannot produce,
+ * since it writes these three files only on `win32`.
+ */
 function win32Ps1Source(rel: string): string {
   const posixRel = rel.replaceAll("\\", "/");
   return [
     `#!/usr/bin/env pwsh`,
+    banner("#"),
     `$basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent`,
     ``,
     `$exe=""`,
@@ -874,22 +982,13 @@ function win32Ps1Source(rel: string): string {
     `  $exe=".exe"`,
     `}`,
     `$ret=0`,
-    `if (Test-Path "$basedir/node$exe") {`,
-    `  # Support pipeline input`,
-    `  if ($MyInvocation.ExpectingInput) {`,
-    `    $input | & "$basedir/node$exe"  "$basedir/${posixRel}" $args`,
-    `  } else {`,
-    `    & "$basedir/node$exe"  "$basedir/${posixRel}" $args`,
-    `  }`,
-    `  $ret=$LASTEXITCODE`,
+    `# Support pipeline input`,
+    `if ($MyInvocation.ExpectingInput) {`,
+    `  $input | & "node$exe"  "$basedir/${posixRel}" $args`,
     `} else {`,
-    `  if ($MyInvocation.ExpectingInput) {`,
-    `    $input | & "node$exe"  "$basedir/${posixRel}" $args`,
-    `  } else {`,
-    `    & "node$exe"  "$basedir/${posixRel}" $args`,
-    `  }`,
-    `  $ret=$LASTEXITCODE`,
+    `  & "node$exe"  "$basedir/${posixRel}" $args`,
     `}`,
+    `$ret=$LASTEXITCODE`,
     `exit $ret`,
     ``,
   ].join("\n");
@@ -918,7 +1017,7 @@ export async function generateWin32Link(
   const rel = relative(installDirectory, stub);
 
   const files = [
-    [file, win32ShSource(rel)],
+    [file, win32ShSource(rel, binName)],
     [`${file}.cmd`, win32CmdSource(rel)],
     [`${file}.ps1`, win32Ps1Source(rel)],
   ] as const;
@@ -1063,15 +1162,19 @@ export function verifyOnPath(installDirectory: string, installed: [string, strin
  * fallback and §15.29's verification.
  *
  * `distFolder` is a seam for the tests; production always uses our own folder.
+ * `scope` is §17.6 C5's, and comes last precisely so that the seam's callers do
+ * not have to name it: `undefined` is `DEFAULT_SHIM_ROLE`, which is what
+ * `jup enable` and `corepack enable` both mean.
  */
 export async function cmdEnable(
   args: string[],
   distFolder: string = resolveDistFolder(),
+  scope?: Role | null,
 ): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);
   // Validate before touching the filesystem, so a bad name reports itself even
   // when the install directory cannot be resolved (§12.9).
-  const binaries = targetBinaries(names, exclude);
+  const binaries = targetBinaries(names, exclude, scope ?? DEFAULT_SHIM_ROLE);
   // §15.13 — resolve, then probe, then fall back; nothing is written before the
   // directory is known to be writable.
   const installDirectory = prepareInstallDirectory(resolveInstallDirectory(options, false));
@@ -1098,10 +1201,17 @@ export async function cmdEnable(
  * §10.6 — removes only the names it was asked about, and within those only the
  * entries it created (§15.15); `disable yarn` also removes `yarnpkg`. Anything
  * `enable` displaced is then put back.
+ *
+ * It reads §10.5's target set, so §17.6 C5's role scoping reaches it too:
+ * `jup disable` is the inverse of `jup enable`, and `jup runtime disable` takes
+ * the shims `jup runtime enable` wrote. That is the by-construction reading —
+ * §10.5 defines one target set and both commands use it — and it is the safe
+ * direction, because §10.6 already forbids touching a name it was not asked
+ * about.
  */
-export async function cmdDisable(args: string[]): Promise<number> {
+export async function cmdDisable(args: string[], scope?: Role | null): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);
-  const binaries = targetBinaries(names, exclude);
+  const binaries = targetBinaries(names, exclude, scope ?? DEFAULT_SHIM_ROLE);
   // §10.4 — no realpath here: removal needs no relative-path computation.
   const installDirectory = resolveInstallDirectory(options, false);
 

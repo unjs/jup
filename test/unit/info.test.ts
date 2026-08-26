@@ -28,7 +28,7 @@ import {
 } from "../../src/commands/info.ts";
 import { discoverProjectSpec } from "../../src/project/manifest.ts";
 import { getRegistryUrl } from "../../src/net/registry.ts";
-import { SHIM_MARKER } from "../../src/commands/shims.ts";
+import { SHIM_MARKER } from "../../src/utils/shim-id.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 
 const ENV_KEYS = [

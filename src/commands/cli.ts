@@ -1287,8 +1287,14 @@ const HANDLERS: Record<DispatchedVerb, (command: Route) => Promise<number> | num
   cache: (command) => cmdCache(command.args, { role: command.scope, word: command.scopeWord }),
   // Imported lazily: §10's shim machinery is only ever reached by these two
   // commands, and nothing else in the surface should pay to load it.
-  disable: (command) => import("./shims.ts").then(({ cmdDisable }) => cmdDisable(command.args)),
-  enable: (command) => import("./shims.ts").then(({ cmdEnable }) => cmdEnable(command.args)),
+  // §17.6 C5 — the scope reaches §10.5's default target set: `jup enable` shims
+  // the package-manager role only, and a runtime shim wants either an explicit
+  // name or `jup runtime enable`. `undefined` for the dist folder keeps that
+  // parameter's default (our own folder); it is a test seam and not a route.
+  disable: (command) =>
+    import("./shims.ts").then(({ cmdDisable }) => cmdDisable(command.args, command.scope)),
+  enable: (command) =>
+    import("./shims.ts").then(({ cmdEnable }) => cmdEnable(command.args, undefined, command.scope)),
   help: (command) => cmdHelp(command),
   hydrate: (command) => cmdHydrate(command.args),
   // Lazily, like `enable`/`disable`: §15.30's report reaches for the shim
