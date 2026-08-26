@@ -1,7 +1,9 @@
 /**
  * The embedded trust store — §02.6.
  *
- * `key` is a base64 DER SubjectPublicKeyInfo for a NIST P-256 public key. Keyed
+ * `key` is a base64 DER SubjectPublicKeyInfo for an ECDSA public key; the keys
+ * embedded here are NIST P-256, though §06.3 reads the curve from the key
+ * material, so a store supplied for another registry need not be. Keyed
  * by registry origin so §15.10's custom-registry trust is additive later; phase 1
  * populates only the default registry.
  *

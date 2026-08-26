@@ -238,14 +238,45 @@ describe("verifySignature — key expiry (§14.4, test 82)", () => {
   });
 });
 
-describe("verifySignature — curve validation (§06.3)", () => {
-  it("rejects a key that is not P-256 rather than mis-verifying", () => {
-    const p384 = makeKeypair("SHA256:npm-p384", "secp384r1");
-    useTrustStore([trustedKey(p384)]);
+describe("verifySignature — key-type validation (§06.3)", () => {
+  it("verifies on whatever curve the key declares, not only P-256", () => {
+    // §06.3's algorithm is generic ECDSA-with-SHA-256 and takes the curve from
+    // the key material; its P-256 assertion is scoped to native implementations
+    // that can only do that one curve. A custom registry may sign on any curve —
+    // corepack's own test registry uses `sect239k1`.
+    for (const curve of ["secp384r1", "secp521r1", "sect239k1"]) {
+      const key = makeKeypair(`SHA256:npm-${curve}`, curve);
+      useTrustStore([trustedKey(key)]);
 
-    expect(() => verify([{ keyid: p384.keyid, sig: signPayload(p384, PAYLOAD) }])).toThrow(
-      /expected an ECDSA P-256 public key/,
-    );
+      expect(() => verify([{ keyid: key.keyid, sig: signPayload(key, PAYLOAD) }])).not.toThrow();
+      // Still a real verification, not a rubber stamp.
+      expect(() =>
+        verify([{ keyid: key.keyid, sig: signPayload(key, `${PAYLOAD}-tampered`) }]),
+      ).toThrow("Signature does not match");
+    }
+  });
+
+  it("still rejects a key that is not ECDSA at all", () => {
+    // An RSA or Ed25519 SPKI parses happily, but DER `(r, s)` decoding means
+    // nothing for it; refuse it by name rather than let it fail as an opaque
+    // mismatch.
+    const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const ed = generateKeyPairSync("ed25519");
+
+    for (const [name, pair, algo] of [
+      ["rsa", rsa, "sha256"],
+      ["ed25519", ed, null],
+    ] as const) {
+      const keyid = `SHA256:npm-${name}`;
+      const spki = pair.publicKey.export({ type: "spki", format: "der" }).toString("base64");
+      const sig = sign(algo, Buffer.from(PAYLOAD, "utf8"), pair.privateKey).toString("base64");
+
+      useTrustStore([trustedKey({ keyid, spki, privateKey: pair.privateKey })]);
+
+      expect(() => verify([{ keyid, sig }])).toThrow(
+        `Unsupported trusted key ${keyid}: expected an ECDSA public key`,
+      );
+    }
   });
 
   it("rejects unusable key material", () => {

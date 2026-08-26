@@ -240,8 +240,10 @@ and extracts only `bin/yarn.js` from its tarball (§05.3, §07.4).
 }
 ```
 
-`key` is a base64 DER **SubjectPublicKeyInfo** for a NIST P-256 public key. See §06.3
-for the verification algorithm and §11 for the `COREPACK_INTEGRITY_KEYS` override.
+`key` is a base64 DER **SubjectPublicKeyInfo** for an ECDSA public key — npm's own
+keys are NIST P-256, but the curve is read from the key material and a store supplied
+for another registry may use any curve. See §06.3 for the verification algorithm and
+§11 for the `COREPACK_INTEGRITY_KEYS` override.
 
 > **Divergence (§14.4):** the `expires` field is *present in the data but never
 > consulted* by corepack. This spec requires implementations to store it and

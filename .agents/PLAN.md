@@ -221,7 +221,9 @@ adding it later touches one file. Test 71/72 move to phase 2 with it.
   `keyid`; stop at the first trusted key with a match. Errors per §06.3 verbatim.
 - Key material is a bare base64 DER SPKI; wrap in PEM armour for
   `crypto.createVerify("SHA256").verify(...)`. Signature is base64 of DER `(r,s)`.
-  Validate the parsed curve is P-256 and reject others.
+  Accept whatever curve the key material declares (§06.3's P-256 assertion is
+  scoped to native implementations that support only that curve); reject a key
+  that is not ECDSA at all.
 - **§14.4:** honour `expires`. Exclude expired keys from selection; if only an expired
   key matches, error `The package was signed with an expired key (<keyid>, expired
 <expires>)`. If no unexpired key matches but the signature is otherwise valid, an

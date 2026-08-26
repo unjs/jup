@@ -211,8 +211,8 @@ export class UntrustedKeyidError extends UsageError {}
  *
  * Walks trusted keys **in order**, taking the first whose `keyid` matches a
  * signature. Per §14.4, expired keys are excluded from selection. The key
- * material is a bare base64 DER SPKI; the signature is base64 DER `(r, s)`. The
- * parsed curve must be P-256.
+ * material is a bare base64 DER SPKI; the signature is base64 DER `(r, s)`; the
+ * curve is whatever that SPKI declares.
  */
 export function verifySignature(input: {
   signatures: RegistrySignature[] | undefined;
@@ -272,10 +272,7 @@ export function verifySignature(input: {
 
   if (!selected) {
     if (expired) {
-      if (
-        ACCEPT_EXPIRED_KEY_WITH_WARNING &&
-        verifyEcdsaP256(expired.key, expired.signature, payload)
-      ) {
+      if (ACCEPT_EXPIRED_KEY_WITH_WARNING && verifyEcdsa(expired.key, expired.signature, payload)) {
         console.warn(
           `! Corepack integrity warning: accepting a signature made with the expired key ${expired.key.keyid} (expired ${expired.expires}); check your system clock`,
         );
@@ -299,7 +296,7 @@ export function verifySignature(input: {
     throw new UsageError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));
   }
 
-  if (!verifyEcdsaP256(selected.key, selected.signature, payload)) {
+  if (!verifyEcdsa(selected.key, selected.signature, payload)) {
     throw new Error(messages.signatureMismatch());
   }
 }
@@ -321,14 +318,26 @@ function expiryOf(key: TrustedKey): string | undefined {
 }
 
 /**
- * ECDSA-with-SHA-256 over a NIST P-256 key.
+ * ECDSA-with-SHA-256 over whatever curve the trusted key declares.
  *
  * `key.key` is a bare base64 DER SubjectPublicKeyInfo, so the PEM armour is put
- * back on here. §06.3 notes that the reference implementation ignores
- * `keytype`/`scheme` and takes the curve from the key material; targeting only
- * P-256, this asserts the parsed curve rather than mis-verifying quietly.
+ * back on here. §06.3's rule is that the signature algorithm is *generic*
+ * ECDSA-with-SHA-256 and the curve comes from the key material — `keytype` and
+ * `scheme` (both `ecdsa-sha2-nistp256` in npm's own store) are never consulted.
+ * Its P-256 assertion is scoped to "a native implementation targeting only
+ * P-256", which must reject other curves rather than mis-verify them; running on
+ * `node:crypto`, this one targets no curve in particular, so pinning P-256 would
+ * buy no safety and would reject legitimate keys — a custom registry is free to
+ * sign on any curve OpenSSL supports, and corepack's own test registry mints
+ * `sect239k1`.
+ *
+ * The `"ec"` half of the guard stays. It is not a curve restriction but a
+ * key-*type* one: an RSA or Ed25519 SPKI parses happily and would then be handed
+ * to a verifier under `dsaEncoding: "der"`, where the DER `(r, s)` decoding of
+ * §06.3 means nothing. Refusing it by name beats discovering it as an opaque
+ * false.
  */
-function verifyEcdsaP256(key: TrustedKey, signature: RegistrySignature, payload: string): boolean {
+function verifyEcdsa(key: TrustedKey, signature: RegistrySignature, payload: string): boolean {
   const pem = `-----BEGIN PUBLIC KEY-----\n${key.key}\n-----END PUBLIC KEY-----`;
 
   let publicKey;
@@ -338,11 +347,8 @@ function verifyEcdsaP256(key: TrustedKey, signature: RegistrySignature, payload:
     throw new Error(`Invalid trusted key ${key.keyid}: ${(error as Error).message}`);
   }
 
-  if (
-    publicKey.asymmetricKeyType !== "ec" ||
-    publicKey.asymmetricKeyDetails?.namedCurve !== "prime256v1"
-  ) {
-    throw new Error(`Unsupported trusted key ${key.keyid}: expected an ECDSA P-256 public key`);
+  if (publicKey.asymmetricKeyType !== "ec") {
+    throw new Error(`Unsupported trusted key ${key.keyid}: expected an ECDSA public key`);
   }
 
   // `dsaEncoding: "der"` is the default, but npm's signatures being DER `(r, s)`
