@@ -10,7 +10,7 @@ import { ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { npmAlternativeFor, packageManagerForRegistry } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
-import { messages, networkError, redactUserinfo, UsageError } from "../errors.ts";
+import { advisory, messages, networkError, redactUserinfo, UsageError } from "../errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck } from "../verify/integrity.ts";
 import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
@@ -532,7 +532,7 @@ export function warnUnsignedRegistry(
   const seen = `${registryUrl}\0${packageName}\0${version}`;
   if (warnedUnsigned.has(seen)) return;
   warnedUnsigned.add(seen);
-  console.warn(messages.unsignedRegistry(registryUrl, packageName, version));
+  advisory(messages.unsignedRegistry(registryUrl, packageName, version));
 }
 
 /**

@@ -8,6 +8,8 @@
  * `<JSON x>` in the spec means `JSON.stringify(x)` — strings appear quoted.
  */
 
+import { ENV, readEnv } from "./config/env-vars.ts";
+
 /**
  * §12.1 — the user asked for something impossible or contradictory.
  *
@@ -138,6 +140,25 @@ export function networkError<T extends Error>(error: T, cause: unknown): T {
 
 /** §12.3 — prefix applied when a validation failure warns instead of throwing. */
 export const VALIDATION_WARNING_PREFIX = "! Corepack validation warning: ";
+
+/**
+ * §11.5 — an advisory line **this** implementation adds, which
+ * `COREPACK_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
+ *
+ * Corepack's own six advisory sites — the download notice and its prompt, the
+ * auto-pin notice, the three `devEngines` warnings, `enable`/`disable`'s Yarn
+ * Switch skip — call `console.warn`/`stderr` directly and are never routed
+ * here, because §13's rows and existing CI jobs match their text byte for byte.
+ * Routing only what §14/§15 add is what lets "quiet" mean the extra lines
+ * rather than a blunt mute that takes the contract text with it (§14.23).
+ *
+ * `readEnv`, not `envFlag`: `project/env.ts` imports this module, so reaching
+ * for its flag reader would close a cycle over the warm path.
+ */
+export function advisory(message: string): void {
+  if (readEnv(ENV.QUIET_ADVISORIES) === "1") return;
+  console.warn(message);
+}
 
 export const messages = {
   /* §12.2 — spec parsing ------------------------------------------------- */

@@ -581,6 +581,26 @@ describe("devEngines — §03.3", () => {
     );
   });
 
+  // §11.5 / §14.23 — the mute is scoped by *origin*. All three warnings in this
+  // block are ones corepack prints too, and §13 rows 27–29 match their text byte
+  // for byte, so `COREPACK_QUIET_ADVISORIES` must not reach any of them.
+  it("keeps printing corepack's own devEngines warnings when advisories are quiet", () => {
+    process.env.COREPACK_QUIET_ADVISORIES = "1";
+
+    read({ devEngines: { packageManager: [{ name: "yarn" }] } });
+    expect(warn).toHaveBeenCalledWith(messages.devEnginesArray());
+
+    warn.mockClear();
+    read({ devEngines: { packageManager: "pnpm@10.x" } });
+    expect(warn).toHaveBeenCalledWith(messages.devEnginesNotObject("pnpm@10.x"));
+
+    warn.mockClear();
+    read({ devEngines: { packageManager: { name: "yarn", version: "!", onFail: "warn" } } });
+    expect(warn).toHaveBeenCalledWith(
+      `${VALIDATION_WARNING_PREFIX}${messages.devEnginesBadVersion("!")}`,
+    );
+  });
+
   const nameMismatch = (onFail?: string) => ({
     packageManager: "pnpm@6.6.2",
     devEngines: { packageManager: { name: "yarn", ...(onFail === undefined ? {} : { onFail }) } },

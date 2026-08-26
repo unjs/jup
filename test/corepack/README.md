@@ -44,14 +44,16 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-141 rows. **46 pass live; 72 with `JUP_COREPACK_COMPAT=1`**, which sets
-`COREPACK_INTEGRITY_KEYS=0` and `COREPACK_ALLOW_UNVERIFIED=1` — the two escape
-hatches jup already documents for its two widest divergences:
+141 rows. **46 pass live; 103 with `JUP_COREPACK_COMPAT=1`**, which sets
+`COREPACK_INTEGRITY_KEYS=0`, `COREPACK_ALLOW_UNVERIFIED=1` and
+`COREPACK_QUIET_ADVISORIES=1` — the escape hatches jup already documents for its
+widest divergences:
 
 | Rows | Cause |
 | --- | --- |
 | 20 | §14.4 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
 | 18 | §15.11 — a source with no signature and no pinned hash is refused: every Berry release from `repo.yarnpkg.com`, and every URL reference. |
+| 22 | §14.23 — the advisory `!` lines jup adds and corepack has no equivalent for. Measured by adding `COREPACK_QUIET_ADVISORIES=1` to compat mode: 59 failed / 81 passed became 37 failed / 103 passed, with no row moving the other way. |
 
 Compat mode is a blunt instrument — five rows *want* verification to fail and
 pass spuriously under it. It is a regression detector, not a score.
@@ -65,15 +67,17 @@ Measured by applying each lever and re-running:
 | Hand over with `Module.runMain`, not `import()` | +6 | **bug** — fixed, see below |
 | Leave `process.exitCode` undefined on a plain success | (1 of those 6) | **bug** — fixed, see below |
 | Scrub `YARN_*` / `npm_config_*` from the test environment | +6 | harness (already applied) |
-| Suppress jup's *extra* advisory `!` lines on stderr | +17 | policy |
+| Suppress jup's *extra* advisory `!` lines on stderr | +22 | policy — `COREPACK_QUIET_ADVISORIES` (§11.5), now set by compat mode |
 | Accept trusted keys on curves other than P-256 | +13 | policy |
 
-The advisory lever is the largest and the least safe to pull bluntly: a global
-mute costs five rows back, because upstream asserts the exact `!` text for the
-`devEngines` warnings, which jup already emits verbatim. What is actually needed
-is a way to silence the lines jup adds — §06.2's weak-hash notice, §15.11's
-"publishes no signatures", §15.13's shim diagnostics — without touching the
-lines Corepack also prints. There is no environment variable for that today.
+The advisory lever is the largest, and it is the one that could not be pulled
+bluntly: a global mute costs five rows back, because upstream asserts the exact
+`!` text for the `devEngines` warnings, which jup already emits verbatim.
+`COREPACK_QUIET_ADVISORIES` (§11.5, §14.23) is scoped by *origin* instead — it
+silences the lines jup adds (§06.2's weak-hash notice, §15.11's "publishes no
+signatures", §15.13's shim diagnostics) and leaves corepack's own six untouched,
+`devEngines` included. Compat mode sets it, and the +22 above is the measured
+result: no row moved the other way.
 
 What no lever reaches, roughly 25 rows:
 

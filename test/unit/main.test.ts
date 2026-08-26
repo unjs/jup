@@ -992,6 +992,17 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * `process.env[name]` is *wrong* — it sees one of them — which is what the
    * accessors exist to make unavailable. Neither can move off the warm path: it
    * is the warm path that reads the environment.
+   *
+   * And once more, from 202,000 to 204,000, for `COREPACK_QUIET_ADVISORIES`
+   * (§11.5, §14.23): `errors.ts` gained `advisory()` and its import of
+   * `config/env-vars.ts` (+958 source bytes, most of it the comment explaining
+   * *why* the mute is scoped by origin), `project/env.ts` its two deny-list
+   * entries (+440) and `config/env-vars.ts` the name itself (+49). Source
+   * +1,447; measured, `warm.mjs` went 79,056 -> 79,263, +207 bytes or +0.26%,
+   * because the rest is prose. Neither half can move off the warm path: the
+   * gate reads the environment, and `env.ts`'s own §14.5 warning goes through
+   * it. Held at 204,000 rather than the 203,432 this leaves, so the next
+   * addition is still a change worth arguing for.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1003,6 +1014,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(202_000);
+    ).toBeLessThanOrEqual(204_000);
   });
 });

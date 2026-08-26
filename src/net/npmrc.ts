@@ -38,6 +38,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
 import { ENV, jupSpelling, registryVariableFor, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
+import { advisory } from "../errors.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                       */
@@ -112,7 +113,7 @@ const warned = new Set<string>();
 function warnOnce(message: string, seen: string): void {
   if (warned.has(seen)) return;
   warned.add(seen);
-  console.warn(message);
+  advisory(message);
 }
 
 /** Test seam: forget both the parse cache and the warning log. */

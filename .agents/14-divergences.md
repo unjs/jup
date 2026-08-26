@@ -304,3 +304,25 @@ package manager looking for `COREPACK_ROOT` still finds it.
 An implementation MUST NOT read a variable with a bare environment lookup, which
 sees one spelling; §11.6's precedence is the contract, including the rule that a
 diagnostic names the spelling the user actually set.
+
+## 14.23 A mute scoped to the lines this spec adds — [correct]
+
+**Corepack:** prints six advisories, and has no way to turn any of them off:
+the download notice and its prompt (§11.1), the auto-pin notice (§03.6), the
+three `devEngines` warnings (§03.3), and `enable`/`disable`'s Yarn Switch skip.
+
+**Consequence:** this spec adds a good deal more — §06.2's weak-hash notice,
+§15.4's disabled-TLS line, §15.11's "publishes no signatures" and its unverified
+opt-out, §15.13's and §15.29's shim diagnostics, §14.5's refused env-file
+variable, §14.16's declined shim, §15.15's failed restore, §15.1's refused
+`.npmrc` key. They are good defaults, and they are also stderr an existing CI job
+did not have. A blunt mute is not the answer: the `devEngines` text is matched
+byte for byte by §13's rows, so silencing everything breaks the contract §12
+establishes.
+
+**Required:** `COREPACK_QUIET_ADVISORIES=1` (§11.5) silences exactly the lines
+this spec adds. Corepack's six are unaffected, and so is every error — the
+variable changes what is *reported*, never what is done. It is env-file
+ineligible under §14.5: several of the lines it covers are the notice that a
+verification step was skipped, and a cloned repository must not be able to
+silence them, least of all §14.5's own "Ignoring `<NAME>`" warning.

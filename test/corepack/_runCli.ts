@@ -36,7 +36,14 @@ export interface CliResult {
  * this to see what is left once the known-intentional divergences are removed —
  * which is the useful signal when watching for a real regression.
  *
- * A row that sets either variable itself keeps its own value.
+ * A third variable joins them, `COREPACK_QUIET_ADVISORIES` (§11.5): jup emits `!`
+ * advisories corepack has no equivalent for — §15.4's disabled-TLS notice, §15.11's
+ * "publishes no signatures", §15.13's shim diagnostics — and a row that asserts
+ * stderr exactly fails on the extra text alone. The variable is scoped to the
+ * lines jup *adds*, so corepack's own advisories, `devEngines` warnings
+ * included, still print and the rows matching their text still hold.
+ *
+ * A row that sets any of the three itself keeps its own value.
  */
 // Read once at load: the setup file scrubs every `JUP_`-prefixed variable out
 // of `process.env` before each test.
@@ -48,6 +55,7 @@ function compatEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const patched = { ...env };
   patched.COREPACK_INTEGRITY_KEYS ??= `0`;
   patched.COREPACK_ALLOW_UNVERIFIED ??= `1`;
+  patched.COREPACK_QUIET_ADVISORIES ??= `1`;
   return patched;
 }
 

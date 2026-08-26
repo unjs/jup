@@ -7,8 +7,14 @@
  * not import it to learn the status.
  */
 
-import { describe, expect, it } from "vitest";
-import { explainFetchFailure, messages, parseBadStatus, UsageError } from "../../src/errors.ts";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import {
+  advisory,
+  explainFetchFailure,
+  messages,
+  parseBadStatus,
+  UsageError,
+} from "../../src/errors.ts";
 
 describe("parseBadStatus", () => {
   it("round-trips every status and URL shape messages.badStatus can render", () => {
@@ -99,5 +105,64 @@ describe("explainFetchFailure — §15.19, §15.35j", () => {
 
     expect(explained!.message).not.toContain("secret");
     expect(explained!.message).toContain("https://nexus.internal");
+  });
+});
+
+/**
+ * §11.5 / §14.23 — the advisory mute, and the half of stderr it must not reach.
+ *
+ * The gate is three lines of code; what needs a test is the *classification*.
+ * The negative control lives in `manifest.test.ts`, next to the `devEngines`
+ * warnings whose text §13 matches byte for byte.
+ */
+describe("advisory — §11.5", () => {
+  let warn: MockInstance<typeof console.warn>;
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = process.env;
+    process.env = { ...process.env };
+    for (const key of Object.keys(process.env)) {
+      if (key.startsWith("COREPACK_") || key.startsWith("JUP_")) delete process.env[key];
+    }
+    warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it("prints by default", () => {
+    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+
+    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+  });
+
+  it("is silent under COREPACK_QUIET_ADVISORIES=1", () => {
+    process.env.COREPACK_QUIET_ADVISORIES = "1";
+
+    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // §11.6 — the pair is one variable, so the gate cannot be a bare lookup.
+  it("is silent under the JUP_ spelling too", () => {
+    process.env.JUP_QUIET_ADVISORIES = "1";
+
+    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // The value tables in §11 read `1`, not "anything truthy": `0` is how a user
+  // turns the mute back off in a shell that already exports it.
+  it.for([["0"], [""], ["true"], ["yes"]])("prints for the value %o", ([value]) => {
+    process.env.COREPACK_QUIET_ADVISORIES = value;
+
+    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });

@@ -20,7 +20,7 @@ import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } 
 import { createReadStream } from "node:fs";
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "../config/keys.ts";
-import { messages, UsageError } from "../errors.ts";
+import { advisory, messages, UsageError } from "../errors.ts";
 import type { RegistrySignature, TrustedKey, TrustStore } from "../types.ts";
 
 /** §14.11 — explicit allowlist; anything else is a clear error, not a crash. */
@@ -71,7 +71,7 @@ export function assertSupportedAlgo(algo: string, userPinned = false): HashAlgo 
   }
   if (userPinned && WEAK_HASH_ALGOS.has(normalized) && !warnedWeakAlgos.has(normalized)) {
     warnedWeakAlgos.add(normalized);
-    console.warn(
+    advisory(
       `! Corepack integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
     );
   }
@@ -273,7 +273,7 @@ export function verifySignature(input: {
   if (!selected) {
     if (expired) {
       if (ACCEPT_EXPIRED_KEY_WITH_WARNING && verifyEcdsa(expired.key, expired.signature, payload)) {
-        console.warn(
+        advisory(
           `! Corepack integrity warning: accepting a signature made with the expired key ${expired.key.keyid} (expired ${expired.expires}); check your system clock`,
         );
         return;

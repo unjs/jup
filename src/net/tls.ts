@@ -25,7 +25,7 @@
 
 import { readFileSync } from "node:fs";
 import { corepackSpelling, ENV, envEntry, readEnv } from "../config/env-vars.ts";
-import { messages } from "../errors.ts";
+import { advisory, messages } from "../errors.ts";
 import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";
 
 /** What the environment (and, later, `.npmrc`) says about TLS. */
@@ -218,7 +218,7 @@ export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): vo
     const source = settings.verifySource ?? "the environment";
     if (!warned.has(source)) {
       warned.add(source);
-      console.warn(messages.strictSslDisabled(source));
+      advisory(messages.strictSslDisabled(source));
     }
   }
 }

@@ -16,7 +16,7 @@ import {
   readEnv,
   SYSTEM_ENV,
 } from "../config/env-vars.ts";
-import { messages } from "../errors.ts";
+import { advisory, messages } from "../errors.ts";
 
 /**
  * §03.2 — the prefix filter is the entire sandbox against a hostile repository.
@@ -53,6 +53,7 @@ export const ENV_FILE_INELIGIBLE = new Set<string>([
   ENV.STRICT_SSL,
   ENV.ALLOW_UNVERIFIED,
   ENV.SPEC_FILE,
+  ENV.QUIET_ADVISORIES,
 ]);
 
 /**
@@ -90,6 +91,12 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // cloned repository whose `.corepack.env` set this could point the spec at a
   // file of its own and run a package manager the manifest never names.
   ENV.SPEC_FILE,
+  // §11.5 / §14.23 — the advisory mute covers TLS verification being off
+  // (§15.4), a registry that publishes no signatures (§15.11), an unverified
+  // artifact permitted (§15.11) — and this very warning. A cloned repository
+  // able to set it could silence the evidence of what its *other* variables
+  // were refused for, so muting stays the caller's decision to make.
+  ENV.QUIET_ADVISORIES,
 ]);
 
 /**
@@ -365,7 +372,7 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
         const seen = `${path}\0${name}`;
         if (!warnedIneligible.has(seen)) {
           warnedIneligible.add(seen);
-          console.warn(messages.ignoringEnvVar(name, path));
+          advisory(messages.ignoringEnvVar(name, path));
         }
       }
       continue;

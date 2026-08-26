@@ -59,6 +59,7 @@ always wins over the file.
 | Variable | Accepted values | Effect | Env file |
 |---|---|---|---|
 | `COREPACK_NODE_EXECPATH` | path | Path to the JavaScript runtime used to execute package managers. Only meaningful for a native implementation (§08.3.1). Falls back to a sibling runtime, then `PATH`. | yes |
+| `COREPACK_QUIET_ADVISORIES` | `1` | Silence the advisory `!` lines this spec adds on top of corepack's own (§14.23). Corepack's six — the download notice and its prompt, the auto-pin notice, the three `devEngines` warnings, and `enable`/`disable`'s Yarn Switch skip — are unaffected, as is every error. | **no** (§14.5) |
 
 ## 11.6 Precedence
 

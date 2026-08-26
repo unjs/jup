@@ -18,7 +18,7 @@ import {
   resolveSpecUrl,
 } from "../config/table.ts";
 import { envFlag, isCI } from "../project/env.ts";
-import { messages, UsageError } from "../errors.ts";
+import { advisory, messages, UsageError } from "../errors.ts";
 import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
@@ -480,6 +480,9 @@ function confine(
  * `DEBUG=corepack` is what the reference implementation documents, and §15.35l
  * is explicit that it is "a debugging aid, not a substitute for command output"
  * — so this is the one place a message is allowed to be conditional on it.
+ *
+ * Not routed through `advisory()`: `DEBUG=corepack` is a request for *more*
+ * output, and the more specific ask wins over §11.5's blanket mute.
  */
 function debugNote(message: string): void {
   const debug = process.env[SYSTEM_ENV.DEBUG];
@@ -607,7 +610,7 @@ function assertVerificationTier(
   const origin = URL.canParse(source.url) ? new URL(source.url).origin : source.url;
 
   if (envFlag(ENV.ALLOW_UNVERIFIED)) {
-    console.warn(messages.allowingUnverified(locator.name, shownVersion, origin));
+    advisory(messages.allowingUnverified(locator.name, shownVersion, origin));
     return;
   }
 

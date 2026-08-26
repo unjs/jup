@@ -54,7 +54,7 @@ import { basename, delimiter, dirname, join, relative, resolve as resolvePath } 
 import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor } from "../config/table.ts";
-import { messages, UsageError } from "../errors.ts";
+import { advisory, messages, UsageError } from "../errors.ts";
 import { perUserShimDirectory as perUserDefault } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder } from "../cache/store.ts";
@@ -366,7 +366,7 @@ export function prepareInstallDirectory(directory: string): string {
     throw failure;
   }
 
-  console.warn(shimDirectoryFallback(directory, fallback));
+  advisory(shimDirectoryFallback(directory, fallback));
 
   const second = probeWritable(fallback);
   if (second !== undefined) throw new UsageError(shimDirectoryNotWritable(fallback));
@@ -668,7 +668,7 @@ export function restoreDisplaced(installDirectory: string, files: string[]): num
     }
 
     const failure = restoreOne(entry);
-    if (failure !== undefined) console.warn(restoreFailed(entry.path, failure));
+    if (failure !== undefined) advisory(restoreFailed(entry.path, failure));
     else restored++;
   }
 
@@ -750,13 +750,15 @@ export async function generatePosixLink(
     } else {
       if (!options.force) {
         if (await isYarnSwitch(binName, file)) {
+          // Corepack prints this one too (`Enable.ts`, `Disable.ts`), so it is
+          // not `advisory()`: §11.5 scopes the mute to the lines *we* add.
           console.warn(messages.yarnSwitchSkip(binName, file));
           return undefined;
         }
         // Symlinks are ours to manage — §10.2 corrects one that points elsewhere.
         // Anything else without our marker is a real binary and stays put.
         if (!existing.isSymbolicLink()) {
-          console.warn(messages.shimNotOurs(binName, file));
+          advisory(messages.shimNotOurs(binName, file));
           return undefined;
         }
       }
@@ -797,6 +799,7 @@ export async function removePosixLink(
 
   if (!options.force) {
     if (await isYarnSwitch(binName, file)) {
+      // Corepack prints this one too — see `installPosixLink`.
       console.warn(messages.yarnSwitchSkip(binName, file));
       return;
     }
@@ -927,7 +930,7 @@ export async function generateWin32Link(
     if (existing === undefined) continue;
     if (await isOurEntry(path, binName, existing)) continue;
     if (!options.force) {
-      console.warn(messages.shimNotOurs(binName, path));
+      advisory(messages.shimNotOurs(binName, path));
       return undefined;
     }
   }
@@ -1031,7 +1034,7 @@ function directoryOnPath(directory: string): boolean {
  */
 export function verifyOnPath(installDirectory: string, installed: [string, string][]): void {
   if (!directoryOnPath(installDirectory)) {
-    console.warn(shimDirectoryNotOnPath(installDirectory));
+    advisory(shimDirectoryNotOnPath(installDirectory));
     return;
   }
 
@@ -1042,11 +1045,11 @@ export function verifyOnPath(installDirectory: string, installed: [string, strin
     // `PATH`, so this only happens for an entry we did not install.
     if (resolved === undefined) continue;
     if (samePath(dirname(resolved), installDirectory)) continue;
-    console.warn(shimShadowed(binName, resolved, shim));
+    advisory(shimShadowed(binName, resolved, shim));
     shadowed = true;
   }
 
-  if (shadowed) console.warn(rehashNotice());
+  if (shadowed) advisory(rehashNotice());
 }
 
 /* -------------------------------------------------------------------------- */
