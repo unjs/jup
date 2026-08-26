@@ -222,13 +222,13 @@ describe("execPackageManager — §08.2 handover", () => {
     expect(result.stdout).toBe("esm-ok true\n");
   });
 
-  it("a CJS entry point runs with require.main undefined (pnpm's version detection)", () => {
+  it("a CJS entry point runs as require.main (npm 6 and pnpm 4 read its filename)", () => {
     const location = fixture("cjs", {
-      "bin/yarn.js": `console.log("main:", require.main === undefined, "execArgv:", JSON.stringify(process.execArgv));\n`,
+      "bin/yarn.js": `console.log("main:", require.main.filename, "execArgv:", JSON.stringify(process.execArgv));\n`,
     });
     const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(0);
-    expect(result.stdout).toBe("main: true execArgv: []\n");
+    expect(result.stdout).toBe(`main: ${join(location, "bin", "yarn.js")} execArgv: []\n`);
   });
 
   it("test 136 — a bin list resolves every declared name to the same file", () => {

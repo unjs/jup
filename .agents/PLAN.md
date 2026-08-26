@@ -350,9 +350,11 @@ Runs in wave 1 because most later tests block on it.
 - In-process handover: set `process.env.COREPACK_ROOT`, `process.argv = [execPath,
 binPath, ...args]`, `process.execArgv = []`, then schedule the load on `nextTick` so
   our frames leave the stack.
-- Load via `import(pathToFileURL(binPath))` — this handles both CJS and ESM entry points
-  (test 135) and leaves `require.main` undefined for CJS, which is what pnpm's
-  self-detection expects.
+- Load via `runMain(binPath)` from `node:module` — Node's `executeUserEntryPoint`, so it
+  handles both CJS and ESM entry points (test 135) *and* installs the loaded module as
+  `require.main`, which npm 6 and pnpm 4 read. Clearing `process.mainModule` first is
+  what pnpm's `require.main == null` self-detection expects; `import()` cannot be used,
+  as it never sets `require.main` at all.
 - **Do not wrap the load in a catch that rewrites the exit code.** An uncaught error must
   reset a pending code to 1 (test 133) while a `beforeExit` hook's code must survive
   (test 134). This is the corepack 0.18.1 regression; guard it with all three of 132–134.

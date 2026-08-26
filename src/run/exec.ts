@@ -6,9 +6,9 @@
  */
 
 import { existsSync } from "node:fs";
+import { runMain } from "node:module";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:path";
-import { pathToFileURL } from "node:url";
 import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
@@ -194,9 +194,10 @@ export function resolveBinPath(
  * The JavaScript path rewrites the process state to look like a direct
  * invocation, then loads the entry module on `nextTick` so our frames leave any
  * stack trace the package manager prints. `process.argv[1]` is how Yarn locates
- * itself; an undefined `require.main` is how pnpm detects its own version;
- * `execArgv` is cleared so the package manager does not inherit our runtime
- * flags.
+ * itself; `require.main` is first cleared and then repopulated by `runMain` with
+ * the package manager's *own* entry module, which is what both generations of
+ * pnpm's self-detection read; `execArgv` is cleared so the package manager does
+ * not inherit our runtime flags.
  *
  * **Do not wrap the load in a catch that rewrites the exit code.** §08.4's
  * contract is exact: a synchronous `exitCode = 42` exits 42; setting 42 and then
@@ -267,15 +268,23 @@ export function execPackageManager(
 
   process.argv = [process.execPath, binPath, ...args];
   process.execArgv = [];
-  // Let the runtime set it (§08.2); pnpm reads `require.main == null` to detect
-  // that it is running from a version manager rather than from its own bin stub.
+  // `require.main` is a live view of `process.mainModule`, and the two lines below
+  // are one statement about it. Cleared first, so that whatever started *us* — a
+  // CJS shim, when we were invoked through one — is never mistaken for the package
+  // manager's own entry: that is the `require.main == null` pnpm checks to tell it
+  // is running under a version manager rather than from its bin stub (§08.2).
   (process as { mainModule?: unknown }).mainModule = undefined;
 
-  process.nextTick(() => {
-    // `import()` handles both CJS and ESM entry points and leaves `require.main`
-    // undefined for the CJS ones. The promise is deliberately left unhandled.
-    void import(pathToFileURL(binPath).href);
-  });
+  // Repopulated second, by §08.2's handover itself: `runMain` is Node's
+  // `executeUserEntryPoint`, so it covers CJS and ESM entry points alike *and*
+  // installs the loaded one as `require.main`, which a bare `import()` never does.
+  // npm 6 dereferences `require.main.filename` unconditionally; pnpm 4 reads its
+  // own version out of `dirname(require.main.filename)/../package.json` and
+  // silently reports `0.0.0` when that throws. Unlike `node:child_process` above
+  // this import is static: `node:module` is the CJS loader, already instantiated
+  // during bootstrap, so a cache hit pays nothing for it (§16.3). Failures reach
+  // the runtime uncaught, per §08.4 above.
+  process.nextTick(runMain, binPath);
 
   return 0;
 }
