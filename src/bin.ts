@@ -14,4 +14,15 @@ defaultEnv(ENV.ENABLE_DOWNLOAD_PROMPT, "0");
 
 const { runMain } = await import("./main.ts");
 
-process.exitCode = await runMain(process.argv.slice(2));
+/**
+ * §08.4 — a failure only. The in-process handover returns `0` *before* the
+ * package manager's module body runs, so assigning it would turn
+ * `process.exitCode` from `undefined` into `0` and a hook guarding on
+ * `process.exitCode === undefined` would then decline to set its own code: the
+ * corepack 0.18.1 regression, arriving through the entry point instead of a
+ * `catch`. Node exits 0 when nothing is ever assigned, so every success — a
+ * handover, a management command, a native child that exited 0 — is unchanged,
+ * and the exit code is written only to report a failure.
+ */
+const code = await runMain(process.argv.slice(2));
+if (code !== 0) process.exitCode = code;

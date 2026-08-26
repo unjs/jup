@@ -76,6 +76,27 @@ describe("§13.12 execution", () => {
     expect(result.exitCode).toBe(42);
   });
 
+  /**
+   * The same case as 134, in the form that actually catches the bug 134 misses.
+   *
+   * A hook that sets the code *unconditionally* survives an entry point which
+   * has already written `0`, because the hook runs last. A hook that first asks
+   * whether anyone has claimed an exit code does not: it sees the `0` and
+   * declines. So this is the row that pins "a plain success leaves
+   * `process.exitCode` undefined" — the in-process handover answers `0` to mean
+   * "handed over", and no entry point may assign that.
+   */
+  it("134b: a beforeExit hook guarding on an unset exit code still sets one", async () => {
+    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+    seedPackageManager(fixture.home, "yarn", "1.22.4", {
+      script: `process.once("beforeExit", () => { if (process.exitCode === undefined) process.exitCode = 42; });\n`,
+    });
+
+    const result = await run(["yarn", "--version"], fixture);
+
+    expect(result.exitCode).toBe(42);
+  });
+
   it("135: an ESM entry point runs", async () => {
     const fixture = createFixture({ packageManager: "yarn@1.22.4" });
     seedPackageManager(fixture.home, "yarn", "1.22.4", {

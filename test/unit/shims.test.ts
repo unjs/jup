@@ -392,6 +392,36 @@ describe("enable (§10.2)", () => {
     // The stub is executable in its own right, for the `#!/usr/bin/env node` path.
     expect(lstatSync(join(dist, "yarn.js")).mode & 0o777).toBe(0o755);
   });
+
+  /**
+   * §08.4, through the stub rather than through `bin.ts`.
+   *
+   * The entry here stands in for an in-process handover: `runMain` answers `0`
+   * to mean "handed over", and the package manager it handed to claims its exit
+   * code from a `beforeExit` hook that fires only if nothing has claimed one
+   * yet. A stub that assigned the `0` would make that hook decline, and the run
+   * would exit 0. The generated stub is what occupies `yarn`, `npm` and `pnpm`
+   * on `PATH` after `enable`, so it needs its own row: `bin.ts` getting this
+   * right says nothing about the file every shimmed invocation actually runs.
+   */
+  it("leaves the exit code to the package manager the handover ran", async () => {
+    writeFileSync(
+      join(dist, "index.mjs"),
+      `export async function runMain() {
+  process.once("beforeExit", () => { if (process.exitCode === undefined) process.exitCode = 42; });
+  return 0;
+}
+`,
+    );
+    await generatePosixLink(binDir, dist, "yarn");
+
+    // `execFile` rejects on a non-zero exit, carrying the code on the error.
+    const failure = (await execFileAsync(process.execPath, [join(binDir, "yarn")]).catch(
+      (error: unknown) => error,
+    )) as { code?: number };
+
+    expect(failure.code).toBe(42);
+  });
 });
 
 describe("read-only install directories (§15.13, §14.18)", () => {

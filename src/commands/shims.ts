@@ -393,6 +393,15 @@ function realpathOr(directory: string): string {
  * `COREPACK_ENABLE_DOWNLOAD_PROMPT` defaults to `1` here and to `0` in `bin.ts`
  * (§05.5): the user asked for `yarn`, not for a download. `??=` in both, so a
  * real environment variable still wins.
+ *
+ * The exit code is assigned only when it is non-zero, exactly as `bin.ts` does
+ * it and for the same reason (§08.4): the in-process handover answers `0` before
+ * the package manager's module body has run, and writing that would replace
+ * `undefined` with `0` — after which a package manager whose `beforeExit` hook
+ * guards on `process.exitCode === undefined` declines to set its own code. Node
+ * exits 0 when nothing is assigned, so a plain success is unaffected. This is
+ * the stub every `yarn`, `npm` and `pnpm` on the machine runs through, so the
+ * reasoning lives here rather than in the two lines it emits.
  */
 export function shimSource(entrySpecifier: string, binName: string): string {
   return [
@@ -401,7 +410,8 @@ export function shimSource(entrySpecifier: string, binName: string): string {
     `if (process.env.${jupSpelling(ENV.ENABLE_DOWNLOAD_PROMPT)} === undefined)`,
     `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "1";`,
     `const { runMain } = await import(${JSON.stringify(entrySpecifier)});`,
-    `process.exitCode = await runMain([${JSON.stringify(binName)}, ...process.argv.slice(2)]);`,
+    `const code = await runMain([${JSON.stringify(binName)}, ...process.argv.slice(2)]);`,
+    `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");
 }

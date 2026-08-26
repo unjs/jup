@@ -62,8 +62,8 @@ Measured by applying each lever and re-running:
 
 | Lever | Rows | Kind |
 | --- | --- | --- |
-| Hand over with `Module.runMain`, not `import()` | +6 | **bug** — see below |
-| Leave `process.exitCode` undefined on a plain success | (1 of those 6) | **bug** — see below |
+| Hand over with `Module.runMain`, not `import()` | +6 | **bug** — fixed, see below |
+| Leave `process.exitCode` undefined on a plain success | (1 of those 6) | **bug** — fixed, see below |
 | Scrub `YARN_*` / `npm_config_*` from the test environment | +6 | harness (already applied) |
 | Suppress jup's *extra* advisory `!` lines on stderr | +17 | policy |
 | Accept trusted keys on curves other than P-256 | +13 | policy |
@@ -87,12 +87,17 @@ What no lever reaches, roughly 25 rows:
   asserts `COREPACK_ROOT` equals the tests' own parent directory, which is only
   true when the suite lives inside the tool's package. (1)
 
-## The two that are not divergences
+## The two that were not divergences
 
-**`require.main` is never set.** Both tools clear `process.mainModule` before
+Both were jup bugs rather than deliberate differences, and both have since been
+fixed; the row counts above were measured before either fix. They are kept here
+because the two failure modes are invisible to jup's own fixtures and would be
+re-introduced silently.
+
+**`require.main` was never set.** Both tools clear `process.mainModule` before
 handing over (§08.2 — newer pnpm reads `require.main == null` to detect a version
 manager), but Corepack then calls `Module.runMain(binPath)`, which makes Node set
-`require.main` to the package manager's own entry module. jup uses `import()`,
+`require.main` to the package manager's own entry module. jup used `import()`,
 which never sets it. Isolated repro:
 
 ```
@@ -105,12 +110,14 @@ pnpm 4.x resolves its own `package.json` through
 **npm 6 does not degrade at all** — it aborts with
 `npm ERR! Cannot read properties of undefined (reading 'filename')`. jup's own
 conformance fixtures never catch this, because the stand-in entry script answers
-`--version` from a constant.
+`--version` from a constant. Fixed by handing over with `Module.runMain`.
 
-**`process.exitCode` is 0 before the package manager runs.** `bin.ts` assigns
+**`process.exitCode` was 0 before the package manager ran.** `bin.ts` assigned
 `process.exitCode = await runMain(…)` unconditionally, and the in-process
-handover returns `0` to mean "handed over". §08.4's first two cases still hold —
+handover returns `0` to mean "handed over". §08.4's first two cases held anyway —
 the handover is on `nextTick`, so a package manager that sets `42` synchronously
-overwrites the `0` — but the third does not: a hook that guards on
-`process.exitCode === undefined` sees `0` and declines to set anything. jup's own
-test 134 sets the code unconditionally, so it passes over the gap.
+overwrites the `0` — but the third did not: a hook that guards on
+`process.exitCode === undefined` saw `0` and declined to set anything. jup's own
+test 134 sets the code unconditionally, so it passed over the gap. Fixed by
+assigning only a non-zero code, in `bin.ts` and in the generated shim stub
+alike; test 134b pins the guarded form.
