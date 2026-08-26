@@ -1,4 +1,17 @@
-import { defineBuildConfig } from "obuild/config";
+import { type BuildConfig, defineBuildConfig } from "obuild/config";
+
+/**
+ * Rolldown's `PreRenderedChunk`, reached through obuild's hook signature so that
+ * `rolldown` itself need not become a direct devDependency just for one type.
+ */
+type ChunkInfo = Parameters<
+  Extract<
+    Parameters<
+      NonNullable<NonNullable<BuildConfig["hooks"]>["rolldownOutput"]>
+    >[0]["chunkFileNames"],
+    (...args: never) => unknown
+  >
+>[0];
 
 /**
  * The modules a warm proxy invocation loads, relative to `src/` — §01.3, §16.3.
@@ -42,6 +55,61 @@ const pattern = (module: string) =>
 
 const WARM_CHUNK = new RegExp(String.raw`[\\/]src[\\/](?:${WARM_MODULES.map(pattern).join("|")})$`);
 
+/** The one chunk this build asks for by name; everything else is named after its modules. */
+const WARM_GROUP = "warm";
+
+/**
+ * `/abs/jup/src/net/registry.ts` → `net/registry`.
+ *
+ * `undefined` for anything outside `src/` and for the `.d.ts` modules of the
+ * declaration build, which names its own output.
+ */
+const SOURCE_MODULE = /[\\/]src[\\/](.+)(?<!\.d)\.[cm]?ts$/;
+
+function sourceName(id: string | undefined): string | undefined {
+  if (id === undefined) return undefined;
+  return SOURCE_MODULE.exec(id)?.[1]?.replaceAll("\\", "/");
+}
+
+/**
+ * Name a chunk after the module it exists for, mirroring `src/` inside `_chunks/`.
+ *
+ * Rolldown's own names are the module *basenames*, which collide as soon as two
+ * chunks share one — and here they always do, because a dynamically imported
+ * module that is also statically imported somewhere else is emitted twice: a
+ * re-export facade for the `import()` site, plus the chunk actually holding the
+ * code. That produced `install.mjs`/`install2.mjs`, `pin.mjs`/`pin2.mjs` and
+ * five more pairs where the digit, not the name, carried the meaning.
+ *
+ * So:
+ *
+ * - the `warm` group keeps the name it was asked for;
+ * - a chunk fronting an `import()` is named for the module that `import()` names
+ *   — `cache/install.ts` → `_chunks/cache/install.mjs`;
+ * - a chunk that fronts no single module is a shared chunk, named for its root
+ *   module (last in dependency order) plus `.shared` — so the pair above becomes
+ *   `cache/install.mjs` and `cache/install.shared.mjs`, and `net/tls.shared.mjs`
+ *   holds `net/tls.ts` together with the `keys.ts`/`npmrc.ts` it drags in.
+ *
+ * Declaration chunks and anything outside `src/` fall through to `[name]`; the
+ * `.d.ts` pipeline renames its own output afterwards and must not be second
+ * guessed. Nothing here forces a module into a chunk — this only labels the
+ * chunks rolldown decided on, so the split stays whatever the import graph says.
+ *
+ * The subdirectories are safe: `getOwnRoot` and `findEntryModule` walk *up* to
+ * find the package root precisely because a bundler is free to nest chunks, and
+ * `test/unit/self.test.ts` pins that.
+ */
+function chunkName(chunk: ChunkInfo): string {
+  if (chunk.name === WARM_GROUP) return WARM_GROUP;
+
+  const entry = sourceName(chunk.facadeModuleId);
+  if (entry !== undefined) return entry;
+
+  const shared = sourceName(chunk.moduleIds.at(-1));
+  return shared === undefined ? "[name]" : `${shared}.shared`;
+}
+
 export default defineBuildConfig({
   entries: [
     {
@@ -51,7 +119,15 @@ export default defineBuildConfig({
   ],
   hooks: {
     rolldownOutput(cfg) {
-      cfg.codeSplitting = { groups: [{ name: "warm", test: WARM_CHUNK }] };
+      cfg.codeSplitting = {
+        // Keep obuild's own groups (it splits `node_modules` into `libs/*`) so a
+        // dependency, should one ever appear, still lands where obuild expects.
+        groups: [
+          { name: WARM_GROUP, test: WARM_CHUNK },
+          ...(typeof cfg.codeSplitting === "object" ? (cfg.codeSplitting.groups ?? []) : []),
+        ],
+      };
+      cfg.chunkFileNames = (chunk) => `_${chunkName(chunk)}.mjs`;
     },
   },
 });
