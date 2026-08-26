@@ -29,7 +29,7 @@ import {
   SUPPORTED_NAMES,
 } from "../config/table.ts";
 import { isFrozenLockfile } from "../project/env.ts";
-import { explainFetchFailure, messages, toolName, UsageError } from "../errors.ts";
+import { explainFetchFailure, messages, setScopeNaming, toolName, UsageError } from "../errors.ts";
 import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
 import {
@@ -63,7 +63,14 @@ import type { Descriptor, InstallSpec, Locator, ProjectPin, Role, SpecResult } f
 /** §09.6 / §17.6 C9 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
-import { invocationPrefix, ROLE_NOUN, type Route, routeArgv, SCOPE_SPELLING } from "./router.ts";
+import {
+  invocationPrefix,
+  ROLE_NOUN,
+  type Route,
+  routeArgv,
+  SCOPE_SPELLING,
+  scopeNamingFor,
+} from "./router.ts";
 import { type DispatchedVerb, helpText } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
 
@@ -1319,7 +1326,22 @@ const HANDLERS: Record<DispatchedVerb, (command: Route) => Promise<number> | num
  * the scope in effect, which `router.ts` renders from the same table).
  */
 export async function runManagementCommand(args: string[]): Promise<number> {
-  return await dispatch(routeArgv(args));
+  const command = routeArgv(args);
+
+  // §17.6 C10a — the noun §12's messages use is the scope in effect, and the
+  // scope is known here and nowhere deeper: `parseSpec` in `manifest.ts` and
+  // `resolveDescriptor` in `resolve.ts` build these sentences without ever
+  // being told which command asked. Restored afterwards rather than left set,
+  // because the state is process-global and this is the only thing that scopes
+  // it: `presentError` formats an already-built string, so nothing downstream
+  // reads it, and an in-process caller (a test, `index.ts`) gets the frozen
+  // default back instead of the last command's noun.
+  const previous = setScopeNaming(scopeNamingFor(command));
+  try {
+    return await dispatch(command);
+  } finally {
+    setScopeNaming(previous);
+  }
 }
 
 async function dispatch(command: Route): Promise<number> {

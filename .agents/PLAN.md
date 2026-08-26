@@ -7,7 +7,7 @@ Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
 ## Where things stand — §17 is complete (D0–D4), 2026-08-26
 
 * **§01–§16 are implemented.** Every row of §13 (1–147) and §15.38 (148–207) has a test
-  whose title names it. `pnpm vitest run`: **1754 passed, 3 skipped**, the skips all
+  whose title names it. `pnpm vitest run`: **1760 passed, 3 skipped**, the skips all
   platform-conditional (Windows, root, no TTY). `pnpm test:corepack` (corepack's own
   suite): **100 passed, 1 expected fail, 40 skipped**, each skip a §14/§17 divergence with
   a stated reason.
@@ -20,15 +20,17 @@ Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
   two closed tiers. D0 landed §17.3's noun and its roles as data plus §17.9's table
   fixture, D1 the command router, the entry-point name, and C6/C10, D2 the role-sensitive
   behaviour (R4, R9, R10, R11, R14–R16), D3 the renames (C2, C3, C8, C9) and C4's second
-  tier, and D4 the shim policy and the interpreter guard (C5, C7). **Rows 208–233 all have
-  tests.** What remains is not implementation: §17.7's eight undecided questions, the open
+  tier, and D4 the shim policy and the interpreter guard (C5, C7); D5, the spec amendment
+  `d3dcd01` asked for after the five, the noun (C10a). **Rows 208–236 all have tests.**
+  What remains is not implementation: §17.7's eight undecided questions, the open
   follow-ups below, and the release decisions at the foot of this file.
 * **Nothing is published**; `package.json` is at `0.0.0`.
 
 ## The §17 work, as landed
 
 Order was dependency order: D0 unblocked D2 and D4; the rest were independent. All five
-are done, and each section below is the record of what was decided and why.
+are done — and so is D5, which the spec grew after them. Each section below is the record
+of what was decided and why.
 
 ### D0 — The test-only table fixture §17.9 — **done**
 
@@ -261,9 +263,65 @@ reverted: 222 by dropping `hasRole` from `targetBinaries`'s default set, 223 and
 restoring §10.3's `if [ -x "$basedir/node" ]` preference — which makes 223 report
 `["node", "<dist>/pnpm.js", …]` and hangs 224 in the recursion the row exists to prevent.
 
+### D5 — The noun follows the scope §17.6 C10a — **done**
+
+Not one of the original five: `jup runtime install -g node@22` answered `Unsupported
+package manager specification (node@22)` under a usage line that said `jup runtime`, R4 had
+deferred the wording to a C10 that never decided it, and `d3dcd01` amended the spec with
+C10a. This is that clause.
+
+**One ambient, set cold, read warm.** `errors.ts` holds a `ScopeNaming` — the noun plus
+the fields that scope's role reads — defaulting to corepack's frozen wording, and
+`setScopeNaming` is what the *router* calls. The direction is the whole design: `errors.ts`
+is on the warm path and `router.ts` must never be dragged onto it, so the cold side
+imports the warm one and hands it two strings. `runManagementCommand` sets the scope from
+the `Route` it just classified and restores it in a `finally` — the state is
+process-global, `presentError` formats an already-built string, and an in-process caller
+gets the default back rather than the last command's noun.
+
+**Why the default is the safe one, said in the comment where it lives:** every caller that
+never sets a scope is *already* correct with it. Proxy mode never sets one (C10a), unscoped
+`jup` keeps corepack's wording deliberately, and R12 puts the `corepack` entry point at
+`package-manager`, whose noun and fields **are** the frozen ones — so the same expression
+that substitutes for `jup runtime` reproduces §13's bytes for `corepack`, rather than a
+branch promising to. A scope that fails to be entered under-reports instead of
+mis-reporting.
+
+**Eight strings take the noun**, all §12: `unsupportedSpec`, `illegalUrl`,
+`unsupportedByBuild`, `unsupportedPackageManagerName`, `invalidPackageManagerName`,
+`couldntFindProject`, `noSpecInProject`, `noSpecInProjectLegacy`. **Four deliberately do
+not** — the three `Invalid package manager specification in <source>…` variants and
+`No version specified for <raw> in "packageManager" of <source>`, which are statements
+about a malformed `packageManager` **field**, C10a's exclusion and row 236's subject.
+`tagsNotAllowed` is the judgement call, the same shape as C10's `nodejs/corepack` URL: its
+noun is plural and ungrammatical (`Packages managers can't be…`), so substituting needs an
+invented plural — a rewrite, which C10a forbids — and it is unreachable under any scope
+anyway, since every management command passes `allowTags: true`. `usage.ts`'s help text is
+C6's surface, not §12's, and is untouched.
+
+**The both-halves rule reuses D2's mapping.** `manifest.ts` gained `pinFieldLabels(role)`
+beside `PIN_FIELDS`, and `pinFieldLabel` is now its head — so the two are one mapping
+rather than two, and the sentence naming both fields renders `a 'packageManager' field nor
+a 'devEngines.packageManager' field` for one role and `a 'devEngines.runtime' field` for a
+role with no top-level home. `errors.ts` spells no role literal, so R3's six-file scan
+still passes.
+
+**Rows:** 234–236, in `test/conformance/17-06-nouns.test.ts`. 236 is the negative row and
+was verified load-bearing by routing `invalidSpecNotString` through the same noun as its
+neighbours: both of its tests failed with `Invalid runtime specification in package.json`
+while 234 and 235 stayed green. Row 235 carries a third test as its control — pinning
+`devEngines.runtime` is what makes the message go away, so "the fields that scope's role
+actually reads" is asserted rather than intended.
+
 ## Standing hazards
 
-* **The warm byte ceiling is at 232,000** (`test/unit/main.test.ts`), raised from 223,000
+* **The warm byte ceiling is at 237,000** (`test/unit/main.test.ts`), raised from 232,000
+  by D5's noun: `errors.ts` +4,121 (`ScopeNaming`, the ambient with the frozen default, a
+  `${noun()}` in eight message bodies, and the two comments recording what stays frozen)
+  and `manifest.ts` +608 (`pinFieldLabels`). Measured, `_warm.mjs` 83,591 -> 84,094,
+  **+503 bytes, +0.60%**, against +4,729 of source; the *setter* is cold and a run that
+  never scopes anything reads one module-level object and calls nothing. It leaves
+  **1,377**. Before that it was raised from 223,000
   by D2's per-role pins: `manifest.ts` +6,897 (`PIN_FIELDS`, the per-role loop in
   `describe`, the role parameter through `readSpecFromManifest`, role-aware `reconcile`),
   `errors.ts` +1,598, `table.ts` +600, `main.ts` +287. Measured, `_warm.mjs` 81,644 ->
@@ -274,13 +332,13 @@ restoring §10.3's `if [ -x "$basedir/node" ]` preference — which makes 223 re
   deliberately, with a reason. It is a tripwire, not a budget. The
   companion assertion — the modules statically reachable from `src/shim.ts` **equal**
   `build.config.ts`'s `WARM_MODULES` — is what pins the emitted chunk; a new static import
-  on the warm path fails until the build config is updated. D4 spent 597 of the remaining
-  bytes (`config/table.ts`'s `DEFAULT_SHIM_ROLE`, `errors.ts`'s C7 message) and left
-  **1,106**; its own machinery — `utils/shim-id.ts` and the generator — is cold.
+  on the warm path fails until the build config is updated. (D4 had spent 597 of the
+  1,703 D2 left, on `config/table.ts`'s `DEFAULT_SHIM_ROLE` and `errors.ts`'s C7 message;
+  its own machinery — `utils/shim-id.ts` and the generator — is cold, as D5's setter is.)
 * **`test/conformance/15-28-native.test.ts` flakes under full-suite load.** The §08.5
   row asserting `exitCode 55` / `signal null` — the child stayed in the process group and
   the tool did not die of the same signal — failed once in two consecutive full runs and
-  passes alone every time. 1754 passed / 3 skipped is the green baseline; a single failure
+  passes alone every time. 1760 passed / 3 skipped is the green baseline; a single failure
   in that file is the flake, not a regression. Worth a timing fix before it costs someone
   an afternoon.
 * **The sandbox has live network and the conformance harness does not disable it.** A row
@@ -309,7 +367,18 @@ restoring §10.3's `if [ -x "$basedir/node" ]` preference — which makes 223 re
   still names `packageManager`. No §17.9 row covers it (row 232 is the dual-role case,
   where R11's tie-break makes the notice true), and §12's text is frozen — so this wants a
   spec ruling on what the runtime spelling of that notice is, not an invented one.
+  **C10a does not close it.** The notice fires in proxy mode, which never sets a scope, so
+  the noun C10a supplies is the frozen one by construction; and the sentence's subject is
+  the `packageManager` *field*, which C10a's exclusion keeps out of the substitution
+  entirely. The ruling is still owed.
 
+* **`jup runtime --help` still says "run a package manager".** C10a settled §12's noun;
+  C6's help surface was deliberately left, and no row covers it. `usage.ts`'s proxy line
+  and its `enable`/`disable` prose name the package manager unconditionally, which reads
+  wrong under a runtime scope for the same reason §12's strings did. It is the same
+  question C10a answered one file over, and it wants the same kind of ruling — with the
+  extra wrinkle that R7 makes `jup runtime <binary>` a usage error, so the proxy line may
+  belong out of a runtime-scoped help entirely rather than reworded.
 * **§15.38 row 153's text is now stale.** It says the unknown-CA message names
   `COREPACK_CAFILE`; C4 makes every tier-2 variable `JUP_`-named in this spec's own
   diagnostics (§11.6: "not used in this spec's own documentation, diagnostics, or `info`

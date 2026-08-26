@@ -18,6 +18,8 @@
  * Both are §17.9 rows 210 and 209, and they are the same argument written twice.
  */
 
+import type { ScopeNaming } from "../errors.ts";
+import { pinFieldLabels } from "../project/manifest.ts";
 import type { Role } from "../types.ts";
 import { type EntryName, getEntryName } from "../utils/self.ts";
 import { isPendingVerb, usageLine, VERBS } from "./usage.ts";
@@ -220,6 +222,27 @@ export function routeArgv(args: string[]): Route {
  */
 export function invocationPrefix(command: Route): string {
   return command.scopeWord === null ? command.entry : `${command.entry} ${command.scopeWord}`;
+}
+
+/**
+ * §17.6 C10a — how §12's messages name the kind of tool this command acts on.
+ *
+ * `null` when there is no scope, which leaves `errors.ts` on corepack's frozen
+ * wording: unscoped `jup` keeps it deliberately (a command that fails before it
+ * has resolved a name has no role to report, and R10's inference cannot supply
+ * one from the name that just failed), and proxy mode never reaches here at all.
+ * Under the `corepack` entry point R12 has already put {@link Route.scope} at
+ * `package-manager`, whose noun and fields *are* the frozen ones — so the same
+ * expression that substitutes for `jup runtime` reproduces §13's bytes for
+ * `corepack`, rather than a branch promising to.
+ *
+ * The mapping is read, never written: the noun from {@link ROLE_NOUN} beside
+ * R8's scope words, the fields from §03's `PIN_FIELDS` (R3, R14). `errors.ts`
+ * holds neither — it is warm-path code, and this file is cold.
+ */
+export function scopeNamingFor(command: Route): ScopeNaming | null {
+  if (command.scope === null) return null;
+  return { noun: ROLE_NOUN[command.scope], pinFields: pinFieldLabels(command.scope) };
 }
 
 /**

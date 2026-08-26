@@ -56,6 +56,84 @@ export function ToolName(): string {
 }
 
 /**
+ * §17.6 C10a — how the messages below name **the kind of tool** the command is
+ * acting on, and the manifest fields that go with it.
+ *
+ * C10's sibling. Where {@link toolName} substitutes *our* name, this substitutes
+ * the noun: `Unsupported package manager specification` under `jup pm`,
+ * `Unsupported runtime specification` under `jup runtime`. Same discipline —
+ * the same sentence, the same punctuation, the same interpolations, one word
+ * different — and the same exclusion: a `packageManager` or
+ * `devEngines.packageManager` **field name** is not this noun, so the messages
+ * that validate that field (`Invalid package manager specification in <source>;
+ * expected a string`) are untouched under every scope.
+ *
+ * The noun is the **scope in effect** and never the role of anything resolved:
+ * a command that fails before it has resolved a name has no role to report.
+ */
+export interface ScopeNaming {
+  /** §17.4's `ROLE_NOUN` for the scope in effect — `package manager`, `runtime`. */
+  noun: string;
+  /**
+   * The manifest fields that scope's role reads (§17.5 R14), primary first, for
+   * the one sentence that names the noun *and* the fields. `manifest.ts`'s
+   * `pinFieldLabels` is the mapping; nothing here derives it.
+   */
+  pinFields: readonly string[];
+}
+
+/**
+ * The default, and the reason it is the safe one: it is corepack's frozen
+ * wording, byte for byte.
+ *
+ * Unlike {@link toolName}, which *derives* its answer from `process.argv[1]`,
+ * this is set by whoever knows the scope — and only the command router does
+ * (§17.4 R7 step 4), which is cold-path code the warm proxy path never loads.
+ * So the state has to start somewhere, and it starts where every unset caller is
+ * already correct: proxy mode never sets a scope (§17.6 C10a), unscoped `jup`
+ * keeps corepack's wording deliberately, and the `corepack` entry point is
+ * frozen by R12. A scope that fails to be entered therefore under-reports
+ * rather than mis-reports — the failure mode C10a calls "merely dated" instead
+ * of the one it calls "wrong".
+ */
+const FROZEN_SCOPE: ScopeNaming = {
+  noun: "package manager",
+  pinFields: ["packageManager", "devEngines.packageManager"],
+};
+
+let currentScope: ScopeNaming = FROZEN_SCOPE;
+
+/**
+ * Enter a scope, returning the one it replaced so a caller can restore it.
+ *
+ * `null` restores {@link FROZEN_SCOPE}. The router hands this the naming for the
+ * route it just classified (`commands/router.ts`'s `scopeNamingFor`), which is
+ * why the dependency runs cold → warm and never the other way: `errors.ts` is
+ * loaded on every proxy invocation and must not pull the router in behind it.
+ */
+export function setScopeNaming(next: ScopeNaming | null): ScopeNaming {
+  const previous = currentScope;
+  currentScope = next ?? FROZEN_SCOPE;
+  return previous;
+}
+
+/** The noun of the scope in effect (§17.6 C10a). */
+function noun(): string {
+  return currentScope.noun;
+}
+
+/**
+ * `a 'packageManager' field nor a 'devEngines.packageManager' field` — the
+ * fields of the scope in effect, in the shape §12.9's sentence already had.
+ *
+ * A role with one field (`devEngines.runtime`, §17.5 R14) renders the single-
+ * field form, which is the shape §12.9's other no-spec sentence already uses.
+ */
+function pinFieldClause(): string {
+  return currentScope.pinFields.map((field) => `a '${field}' field`).join(" nor ");
+}
+
+/**
  * §12.1 — the user asked for something impossible or contradictory.
  *
  * Only this class gets the friendly treatment. Presentation differs by mode:
@@ -215,13 +293,19 @@ export function advisory(message: string): void {
 export const messages = {
   /* §12.2 — spec parsing ------------------------------------------------- */
 
+  /**
+   * §17.6 C10a's exclusion, and §17.9 row 236: **not** `${noun()}`. All three
+   * `Invalid package manager specification in <source>…` sentences are about a
+   * malformed `packageManager` *field* — the field is the subject and there is
+   * no noun about the command in them — so they read the same under every scope.
+   */
   invalidSpecNotString: (source: string) =>
     `Invalid package manager specification in ${source}; expected a string`,
 
   noVersionSpecified: (raw: string, source: string) =>
     `No version specified for ${raw} in "packageManager" of ${source}`,
 
-  unsupportedSpec: (raw: string) => `Unsupported package manager specification (${raw})`,
+  unsupportedSpec: (raw: string) => `Unsupported ${noun()} specification (${raw})`,
 
   invalidSpecExpectedVersion: (source: string, raw: string) =>
     `Invalid package manager specification in ${source} (${raw}); expected a semver version`,
@@ -231,7 +315,7 @@ export const messages = {
     `Invalid package manager specification in ${source} (${raw}); expected a semver version, range, or tag`,
 
   illegalUrl: (raw: string) =>
-    `Illegal use of URL for known package manager. Instead, select a specific version, or set COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (${raw})`,
+    `Illegal use of URL for known ${noun()}. Instead, select a specific version, or set COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (${raw})`,
 
   invalidPackageJson: (relativePath: string) => `Invalid package.json in ${relativePath}`,
 
@@ -282,10 +366,18 @@ export const messages = {
 
   tagNotFound: (tag: string) => `Tag not found (${tag})`,
 
+  /**
+   * The one §17.6 C10a judgement call, and it goes the way C10's `nodejs/corepack`
+   * URL went: left alone. Corepack's noun here is plural *and* ungrammatical, so
+   * a substitution would have to invent a plural and fix the typo — a rewrite,
+   * which C10a forbids. It is also unreachable under a scope: every management
+   * command resolves with `allowTags: true`, and the paths that do not (the
+   * project spec, proxy mode) never set one.
+   */
   tagsNotAllowed: () => `Packages managers can't be referenced via tags in this context`,
 
   unsupportedByBuild: (name: string) =>
-    `This package manager (${name}) isn't supported by this ${toolName()} build`,
+    `This ${noun()} (${name}) isn't supported by this ${toolName()} build`,
 
   /**
    * §15.17 — a version no declared band covers. Corepack's equivalent is an
@@ -476,21 +568,21 @@ export const messages = {
   invalidArchiveFormat: (command: "pack" | "prepare" = "pack") =>
     `Invalid archive format; did it get generated by '${toolName()} ${command}'?`,
 
-  unsupportedPackageManagerName: (name: string) => `Unsupported package manager '${name}'`,
+  unsupportedPackageManagerName: (name: string) => `Unsupported ${noun()} '${name}'`,
 
   /* §12.9 — commands ------------------------------------------------------ */
 
   couldntFindProject: () =>
-    `Couldn't find a project in the local directory - please specify the package manager to pack, or run this command from a valid project`,
+    `Couldn't find a project in the local directory - please specify the ${noun()} to pack, or run this command from a valid project`,
 
   noSpecInProject: () =>
-    `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
+    `The local project doesn't feature ${pinFieldClause()} - please specify the ${noun()} to pack, or update the manifest to reference it`,
 
   /** The deprecated `prepare` command omits the devEngines mention. */
   noSpecInProjectLegacy: () =>
-    `The local project doesn't feature a 'packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
+    `The local project doesn't feature a '${currentScope.pinFields[0]}' field - please specify the ${noun()} to pack, or update the manifest to reference it`,
 
-  invalidPackageManagerName: (name: string) => `Invalid package manager name '${name}'`,
+  invalidPackageManagerName: (name: string) => `Invalid ${noun()} name '${name}'`,
 
   assertStubFolderMissing: () => `Assertion failed: The stub folder doesn't exist`,
 

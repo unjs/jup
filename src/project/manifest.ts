@@ -73,8 +73,22 @@ export const PIN_FIELDS: Readonly<Record<Role, PinFields>> = {
  * role whose pin has no top-level home (§17.5 R14).
  */
 export function pinFieldLabel(role: Role): string {
+  return pinFieldLabels(role)[0]!;
+}
+
+/**
+ * **Every** field that holds this role's pin, primary first — §17.6 C10a.
+ *
+ * The one §12.9 sentence that names the noun *and* the fields names both of the
+ * package manager's ("a 'packageManager' field nor a 'devEngines.packageManager'
+ * field"), so C10a's "the field names move with the noun" needs the list, not
+ * just the label. {@link pinFieldLabel} is its head, which is what makes the two
+ * one mapping rather than two.
+ */
+export function pinFieldLabels(role: Role): readonly string[] {
   const fields = PIN_FIELDS[role];
-  return fields.top ?? `devEngines.${fields.block}`;
+  const block = `devEngines.${fields.block}`;
+  return fields.top === undefined ? [block] : [fields.top, block];
 }
 
 /** §03.3 — every field of the manifest the discovery walk actually looks at. */

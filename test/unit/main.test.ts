@@ -1067,6 +1067,26 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * `package.json` reads are exactly what they were. What a warm run pays is one
    * extra iteration of a two-element loop over a manifest that pins one role.
    * Held at 232,000 rather than the 230,249 this leaves.
+   *
+   * And from 232,000 to 237,000 for §17.6 C10a — the noun. `errors.ts` (+4,121)
+   * gained `ScopeNaming`, the ambient scope with corepack's frozen wording as
+   * its default, and a `${noun()}` in the eight message bodies that name the
+   * kind of tool a command is acting on; `manifest.ts` (+608) `pinFieldLabels`,
+   * so the one sentence naming the noun *and* the fields moves both together
+   * out of `PIN_FIELDS` rather than out of a second mapping. Measured,
+   * `_warm.mjs` went 83,591 -> 84,094, **+503 bytes, or +0.60%**, against +4,729
+   * of source — the usual gap, since most of the addition is prose: the paragraph
+   * explaining why the default is the safe one, and the two comments recording
+   * which strings C10a deliberately leaves frozen.
+   *
+   * **None of it can move off the warm path, and none of it costs a run that
+   * never scopes anything.** `errors.ts` is what every warm module reaches for,
+   * and the noun has to be resolved where the message is *built* — a proxy-mode
+   * `UsageError` goes straight to stderr with no second pass over the text. The
+   * *setter* is the cold half and stays there: `commands/router.ts` is the only
+   * thing that knows a scope, and it imports `errors.ts` rather than the other
+   * way round, so a warm run reads one module-level object and calls nothing.
+   * Held at 237,000 rather than the 235,623 this leaves.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1078,6 +1098,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(232_000);
+    ).toBeLessThanOrEqual(237_000);
   });
 });
