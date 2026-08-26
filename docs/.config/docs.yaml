@@ -3,7 +3,7 @@
 name: "jup"
 shortDescription: "Run the package manager your project pinned."
 description: "A fast, small, zero-dependency package manager version manager."
-github: "pithings/jup"
+github: "unjs/jup"
 url: "https://jup.unjs.io"
 themeColor: "yellow"
 

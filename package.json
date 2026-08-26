@@ -11,7 +11,7 @@
     "yarn"
   ],
   "license": "MIT",
-  "repository": "pithings/jup",
+  "repository": "unjs/jup",
   "bin": {
     "corepack": "./dist/bin.mjs",
     "jup": "./dist/bin.mjs"

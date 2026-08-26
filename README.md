@@ -25,13 +25,13 @@ jup is designed as a fast, small, zero-dependency replacement for [Corepack](htt
 
 ## Documentation
 
-- [Getting started](./docs/getting-started.md)
-- [Project pins](./docs/project-pins.md)
-- [Commands](./docs/commands.md)
-- [Cache, offline use, and security](./docs/cache-and-security.md)
-- [Configuration](./docs/configuration.md)
-- [Corepack compatibility](./docs/corepack-compatibility.md)
-- [Troubleshooting](./docs/troubleshooting.md)
+- [Getting started](./docs/1.getting-started.md)
+- [Project pins](./docs/2.project-pins.md)
+- [Commands](./docs/3.commands.md)
+- [Cache, offline use, and security](./docs/4.cache-and-security.md)
+- [Configuration](./docs/5.configuration.md)
+- [Corepack compatibility](./docs/6.corepack-compatibility.md)
+- [Troubleshooting](./docs/7.troubleshooting.md)
 
 See the [documentation home page](./docs/index.md) for the complete guide.
 

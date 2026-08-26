@@ -1,9 +1,8 @@
 ---
 icon: i-lucide-package-check
-title: jup
 ---
 
-# Run the right package manager every time
+# Introduction
 
 jup runs the version of npm, pnpm, or Yarn that a project asks for. It downloads that version, checks it, saves it in a local cache, and then runs it.
 
