@@ -2,50 +2,43 @@
 icon: i-lucide-package-check
 ---
 
-# Introduction
+# jup documentation
 
-jup runs the version of npm, pnpm, or Yarn that a project asks for. It downloads that version, checks it, saves it in a local cache, and then runs it.
+jup reads the package manager declared in `package.json`, downloads and verifies that release, and runs it. It supports npm, pnpm, and Yarn.
 
-This prevents one computer from changing a lockfile because it used a different package manager version.
+```json
+{
+  "packageManager": "pnpm@11.1.2+sha512.abc123..."
+}
+```
 
-## Get started
-
-1. Install jup. A release is not on npm yet. To try the current source, clone the repository, run `pnpm install && pnpm pack`, then install the generated `.tgz` with `npm install -g ./jup-0.0.0.tgz`.
-
-2. Install its **shims**. A shim is a small command that sends `npm`, `pnpm`, or `yarn` to jup.
-
-   ```sh
-   jup enable
-   ```
-
-3. In your project, choose a package manager:
-
-   ```sh
-   jup use pnpm@11
-   ```
-
-4. Use the package manager normally:
-
-   ```sh
-   pnpm install
-   ```
-
-jup reads the project pin from `package.json`. It then runs the pinned version, not an unrelated version installed elsewhere on your computer.
+When `pnpm install` runs through a jup shim, it uses the pinned release rather than an unrelated global installation. The same pin can be used on developer machines, in CI, and in containers.
 
 ::note
-jup is compatible with Corepack projects. It understands the same `packageManager` field and `COREPACK_*` settings. Every `COREPACK_*` setting also has a `JUP_*` name.
+jup is not published to npm yet. Follow the source installation steps in [Getting started](./getting-started).
 ::
 
-## Where to go next
+## Start here
 
-- [Install and set up jup](./getting-started)
-- [Understand project pins](./project-pins)
-- [Use everyday commands](./commands)
-- [Work with the cache, offline installs, and verification](./cache-and-security)
-- [Configure registries, proxies, and environment variables](./configuration)
-- [Learn how jup differs from Corepack](./corepack-compatibility)
-- [Fix common problems](./troubleshooting)
+- [Getting started](./getting-started) — install jup, enable its shims, and pin a package manager.
+- [Projects and workspaces](./projects-and-workspaces) — configure exact versions, ranges, `devEngines`, workspaces, and `.corepack.lock`.
+
+## Deployment guides
+
+- [CI and offline use](./ci-and-offline) — warm the cache, build container layers, freeze range resolutions, and move package managers to isolated machines.
+- [Registries and networking](./registries-and-networking) — configure private registries, authentication, `.npmrc`, proxies, TLS, timeouts, and retries.
+- [Download verification](./security) — understand digests, registry signatures, signing keys, trust boundaries, and Yarn Berry downloads.
+
+## Reference
+
+- [Commands](./commands) — review every command and its side effects.
+- [Environment variables](./settings-reference) — find every supported `JUP_*` setting.
+
+## Migration and support
+
+- [Migrating from Corepack](./corepack-migration) — reuse existing project configuration and understand behavior that differs from Corepack.
+- [Troubleshooting](./troubleshooting) — diagnose shim, cache, registry, TLS, and verification failures.
 
 ::tip
-Run `jup info` when the result is surprising. It explains which project file, pin, registry, cache entry, and shim jup found. It does not make a network request.
+If jup selects an unexpected manifest or version, run `jup info`. It reports the project pin, registry, cache entry, and active shims without contacting the network.
 ::
