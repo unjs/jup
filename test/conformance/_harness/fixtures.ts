@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { getSpecFor } from "../../../src/config/table.ts";
+import { getSpecFor, isSupportedPackageManager } from "../../../src/config/table.ts";
 import { parse } from "../../../src/version/semver.ts";
 import { npmTarball } from "./tarball.ts";
 
@@ -205,8 +205,19 @@ export function packageManagerTarball(
   const script = options?.script ?? pmScript(name, version);
   const binPaths = options?.binPaths ?? binPathsFor(name, version);
 
+  // §07.7 reads `bin` from *here* now, not from the table, so the manifest has
+  // to declare what a real package declares: the band's own map when the caller
+  // did not override the layout, and one entry per path when it did.
+  const tableBin =
+    options?.binPaths === undefined && isSupportedPackageManager(name)
+      ? getSpecFor(name, version).bin
+      : undefined;
   const bin: Record<string, string> = {};
-  for (const path of binPaths) bin[basename(path, ".js")] = `./${path}`;
+  if (tableBin !== undefined && !Array.isArray(tableBin)) {
+    Object.assign(bin, tableBin);
+  } else {
+    for (const path of binPaths) bin[basename(path).replace(/\.[cm]?js$/, "")] = `./${path}`;
+  }
 
   const files: Record<string, string> = {
     "package.json": `${JSON.stringify(

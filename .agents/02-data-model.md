@@ -132,6 +132,11 @@ even though `yarn@1.22.22` would download from npm.
   maps to it. e.g. Yarn 2+ declares `["yarn", "yarnpkg"]` and both run
   `<location>/yarn.js`.
 
+For a **tarball**, the table's `BinSpec` is a fallback rather than the authority:
+§07.7 reads the package's own `bin` first (§15.17), so a band whose paths have gone
+stale cannot break an install. A `BinList` *is* authoritative, because a single-file
+download carries no manifest to read.
+
 The union of all `bin` names across all ranges of all package managers is the set of
 binary names the tool answers to (`Engine::getPackageManagerFor`,
 `Engine::getBinariesFor`). It is also the set of shims `enable` creates (§10).

@@ -389,25 +389,33 @@ function isValidBinSpec(value: unknown): value is BinSpec {
 /**
  * §07.7, §15.17 — where a completed install's `bin` comes from.
  *
- * Two independent reasons to read the downloaded `package.json` instead of the
- * table, and keeping them apart is what makes the second safe:
+ * The package's own `package.json` is the source of truth, and the embedded
+ * table is the fallback. That is the inversion #775 asks for: an entry point is
+ * a property of the package, not of the tool that downloads it, and pnpm has
+ * moved its own twice (`.js` → `.cjs` → `.mjs`, §02.5) with a v12 alpha moving
+ * it again. A hardcoded path is worth nothing once it is wrong, and the version
+ * that makes it wrong is by definition one no release of ours anticipated — so
+ * a band that disagrees with the package is a stale band, not a correction.
  *
- * * §07.7's: the `isValidBinList` / `isValidBinSpec` discrimination. Yarn Berry
- *   declares an array `bin`, but through a custom npm registry it arrives as a
- *   *tarball*, so the array cannot describe it and the package's own map is used.
- * * §15.17's: the resolved version matches no **declared** range band, so the
- *   table's `bin` for it is the newest band's guess (§02.3's fall-forward). #775
- *   is that guess outliving the layout it described — pnpm has moved its entry
- *   point twice and a v12 alpha broke it again — and a hardcoded path is worth
- *   nothing once it is wrong. The package's own `bin` is correct by
- *   construction, and by the time this runs the artifact has cleared §15.11's
- *   verification tier, so it is no more attacker-controlled than the code about
- *   to be executed from the same tarball.
+ * The honest objection is that this trusts published metadata. It does not
+ * trust it any further than it is already trusted: by the time this runs the
+ * artifact has cleared §15.11's verification tier, so the `bin` map comes from
+ * the same signed bytes as the code about to be executed from beside it, and
+ * §14.13 confines every value it yields before the marker records it.
  *
- * Either way the values are confined per §14.13 before they reach the marker.
- * `exec.resolveBinPath` checks again at the point of use — markers outlive this
- * function, including ones written by other releases — but failing here is what
- * keeps an escaping path out of the store in the first place.
+ * The table still decides two things:
+ *
+ * * a **single file** has no `package.json` to read, so its `BinList` is the
+ *   only description there is (§07.7's `isValidBinList` / `isValidBinSpec`
+ *   discrimination — Yarn Berry declares an array, but through a custom npm
+ *   registry it arrives as a *tarball* and the package's map describes it); and
+ * * a tarball whose package declares no usable `bin` falls back to the band —
+ *   but only a **declared** one, so §02.3's fall-forward guess for an uncovered
+ *   version never reaches the marker.
+ *
+ * `exec.resolveBinPath` checks containment again at the point of use — markers
+ * outlive this function, including ones written by other releases — but failing
+ * here is what keeps an escaping path out of the store in the first place.
  */
 export function resolveBin(
   tmpDir: string,
@@ -416,36 +424,65 @@ export function resolveBin(
 ): BinSpec | BinList {
   const parsed = parse(locator.reference);
   const known = parsed !== null && isSupportedPackageManager(locator.name);
-  // §15.17 point 1 — the table's `bin` is preferred, but only where a declared
-  // band actually covers the version.
   const banded = known && hasRangeBand(locator.name, parsed.version);
-  const tableBin = banded ? getSpecFor(locator.name, parsed.version).bin : undefined;
-
-  // §15.17 point 3 — the maintenance signal. Debug-level: the run succeeds, and
-  // the person who needs to hear this is whoever maintains the table (§16.9).
-  if (known && !banded) debugNote(messages.binFromPackage(locator.name, parsed.version));
+  const tableBin = known ? getSpecFor(locator.name, parsed.version).bin : undefined;
 
   if (isSingleFile) {
-    // A single file has no `package.json` to consult, so an unbanded version
-    // falls back to the locator's own name — which is what the artifact is.
+    // No manifest to consult. An unbanded version falls back to the locator's
+    // own name — which is what the artifact is.
     if (isValidBinList(tableBin)) return tableBin;
     return [locator.name];
   }
 
-  if (isValidBinSpec(tableBin)) return tableBin;
-
-  const manifest = JSON.parse(readFileSync(join(tmpDir, "package.json"), "utf8")) as {
-    name?: unknown;
-    bin?: unknown;
-  } | null;
-
+  const manifest = readManifest(tmpDir);
   const packageBin = manifest?.bin;
-  if (typeof packageBin === "string") {
-    return confine({ [String(manifest?.name)]: packageBin }, tmpDir, locator, parsed?.version);
+
+  if (typeof packageBin === "string" || isValidBinSpec(packageBin)) {
+    const bin =
+      typeof packageBin === "string" ? { [String(manifest?.name)]: packageBin } : packageBin;
+    // §15.17 point 3 — the two maintenance signals, both debug-level because
+    // neither changes the outcome of this run (§16.9).
+    if (known && !banded) {
+      debugNote(messages.binFromPackage(locator.name, parsed.version));
+    } else if (banded && isValidBinSpec(tableBin) && !sameBin(tableBin, bin)) {
+      debugNote(messages.binBandStale(locator.name, parsed.version, tableBin, bin));
+    }
+    return confine(bin, tmpDir, locator, parsed?.version);
   }
-  if (isValidBinSpec(packageBin)) return confine(packageBin, tmpDir, locator, parsed?.version);
+
+  // Nothing usable in the package. The band is the fallback, and only a
+  // declared one: falling forward here would put a guess in the marker.
+  if (banded && isValidBinSpec(tableBin)) return tableBin;
 
   throw new Error(messages.unableToLocateBin());
+}
+
+/**
+ * The install's own `package.json`, or `null` when there is nothing to read.
+ *
+ * Tolerant by design: §07.7 now reads this on **every** tarball install rather
+ * than only on the unbanded path, so a package that ships without a manifest —
+ * or with a corrupt one — must degrade to the table rather than turn an install
+ * that used to work into an `ENOENT` nobody can act on.
+ */
+function readManifest(tmpDir: string): { name?: unknown; bin?: unknown } | null {
+  try {
+    return JSON.parse(readFileSync(join(tmpDir, "package.json"), "utf8")) as {
+      name?: unknown;
+      bin?: unknown;
+    } | null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether two `bin` maps name the same entry points, `./`-insensitively. */
+function sameBin(a: BinSpec, b: BinSpec): boolean {
+  const keys = Object.keys(a);
+  if (keys.length !== Object.keys(b).length) return false;
+  return keys.every(
+    (key) => Object.hasOwn(b, key) && a[key]!.replace(/^\.\//, "") === b[key]!.replace(/^\.\//, ""),
+  );
 }
 
 /**

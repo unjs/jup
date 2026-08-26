@@ -213,25 +213,37 @@ rethrowing on the last attempt.
 ## 7.7 Resolving `bin`
 
 ```
-if the download produced a single file:
+if the download produced a single file:            # there is no package.json
     if the locator is a known package manager and spec.bin is a non-empty ARRAY:
         bin := spec.bin
     else:
         bin := [locator.name]
 else:                                     # extracted tarball
-    if the locator is a known package manager and spec.bin is a non-empty OBJECT:
-        bin := spec.bin
-    else:
-        read tmp/package.json:
-            packageBin is a string  → bin := { <package name>: packageBin }
-            packageBin is an object → bin := packageBin
-            otherwise               → Error `Unable to locate bin in package.json`
+    read tmp/package.json (unreadable or unparseable → treat as declaring nothing):
+        packageBin is a string        → bin := { <package name>: packageBin }
+        packageBin is a non-empty object → bin := packageBin
+        otherwise, if a DECLARED range band covers the version
+                   and spec.bin is a non-empty OBJECT
+                                      → bin := spec.bin
+        otherwise                     → Error `Unable to locate bin in package.json`
 ```
 
-The shape check matters: Yarn Berry's table entry declares an **array** `bin`
-(single-file form), but when fetched from a custom npm registry it arrives as a
-*tarball*, so the array is ignored and the package's own `bin` map is used. This is
-the `isValidBinList` / `isValidBinSpec` discrimination and MUST be preserved.
+**The package's own `bin` is the source of truth** (§15.17). An entry point is a
+property of the package, not of the tool that downloads it, and by the time this
+runs the `package.json` being read has cleared §15.11's verification tier — it is no
+more attacker-controlled than the code about to be executed beside it. The values it
+yields MUST be confined per §14.13.
+
+The embedded table's `bin` is a **fallback**, and it is authoritative in exactly one
+place: a single-file download, which carries no manifest to consult. For a tarball it
+is consulted only when the package declares no usable `bin` at all, and only when a
+*declared* range band covers the version — the fall-forward guess §02.3 produces for
+an uncovered version MUST NOT reach the marker.
+
+Yarn Berry falls out of this: its table entry declares an **array** `bin`
+(single-file form), and through a custom npm registry it arrives as a *tarball*, so
+the package's own `bin` map is what describes it. The `isValidBinList` /
+`isValidBinSpec` discrimination MUST be preserved.
 
 ## 7.8 Error tolerance
 

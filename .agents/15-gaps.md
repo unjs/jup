@@ -458,20 +458,32 @@ from corepack will notice immediately.
 > the tradeoff honestly: reading `bin` from the downloaded package is more correct but
 > trusts attacker-controlled metadata.
 
-Both horns are avoidable, because verification already happens:
+Both horns are avoidable, because verification already happens. A hardcoded path is
+worth nothing once it is wrong, and the version that will break it is by definition
+one no release could have anticipated — so the table MUST NOT be the thing that
+decides where an entry point is.
 
 **Required:**
 
-1. Prefer the embedded table's `bin` when the resolved version matches a declared
-   range band (fast, no parsing — unchanged from §07.7).
-2. Otherwise read `bin` from the extracted `package.json` — but only **after** the
-   artifact has cleared §15.11's verification tier, and subject to §14.13's
-   containment check.
-3. When falling back, emit a debug-level note naming the version, so the maintenance
-   signal to add a range band is not lost.
+1. For a tarball install, `bin` MUST come from the extracted `package.json` — read
+   only **after** the artifact has cleared §15.11's verification tier, and subject to
+   §14.13's containment check. This holds whether or not a declared range band covers
+   the version: a band that disagrees with the package is a stale band, not a
+   correction.
+2. The embedded table's `bin` is the fallback. It is authoritative for a **single-file**
+   download, which has no manifest to read, and it is used for a tarball only when the
+   package declares no usable `bin` — and then only where a *declared* band covers the
+   version, so §02.3's fall-forward guess never reaches the marker.
+3. Debug-level notes carry the maintenance signal to whoever owns the table (§16.9),
+   since neither case changes the outcome of the run:
+   * the resolved version matches no declared range band; and
+   * a declared band's `bin` disagrees with what the package declares — the band has
+     rotted, and only this note will say so.
 
 This makes a new package-manager major work on day one instead of requiring a release,
-without ever trusting an unverified path.
+without ever trusting an unverified path. The range bands keep their other jobs
+(§02.3's `url`, `registry`, `commands`) and remain worth maintaining; they simply stop
+being able to break an install by being out of date.
 
 ---
 
@@ -997,7 +1009,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 173 | Shim pointing at a nonexistent target | `enable` replaces it; `disable` removes it (§15.14) |
 | 174 | `enable --force` over a real binary, then `disable` | the original is restored (§15.15) |
 | 175 | `enable` with no arguments | npm shims are created; `--exclude npm` omits them (§15.16) |
-| 176 | Version outside every declared range band | `bin` read from the verified package, containment-checked (§15.17, §14.13) |
+| 176 | A tarball install, banded or not | `bin` read from the verified package, containment-checked; the table is the fallback (§15.17, §14.13) |
 | 177 | `cache clean` then `cache clean --all` | defaults survive the first, are removed by the second (§15.18) |
 | 178 | Uncached version with `COREPACK_ENABLE_NETWORK=0` | the error names the seeding command (§15.19) |
 | 179 | `cache list --json` | installed pairs and recorded defaults (§15.19) |

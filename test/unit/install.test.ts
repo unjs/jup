@@ -350,8 +350,9 @@ describe("download shapes (§07.3, §07.4)", () => {
     expect(await readFile(join(spec.location, "bin/pnpm.cjs"), "utf8")).toBe(
       "console.log('pnpm')\n",
     );
-    // §07.7 — the table's own BinSpec wins over the package's `bin` string.
-    expect(spec.bin).toEqual({ pnpm: "./bin/pnpm.cjs", pnpx: "./bin/pnpx.cjs" });
+    // §07.7, §15.17 — the package's own `bin` string wins over the table's band,
+    // and a string becomes `{ <package name>: <path> }`.
+    expect(spec.bin).toEqual({ pnpm: "./bin/pnpm.cjs" });
     // §06.2 — a full extraction hashes the raw tarball stream.
     expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
     expect(marker(spec.location)).toEqual({

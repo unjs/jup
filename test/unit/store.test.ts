@@ -703,7 +703,37 @@ describe("resolveBin — §07.7", () => {
     ).toEqual(["yarn"]);
   });
 
-  it("tarball: uses the table's BinSpec when it declares one", () => {
+  it("tarball: the package's own bin wins over the band that covers it (§15.17)", () => {
+    // The inversion. pnpm 11 *is* inside a declared band, and the band's paths
+    // exist in the shipped table — but the package says its entry point moved,
+    // and the package is the thing that knows.
+    writeFileSync(
+      join(tmp, "package.json"),
+      JSON.stringify({ name: "pnpm", bin: { pnpm: "./dist/pnpm.mjs", pnpx: "./dist/pnpx.mjs" } }),
+    );
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+      pnpm: "./dist/pnpm.mjs",
+      pnpx: "./dist/pnpx.mjs",
+    });
+  });
+
+  it("tarball: falls back to the band when the package declares no bin", () => {
+    writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "pnpm" }));
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+      pnpm: "./bin/pnpm.mjs",
+      pnpx: "./bin/pnpx.mjs",
+    });
+  });
+
+  it("tarball: falls back to the band when there is no package.json at all", () => {
+    // Tolerant by design: reading the manifest is now unconditional, and an
+    // unreadable one must not turn an install that worked into an `ENOENT`.
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+      pnpm: "./bin/pnpm.mjs",
+      pnpx: "./bin/pnpx.mjs",
+    });
+
+    writeFileSync(join(tmp, "package.json"), "{ not json");
     expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
       pnpm: "./bin/pnpm.mjs",
       pnpx: "./bin/pnpx.mjs",
@@ -768,6 +798,8 @@ describe("resolveBin — §07.7", () => {
   });
 
   it("tarball: neither branch is §12.8's `Unable to locate bin in package.json`", () => {
+    // Yarn Berry's band declares a BinList, so there is no BinSpec to fall back
+    // to: nothing describes this install and the error is the only answer.
     writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "x", bin: {} }));
     expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
       "Unable to locate bin in package.json",
@@ -777,6 +809,15 @@ describe("resolveBin — §07.7", () => {
     expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
       "Unable to locate bin in package.json",
     );
+  });
+
+  it("tarball: a URL reference has no band to fall back to", () => {
+    // No version, so no band — §02.3's fall-forward guess is exactly what §15.17
+    // keeps out of the marker. With nothing in the package, that is an error.
+    writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "pnpm" }));
+    expect(() =>
+      resolveBin(tmp, { name: "pnpm", reference: "https://example.com/pnpm.tgz" }, false),
+    ).toThrow("Unable to locate bin in package.json");
   });
 });
 

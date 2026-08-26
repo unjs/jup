@@ -234,6 +234,19 @@ export const messages = {
   binFromPackage: (name: string, version: string) =>
     `${name}@${version} matches no declared range band; reading "bin" from the verified package. Add a range band for it.`,
 
+  /**
+   * §15.17 point 3 — the band still covers this version, but its entry points
+   * are not the ones the package ships. The package won, so the run succeeds;
+   * this note is the only thing that will ever say the band has rotted.
+   */
+  binBandStale: (
+    name: string,
+    version: string,
+    band: Record<string, string>,
+    declared: Record<string, string>,
+  ) =>
+    `${name}@${version} declares "bin" ${JSON.stringify(declared)}, but its range band says ${JSON.stringify(band)}. The package won; update the range band.`,
+
   upNotSemver: () =>
     `The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
 
