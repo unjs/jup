@@ -49,13 +49,23 @@ export interface CliResult {
 // of `process.env` before each test.
 const COMPAT = process.env.JUP_COREPACK_COMPAT === `1`;
 
-function compatEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function compatEnv(env: NodeJS.ProcessEnv, withCustomRegistry: boolean): NodeJS.ProcessEnv {
   if (!COMPAT) return env;
 
   const patched = { ...env };
+  patched.COREPACK_QUIET_ADVISORIES ??= `1`;
+
+  // The two integrity hatches below are scoped away from the mock-registry rows.
+  // `_registryServer.mjs` mints its own keypair and sets
+  // `COREPACK_INTEGRITY_KEYS` to the public half, so those rows are about
+  // verification itself — several assert that it *fails* before turning it off
+  // themselves. The hatches answer npm's retired key and `repo.yarnpkg.com`
+  // publishing no signature; neither is in play here, and applying them would
+  // disable the very thing the row is testing. The advisory mute above is not
+  // scoped, because it changes no outcome — only how much jup says about it.
+  if (withCustomRegistry) return patched;
   patched.COREPACK_INTEGRITY_KEYS ??= `0`;
   patched.COREPACK_ALLOW_UNVERIFIED ??= `1`;
-  patched.COREPACK_QUIET_ADVISORIES ??= `1`;
   return patched;
 }
 
@@ -79,7 +89,7 @@ export async function runCli(
       ],
       {
         cwd: npath.fromPortablePath(cwd),
-        env: compatEnv(process.env),
+        env: compatEnv(process.env, withCustomRegistry === true),
         stdio: `pipe`,
       },
     );

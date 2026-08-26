@@ -19,7 +19,11 @@ beforeEach(async () => {
 });
 
 describe(`EnableCommand`, () => {
-  it(`should add the binaries in the folder found in the PATH`, async () => {
+  // SKIP (jup §15.13): jup does not derive the install directory from a `PATH`
+  // lookup of its own name. It uses `--install-directory`, else
+  // COREPACK_SHIM_DIRECTORY, else $XDG_BIN_HOME/~/.local/bin — so the shims
+  // land there rather than in the directory this row puts on PATH.
+  it.skip(`should add the binaries in the folder found in the PATH`, async () => {
     await xfs.mktempPromise(async cwd => {
       const corepackBin = await makeBin(cwd, `corepack` as Filename);
 
@@ -43,7 +47,11 @@ describe(`EnableCommand`, () => {
     });
   });
 
-  it(`should add the binaries to the specified folder when using --install-directory`, async () => {
+  // SKIP (jup §15, #138): jup's default target set includes npm, so `npm` and
+  // `npx` shims appear where Corepack writes none. Corepack excludes npm
+  // deliberately; #138 records why that is the wrong call. Conformance row 117
+  // pins the inclusion.
+  it.skip(`should add the binaries to the specified folder when using --install-directory`, async () => {
     await xfs.mktempPromise(async cwd => {
       const corepackBin = await makeBin(cwd, `corepack` as Filename);
 
@@ -88,7 +96,12 @@ describe(`EnableCommand`, () => {
     });
   });
 
-  test.skipIf(process.platform === `win32`)(`should overwrite existing files`, async () => {
+  // SKIP (jup §14.16): silently clobbering a regular file jup did not install
+  // is hostile, so it refuses and prints `… was not installed by this tool -
+  // skipping (use --force to overwrite)`. This row writes `hello` to `yarn`
+  // and asserts it is replaced; under jup it survives unless --force is given.
+  // (Was `test.skipIf(win32)`; now skipped everywhere.)
+  test.skip(`should overwrite existing files`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeFilePromise(ppath.join(cwd, `yarn`), `hello`);
 

@@ -18,7 +18,10 @@ beforeEach(async () => {
 
 describe(`UseCommand`, () => {
   describe(`should set the package manager in the current project`, () => {
-    it(`With an existing 'packageManager' field`, async () => {
+    // SKIP (jup §09.4): `use` prints an extra `Updated <path> to use <ref>`
+    // line, so stdout no longer matches `/^Installing … in the project\.\.\.\n\n/`.
+    // The pin it writes is correct and is covered by 13-10-use-up.
+    it.skip(`With an existing 'packageManager' field`, async () => {
       await xfs.mktempPromise(async cwd => {
         await xfs.writeJsonPromise(ppath.join(cwd, `package.json`), {
           packageManager: `yarn@1.0.0`,
@@ -42,7 +45,11 @@ describe(`UseCommand`, () => {
         });
       });
     });
-    it(`with 'devEngines.packageManager' field`, async () => {
+    // SKIP (jup §15.26/§15.27): the usage line printed with the error carries
+    // jup's extra flags — `$ corepack use [--here] [--pin-style=suffix|sidecar]
+    // <pattern>` — where Corepack has `$ corepack use <pattern>`. The refusal
+    // itself, and its message, match.
+    it.skip(`with 'devEngines.packageManager' field`, async () => {
       await xfs.mktempPromise(async cwd => {
         process.env.NO_COLOR = `1`;
         const devEngines = {packageManager: {name: `yarn`, version: `2.x`}};
@@ -77,7 +84,8 @@ describe(`UseCommand`, () => {
       });
     });
 
-    it(`with 'devEngines.packageManager' and 'packageManager' fields`, async () => {
+    // SKIP (jup §09.4): the extra `Updated …` line again.
+    it.skip(`with 'devEngines.packageManager' and 'packageManager' fields`, async () => {
       await xfs.mktempPromise(async cwd => {
         process.env.NO_COLOR = `1`;
         const devEngines = {packageManager: {name: `yarn`, version: `1.x || 2.x`}};
@@ -148,7 +156,10 @@ describe(`UseCommand`, () => {
     });
   });
 
-  describe(`should not care if packageManager is set to an invalid value`, () => {
+  // SKIP (jup §09.4): all four rows assert the exact stdout of `use`, which
+  // carries jup's extra `Updated <path> to use <ref>` line. They agree with jup
+  // on the point being made — an invalid incumbent value is not an obstacle.
+  describe.skip(`should not care if packageManager is set to an invalid value`, () => {
     for (const {description, packageManager} of [
       {
         description: `when a version range is given`,

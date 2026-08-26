@@ -5,8 +5,11 @@ specification to. The point is not to make it pass: it is an outside view of how
 jup answers the questions Corepack's own maintainers thought worth asking, and a
 place where a real regression shows up as a *new* failure.
 
-The five CLI-level files are copied **verbatim**. Only the import lines were
-rewritten:
+The five CLI-level files are copied with their **test bodies untouched**. Two
+kinds of edit were made and no others: the import lines were rewritten (below),
+and rows covering a deliberate divergence were turned into `it.skip` /
+`describe.skip` with a `// SKIP (jup §…)` comment above naming the section that
+makes them deliberate. Every skip is listed under *What it reports*.
 
 | Upstream | Here |
 | --- | --- |
@@ -21,17 +24,20 @@ substance. The three files that import Corepack's internals directly —
 `config.test.ts`, `corepackUtils.test.ts`, `npmRegistryUtils.test.ts` — are not
 ported: jup covers the same ground in `test/unit/`.
 
-Because the bodies are verbatim, `test/corepack/*.test.ts` is excluded from
-`oxfmt` — a reformat would destroy the diff against upstream. Re-porting is
-`sed` on the import block and nothing else.
+`test/corepack/*.test.ts` is excluded from `oxfmt` — a reformat would destroy
+the diff against upstream, which is what makes re-porting from a newer Corepack
+tractable: `git diff` against the upstream file shows only the import block and
+the `SKIP` markers.
 
 ## Running it
 
 ```sh
-pnpm test:corepack                          # live network
-JUP_COREPACK_COMPAT=1 pnpm test:corepack    # known divergences switched off
+pnpm test:corepack                          # compat mode, live network — green
 NOCK_ENV=record pnpm test:corepack          # write test/corepack/nocks.db
 NOCK_ENV=replay pnpm test:corepack          # offline, from that recording
+
+# jup's real defaults, no compat hatches: 52 rows fail, all of them deliberate
+vitest run --config test/corepack/vitest.config.ts
 ```
 
 It is **not** part of `pnpm test`: it talks to the real npm registry, and
@@ -44,52 +50,65 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-141 rows. **46 pass live; 103 with `JUP_COREPACK_COMPAT=1`**, which sets
-`COREPACK_INTEGRITY_KEYS=0`, `COREPACK_ALLOW_UNVERIFIED=1` and
-`COREPACK_QUIET_ADVISORIES=1` — the escape hatches jup already documents for its
-widest divergences:
+**141 rows: 103 pass, 37 skipped, 1 expected fail, 0 failing.**
 
-| Rows | Cause |
+`pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
+which green means green. Without it, 52 rows fail — see *Compat mode* below.
+
+Every skip is a deliberate divergence, carries a `// SKIP (jup §…)` comment
+naming the section that makes it deliberate, and points at the jup test covering
+the behaviour instead. Nothing is skipped for being merely inconvenient: a new
+red row is a regression, which is the whole point of keeping the port.
+
+| Skipped | Cause |
 | --- | --- |
-| 20 | §14.4 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
-| 18 | §15.11 — a source with no signature and no pinned hash is refused: every Berry release from `repo.yarnpkg.com`, and every URL reference. |
-| 22 | §14.23 — the advisory `!` lines jup adds and corepack has no equivalent for. Measured by adding `COREPACK_QUIET_ADVISORIES=1` to compat mode: 59 failed / 81 passed became 37 failed / 103 passed, with no row moving the other way. |
+| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--pin-style`, which Corepack has no equivalent for (§15.26, §15.27). |
+| 8 | **§15.11** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
+| 6 | **§14.16 / §15.13** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
+| 5 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
+| 4 | **§15.23** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
+| 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe `.corepack.env` discovery. |
+| 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
+| 1 | **§15, #138** — `enable`'s default target set includes npm. |
+| 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |
 
-Compat mode is a blunt instrument — five rows *want* verification to fail and
-pass spuriously under it. It is a regression detector, not a score.
+## Compat mode
 
-### The residual, and what moves it
+`JUP_COREPACK_COMPAT=1` sets three variables, and each answers a divergence too
+broad to skip row by row:
 
-Measured by applying each lever and re-running:
+| Variable | Rows | Divergence |
+| --- | --- | --- |
+| `COREPACK_INTEGRITY_KEYS=0` | 20 | §14.4 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
+| `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §15.11 — a source with no signature and no pinned hash is refused: every Berry release from `repo.yarnpkg.com`, and every URL reference. |
+| `COREPACK_QUIET_ADVISORIES=1` | 22 | §14.23 — the advisory `!` lines jup adds. |
+
+The first two are **not** applied to rows that run against the mock registry
+(`runCli(..., true)`): `_registryServer.mjs` mints its own keypair, so those rows
+are about verification itself and several assert that it *fails* before turning
+it off. The advisory mute is applied everywhere, because it changes no outcome —
+only how much jup says about it.
+
+Run without it — `vitest run --config test/corepack/vitest.config.ts` — to see
+those 52 rows fail, which is what a user with jup's real defaults would hit.
+
+### What was fixed rather than skipped
+
+Four levers were measured against the residual, and all four were taken:
 
 | Lever | Rows | Kind |
 | --- | --- | --- |
 | Hand over with `Module.runMain`, not `import()` | +6 | **bug** — fixed, see below |
 | Leave `process.exitCode` undefined on a plain success | (1 of those 6) | **bug** — fixed, see below |
-| Scrub `YARN_*` / `npm_config_*` from the test environment | +6 | harness (already applied) |
-| Suppress jup's *extra* advisory `!` lines on stderr | +22 | policy — `COREPACK_QUIET_ADVISORIES` (§11.5), now set by compat mode |
-| Accept trusted keys on curves other than P-256 | +13 | policy |
+| Accept trusted keys on curves other than P-256 | +13 | §06.3 scopes its P-256 assertion to *native* implementations; jup is not one |
+| Suppress jup's *extra* advisory `!` lines | +22 | `COREPACK_QUIET_ADVISORIES` (§11.5, §14.23) |
+| Scrub `YARN_*` / `npm_config_*` from the test environment | +6 | harness — a stray `YARN_NPM_MINIMAL_AGE_GATE` fails every row running an older Yarn |
 
-The advisory lever is the largest, and it is the one that could not be pulled
+The advisory lever was the largest, and the one that could not be pulled
 bluntly: a global mute costs five rows back, because upstream asserts the exact
 `!` text for the `devEngines` warnings, which jup already emits verbatim.
-`COREPACK_QUIET_ADVISORIES` (§11.5, §14.23) is scoped by *origin* instead — it
-silences the lines jup adds (§06.2's weak-hash notice, §15.11's "publishes no
-signatures", §15.13's shim diagnostics) and leaves corepack's own six untouched,
-`devEngines` included. Compat mode sets it, and the +22 above is the measured
-result: no row moved the other way.
-
-What no lever reaches, roughly 25 rows:
-
-- **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line,
-  and jup's usage line carries flags Corepack has no equivalent for. (12)
-- **Deliberate §15 behaviour the rows predate.** Ranges and tags resolve where
-  Corepack errors (§15.23); `yarn`'s built-in default is Berry, not Classic
-  1.22; `disable` will not remove a file it did not install; a hand-written
-  `.corepack` marker of `{}` is not a complete install (§07.2, §15.11). (11)
-- **Structurally unportable.** `should expose its root to spawned processes`
-  asserts `COREPACK_ROOT` equals the tests' own parent directory, which is only
-  true when the suite lives inside the tool's package. (1)
+`COREPACK_QUIET_ADVISORIES` is scoped by *origin* instead — it silences the lines
+jup adds and leaves Corepack's own six untouched.
 
 ## The two that were not divergences
 

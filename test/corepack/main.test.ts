@@ -98,7 +98,12 @@ it.fails(`should refuse to download a known package manager from a URL in packag
   });
 });
 
-it(`should require a version to be specified`, async () => {
+// SKIP (jup §15.23): `yarn@stable` is a tag and `yarn@*` a range, and jup
+// resolves both against the registry. Corepack requires an exact semver here
+// and errors `expected a semver version`. The first half of this row — a bare
+// `yarn` with no version at all — still errors in jup and is covered by
+// test/unit/index.test.ts.
+it.skip(`should require a version to be specified`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
       packageManager: `yarn`,
@@ -272,7 +277,9 @@ it(`should ignore the packageManager field when found within a node_modules vend
 });
 
 describe(`should handle invalid devEngines values`, () => {
-  it(`throw on missing version`, async () => {
+  // SKIP (jup §15.23): `yarn@*` is a range, and jup resolves ranges in
+  // devEngines rather than rejecting them as non-semver.
+  it.skip(`throw on missing version`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         devEngines: {
@@ -381,7 +388,8 @@ it(`should use hash from "packageManager" even when "devEngines" defines a diffe
 });
 
 describe(`should accept range in devEngines only if a specific version is provided`, () => {
-  it(`either in package.json#packageManager field`, async () => {
+  // SKIP (jup §15.23): `pnpm@6.x` is a range, and jup resolves it.
+  it.skip(`either in package.json#packageManager field`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         devEngines: {
@@ -583,7 +591,12 @@ it(`should use the closest matching packageManager field`, async () => {
   });
 });
 
-it(`should expose its root to spawned processes`, async () => {
+// SKIP (unportable): asserts COREPACK_ROOT equals `npath.dirname(__dirname)`,
+// i.e. that the test suite lives inside the tool's own package, as it does
+// upstream. jup exports COREPACK_ROOT correctly (§08.7) — it is the repo root
+// here, not `test/` — so the row can only ever fail in a port. §13's own row
+// for §08.7 covers the behaviour.
+it.skip(`should expose its root to spawned processes`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
       packageManager: `npm@6.14.2`,
@@ -851,7 +864,12 @@ it(`should always use fallback version when project spec env is disabled`, async
   });
 });
 
-it(`should support disabling the network accesses from the environment`, async () => {
+// SKIP (jup §15, errors.ts:270): with COREPACK_ENABLE_NETWORK=0 and nothing
+// cached, jup replaces Corepack's bare `Network access disabled by the
+// environment` with an actionable message naming the seeding commands. The
+// terse form is still emitted when a request is actually refused (§11.1), and
+// conformance test 45 pins it.
+it.skip(`should support disabling the network accesses from the environment`, async () => {
   process.env.COREPACK_ENABLE_NETWORK = `0`;
 
   await xfs.mktempPromise(async cwd => {
@@ -1255,7 +1273,12 @@ it(`should be able to show the latest version`, async () => {
   });
 });
 
-it(`should download yarn classic from custom registry`, async () => {
+// SKIP (jup §14): `yarn`'s built-in default is Berry, not Classic 1.22 — an
+// embedded default MUST track the current supported major, and Classic has
+// been unsupported since 2020 (#812). With no `packageManager` field this row
+// gets 4.x, and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3),
+// so both the version and the URL differ by design.
+it.skip(`should download yarn classic from custom registry`, async () => {
   await xfs.mktempPromise(async cwd => {
     process.env.COREPACK_NPM_REGISTRY = `https://registry.npmmirror.com`;
     process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = `1`;
@@ -1322,7 +1345,12 @@ it(`should download latest pnpm from custom registry`, async () => {
   });
 });
 
-it(`should use COREPACK_NPM_REGISTRY from .corepack.env for "corepack use" command`, async () => {
+// SKIP (jup §15, errors.ts:270): the row probes `.corepack.env` discovery by
+// disabling the network and looking for the registry host in the error. jup's
+// cache-miss message names the seeding commands instead of the URL, so the
+// probe fails even though the env file is read. Discovery itself is covered by
+// test/conformance/13-06-env-files.test.ts.
+it.skip(`should use COREPACK_NPM_REGISTRY from .corepack.env for "corepack use" command`, async () => {
   process.env.COREPACK_ENABLE_NETWORK = `0`;
 
   await xfs.mktempPromise(async cwd => {
@@ -1341,7 +1369,9 @@ it(`should use COREPACK_NPM_REGISTRY from .corepack.env for "corepack use" comma
   });
 });
 
-it(`should use closest .corepack.env`, async () => {
+// SKIP (jup §15, errors.ts:270): same probe, same reason — the nearest-file
+// rule it tests is covered by test/conformance/13-06-env-files.test.ts.
+it.skip(`should use closest .corepack.env`, async () => {
   process.env.COREPACK_ENABLE_NETWORK = `0`;
   process.env.DEBUG = `corepack`;
 
@@ -1411,7 +1441,14 @@ it(`should ignore .corepack.env inside a node_modules folder`, async () => {
   });
 });
 
-describe(`should pick up COREPACK_INTEGRITY_KEYS from env`, () => {
+// SKIP (jup §15.11): every row here asserts that a registry publishing no
+// signature is a hard failure (`No compatible signature found in package
+// metadata`). jup instead warns and falls back to integrity-only
+// verification, so the first half of each row cannot hold. The second half —
+// `COREPACK_INTEGRITY_KEYS=0` disabling verification, and being honoured from
+// the environment but never from `.corepack.env` (§14.5) — is covered by
+// test/conformance/13-05-environment.test.ts and 15-01/15-11.
+describe.skip(`should pick up COREPACK_INTEGRITY_KEYS from env`, () => {
   beforeEach(() => {
     process.env.AUTH_TYPE = `COREPACK_NPM_TOKEN`; // See `_registryServer.mjs`
     process.env.COREPACK_DEFAULT_TO_LATEST = `1`;
@@ -1616,7 +1653,10 @@ describe(`handle integrity checks`, () => {
       process.env.TEST_INTEGRITY = `valid`; // See `_registryServer.mjs`
     });
 
-    it(`should return no error when calling 'corepack use'`, async () => {
+    // SKIP (jup §09.4): `use` prints an extra `Updated <path> to use <ref>`
+    // line that Corepack does not, so the exact stdout differs. The signature
+    // check this row is really about passes.
+    it.skip(`should return no error when calling 'corepack use'`, async () => {
       await xfs.mktempPromise(async cwd => {
       // Skip rest of the test on Windows & Node.js 18.x as it inevitably times out otherwise.
         if (process.version.startsWith(`v18.`) && os.platform() === `win32`) return;
@@ -1690,7 +1730,11 @@ describe(`handle integrity checks`, () => {
       });
     });
   });
-  it(`should return an error when hash does not match without a tag`, async () => {
+  // SKIP (jup §12.1): a hash mismatch is an `Error`, not a `UsageError`, so it
+  // prints on stderr with a stack. Corepack presented every error as a usage
+  // error until 0.31.0 and this row still expects stdout; §12.1 requires a
+  // re-implementation to keep the distinction. The message text matches.
+  it.skip(`should return an error when hash does not match without a tag`, async () => {
     process.env.TEST_INTEGRITY = `invalid_integrity`; // See `_registryServer.mjs`
     process.env.COREPACK_DEFAULT_TO_LATEST = `1`; // Necessary as the version defined in `config.json` does not exist on the custom registry.
 
@@ -1718,7 +1762,9 @@ describe(`handle integrity checks`, () => {
       });
     });
   });
-  it(`should return an error when signature does not match without a tag`, async () => {
+  // SKIP (jup §12.1): as above — `Signature does not match` is an `Error`, so
+  // stderr with a stack rather than stdout.
+  it.skip(`should return an error when signature does not match without a tag`, async () => {
     process.env.TEST_INTEGRITY = `invalid_signature`; // See `_registryServer.mjs`
     process.env.COREPACK_DEFAULT_TO_LATEST = `1`; // Necessary as the version defined in `config.json` does not exist on the custom registry.
 
@@ -1746,7 +1792,8 @@ describe(`handle integrity checks`, () => {
       });
     });
   });
-  it(`should return an error when signature does not match when version is provided`, async () => {
+  // SKIP (jup §12.1): as above.
+  it.skip(`should return an error when signature does not match when version is provided`, async () => {
     process.env.TEST_INTEGRITY = `invalid_signature`; // See `_registryServer.mjs`
 
     await xfs.mktempPromise(async cwd => {
@@ -1762,7 +1809,8 @@ describe(`handle integrity checks`, () => {
       });
     });
   });
-  it(`should return an error when hash does not match`, async () => {
+  // SKIP (jup §12.1): as above.
+  it.skip(`should return an error when hash does not match`, async () => {
     process.env.TEST_INTEGRITY = `invalid_integrity`; // See `_registryServer.mjs`
 
     await xfs.mktempPromise(async cwd => {
@@ -1825,7 +1873,9 @@ describe(`allow range versions in devEngines.packageManager.version when user sp
   }
 });
 
-it(`should still validate devEngines.packageManager.version format when no user version specified`, async () => {
+// SKIP (jup §15.23): `npm@^6.14.2` in devEngines is a range, and jup resolves
+// ranges rather than rejecting them.
+it.skip(`should still validate devEngines.packageManager.version format when no user version specified`, async () => {
   await xfs.mktempPromise(async cwd => {
     // When no user version is specified, range versions in devEngines should still cause error
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
