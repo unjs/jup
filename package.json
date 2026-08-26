@@ -26,7 +26,7 @@
     ".": "./dist/index.mjs"
   },
   "scripts": {
-    "build": "obuild && node scripts/generate-shims.mjs",
+    "build": "node scripts/check-name-sets.mjs && obuild && node scripts/generate-shims.mjs",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",

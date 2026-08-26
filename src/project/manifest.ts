@@ -11,7 +11,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { isSupportedPackageManager } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
-import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
+import { messages, UsageError, validationWarningPrefix } from "../errors.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type {
@@ -593,7 +593,7 @@ export function warnOrThrow(message: string, onFail?: unknown): void {
     default: {
       // Includes `"warn"` — and anything unrecognised, which degrades here
       // rather than becoming an error about the error handling.
-      console.warn(`${VALIDATION_WARNING_PREFIX}${message}`);
+      console.warn(`${validationWarningPrefix()}${message}`);
     }
   }
 }

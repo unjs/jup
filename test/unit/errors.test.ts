@@ -54,7 +54,7 @@ describe("explainFetchFailure — §15.19, §15.35j", () => {
       expect(explained!.message).toBe(messages.notInCacheOffline("pnpm", "^11.0.0"));
       // The *range* the user wrote, so what the message tells them to run is
       // something they can paste back.
-      expect(explained!.message).toContain("corepack install -g --cache-only pnpm@^11.0.0");
+      expect(explained!.message).toContain("jup install -g --cache-only pnpm@^11.0.0");
     }
   });
 

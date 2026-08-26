@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../../src/errors.ts";
+import { messages, UsageError, validationWarningPrefix } from "../../src/errors.ts";
 import {
   discoverProjectSpec,
   NODE_MODULES_RE,
@@ -568,7 +568,7 @@ describe("devEngines — §03.3", () => {
       hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(
-      `! Corepack only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
+      `! Jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
     );
 
     warn.mockClear();
@@ -577,7 +577,7 @@ describe("devEngines — §03.3", () => {
       hasPin: false,
     });
     expect(warn).toHaveBeenCalledWith(
-      `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
+      `! Jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
     );
   });
 
@@ -597,7 +597,7 @@ describe("devEngines — §03.3", () => {
     warn.mockClear();
     read({ devEngines: { packageManager: { name: "yarn", version: "!", onFail: "warn" } } });
     expect(warn).toHaveBeenCalledWith(
-      `${VALIDATION_WARNING_PREFIX}${messages.devEnginesBadVersion("!")}`,
+      `${validationWarningPrefix()}${messages.devEnginesBadVersion("!")}`,
     );
   });
 
@@ -626,7 +626,7 @@ describe("devEngines — §03.3", () => {
       devEngines: { name: "yarn", onFail: "warn" },
       hasPin: true,
     });
-    expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
+    expect(warn).toHaveBeenCalledWith(`${validationWarningPrefix()}${nameMismatchMessage}`);
   });
 
   // Tests 32, 33.
@@ -642,7 +642,7 @@ describe("devEngines — §03.3", () => {
       devEngines: { name: "yarn", onFail: "explode" },
       hasPin: true,
     });
-    expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
+    expect(warn).toHaveBeenCalledWith(`${validationWarningPrefix()}${nameMismatchMessage}`);
   });
 
   it("treats a non-string packageManager as a name mismatch", () => {
@@ -672,7 +672,7 @@ describe("devEngines — §03.3", () => {
       devEngines: { name: "pnpm", version: "10.x", onFail: "warn" },
       hasPin: true,
     });
-    expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${versionMismatchMessage}`);
+    expect(warn).toHaveBeenCalledWith(`${validationWarningPrefix()}${versionMismatchMessage}`);
   });
 
   // Test 35.
@@ -740,11 +740,11 @@ describe("warnOrThrow — §03.3", () => {
     expectUsageError(() => warnOrThrow("boom", undefined), "boom");
 
     warnOrThrow("boom", "warn");
-    expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}boom`);
+    expect(warn).toHaveBeenCalledWith(`${validationWarningPrefix()}boom`);
 
     warn.mockClear();
     warnOrThrow("boom", { nonsense: true });
-    expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}boom`);
+    expect(warn).toHaveBeenCalledWith(`${validationWarningPrefix()}boom`);
   });
 });
 
@@ -1028,7 +1028,7 @@ describe("writePin — §03.7", () => {
 
     writePin(root, { name: "pnpm", reference: "6.6.2" });
     expect(warn).toHaveBeenCalledWith(
-      `${VALIDATION_WARNING_PREFIX}${messages.devEnginesPinMismatch("pnpm", "6.6.2", "yarn", "6.x")}`,
+      `${validationWarningPrefix()}${messages.devEnginesPinMismatch("pnpm", "6.6.2", "yarn", "6.x")}`,
     );
     expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
       "pnpm@6.6.2",

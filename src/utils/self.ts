@@ -1,9 +1,11 @@
 /**
- * Locating our own installation — §08.7, §10.4.
+ * Our own identity — §08.7, §10.4, §17.6 C1′.
  *
- * Two questions, both answered by walking **up** from whichever file is asking:
+ * Two questions are answered by walking **up** from whichever file is asking:
  * where is our package root (for `COREPACK_ROOT`), and where is the entry module
- * a shim stub should import (for `enable`).
+ * a shim stub should import (for `enable`). A third — *which of our two names
+ * were we invoked under* — is answered from `process.argv[1]` at the bottom of
+ * this file.
  *
  * Walking is not over-engineering here. A bundler is free to emit chunks into a
  * subdirectory — obuild puts them in `dist/_chunks/` — so a fixed number of
@@ -13,7 +15,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -99,4 +101,59 @@ export function findEntryModule(
   });
 
   return directory === undefined || found === undefined ? undefined : { directory, entry: found };
+}
+
+/* -------------------------------------------------------------------------- */
+/* The invoked entry point — §17.6 C1′                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * §17.6 C1′ — the tool's own entry-point names.
+ *
+ * One executable, two names: `jup` is its name and `corepack` a second name for
+ * the same file. Both are members of "the tool's own entry-point names" in
+ * §17.4 R7 step 0, so neither is ever mistaken for a shim.
+ */
+export const ENTRY_NAMES = ["jup", "corepack"] as const;
+
+export type EntryName = (typeof ENTRY_NAMES)[number];
+
+/**
+ * Extensions a launcher may carry that are not part of the name the user typed.
+ *
+ * `.ts` is how the tool runs from source under Node's type stripping, `.mjs`
+ * how it runs from `dist/`, and `.exe` how a Windows launcher would be named.
+ */
+const SCRIPT_EXTENSION =
+  process.platform === "win32" ? /\.(?:c?js|mjs|ts|exe)$/i : /\.(?:c?js|mjs|ts)$/;
+
+/**
+ * Which of {@link ENTRY_NAMES} this argv[1] names — **`jup` when it names
+ * neither** (§17.6 C1′).
+ *
+ * Node does not realpath `process.argv[1]`, so the name survives the two
+ * indirections that matter: npm's bin symlink (`node_modules/.bin/corepack` →
+ * `dist/bin.mjs`) arrives spelled `corepack`, and a generated package-manager
+ * shim (`~/.local/bin/pnpm`, §10.1) arrives spelled `pnpm` — neither of our
+ * names, and correctly `jup`, because a shim reaches `runMain` with the binary
+ * name already prepended to argv and never wants corepack's spellings.
+ *
+ * Pure, and exported separately from {@link getEntryName}, so the classification
+ * is testable without a process.
+ */
+export function entryNameFrom(argv1: string | undefined): EntryName {
+  if (argv1 === undefined || argv1 === "") return "jup";
+  const name = basename(argv1).replace(SCRIPT_EXTENSION, "");
+  return (ENTRY_NAMES as readonly string[]).includes(name) ? (name as EntryName) : "jup";
+}
+
+/**
+ * The name this process was invoked under (§17.4 R12, §17.6 C10).
+ *
+ * Deliberately not cached: it is two string operations, it is only ever reached
+ * while building a message or a usage line, and a cache would make the one
+ * process-global input here untestable without a hook in shipped code.
+ */
+export function getEntryName(): EntryName {
+  return entryNameFrom(process.argv[1]);
 }

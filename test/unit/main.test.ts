@@ -393,7 +393,7 @@ describe("presentError — §08.4, §12.1", () => {
     expect(code).toBe(1);
     expect(sink.err.join("")).toBe("");
     expect(sink.out.join("")).toBe(
-      "Usage Error: boom\n\n$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>\n",
+      "Usage Error: boom\n\n$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>\n",
     );
   });
 
@@ -731,6 +731,10 @@ const COLD_PATH_MODULES = [
   "net/registry.ts",
   "cache/tar.ts",
   "commands/cli.ts",
+  // §17.4 R7 steps 3–7. The proxy tests (steps 0–2) are `main.ts`'s and stay
+  // warm; the scope word and the verb table are only ever reached in management
+  // mode, which is already behind the lazy import.
+  "commands/router.ts",
   "commands/shims.ts",
   // §15.30's report is management-mode only, and it reaches for the shim
   // resolver and a full store listing — none of which a `yarn --version` may pay
@@ -1013,6 +1017,19 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * on every invocation — so none of it can move off it, and the roles have to
    * be *in* the entries because R1 makes a role a property of the tool rather
    * than of a second table beside it.
+   *
+   * And from 206,000 to 212,000 for §17.6 C1′ and C10: `utils/self.ts` learned
+   * which of the tool's two names it was invoked under (+2,523 source bytes) and
+   * `errors.ts` substitutes that name into a dozen message bodies (+2,156). Both
+   * numbers are mostly prose — the code is a `basename`, an extension strip, a
+   * membership test, and a `${tool()}` at each call site. Measured, `warm.mjs`
+   * went 79,952 -> 80,413, **+461 bytes, or +0.58%**, against +4,782 of source:
+   * this measure over-counts a comment exactly as it over-counts a long import
+   * specifier. Neither half can move off the warm path — `errors.ts` is what
+   * every warm module reaches for, and the name has to be resolved where the
+   * message is *built*, not where it is printed: a proxy-mode `UsageError` goes
+   * straight to stderr with no second pass over the text. Held at 212,000 rather
+   * than the 210,555 this leaves.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1024,6 +1041,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(206_000);
+    ).toBeLessThanOrEqual(212_000);
   });
 });

@@ -26,7 +26,7 @@ import {
   SUPPORTED_NAMES,
 } from "../config/table.ts";
 import { isFrozenLockfile } from "../project/env.ts";
-import { explainFetchFailure, messages, UsageError } from "../errors.ts";
+import { explainFetchFailure, messages, toolName, UsageError } from "../errors.ts";
 import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
 import {
@@ -59,7 +59,8 @@ import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
 
-import { HELP_TEXT } from "./usage.ts";
+import { invocationPrefix, type Route, routeArgv } from "./router.ts";
+import { type DispatchedVerb, helpText } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
 
 /* -------------------------------------------------------------------------- */
@@ -311,7 +312,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
   const parsed = parseArgs(args, {});
   if (parsed.positionals.length > 0) {
     throw new UsageError(
-      `The 'corepack install' command takes no arguments; use 'corepack install -g <name>@<version>' to install one globally`,
+      `The '${toolName()} install' command takes no arguments; use '${toolName()} install -g <name>@<version>' to install one globally`,
     );
   }
 
@@ -354,7 +355,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
 
   if (parsed.positionals.length === 0) {
     throw new UsageError(
-      `The 'corepack install -g' command requires at least one package manager or archive`,
+      `The '${toolName()} install -g' command requires at least one package manager or archive`,
     );
   }
 
@@ -511,7 +512,7 @@ async function installFromArchive(
 export async function cmdUp(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
   if (parsed.positionals.length > 0) {
-    throw new UsageError(`The 'corepack up' command takes no arguments`);
+    throw new UsageError(`The '${toolName()} up' command takes no arguments`);
   }
 
   // §15.27 — `--here` reads and writes `cwd`'s own manifest, ignoring the walk.
@@ -590,10 +591,12 @@ export async function cmdUse(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
   const [pattern, ...extra] = parsed.positionals;
   if (pattern === undefined) {
-    throw new UsageError(`The 'corepack use' command requires a package manager pattern`);
+    throw new UsageError(`The '${toolName()} use' command requires a package manager pattern`);
   }
   if (extra.length > 0) {
-    throw new UsageError(`The 'corepack use' command accepts a single package manager pattern`);
+    throw new UsageError(
+      `The '${toolName()} use' command accepts a single package manager pattern`,
+    );
   }
 
   // Read before anything is resolved or downloaded: see {@link readPinStyle}.
@@ -791,12 +794,14 @@ export async function cmdCache(args: string[]): Promise<number> {
   }
 
   if ((subcommand !== "clean" && subcommand !== "clear") || extra.length > 0) {
-    throw new UsageError(`The 'corepack cache' command only accepts 'clean', 'clear' or 'list'`);
+    throw new UsageError(
+      `The '${toolName()} cache' command only accepts 'clean', 'clear' or 'list'`,
+    );
   }
   // `--json` belongs to `list`; silently ignoring it here would let a script
   // believe it was parsing output that never came.
   if (hasFlag(parsed, "--json")) {
-    throw new UsageError(`The 'corepack cache ${subcommand}' command does not accept --json`);
+    throw new UsageError(`The '${toolName()} cache ${subcommand}' command does not accept --json`);
   }
 
   // `rm -rf <home>/v1`, forced; `lastKnownGood.json` lives outside `v1` and
@@ -865,7 +870,7 @@ export async function cmdHydrate(args: string[]): Promise<number> {
   const [file, ...extra] = parsed.positionals;
 
   if (file === undefined || extra.length > 0) {
-    throw new UsageError(`The 'corepack hydrate' command requires exactly one archive`);
+    throw new UsageError(`The '${toolName()} hydrate' command requires exactly one archive`);
   }
 
   // Three differences from `install -g <file>.tgz`: no `.tgz` extension check,
@@ -940,8 +945,22 @@ function cmdVersion(): Promise<number> {
   return Promise.resolve(0);
 }
 
-function cmdHelp(): Promise<number> {
-  out(HELP_TEXT);
+/**
+ * §17.6 C6 — the help text is the surface's documentation, so it has to be able
+ * to describe a scope.
+ *
+ * `jup --help` shows both scopes; `jup pm --help` and `corepack --help` show the
+ * package-manager surface, with every synopsis line spelled the way the reader
+ * would have to type it.
+ */
+function cmdHelp(command: Route): Promise<number> {
+  out(
+    helpText({
+      entry: command.entry,
+      prefix: invocationPrefix(command),
+      scopes: command.scopeWord === null && command.entry !== "corepack",
+    }),
+  );
   return Promise.resolve(0);
 }
 
@@ -950,64 +969,68 @@ function cmdHelp(): Promise<number> {
 /* -------------------------------------------------------------------------- */
 
 /**
- * §09 — dispatch a management-mode invocation and return its exit code.
+ * §09, §17.4 R7 steps 5–7 — the verb table.
+ *
+ * Typed by {@link DispatchedVerb}, which `usage.ts` derives from the surface
+ * itself: a verb named there and missing here is a compile error, and a verb
+ * here that the surface does not name is one too. R8's "one list, derived from
+ * the surface, never written out twice" is that type, not a comment.
+ *
+ * Every handler takes the whole {@link Route} rather than just its arguments,
+ * so `command.scope` — the role a scope word put the command in — is already in
+ * front of the code that will need it. Nothing branches on it yet: R9's
+ * narrowing and R10's inference are §17.9 rows 225–233, and R13 requires that
+ * until then `jup use …` and `jup pm use …` agree exactly (row 208).
+ */
+const HANDLERS: Record<DispatchedVerb, (command: Route) => Promise<number> | number> = {
+  cache: (command) => cmdCache(command.args),
+  // Imported lazily: §10's shim machinery is only ever reached by these two
+  // commands, and nothing else in the surface should pay to load it.
+  disable: (command) => import("./shims.ts").then(({ cmdDisable }) => cmdDisable(command.args)),
+  enable: (command) => import("./shims.ts").then(({ cmdEnable }) => cmdEnable(command.args)),
+  help: (command) => cmdHelp(command),
+  hydrate: (command) => cmdHydrate(command.args),
+  // Lazily, like `enable`/`disable`: §15.30's report reaches for the shim
+  // resolver and the store listing, and no other command pays for either.
+  info: (command) => import("./info.ts").then(({ cmdInfo }) => cmdInfo(command.args)),
+  install: (command) =>
+    // `-g`/`--global` selects a different command, not a different flag.
+    command.args.includes("-g") || command.args.includes("--global")
+      ? cmdInstallGlobal(command.args)
+      : cmdInstall(command.args),
+  pack: (command) => cmdPack(command.args),
+  prepare: (command) => cmdPrepare(command.args),
+  up: (command) => cmdUp(command.args),
+  use: (command) => cmdUse(command.args),
+};
+
+/**
+ * §09, §17.4 R7 — classify the arguments, then dispatch.
  *
  * A `UsageError` deliberately propagates: `main.ts` owns §12.1's presentation
- * (stdout, `Usage Error: `, a blank line, then {@link USAGE_LINES}'s entry for
- * the command word).
+ * (stdout, `Usage Error: `, a blank line, then the usage line for the verb and
+ * the scope in effect, which `router.ts` renders from the same table).
  */
 export async function runManagementCommand(args: string[]): Promise<number> {
-  const [command, ...rest] = args;
+  return await dispatch(routeArgv(args));
+}
 
-  switch (command) {
-    case undefined:
-    case "help":
-    case "-h":
-    case "--help": {
-      return cmdHelp();
-    }
-    case "--version": {
+async function dispatch(command: Route): Promise<number> {
+  switch (command.kind) {
+    case "version": {
       return cmdVersion();
     }
-    case "cache": {
-      return cmdCache(rest);
+    case "help": {
+      return await cmdHelp(command);
     }
-    case "enable": {
-      // Imported lazily: §10's shim machinery is only ever reached by these two
-      // commands, and nothing else in the surface should pay to load it.
-      return import("./shims.ts").then(({ cmdEnable }) => cmdEnable(rest));
+    case "verb": {
+      return await HANDLERS[command.verb as DispatchedVerb]!(command);
     }
-    case "disable": {
-      return import("./shims.ts").then(({ cmdDisable }) => cmdDisable(rest));
-    }
-    case "info": {
-      // Lazily, like `enable`/`disable`: §15.30's report reaches for the shim
-      // resolver and the store listing, and no other command pays for either.
-      return import("./info.ts").then(({ cmdInfo }) => cmdInfo(rest));
-    }
-    case "install": {
-      // `-g`/`--global` selects a different command, not a different flag.
-      return rest.includes("-g") || rest.includes("--global")
-        ? cmdInstallGlobal(rest)
-        : cmdInstall(rest);
-    }
-    case "pack": {
-      return cmdPack(rest);
-    }
-    case "up": {
-      return cmdUp(rest);
-    }
-    case "use": {
-      return cmdUse(rest);
-    }
-    case "hydrate": {
-      return cmdHydrate(rest);
-    }
-    case "prepare": {
-      return cmdPrepare(rest);
-    }
-    default: {
-      throw new UsageError(`Unknown command "${command}"`);
+    case "unknown": {
+      // §12.9, and R12's own refusal where there is one — the corepack entry
+      // point recognises `runtime` precisely so that it can say this rather than
+      // leave the user with a bare "unknown command".
+      throw new UsageError(command.message ?? `Unknown command "${command.unknown}"`);
     }
   }
 }

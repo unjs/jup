@@ -9,6 +9,50 @@
  */
 
 import { ENV, readEnv } from "./config/env-vars.ts";
+import { getEntryName } from "./utils/self.ts";
+
+/**
+ * §17.6 C10 — the tool's own name, spelled as the user invoked it.
+ *
+ * Corepack's messages name it in their *bodies*, not only in usage lines, and
+ * under the `corepack` entry point those bodies are frozen byte for byte (§13.1,
+ * §17.4 R12). Under `jup` the name is substituted — and nothing else is: same
+ * sentence, same punctuation, same interpolations, so a reader can still match
+ * the two.
+ *
+ * Writing `${toolName()}` at the call site rather than running a replacement over
+ * finished text is what makes that a property of the code instead of a promise:
+ * there is one copy of each sentence, and the only thing that varies is a name.
+ *
+ * Three kinds of "corepack" are deliberately **not** routed through here, per
+ * §12.1 and C10 — a name that belongs to something else is not our name:
+ *
+ * * `packageManager`, `devEngines`, and the `https://nodejs.org/…#packagemanager`
+ *   URL, which are the manifest's vocabulary and Node's documentation;
+ * * a `COREPACK_*` variable under its legacy spelling (§11.6);
+ * * `https://github.com/nodejs/corepack#troubleshooting`. This one is a
+ *   judgement call and it goes the same way: the URL names a **repository**, not
+ *   this tool. `https://github.com/nodejs/jup#troubleshooting` does not exist,
+ *   so substituting would turn a working pointer into a 404 — and pointing the
+ *   sentence somewhere else entirely would be a rewrite, which C10 forbids.
+ *
+ * The corepack-named *files* — `.corepack.lock`, `.corepack.env`,
+ * `corepack.tgz`, the `.corepack` marker — are §17.6 C9's rename, not C10's
+ * substitution. Where a message names one, the file name stays as it is and only
+ * the tool name around it moves.
+ */
+export const toolName = getEntryName;
+
+/**
+ * The same name at the start of a sentence: `! Corepack …` / `! Jup …`.
+ *
+ * Named `ToolName` rather than `Tool` because `Tool` is §17.3's table entry —
+ * one identifier, two meanings, in a file that would eventually import both.
+ */
+export function ToolName(): string {
+  const name = getEntryName();
+  return name[0]!.toUpperCase() + name.slice(1);
+}
 
 /**
  * §12.1 — the user asked for something impossible or contradictory.
@@ -138,8 +182,15 @@ export function networkError<T extends Error>(error: T, cause: unknown): T {
   return error;
 }
 
-/** §12.3 — prefix applied when a validation failure warns instead of throwing. */
-export const VALIDATION_WARNING_PREFIX = "! Corepack validation warning: ";
+/**
+ * §12.3 — prefix applied when a validation failure warns instead of throwing.
+ *
+ * A function rather than a constant since §17.6 C10: the name it carries depends
+ * on the entry point the user invoked.
+ */
+export function validationWarningPrefix(): string {
+  return `! ${ToolName()} validation warning: `;
+}
 
 /**
  * §11.5 — an advisory line **this** implementation adds, which
@@ -187,11 +238,11 @@ export const messages = {
 
   /** Unconditional warning, regardless of `onFail`. Emitted with the `! ` already attached. */
   devEnginesNotObject: (value: unknown) =>
-    `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (${json(value)}) will be ignored.`,
+    `! ${ToolName()} only supports objects as valid value for devEngines.packageManager. The current value (${json(value)}) will be ignored.`,
 
   /** Unconditional warning, regardless of `onFail`. */
   devEnginesArray: () =>
-    `! Corepack does not currently support array values for devEngines.packageManager`,
+    `! ${ToolName()} does not currently support array values for devEngines.packageManager`,
 
   devEnginesBadName: (value: unknown) =>
     `The value of devEngines.packageManager.name ${json(value)} is not a supported string value`,
@@ -224,7 +275,7 @@ export const messages = {
   tagsNotAllowed: () => `Packages managers can't be referenced via tags in this context`,
 
   unsupportedByBuild: (name: string) =>
-    `This package manager (${name}) isn't supported by this corepack build`,
+    `This package manager (${name}) isn't supported by this ${toolName()} build`,
 
   /**
    * §15.17 — a version no declared band covers. Corepack's equivalent is an
@@ -248,7 +299,7 @@ export const messages = {
     `${name}@${version} declares "bin" ${JSON.stringify(declared)}, but its range band says ${JSON.stringify(band)}. The package won; update the range band.`,
 
   upNotSemver: () =>
-    `The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
+    `The '${toolName()} up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
 
   upNoHighest: (name: string, major: number) =>
     `Failed to find the highest release for ${name} ${major}.x`,
@@ -269,7 +320,7 @@ export const messages = {
    * the user never typed. This is the sentence that names what was asked for.
    */
   versionDoesNotExist: (name: string, version: string, registry: string) =>
-    `${name}@${version} does not exist in ${url_(registry)}. Run 'corepack info' to see the resolved spec and where it came from.`,
+    `${name}@${version} does not exist in ${url_(registry)}. Run '${toolName()} info' to see the resolved spec and where it came from.`,
 
   /**
    * §15.19 — the airgapped diagnostic.
@@ -280,7 +331,7 @@ export const messages = {
    * the difference between a Dockerfile that can be fixed and one that cannot.
    */
   notInCacheOffline: (name: string, range: string) =>
-    `${name}@${range} is not in the cache and network access is disabled. Seed it with 'corepack install -g --cache-only ${name}@${range}', or run 'corepack pack ${name}@${range}' on a networked machine.`,
+    `${name}@${range} is not in the cache and network access is disabled. Seed it with '${toolName()} install -g --cache-only ${name}@${range}', or run '${toolName()} pack ${name}@${range}' on a networked machine.`,
 
   /* §12.5 — project enforcement ------------------------------------------ */
 
@@ -324,7 +375,7 @@ export const messages = {
    * do **not** appear.
    */
   cannotDownloadLatest: (packageName: string) =>
-    `Corepack cannot download the latest stable version of ${packageName}; you can disable signature verification by setting COREPACK_INTEGRITY_KEYS to 0 in your env, or instruct Corepack to use the latest stable release known by this version of Corepack by setting COREPACK_DEFAULT_TO_LATEST to 0`,
+    `${ToolName()} cannot download the latest stable version of ${packageName}; you can disable signature verification by setting COREPACK_INTEGRITY_KEYS to 0 in your env, or instruct ${ToolName()} to use the latest stable release known by this version of ${ToolName()} by setting COREPACK_DEFAULT_TO_LATEST to 0`,
 
   /* §15.4 — TLS ------------------------------------------------------------ */
 
@@ -395,7 +446,7 @@ export const messages = {
 
   /** `hydrate` says `'corepack prepare'` instead — pass the command name. */
   invalidArchiveFormat: (command: "pack" | "prepare" = "pack") =>
-    `Invalid archive format; did it get generated by 'corepack ${command}'?`,
+    `Invalid archive format; did it get generated by '${toolName()} ${command}'?`,
 
   unsupportedPackageManagerName: (name: string) => `Unsupported package manager '${name}'`,
 
@@ -429,13 +480,13 @@ export const messages = {
 
   allDone: () => `All done!`,
 
-  aboutToDownload: (url: string) => `! Corepack is about to download ${url_(url)}`,
+  aboutToDownload: (url: string) => `! ${ToolName()} is about to download ${url_(url)}`,
 
   /** Trailing space, no newline. */
   downloadPrompt: () => `? Do you want to continue? [Y/n] `,
 
   autoPinNotice: (name: string, reference: string) =>
-    `! The local project doesn't define a 'packageManager' field. Corepack will now add one referencing ${name}@${reference}.`,
+    `! The local project doesn't define a 'packageManager' field. ${ToolName()} will now add one referencing ${name}@${reference}.`,
 
   autoPinDocs: () =>
     `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
@@ -469,7 +520,7 @@ export const messages = {
    * its own replacement, since the rule is about deprecated commands at large.
    */
   deprecatedCommand: (command: string, replacement: string) =>
-    `'corepack ${command}' is deprecated; use 'corepack ${replacement}' instead.`,
+    `'${toolName()} ${command}' is deprecated; use '${toolName()} ${replacement}' instead.`,
 
   /**
    * §15.35d — `COREPACK_SPEC_FILE` names a file that is not there. Falling back

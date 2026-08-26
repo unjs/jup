@@ -47,7 +47,7 @@ import {
 } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../config/table.ts";
 import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
-import { redactUserinfo, UsageError } from "../errors.ts";
+import { redactUserinfo, toolName, UsageError } from "../errors.ts";
 import { parseManifest } from "../utils/json.ts";
 import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "../project/lockfile.ts";
 import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "../project/manifest.ts";
@@ -1271,7 +1271,7 @@ function wantsJson(args: string[], command: string): boolean {
 /** §15.30 — `corepack info [--json]`. Always exits 0 unless the CLI was misused. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function cmdInfo(args: string[]): Promise<number> {
-  const json = wantsJson(args, `corepack info`);
+  const json = wantsJson(args, `${toolName()} info`);
   const report = buildReport();
   process.stdout.write(json ? `${JSON.stringify(report, undefined, 2)}\n` : formatReport(report));
   return 0;
@@ -1280,7 +1280,7 @@ export async function cmdInfo(args: string[]): Promise<number> {
 /** §15.19 / §15.30 — `corepack cache list [--json]`, the aliased subset. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function cmdCacheList(args: string[]): Promise<number> {
-  const json = wantsJson(args, `corepack cache list`);
+  const json = wantsJson(args, `${toolName()} cache list`);
   const report = buildReport();
   process.stdout.write(
     json ? `${JSON.stringify(cacheListView(report), undefined, 2)}\n` : formatCacheList(report),

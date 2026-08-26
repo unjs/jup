@@ -6,11 +6,16 @@
  * variable, `COREPACK_HOME` is always a fresh directory the caller owns, and
  * `COREPACK_DEFAULT_TO_LATEST` is `0` unless the test is about default-version
  * lookup and says otherwise.
+ *
+ * §13.1 also fixes *which name* the tool is spawned under: `corepack` by
+ * default, since rows 1–147 assert corepack's verbatim spellings (§17.4 R12).
+ * Pass `as: "jup"` for a row about the jup surface.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { type EntryName, entryPath } from "../../_fixtures/entry.ts";
 import type { MockRegistry } from "./registry.ts";
 import type { FixtureTable } from "./table-fixture.ts";
 
@@ -52,6 +57,15 @@ export interface RunOptions {
   input?: string;
   /** Run a *copy* of the tool (see `copyTool`) rather than `src/bin.ts`. */
   bin?: string;
+  /**
+   * §13.1, §17.6 C1′ — which of the tool's two entry-point names to spawn it
+   * under.
+   *
+   * `corepack` by default, because rows 1–147 assert corepack's verbatim output
+   * and §13.1 requires them to run through that entry point (§17.4 R12). §17.9's
+   * rows are the ones that opt into `jup`, so no existing row changes meaning.
+   */
+  as?: EntryName;
   /** Inherit the parent's stdio instead of piping it (row 140's TTY case). */
   inheritStdio?: boolean;
   /**
@@ -139,6 +153,8 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
   env.npm_config_prefix = options.home;
 
   const bin = options.bin ?? BIN;
+  // The name the tool sees in `argv[1]`; the module it loads is `bin` either way.
+  const entry = entryPath(bin, options.as ?? "corepack");
 
   const nodeArgs: string[] = [];
   if (options.registry !== undefined) {
@@ -161,7 +177,7 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
     else env[key] = value;
   }
 
-  const child = spawn(process.execPath, [...nodeArgs, bin, ...args], {
+  const child = spawn(process.execPath, [...nodeArgs, entry, ...args], {
     cwd: options.cwd,
     env,
     stdio: options.inheritStdio ? ["pipe", "inherit", "inherit"] : "pipe",

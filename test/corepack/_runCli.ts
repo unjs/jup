@@ -1,20 +1,31 @@
 /**
  * §13.1's `run()`, wearing upstream Corepack's `runCli` signature.
  *
- * Upstream spawns `dist/corepack.js`; this spawns jup's `src/bin.ts` directly,
- * which Node type-strips, so the suite needs no build step. `COREPACK_HOME` and
- * the rest come from `process.env` — the ported tests set them in `beforeEach`
- * exactly as upstream does.
+ * Upstream spawns `dist/corepack.js`; this spawns jup's `src/bin.ts`, which Node
+ * type-strips, so the suite needs no build step. `COREPACK_HOME` and the rest
+ * come from `process.env` — the ported tests set them in `beforeEach` exactly as
+ * upstream does.
+ *
+ * It spawns it through a link *named* `corepack` (§17.6 C1′): every row here
+ * asserts corepack's verbatim output, and §17.4 R12 makes those spellings a
+ * property of the invoked name. Running the same code as `jup` would substitute
+ * the tool's name into a dozen message bodies (§17.6 C10) and fail rows that are
+ * about corepack compatibility — which makes this suite the best detector there
+ * is for a substitution that leaked the wrong way.
  */
 
 import { spawn } from "node:child_process";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { entryPath } from "../_fixtures/entry.ts";
 import { npath, type PortablePath } from "./_fslib.ts";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const BIN = path.join(HERE, `..`, `..`, `src`, `bin.ts`);
+
+/** §13.1 — rows 1–147 run through the `corepack` entry point (§17.4 R12). */
+const ENTRY = entryPath(BIN, `corepack`);
 
 const REGISTRY_SERVER = path.join(HERE, `_registryServer.mjs`);
 const NOCK = path.join(HERE, `_nock.mjs`);
@@ -84,7 +95,7 @@ export async function runCli(
         `--no-warnings`,
         `--import`,
         withCustomRegistry ? pathToImport(REGISTRY_SERVER) : pathToImport(NOCK),
-        BIN,
+        ENTRY,
         ...argv,
       ],
       {

@@ -4,21 +4,22 @@
 breakdown: what is left, in what order, and which conformance rows prove each piece.
 Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
 
-## Where things stand — `2b80f1e`, 2026-08-26
+## Where things stand — `2261d95` + D1, 2026-08-26
 
 * **§01–§16 are implemented.** Every row of §13 (1–147) and §15.38 (148–207) has a test
-  whose title names it. `pnpm vitest run`: **1654 passed, 3 skipped**, the skips all
+  whose title names it. `pnpm vitest run`: **1707 passed, 3 skipped**, the skips all
   platform-conditional (Windows, root, no TTY). `pnpm test:corepack` (corepack's own
   suite): **103 passed, 1 expected fail, 37 skipped**, each skip a §14 divergence with a
   stated reason.
-* **§17 is specified and unimplemented.** Two pieces have landed early: the one-executable
+* **§17 is partly implemented.** Two pieces landed early: the one-executable
   / two-names packaging (`bin.corepack` and `bin.jup` are the same file, C1′) and the
   `JUP_`/`COREPACK_` pair resolution in `src/config/env-vars.ts`. The latter is **tier 1
   only** — C4's second tier, under which §11.5's and §15.37's invented variables are named
   `JUP_` and merely *accept* the `COREPACK_` spelling, is not implemented; the table treats
-  every variable as an equal pair. D0 has since landed §17.3's noun and its roles as data,
-  plus §17.9's table fixture. Nothing else — no scope words, no role-sensitive behaviour, no
-  rename of the store home, marker, env file, or lockfile. Rows 208–233 have no tests.
+  every variable as an equal pair. D0 has since landed §17.3's noun and its roles as data
+  plus §17.9's table fixture, and D1 the command router, the entry-point name, and C6/C10.
+  What is left is role-sensitive *behaviour* (D2), the renames (D3), and the shim policy
+  and interpreter guard (D4). Rows 208–215 have tests; 216–233 do not.
 * **Nothing is published**; `package.json` is at `0.0.0`.
 
 ## Remaining work — §17
@@ -62,16 +63,53 @@ deletes `COREPACK_HOME`, which is all rows 216–217 want. What was missing was 
 row on §07.1's fallback chain would have read *their* cache. Both are now stripped, `HOME`
 is already repointed at the fixture, and the rows that want either set it themselves.
 
-### D1 — The command router §17.4, C1′, C6, C10
+### D1 — The command router §17.4, C1′, C6, C10 — **done**
 
-R7's classification order, R8's disjointness invariant (a build-time check, not a runtime
-one), R9's narrowing (whose row, 230, needs D0's fixture and so lands with D2), and
-R12's `corepack` entry point — which must recognise the scope
-words *in order to refuse them*. C10 is a **name** substitution in message bodies, not a
-rewrite: same sentence, same punctuation, same interpolations, and never applied to
-`packageManager`, `devEngines`, legacy `COREPACK_*` spellings, or the nodejs.org URL.
-`src/commands/usage.ts` becomes scope-aware.
-**Rows:** 208–215.
+R7's classification order splits across the existing warm/cold boundary. Steps 0–2 (the
+proxy tests) stay in `classifyInvocation` in `src/main.ts`, on the warm path; steps 3–7 are
+`src/commands/router.ts`, behind the lazy import, so the scope word and the verb table cost
+the proxy path nothing. `jup pm yarn --version` therefore reaches step 4 → step 7 (row 209)
+while `jup yarn --version` is still step 1 (row 210) — the same rule read from both ends.
+
+* **The entry-point name (C1′).** `utils/self.ts` gained `entryNameFrom(argv[1])`:
+  `basename`, a known script extension stripped, matched against `{ jup, corepack }`,
+  **defaulting to `jup`**. `process.argv[1]` is not realpathed, so npm's bin link arrives
+  spelled `corepack` and a §10.1 shim arrives spelled `pnpm` — neither name, and correctly
+  `jup`. Not cached: two string operations, reached only while building a message, and a
+  cache would want a test hook in shipped code.
+* **Both harnesses spawn through a `corepack`-named entry** (§13.1). `test/_fixtures/entry.ts`
+  is shared by `test/conformance/_harness/run.ts` and `test/corepack/_runCli.ts`: a symlink
+  in a temp directory, verified against Node 24 — it is resolved for module identity (so
+  `import.meta.url` still lands in `src/` and `self.ts`'s upward walk is unaffected) while
+  `argv[1]` keeps the link's name. A one-line launcher is the fallback where an
+  unprivileged symlink is refused. `run()` takes `as: "jup" | "corepack"`, **defaulting to
+  `corepack`**, so §17.9's rows opt into `jup` and no existing row changed.
+* **`VERBS` is single-sourced.** `usage.ts`'s `COMMANDS` carries each verb's usage line and
+  its `--help` synopsis lines; `VERBS` is `Object.keys`, the help text renders from it, and
+  `cli.ts`'s dispatch table is typed `Record<DispatchedVerb, …>` — derived from the same
+  object — so a verb in one place and not the other is a **compile** error rather than a
+  word that silently does nothing. §15.34's `project` sits in the table marked `pending`:
+  R8 needs the word reserved, and `pending` keeps it out of `--help` and out of the
+  dispatch, so it still answers `Unknown command`.
+* **R8 runs in `pnpm build`** (`scripts/check-name-sets.mjs`, which prints the count), and
+  the checking function is exercised against a poisoned table by row 215's tests. That pair
+  is what §17.9 permits in place of a `(exitCode, stdout, stderr)` row.
+* **C10** is `${tool()}` / `${Tool()}` at each call site rather than a pass over finished
+  text, so "a name substitution, not a rewrite" is a property of the code: one copy of each
+  sentence, one thing varying. `https://github.com/nodejs/corepack#troubleshooting` is
+  **not** substituted — it names a *repository*, `nodejs/jup` does not exist, and aiming
+  the sentence elsewhere would be the rewrite C10 forbids. The corepack-named files are C9
+  and untouched.
+* **C6** — `jup --help` describes both scopes, `jup pm --help` and `corepack --help` print
+  the package-manager surface. The proxy line keeps the bare entry name under a scope,
+  because R7 makes `jup pm yarn` an error and advertising it would advertise something that
+  does not work.
+
+The scope reaches the commands as `Route.scope`, on the object every handler receives.
+Nothing branches on it yet — that is R9/R10/R11 — and R13 requires the two forms to agree
+until then, which row 208 asserts.
+**Rows:** 208–215, in `test/conformance/17-01-router.test.ts`; the classification table,
+the `argv[1]` shapes and C10's two sides are `test/unit/router.test.ts`.
 
 ### D2 — Roles in the data model §17.3, §17.5
 
@@ -111,8 +149,9 @@ reachable without any `PATH` of the user's.
 
 ## Standing hazards
 
-* **The warm byte ceiling is at 206,000** (`test/unit/main.test.ts`), raised from 204,000
-  by D0's roles (+1,799 source bytes; measured, `warm.mjs` 79,525 -> 79,952). The next warm-path
+* **The warm byte ceiling is at 212,000** (`test/unit/main.test.ts`), raised from 206,000
+  by D1's C1′ and C10 (+4,782 source bytes, most of it prose; measured, `warm.mjs`
+  79,952 -> 80,413, +0.58%). The next warm-path
   change raises it deliberately, with a reason. It is a tripwire, not a budget. The
   companion assertion — the modules statically reachable from `src/shim.ts` **equal**
   `build.config.ts`'s `WARM_MODULES` — is what pins the emitted chunk; a new static import
@@ -120,7 +159,7 @@ reachable without any `PATH` of the user's.
 * **`test/conformance/15-28-native.test.ts` flakes under full-suite load.** The §08.5
   row asserting `exitCode 55` / `signal null` — the child stayed in the process group and
   the tool did not die of the same signal — failed once in two consecutive full runs and
-  passes alone every time. 1648 passed / 3 skipped is the green baseline; a single failure
+  passes alone every time. 1707 passed / 3 skipped is the green baseline; a single failure
   in that file is the flake, not a regression. Worth a timing fix before it costs someone
   an afternoon.
 * **The sandbox has live network and the conformance harness does not disable it.** A row

@@ -21,7 +21,7 @@ describe("errors", () => {
       `The value of devEngines.packageManager.version "yarn@1.x" is not a valid semver range`,
     );
     expect(messages.devEnginesNotObject(10)).toBe(
-      `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
+      `! Jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
     );
   });
 

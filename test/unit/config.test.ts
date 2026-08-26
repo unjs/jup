@@ -153,7 +153,7 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
   });
 
   it("rejects an unknown package manager with a usage error", () => {
-    expect(() => getSpecFor("bun", "1.0.0")).toThrow(/isn't supported by this corepack build/);
+    expect(() => getSpecFor("bun", "1.0.0")).toThrow(/isn't supported by this jup build/);
   });
 });
 

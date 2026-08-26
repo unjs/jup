@@ -305,7 +305,7 @@ export async function presentError(error: unknown, invocation: Invocation): Prom
 
     // Management mode puts it on **stdout**, with the offending command's usage
     // line underneath. The stream split between the two modes is test-asserted.
-    const usage = await usageLineFor(invocation.args[0]);
+    const usage = await usageLineFor(invocation.args);
     process.stdout.write(`Usage Error: ${error.message}\n\n${usage}\n`);
     return 1;
   }
@@ -403,16 +403,18 @@ async function fallbackReference(name: string, transparent: boolean): Promise<st
 /**
  * §12.1 — the usage line appended to a management-mode `Usage Error:`.
  *
- * Keyed by the command word, falling back to the generic line for anything
- * unrecognised. Loaded on demand: `usage.ts` also carries `--help`'s full
- * synopsis, and neither string has any business being parsed by a `yarn --version`
+ * The whole argument list rather than its first word, because §17.4 R7's scope
+ * word sits in front of the verb and §12.1's line names "the binary the user
+ * invoked **and the scope in effect**": `jup pm use …` has to reach
+ * `$ jup pm use <pattern>`, not a generic line about a command called `pm`.
+ *
+ * Loaded on demand: `router.ts` pulls in `usage.ts`, which carries `--help`'s
+ * full synopsis, and neither has any business being parsed by a `yarn --version`
  * that succeeds.
  */
-async function usageLineFor(command: string | undefined): Promise<string> {
-  const { GENERIC_USAGE_LINE, USAGE_LINES } = await import("./commands/usage.ts");
-  return command !== undefined && Object.hasOwn(USAGE_LINES, command)
-    ? USAGE_LINES[command]!
-    : GENERIC_USAGE_LINE;
+async function usageLineFor(args: string[]): Promise<string> {
+  const router = await import("./commands/router.ts");
+  return router.usageLineFor(args);
 }
 
 /**
