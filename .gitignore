@@ -16,3 +16,6 @@ tsconfig.tsbuildinfo
 /src/pnpx.js
 /src/yarn.js
 /src/yarnpkg.js
+
+# Local recording for the ported Corepack suite (NOCK_ENV=record).
+/test/corepack/nocks.db

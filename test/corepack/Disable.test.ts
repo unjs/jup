@@ -1,0 +1,126 @@
+import type {Filename}                        from './_fslib.ts';
+import {ppath, xfs, npath}                    from './_fslib.ts';
+import {delimiter}                            from 'node:path';
+import process                                from 'node:process';
+import {describe, beforeEach, it, expect}     from 'vitest';
+
+import { engine } from './_compat.ts';
+import { SupportedPackageManagerSetWithoutNpm } from './_compat.ts';
+
+import {makeBin, getBinaryNames}              from './_binHelpers.ts';
+import {runCli}                               from './_runCli.ts';
+
+
+beforeEach(async () => {
+  // `process.env` is reset after each tests in setupTests.js.
+  process.env.COREPACK_HOME = npath.fromPortablePath(await xfs.mktempPromise());
+});
+
+describe(`DisableCommand`, () => {
+  it(`should remove the binaries from the folder found in the PATH`, async () => {
+    await xfs.mktempPromise(async cwd => {
+      const corepackBin = await makeBin(cwd, `corepack` as Filename);
+      const dontRemoveBin = await makeBin(cwd, `dont-remove` as Filename);
+
+      for (const packageManager of SupportedPackageManagerSetWithoutNpm)
+        for (const binName of engine.getBinariesFor(packageManager))
+          for (const variant of getBinaryNames(binName))
+            await makeBin(cwd, variant as Filename, {ignorePlatform: true});
+
+      process.env.PATH = `${npath.fromPortablePath(cwd)}${delimiter}${process.env.PATH}`;
+      await expect(runCli(cwd, [`disable`])).resolves.toMatchObject({
+        exitCode: 0,
+      });
+
+      const sortedEntries = xfs.readdirPromise(cwd).then(entries => {
+        return entries.sort();
+      });
+
+      await expect(sortedEntries).resolves.toEqual([
+        ppath.basename(corepackBin),
+        ppath.basename(dontRemoveBin),
+      ]);
+    });
+  });
+
+  it(`should remove the binaries from the specified folder when used with --install-directory`, async () => {
+    await xfs.mktempPromise(async cwd => {
+      const dontRemoveBin = await makeBin(cwd, `dont-remove` as Filename);
+
+      for (const packageManager of SupportedPackageManagerSetWithoutNpm)
+        for (const binName of engine.getBinariesFor(packageManager))
+          for (const variant of getBinaryNames(binName))
+            await makeBin(cwd, variant as Filename, {ignorePlatform: true});
+
+      await expect(runCli(cwd, [`disable`, `--install-directory`, npath.fromPortablePath(cwd)])).resolves.toMatchObject({
+        exitCode: 0,
+      });
+
+      await expect(xfs.readdirPromise(cwd)).resolves.toEqual([
+        ppath.basename(dontRemoveBin),
+      ]);
+    });
+  });
+
+  it(`should remove binaries only for the requested package managers`, async () => {
+    await xfs.mktempPromise(async cwd => {
+      const binNames = new Set<string>();
+
+      for (const packageManager of SupportedPackageManagerSetWithoutNpm)
+        for (const binName of engine.getBinariesFor(packageManager))
+          for (const variant of getBinaryNames(binName))
+            binNames.add(variant);
+
+      for (const binName of binNames)
+        await makeBin(cwd, binName as Filename, {ignorePlatform: true});
+
+      const corepackBin = await makeBin(cwd, `corepack` as Filename);
+      binNames.add(ppath.basename(corepackBin));
+
+      const dontRemoveBin = await makeBin(cwd, `dont-remove` as Filename);
+      binNames.add(ppath.basename(dontRemoveBin));
+
+      await expect(runCli(cwd, [`disable`, `--install-directory=${npath.fromPortablePath(cwd)}`, `yarn`])).resolves.toMatchObject({
+        exitCode: 0,
+        stdout: ``,
+        stderr: ``,
+      });
+
+      for (const variant of getBinaryNames(`yarn`))
+        binNames.delete(variant);
+      for (const variant of getBinaryNames(`yarnpkg`))
+        binNames.delete(variant);
+
+      const sortedEntries = xfs.readdirPromise(cwd).then(entries => {
+        return entries.sort();
+      });
+
+      await expect(sortedEntries).resolves.toEqual([...binNames].sort());
+    });
+  });
+
+  it(`shouldn't remove Yarn binaries if they are in a /switch/ folder`, async () => {
+    await xfs.mktempPromise(async cwd => {
+      await xfs.mkdirPromise(ppath.join(cwd, `switch/bin`), {recursive: true});
+      await xfs.writeFilePromise(ppath.join(cwd, `switch/bin/yarn`), `hello`);
+
+      await xfs.symlinkPromise(
+        ppath.join(cwd, `switch/bin/yarn`),
+        ppath.join(cwd, `yarn`),
+      );
+
+      const isWindows = process.platform === `win32`; // Yarn Switch support is Posix-only
+      await expect(runCli(cwd, [`disable`, `--install-directory=${npath.fromPortablePath(cwd)}`])).resolves.toMatchObject({
+        stdout: ``,
+        stderr: isWindows ? `` : expect.stringMatching(/^yarn is already installed in .+ and points to a Yarn Switch install - skipping\n$/),
+        exitCode: 0,
+      });
+
+      if (isWindows) {
+        expect(xfs.existsSync(ppath.join(cwd, `yarn`))).toBe(false);
+      } else {
+        await expect(xfs.readFilePromise(ppath.join(cwd, `yarn`), `utf8`)).resolves.toBe(`hello`);
+      }
+    });
+  });
+});
