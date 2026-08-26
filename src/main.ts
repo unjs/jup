@@ -495,12 +495,19 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
 
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
-  const { writePin } = await import("./project/pin.ts");
-  const { target } = writePin(dirname(specResult.target), {
-    name: locator.name,
-    reference,
-    hash: installSpec.hash,
-  });
+  //
+  // §17.4 R11 — `autoRoleFor` is which *field* it goes in, and its doc comment
+  // is where R11 steps 1–4 are worked through for this call site. One pin, so
+  // §15.26's atomic write carries one entry.
+  const { autoRoleFor, writePin } = await import("./project/pin.ts");
+  const { target } = writePin(dirname(specResult.target), [
+    {
+      role: autoRoleFor(locator.name),
+      name: locator.name,
+      reference,
+      hash: installSpec.hash,
+    },
+  ]);
 
   // §15.27, §15.35l — "it also covers the auto-pin case in §03.6". On **stderr**:
   // this is proxy mode, and stdout belongs entirely to the package manager

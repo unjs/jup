@@ -1046,6 +1046,27 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * missed. An inherited corepack store pays one extra `stat` per warm probe
    * until its entries are reinstalled, which is C3's stated price. Held at
    * 223,000 rather than the 220,867 this leaves.
+   *
+   * And from 223,000 to 232,000 for §17.3 R4's per-role project pins.
+   * `manifest.ts` (+6,897) carries almost all of it: `PIN_FIELDS`, the per-role
+   * loop in `describe`, a role parameter through `readSpecFromManifest`, and
+   * `reconcile` reconciling against *the invoked binary's* role rather than
+   * against "the" project spec. `errors.ts` (+1,598) gained the `devEngines`
+   * messages' field parameter — so a `devEngines.runtime` fault names the field
+   * it is about — and §17.5's unwritable-field error; `config/table.ts` (+600)
+   * `ROLE_ORDER`; `main.ts` (+287) the auto-pin role. Measured, `_warm.mjs` went
+   * 81,644 -> 83,425, **+1,781 bytes, or +2.18%**, against +9,382 of source: the
+   * usual gap, because the additions are mostly the paragraphs explaining which
+   * pin a role selects and why getting it wrong runs the wrong program.
+   *
+   * **None of it costs a syscall.** `devEngines` was already one of the two
+   * fields {@link scanTopLevelFields} extracts for the walk (§16.3), so its
+   * `runtime` sub-key arrives with its `packageManager` one and a second pin is
+   * read out of bytes already in memory. The walk's stop conditions are
+   * untouched (§03.8), so the number of directories visited and the number of
+   * `package.json` reads are exactly what they were. What a warm run pays is one
+   * extra iteration of a two-element loop over a manifest that pins one role.
+   * Held at 232,000 rather than the 230,249 this leaves.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1057,6 +1078,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(223_000);
+    ).toBeLessThanOrEqual(232_000);
   });
 });

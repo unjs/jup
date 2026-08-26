@@ -46,7 +46,7 @@ import {
   type JupSpelling,
   SYSTEM_ENV,
 } from "../config/env-vars.ts";
-import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../config/table.ts";
+import { DEFINITIONS, getBinariesFor, hasRole, SUPPORTED_NAMES } from "../config/table.ts";
 import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
 import { redactUserinfo, toolName, UsageError } from "../errors.ts";
 import { parseManifest } from "../utils/json.ts";
@@ -71,7 +71,7 @@ import {
   listInstalled,
   readLastKnownGood,
 } from "../cache/store.ts";
-import type { Descriptor, Manifest } from "../types.ts";
+import type { Descriptor, Manifest, Role } from "../types.ts";
 
 /**
  * The `--json` schema version.
@@ -1282,13 +1282,41 @@ export async function cmdInfo(args: string[]): Promise<number> {
 
 /** §15.19 / §15.30 — `corepack cache list [--json]`, the aliased subset. */
 // eslint-disable-next-line @typescript-eslint/require-await
-export async function cmdCacheList(args: string[]): Promise<number> {
+export async function cmdCacheList(args: string[], scope: Role | null = null): Promise<number> {
   const json = wantsJson(args, `${toolName()} cache list`);
-  const report = buildReport();
+  const report = scopedReport(buildReport(), scope);
   process.stdout.write(
     json ? `${JSON.stringify(cacheListView(report), undefined, 2)}\n` : formatCacheList(report),
   );
   return 0;
+}
+
+/**
+ * §17.4 R10 row 4 — a scope filters what a *report* shows, and nothing else.
+ *
+ * "Reports (`info`, `cache list`, `--version`, `--help`): role-blind; a scope
+ * filters what is reported, nothing else." So this drops the store entries and
+ * recorded defaults for tools outside the scope and touches neither the store
+ * nor the file — the contrast with row 5's `cache clean`, which mutates and
+ * therefore refuses a scope outright.
+ *
+ * `hasRole` is asked about the role the router supplied; nothing here compares a
+ * role against a literal (R3).
+ */
+function scopedReport(report: InfoReport, scope: Role | null): InfoReport {
+  if (scope === null) return report;
+
+  const inScope = (name: string): boolean => hasRole(name, scope);
+  return {
+    ...report,
+    store: { ...report.store, versions: report.store.versions.filter((v) => inScope(v.name)) },
+    defaults: {
+      ...report.defaults,
+      entries: Object.fromEntries(
+        Object.entries(report.defaults.entries).filter(([name]) => inScope(name)),
+      ),
+    },
+  };
 }
 
 function messageOf(error: unknown): string {

@@ -133,6 +133,40 @@ export function setTopLevelString(text: string, key: string, value: string): str
 }
 
 /**
+ * Byte span of a **nested** key's value — `["devEngines", "runtime"]` — or null
+ * when any step of the path is missing or is not an object.
+ *
+ * The walk {@link setNestedString} needs to find the object it is about to edit,
+ * and the one §15.26's block writer needs to find the placeholder it just
+ * inserted, are the same walk; sharing it is what keeps the two from disagreeing
+ * about what "not an object" means.
+ */
+export function scanNestedKey(
+  text: string,
+  path: readonly string[],
+): { start: number; end: number } | null {
+  let start = 0;
+  let end = text.length;
+
+  for (let depth = 0; depth < path.length; depth++) {
+    // Offsets come back relative to the slice; the BOM is only ever at depth 0,
+    // where `scanTopLevelKey` skips it itself.
+    const span = scanTopLevelKey(text.slice(start, end), path[depth]!);
+    if (span === null) return null;
+    const valueStart = start + span.start;
+    const valueEnd = start + span.end;
+    if (depth === path.length - 1) return { start: valueStart, end: valueEnd };
+
+    // Only an object can be descended into; anything else is a different shape
+    // than the caller believed and must not be rewritten blind.
+    if (text.charCodeAt(skipWhitespace(text, valueStart)) !== CH_LBRACE) return null;
+    start = valueStart;
+    end = valueEnd;
+  }
+  return null;
+}
+
+/**
  * The same surgical edit, one level down: `devEngines.packageManager.version`.
  *
  * §15.26 requires every field that encodes the pin to be updated together, and
@@ -158,19 +192,10 @@ export function setNestedString(
   const body = stripBom(text);
 
   // Walk to the innermost object, carrying its span in the *original* text.
-  let start = 0;
-  let end = body.length;
-  for (let depth = 0; depth < path.length - 1; depth++) {
-    const span = scanTopLevelKey(body.slice(start, end), path[depth]!);
-    if (span === null) return null;
-    const nextStart = start + span.start;
-    const nextEnd = start + span.end;
-    // Only an object can be descended into; anything else is a different shape
-    // than the caller believed and must not be rewritten blind.
-    if (body.charCodeAt(skipWhitespace(body, nextStart)) !== CH_LBRACE) return null;
-    start = nextStart;
-    end = nextEnd;
-  }
+  const container = scanNestedKey(body, path.slice(0, -1));
+  if (container === null) return null;
+  if (body.charCodeAt(skipWhitespace(body, container.start)) !== CH_LBRACE) return null;
+  const { start, end } = container;
 
   const inner = body.slice(start, end);
   // The insert branch indents against the object being edited, not the document:

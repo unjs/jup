@@ -39,8 +39,20 @@ export const SCOPE_WORDS: Readonly<Record<string, Role>> = {
 };
 
 /** §09's spelling of each role, which is what a usage line teaches back. */
-const SCOPE_SPELLING: Readonly<Record<Role, ScopeWord>> = {
+export const SCOPE_SPELLING: Readonly<Record<Role, ScopeWord>> = {
   "package-manager": "pm",
+  runtime: "runtime",
+};
+
+/**
+ * §17.4 R9 and R11 — how a message *names* a role in prose.
+ *
+ * "`'<name>' is not a package manager`", "`<name> can be both a package manager
+ * and a runtime`". Data beside the scope words rather than a `switch` at the two
+ * call sites, so a third role is an entry here and no code (R3).
+ */
+export const ROLE_NOUN: Readonly<Record<Role, string>> = {
+  "package-manager": "package manager",
   runtime: "runtime",
 };
 
@@ -82,12 +94,18 @@ export interface Route {
    * and R10 has to infer one.
    *
    * Under the `corepack` entry point this is always `package-manager`: R12 makes
-   * `corepack <verb>` exactly `jup pm <verb>`. It is set and, in D1, read by
-   * nothing but the help text — R9's narrowing and R10's inference are the next
-   * step's, and the field is what they will read.
+   * `corepack <verb>` exactly `jup pm <verb>`. So this is "the role in effect",
+   * which is what R9 narrows by and what R10's inference falls back from.
    */
   scope: Role | null;
-  /** The scope word as §09 spells it, or `null` — `corepack` never shows one. */
+  /**
+   * The scope word as §09 spells it, or `null` — `corepack` never shows one.
+   *
+   * Distinct from {@link Route.scope} in exactly one place, and it matters
+   * there: R10 row 5 refuses a scope **word** on `cache clean`, while R12's
+   * implied package-manager scope must leave `corepack cache clean` — a line in
+   * everyone's scripts — doing what it always did.
+   */
   scopeWord: ScopeWord | null;
   kind: "help" | "version" | "verb" | "unknown";
   /** Set when `kind` is `"verb"`. */

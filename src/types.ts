@@ -196,7 +196,15 @@ export interface RegistrySignature {
 /* Project manifest — §02.7, §03                                              */
 /* -------------------------------------------------------------------------- */
 
-export interface DevEnginesPackageManager {
+/**
+ * §02.7 — the raw shape of one `devEngines` sub-block, before validation.
+ *
+ * §17.5 R14 makes `devEngines.runtime` the runtime pin, "parsed, validated, and
+ * reconciled by the same rules §03.3 applies to `devEngines.packageManager`",
+ * so one type describes both: which sub-key a role reads is data (§03's
+ * `PIN_FIELDS`), not a second shape.
+ */
+export interface DevEnginesBlock {
   name?: unknown;
   version?: unknown;
   onFail?: unknown;
@@ -204,7 +212,12 @@ export interface DevEnginesPackageManager {
 
 export interface Manifest {
   packageManager?: unknown;
-  devEngines?: { packageManager?: unknown };
+  /**
+   * §17.5 R14 — `runtime` beside `packageManager`, and **no** top-level
+   * `runtime` field: `packageManager` is a historical shape, not a pattern to
+   * repeat.
+   */
+  devEngines?: { packageManager?: unknown; runtime?: unknown };
   [key: string]: unknown;
 }
 
@@ -246,6 +259,32 @@ export interface ParseSpecOptions {
   requireVersion: boolean;
 }
 
+/**
+ * §03.3 — what one manifest declares for **one** role.
+ *
+ * §17.3 R4 row 1 gives each role its own pin fields — `packageManager` and
+ * `devEngines.packageManager` for a package manager, `devEngines.runtime` for a
+ * runtime — and R4 row 2 makes the invoked binary's role select which of them an
+ * invocation is reconciled against. So the manifest yields one of these per
+ * role, and nothing above §03 reads "the" pin without saying whose.
+ */
+export interface ProjectPin {
+  /** Lazy: parses and validates only when called, so `use` can overwrite a malformed field. */
+  getSpec: (opts: ParseSpecOptions) => Descriptor;
+  range?: DevEnginesRange;
+  /** §15.26 — the declared `devEngines` block for this role, version or not. */
+  devEngines?: DevEnginesDeclaration;
+  /**
+   * Whether the manifest itself declares the role's *top-level* field, as
+   * opposed to the spec having been synthesised from its `devEngines` block
+   * (§03.3). §15.23's `up` needs the distinction: a declared range is the user's
+   * own statement of intent and must survive an update, while a synthesised one
+   * is what row 114 turns into a fresh pin. Only the package-manager role has a
+   * top-level field at all (§17.5 R14), so for every other role this is `false`.
+   */
+  hasPin?: boolean;
+}
+
 /** §03.1 — the three outcomes of the upward walk. */
 export type SpecResult =
   | { type: "NoProject"; target: string; envFilePath?: string }
@@ -253,19 +292,14 @@ export type SpecResult =
   | {
       type: "Found";
       target: string;
-      /** Lazy: parses and validates only when called, so `use` can overwrite a malformed field. */
-      getSpec: (opts: ParseSpecOptions) => Descriptor;
-      range?: DevEnginesRange;
-      /** §15.26 — the declared `devEngines.packageManager`, version or not. */
-      devEngines?: DevEnginesDeclaration;
       /**
-       * Whether the manifest itself declares `packageManager`, as opposed to the
-       * spec having been synthesised from `devEngines.packageManager` (§03.3).
-       * §15.23's `up` needs the distinction: a declared range is the user's own
-       * statement of intent and must survive an update, while a synthesised one
-       * is what row 114 turns into a fresh pin.
+       * §17.4 R10 — one entry per role the manifest pins, and **only** those:
+       * "a binary whose role has no pin takes the ordinary fallback path". The
+       * result is `Found` when at least one role is pinned and `NoSpec` when
+       * none is, which is exactly the old single-role test written once per
+       * role.
        */
-      hasPin?: boolean;
+      pins: Partial<Record<Role, ProjectPin>>;
       envFilePath?: string;
     };
 

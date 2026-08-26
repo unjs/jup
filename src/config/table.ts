@@ -141,6 +141,18 @@ export function isSupportedPackageManager(name: string): boolean {
 }
 
 /**
+ * §17.4 R10 row 2 — the fixed order every role-iterating command uses:
+ * **package manager first, then runtime**.
+ *
+ * A list rather than a `Role[]` derived from a `Record` so the order is written
+ * down where the rule is, and so `install`, `pack` and `up` all read it from one
+ * place: R10 makes the order observable ("each prints its own line, in order"),
+ * which means it is contract and not an implementation detail. Adding a role is
+ * an entry here and in §03's `PIN_FIELDS`, both of them data (R3).
+ */
+export const ROLE_ORDER: readonly Role[] = ["package-manager", "runtime"];
+
+/**
  * §17.3 R1 — the roles this tool fills, or `undefined` for a name the table
  * does not carry.
  *

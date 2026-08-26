@@ -11,12 +11,36 @@ import {
   reconcile,
   warnOrThrow,
 } from "../../src/project/manifest.ts";
-import { writePin } from "../../src/project/pin.ts";
-import type { LazyLocator, SpecResult } from "../../src/types.ts";
+import { writePin as writePins } from "../../src/project/pin.ts";
+import type { LazyLocator, ProjectPin, SpecResult } from "../../src/types.ts";
 
 let root: string;
 let originalEnv: NodeJS.ProcessEnv;
 let warn: ReturnType<typeof vi.spyOn>;
+
+/**
+ * §17.4 R10 made `writePin` take a **list** so `up` can carry both roles into
+ * one atomic manifest update. Every row below is about the package-manager pin,
+ * which is the only role §02.5's table has, so this one-pin wrapper keeps them
+ * reading exactly as they did — and asserting the same bytes.
+ */
+function writePin(
+  cwd: string,
+  info: { name: string; reference: string; hash?: string },
+  options?: Parameters<typeof writePins>[2],
+): { target: string; previousPackageManager: string; written: string } {
+  const { target, results } = writePins(cwd, [{ role: "package-manager", ...info }], options);
+  return {
+    target,
+    previousPackageManager: results[0]!.previousPin,
+    written: results[0]!.written,
+  };
+}
+
+/** §17.3 R4 row 1 — the package-manager pin out of a `Found` result's per-role map. */
+function pm(result: SpecResult): ProjectPin {
+  return (result as Extract<SpecResult, { type: "Found" }>).pins["package-manager"]!;
+}
 
 beforeEach(() => {
   originalEnv = process.env;
@@ -194,7 +218,7 @@ describe("the upward walk — §03.1", () => {
 
     expect(result.type).toBe("Found");
     expect(result.target).toBe(target);
-    expect((result as Extract<SpecResult, { type: "Found" }>).getSpec(PINNED)).toEqual({
+    expect(pm(result).getSpec(PINNED)).toEqual({
       name: "yarn",
       range: "1.22.4",
     });
@@ -233,7 +257,7 @@ describe("the upward walk — §03.1", () => {
 
     const result = discoverProjectSpec(join(root, "foo")) as Extract<SpecResult, { type: "Found" }>;
     expect(result.target).toBe(closest);
-    expect(result.getSpec(PINNED)).toEqual({ name: "npm", range: "6.14.2" });
+    expect(pm(result).getSpec(PINNED)).toEqual({ name: "npm", range: "6.14.2" });
   });
 
   it("climbs past a manifest without a pin", () => {
@@ -245,7 +269,7 @@ describe("the upward walk — §03.1", () => {
       { type: "Found" }
     >;
     expect(result.target).toBe(rootManifest);
-    expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
+    expect(pm(result).getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
   });
 
   it("targets the ROOT manifest when nothing in a monorepo declares a pin", () => {
@@ -304,7 +328,7 @@ describe("the upward walk — §03.1", () => {
     );
 
     const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
-    expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
+    expect(pm(result).getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
   });
 
   it("defers spec validation until getSpec is called (test 109)", () => {
@@ -314,7 +338,7 @@ describe("the upward walk — §03.1", () => {
       // Discovery itself must not throw — `use` overwrites this field.
       const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
       expect(result.type).toBe("Found");
-      expect(() => result.getSpec(PINNED)).toThrow(UsageError);
+      expect(() => pm(result).getSpec(PINNED)).toThrow(UsageError);
     }
   });
 
@@ -462,9 +486,9 @@ describe("devEngines — §03.3", () => {
     manifest(".", { devEngines: { packageManager: { name: "yarn" } } });
 
     const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
-    expect(result.range).toBeUndefined();
-    expect(result.hasPin).toBe(false);
-    expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "*" });
+    expect(pm(result).range).toBeUndefined();
+    expect(pm(result).hasPin).toBe(false);
+    expect(pm(result).getSpec(PINNED)).toEqual({ name: "yarn", range: "*" });
   });
 
   // Test 23.
@@ -472,9 +496,9 @@ describe("devEngines — §03.3", () => {
     manifest(".", { devEngines: { packageManager: { name: "pnpm", version: "6.x" } } });
 
     const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
-    expect(result.range).toEqual({ name: "pnpm", range: "6.x", onFail: undefined });
-    expect(result.hasPin).toBe(false);
-    expect(result.getSpec(PINNED)).toEqual({ name: "pnpm", range: "6.x" });
+    expect(pm(result).range).toEqual({ name: "pnpm", range: "6.x", onFail: undefined });
+    expect(pm(result).hasPin).toBe(false);
+    expect(pm(result).getSpec(PINNED)).toEqual({ name: "pnpm", range: "6.x" });
   });
 
   // Test 24.
@@ -813,12 +837,15 @@ describe("reconcile — §03.5", () => {
   // Test 41 — the project is never consulted at all.
   it("short-circuits on COREPACK_ENABLE_PROJECT_SPEC=0", () => {
     const result = found("yarn@1.0.0") as Extract<SpecResult, { type: "Found" }>;
-    const getSpec = vi.fn(result.getSpec);
+    const getSpec = vi.fn(pm(result).getSpec);
     const fallback = lazyFallback();
     process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
 
     expect(
-      reconcile({ ...result, getSpec }, fallback, { requestedName: "yarn", transparent: false }),
+      reconcile({ ...result, pins: { "package-manager": { ...pm(result), getSpec } } }, fallback, {
+        requestedName: "yarn",
+        transparent: false,
+      }),
     ).toBe(fallback);
     expect(getSpec).not.toHaveBeenCalled();
   });
@@ -1052,7 +1079,7 @@ describe("discoverProjectSpec — §15.25 stop conditions", () => {
 
     expect(result.type).toBe("Found");
     expect(result.target).toBe(join(root, "nested", "package.json"));
-    expect(result.getSpec({ requireVersion: true })).toEqual({ name: "pnpm", range: "11.1.2" });
+    expect(pm(result).getSpec({ requireVersion: true })).toEqual({ name: "pnpm", range: "11.1.2" });
   });
 
   it("treats a declared-but-invalid packageManager as a stop, not as absent", () => {

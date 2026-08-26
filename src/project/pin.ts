@@ -14,28 +14,91 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { messages } from "../errors.ts";
+import { messages, UsageError } from "../errors.ts";
 import {
   detectFormat,
-  scanTopLevelKey,
+  scanNestedKey,
   setNestedString,
   setTopLevelString,
 } from "../utils/json-write.ts";
 import { parseManifest } from "../utils/json.ts";
+import { getRoles } from "../config/table.ts";
 import { integrityFromHash } from "./lockfile.ts";
-import { discoverProjectSpec, warnOrThrow } from "./manifest.ts";
+import {
+  discoverProjectSpec,
+  type PinFields,
+  PIN_FIELDS,
+  pinFieldLabel,
+  warnOrThrow,
+} from "./manifest.ts";
 import { isValidVersion, parse, satisfies } from "../version/semver.ts";
-import type { DevEnginesDeclaration, Manifest } from "../types.ts";
+import type { DevEnginesDeclaration, Manifest, Role, SpecResult } from "../types.ts";
 
 /**
- * §03.7, as amended by §15.26 and §15.27 — write the pin.
+ * §17.4 R11 — the role an **auto-pin** writes the pin for.
+ *
+ * R11 resolves a pin-writing command's role in four steps, and auto-pin (§03.6)
+ * can reach only two of them: step 1 has no CLI scope word to read, because
+ * auto-pin happens in proxy mode where the user typed a package manager's name
+ * and nothing else, and step 3 has no declaration to read, because `NoSpec` —
+ * the manifest declares nothing — is the only case auto-pin fires in.
+ *
+ * That leaves step 2, "the role under which the binary was invoked". **With
+ * today's table there is nothing that distinguishes a package-manager use of a
+ * dual-role binary from a runtime use.** R2 keeps the surface one flat namespace
+ * (a user never writes `pm:bun`), R3 keeps roles data, and §02.4's binary map
+ * answers a *name* with a *tool* — not with a tool and a role. Building a
+ * bin-name-to-role map to answer it would be exactly the role-qualified lookup
+ * R2 declines to require and R3 would make code out of.
+ *
+ * R11's last paragraph settles that case in as many words: "If even the
+ * invocation is ambiguous, the `package-manager` role wins, because auto-pin's
+ * own verbatim notice is about the `packageManager` field." So §17.9 row 232 —
+ * auto-pin for the dual-role fixture with nothing declared, which must write a
+ * pin rather than raise R11 step 4's usage error — is satisfied **by this
+ * fallback**, and deliberately not by a role-qualified binary lookup.
+ *
+ * A tool with exactly one role needs none of this: it has one role, and that is
+ * the one its pin goes in.
+ */
+export function autoRoleFor(name: string): Role {
+  const roles = getRoles(name) ?? [];
+  return roles.length === 1 ? roles[0]! : "package-manager";
+}
+
+/** One pin to write, and the role whose fields (§03's `PIN_FIELDS`) receive it. */
+export interface PinWrite {
+  role: Role;
+  name: string;
+  reference: string;
+  hash?: string;
+}
+
+/** What one pin's write did, reported per pin because each names its own field. */
+export interface PinWritten {
+  role: Role;
+  /** §09.5 — what `COREPACK_MIGRATE_FROM` carries; the literal `unknown` when there was none. */
+  previousPin: string;
+  /** §15.35l — what the field now holds; differs from the reference in §15.12's sidecar form. */
+  written: string;
+}
+
+/**
+ * §03.7, as amended by §15.26, §15.27 and §17.4 R10 — write the project's pins.
  *
  * Preserves indentation, line endings, key order, and (per §14.7) the BOM.
- * Returns the previous value for `COREPACK_MIGRATE_FROM`, and the path actually
- * modified so the caller can print it (§15.35l).
+ * Returns the path actually modified so the caller can print it (§15.35l), plus
+ * one result per pin.
  *
- * **Which field gets written** is §15.26's whole subject, and the rule has three
- * branches rather than one:
+ * **Every pin lands in one write.** §17.4 R10's third consequence — "`up` writes
+ * both pins in one atomic manifest update (§15.26), not one write per role" —
+ * is why this takes a list rather than being called twice: the edits compose on
+ * one string and there is exactly one `writeFileSync` below, so a manifest is
+ * never left half-updated. With one pin, which is every project today, the
+ * result is byte-identical to the single-pin write this replaces.
+ *
+ * **Which field gets written** is §15.26's whole subject, and for the
+ * package-manager role the rule has three branches rather than one:
  *
  * | Manifest declares | Written |
  * |---|---|
@@ -60,18 +123,20 @@ import type { DevEnginesDeclaration, Manifest } from "../types.ts";
  * describing this pin at all: the mismatch is reported through `onFail` and,
  * if that does not throw, the pin goes to `packageManager` where a reader can
  * still see both statements.
+ *
+ * A role with **no** top-level field (§17.5 R14: "There is no top-level `runtime`
+ * field") has none of those branches, because it has nowhere else to go: its pin
+ * is always written into its `devEngines` block, which is created when absent.
  */
 export function writePin(
   cwd: string,
-  info: { name: string; reference: string; hash?: string },
+  pins: readonly PinWrite[],
   options?: { here?: boolean; pinStyle?: PinStyle },
-): { previousPackageManager: string; target: string; written: string } {
+): { target: string; results: PinWritten[] } {
   // 1 — re-run discovery: the file to edit is not necessarily in `cwd`. §15.27's
   // extra stop conditions apply here and only here, because this is the write.
   const lookup = discoverProjectSpec(cwd, { mutating: true, here: options?.here === true });
   const target = lookup.target;
-  const declared = lookup.type === "Found" ? lookup.devEngines : undefined;
-  const range = lookup.type === "Found" ? lookup.range : undefined;
 
   // 3 — a missing file is an empty document, so `NoProject` creates one. It is
   // read *before* the validation below because §15.26 requires that validation
@@ -100,7 +165,42 @@ export function writePin(
     // far as the surgical edit allows; `setTopLevelString` re-validates below.
   }
 
-  const devEnginesTarget = devEnginesWriteTarget(data, declared, info);
+  // Each pin edits the text the previous one produced; `data` stays the state on
+  // disk, which is what §15.26's checks are about. Two roles never touch the
+  // same field, so the order the list arrives in does not change the result.
+  let updated = content;
+  const results: PinWritten[] = [];
+  for (const info of pins) {
+    const written = writeOnePin(updated, data, lookup, info, options);
+    updated = written.text;
+    results.push({ role: info.role, previousPin: written.previousPin, written: written.written });
+  }
+
+  // 9 — in the `NoProject` case this creates `<cwd>/package.json`. One call, for
+  // however many pins: R10's "not one write per role".
+  writeFileSync(target, updated);
+
+  // `target` goes back to the caller because §15.23's `.jup.lock` lives
+  // beside *this* file, not beside the cwd — in a monorepo those differ, and a
+  // resolution recorded next to the wrong manifest would never be found again.
+  // §15.27 also requires it to be *printed*, and printing is the caller's job.
+  return { target, results };
+}
+
+/** One pin's edit, applied to the text the previous pin left behind. */
+function writeOnePin(
+  content: string,
+  data: Manifest,
+  lookup: SpecResult,
+  info: PinWrite,
+  options: { pinStyle?: PinStyle } | undefined,
+): { text: string; previousPin: string; written: string } {
+  const fields = PIN_FIELDS[info.role];
+  const pin = lookup.type === "Found" ? lookup.pins[info.role] : undefined;
+  const declared = pin?.devEngines;
+  const range = pin?.range;
+
+  const devEnginesTarget = devEnginesWriteTarget(data, declared, info, fields);
 
   // 2 — the package manager being pinned must be the one `devEngines` declares,
   // *and* its version must satisfy the declared range. Checking only the version
@@ -140,9 +240,10 @@ export function writePin(
   }
 
   // 6 — what the package manager's own `use` command is told to migrate from.
-  const previousPackageManager =
-    typeof data.packageManager === "string"
-      ? data.packageManager
+  const existing = fields.top === undefined ? undefined : data[fields.top];
+  const previousPin =
+    typeof existing === "string"
+      ? existing
       : range === undefined
         ? "unknown"
         : `${range.name}@${range.range}`;
@@ -161,14 +262,14 @@ export function writePin(
   // interoperable spelling and §13 asserts it.
   const sidecar = options?.pinStyle === "sidecar";
 
-  let updated = content;
+  let text = content;
   let wroteDevEngines = false;
   if (devEnginesTarget.write || sidecar) {
     const next = sidecar
-      ? writeSidecarPin(updated, data, info)
-      : writeIntoDevEngines(updated, info);
+      ? writeSidecarPin(text, data, info, fields)
+      : writeIntoDevEngines(text, info, fields);
     if (next !== null) {
-      updated = next;
+      text = next;
       wroteDevEngines = true;
     }
   }
@@ -182,17 +283,17 @@ export function writePin(
     // again (§15.12 reads them as one pin); one that did not must keep the
     // suffix, or the pin would be written nowhere at all.
     if (sidecar && wroteDevEngines) written = parse(info.reference)?.version ?? info.reference;
-    updated = setTopLevelString(updated, "packageManager", `${info.name}@${written}`);
+    if (fields.top === undefined) {
+      // §17.5 R14 — there is no second field to fall back to, and inventing one
+      // is exactly what R14 forbids. A block write that could not be made
+      // surgically is a manifest this could not understand, and saying so beats
+      // reporting a success that wrote nothing.
+      throw new UsageError(messages.pinFieldUnwritable(pinFieldLabel(info.role)));
+    }
+    text = setTopLevelString(text, fields.top, `${info.name}@${written}`);
   }
 
-  // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
-  writeFileSync(target, updated);
-
-  // `target` goes back to the caller because §15.23's `.jup.lock` lives
-  // beside *this* file, not beside the cwd — in a monorepo those differ, and a
-  // resolution recorded next to the wrong manifest would never be found again.
-  // §15.27 also requires it to be *printed*, and printing is the caller's job.
-  return { previousPackageManager, target, written };
+  return { text, previousPin, written };
 }
 
 /**
@@ -220,8 +321,21 @@ function devEnginesWriteTarget(
   data: Manifest,
   declared: DevEnginesDeclaration | undefined,
   info: { name: string; reference: string },
+  fields: PinFields,
 ): { write: boolean; exclusive: boolean; replacesDeclaredVersion: boolean } {
   const none = { write: false, exclusive: false, replacesDeclaredVersion: false };
+  const declaredExact = declared?.version !== undefined && isValidVersion(declared.version);
+
+  // §17.5 R14 — a role with no top-level field has exactly one place its pin can
+  // go, so every branch below (which is about *choosing* between two fields)
+  // collapses: the block is written, exclusively, and created if absent. The
+  // name mismatch above has already been reported through `onFail`; if it did
+  // not throw, the block is rewritten to describe the tool actually being
+  // pinned, because a `version` under a `name` that says something else
+  // describes nothing.
+  if (fields.top === undefined) {
+    return { write: true, exclusive: true, replacesDeclaredVersion: declaredExact };
+  }
 
   // A declaration for a *different* package manager does not describe this pin;
   // the mismatch is reported through `onFail` and the pin goes to the top level,
@@ -232,24 +346,21 @@ function devEnginesWriteTarget(
 
   // A `packageManager` key that is present but not a string is a spec error the
   // user is about to have overwritten — write it at the top level, as before.
-  const hasPin = typeof data.packageManager === "string";
-  const hasBrokenPin =
-    Object.hasOwn(data, "packageManager") && !hasPin && data.packageManager != null;
+  const hasPin = typeof data[fields.top] === "string";
+  const hasBrokenPin = Object.hasOwn(data, fields.top) && !hasPin && data[fields.top] != null;
   if (hasBrokenPin) return none;
-
-  const declaredExactVersion = declared.version !== undefined && isValidVersion(declared.version);
 
   if (!hasPin) {
     // §15.26 bullet 2 — the pin lives where the declaration already is.
-    return { write: true, exclusive: true, replacesDeclaredVersion: declaredExactVersion };
+    return { write: true, exclusive: true, replacesDeclaredVersion: declaredExact };
   }
 
   // Both fields. `packageManager` is the one §03.3 reads, so it is always
   // written; `devEngines` is only rewritten when it was itself a pin.
   return {
-    write: declaredExactVersion,
+    write: declaredExact,
     exclusive: false,
-    replacesDeclaredVersion: declaredExactVersion,
+    replacesDeclaredVersion: declaredExact,
   };
 }
 
@@ -267,6 +378,7 @@ function writeSidecarPin(
   content: string,
   data: Manifest,
   info: { name: string; reference: string; hash?: string },
+  fields: PinFields,
 ): string | null {
   const version = parse(info.reference)?.version;
   if (version === undefined || info.hash === undefined) return null;
@@ -274,21 +386,21 @@ function writeSidecarPin(
   const integrity = integrityFromHash(info.hash);
   if (integrity === undefined) return null;
 
-  const block = (data.devEngines as { packageManager?: unknown } | undefined)?.packageManager;
+  const block = data.devEngines?.[fields.block];
 
-  // No `devEngines` at all: create the block, name included — §03.3 reads
-  // `name` first and a block without one describes nothing.
-  if (!Object.hasOwn(data, "devEngines")) {
-    return createDevEnginesBlock(content, info.name, version, integrity);
+  // No block yet: create it, name included — §03.3 reads `name` first and a
+  // block without one describes nothing.
+  if (block === undefined) {
+    return createDevEnginesBlock(content, fields.block, info.name, version, integrity);
   }
 
-  // A block that is not an object, or that speaks for a different package
-  // manager, is not ours to rewrite.
+  // A block that is not an object, or that speaks for a different tool, is not
+  // ours to rewrite.
   if (typeof block !== "object" || block === null || Array.isArray(block)) return null;
   const declaredName = (block as { name?: unknown }).name;
   if (declaredName !== undefined && declaredName !== info.name) return null;
 
-  return writeIntoDevEngines(content, info);
+  return writeIntoDevEngines(content, info, fields);
 }
 
 /**
@@ -303,18 +415,33 @@ function writeSidecarPin(
  */
 function createDevEnginesBlock(
   content: string,
+  block: string,
   name: string,
   version: string,
-  integrity: string,
+  integrity?: string,
 ): string | null {
+  // Two shapes, one trick. With no `devEngines` at all the placeholder is the
+  // top-level key and the literal is the whole `{ "<block>": {…} }`; with a
+  // `devEngines` that simply lacks *this* role's block — a project pinning its
+  // package manager there and now pinning a runtime beside it — the placeholder
+  // is one level down and the literal is the inner object alone.
+  const outer = !Object.hasOwn(parsedOrEmpty(content), "devEngines");
+  const path = outer ? ["devEngines"] : ["devEngines", block];
+
   let seeded: string;
-  try {
-    seeded = setTopLevelString(content, "devEngines", "");
-  } catch {
-    return null;
+  if (outer) {
+    try {
+      seeded = setTopLevelString(content, "devEngines", "");
+    } catch {
+      return null;
+    }
+  } else {
+    const nested = setNestedString(content, path, "");
+    if (nested === null) return null;
+    seeded = nested;
   }
 
-  const span = scanTopLevelKey(seeded, "devEngines");
+  const span = scanNestedKey(seeded, path);
   if (span === null) return null;
 
   // `json.ts` inserts a one-line entry into a one-line object and a
@@ -325,13 +452,27 @@ function createDevEnginesBlock(
 
   const { indent, eol } = detectFormat(seeded);
   const at = (depth: number): string => indent.repeat(depth);
+  const entries: Array<[string, string]> = [
+    ["name", name],
+    ["version", version],
+    ...(integrity === undefined ? [] : ([["integrity", integrity]] as Array<[string, string]>)),
+  ];
+  const fieldsObject = Object.fromEntries(entries);
+  // The block's own depth: 3 inside a freshly created `devEngines`, 2 when the
+  // `devEngines` object is already there and only the block is being added.
+  const depth = outer ? 3 : 2;
+  const members = entries
+    .map(([key, value], index) => {
+      const comma = index === entries.length - 1 ? "" : ",";
+      return `${at(depth)}${JSON.stringify(key)}: ${JSON.stringify(value)}${comma}${eol}`;
+    })
+    .join("");
+  const inner = `{${eol}${members}${at(depth - 1)}}`;
   const literal = inline
-    ? JSON.stringify({ packageManager: { name, version, integrity } })
-    : `{${eol}${at(2)}"packageManager": {${eol}` +
-      `${at(3)}"name": ${JSON.stringify(name)},${eol}` +
-      `${at(3)}"version": ${JSON.stringify(version)},${eol}` +
-      `${at(3)}"integrity": ${JSON.stringify(integrity)}${eol}` +
-      `${at(2)}}${eol}${at(1)}}`;
+    ? JSON.stringify(outer ? { [block]: fieldsObject } : fieldsObject)
+    : outer
+      ? `{${eol}${at(2)}${JSON.stringify(block)}: ${inner}${eol}${at(1)}}`
+      : inner;
 
   const result = seeded.slice(0, span.start) + literal + seeded.slice(span.end);
   try {
@@ -357,15 +498,33 @@ function createDevEnginesBlock(
 function writeIntoDevEngines(
   content: string,
   info: { name: string; reference: string; hash?: string },
+  fields: PinFields,
 ): string | null {
   const version = parse(info.reference)?.version;
   if (version === undefined) return null;
 
-  const withVersion = setNestedString(
-    content,
-    ["devEngines", "packageManager", "version"],
-    version,
-  );
+  let text = content;
+  if (fields.top === undefined) {
+    // §17.5 R14 — the block is this role's only home, so it is created when the
+    // manifest has none and is made to name the tool being pinned. For the
+    // package-manager role neither is needed: `devEngines.packageManager` is
+    // only written when §03.3 already read a matching `name` out of it.
+    const declared = parsedOrEmpty(text).devEngines?.[fields.block];
+    if (declared === undefined) {
+      return createDevEnginesBlock(
+        text,
+        fields.block,
+        info.name,
+        version,
+        info.hash === undefined ? undefined : integrityFromHash(info.hash),
+      );
+    }
+    const named = setNestedString(text, ["devEngines", fields.block, "name"], info.name);
+    if (named === null) return null;
+    text = named;
+  }
+
+  const withVersion = setNestedString(text, ["devEngines", fields.block, "version"], version);
   if (withVersion === null) return null;
 
   if (info.hash === undefined) return withVersion;
@@ -373,7 +532,18 @@ function writeIntoDevEngines(
   if (integrity === undefined) return withVersion;
 
   return (
-    setNestedString(withVersion, ["devEngines", "packageManager", "integrity"], integrity) ??
+    setNestedString(withVersion, ["devEngines", fields.block, "integrity"], integrity) ??
     withVersion
   );
+}
+
+/** `parseManifest`, tolerant: an unparseable or non-object document reads as `{}`. */
+function parsedOrEmpty(text: string): Manifest {
+  try {
+    const parsed = parseManifest(text);
+    if (typeof parsed === "object" && parsed !== null) return parsed as Manifest;
+  } catch {
+    // Falls through to the empty document, exactly as `writePin` does on read.
+  }
+  return {};
 }

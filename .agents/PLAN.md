@@ -4,10 +4,10 @@
 breakdown: what is left, in what order, and which conformance rows prove each piece.
 Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
 
-## Where things stand — `2261d95` + D1 + D3, 2026-08-26
+## Where things stand — D0 + D1 + D2 + D3, 2026-08-26
 
 * **§01–§16 are implemented.** Every row of §13 (1–147) and §15.38 (148–207) has a test
-  whose title names it. `pnpm vitest run`: **1733 passed, 3 skipped**, the skips all
+  whose title names it. `pnpm vitest run`: **1746 passed, 3 skipped**, the skips all
   platform-conditional (Windows, root, no TTY). `pnpm test:corepack` (corepack's own
   suite): **100 passed, 1 expected fail, 40 skipped**, each skip a §14/§17 divergence with
   a stated reason.
@@ -18,10 +18,10 @@ Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
   `JUP_` and merely *accept* the `COREPACK_` spelling, is not implemented; the table treats
   every variable as an equal pair — **superseded by D3**, which split `ENV` into §11.6's
   two closed tiers. D0 landed §17.3's noun and its roles as data plus §17.9's table
-  fixture, D1 the command router, the entry-point name, and C6/C10, and D3 the renames
-  (C2, C3, C8, C9) and C4's second tier. What is left is role-sensitive *behaviour* (D2)
-  and the shim policy and interpreter guard (D4). Rows 208–221 have tests; 222–233 do
-  not.
+  fixture, D1 the command router, the entry-point name, and C6/C10, D2 the role-sensitive
+  behaviour (R4, R9, R10, R11, R14–R16), and D3 the renames (C2, C3, C8, C9) and C4's
+  second tier. What is left is the shim policy and the interpreter guard (D4). Rows
+  208–221 and 225–233 have tests; 222–224 do not.
 * **Nothing is published**; `package.json` is at `0.0.0`.
 
 ## Remaining work — §17
@@ -32,8 +32,8 @@ Order is dependency order. D0 unblocks D2 and D4; the rest are independent.
 
 `Role`, `Tool` and `ToolSpec` are in `src/types.ts` (§17.3's rename, no aliases kept), every
 §02.5 entry carries `roles: ["package-manager"]`, and `config/table.ts` exports `getRoles`
-and `hasRole`. **Nothing branches on a role yet** — R3's seam is open, R4's four behaviours
-are D2's and D4's.
+and `hasRole`. Nothing branched on a role at the time: R4's enforcement, R10's inference
+and R11 landed in D2, and C5's `enable` default set is still D4's.
 
 The seam, for the steps that use it:
 
@@ -107,20 +107,68 @@ while `jup yarn --version` is still step 1 (row 210) — the same rule read from
   because R7 makes `jup pm yarn` an error and advertising it would advertise something that
   does not work.
 
-The scope reaches the commands as `Route.scope`, on the object every handler receives.
-Nothing branches on it yet — that is R9/R10/R11 — and R13 requires the two forms to agree
-until then, which row 208 asserts.
+The scope reaches the commands as `Route.scope`, on the object every handler receives; D2
+is what reads it (R9, R10, R11). R13 requires the two forms to agree on the success path,
+which row 208 asserts.
 **Rows:** 208–215, in `test/conformance/17-01-router.test.ts`; the classification table,
 the `argv[1]` shapes and C10's two sides are `test/unit/router.test.ts`.
 
-### D2 — Roles in the data model §17.3, §17.5
+### D2 — Roles in the data model §17.3, §17.5 — **done**
 
-R1–R6's remainder (the types and the roles landed in D0), R10's inference for an unscoped command, R11's
-dual-role specs, and R4's per-role enforcement — a runtime-only pin must not produce a
-package-manager mismatch error. R14 parses, validates, and reconciles `devEngines.runtime`
-while it stays inert; R15 keeps `engines.node` out of selection; R16 defers `.nvmrc` and
-friends. §15.26's single atomic manifest write has to carry both pins at once.
-**Rows:** 225–233.
+**The project has pins, plural.** `SpecResult`'s `Found` carries
+`pins: Partial<Record<Role, ProjectPin>>` instead of one `getSpec`/`range`/`hasPin`
+triple, built by running §03.3 once per role in `ROLE_ORDER`; `Found` means *some* role
+is pinned and `NoSpec` means none is, which for a package-manager-only table is the same
+test written once per role. Which fields a role reads is `manifest.ts`'s `PIN_FIELDS` —
+`{top: "packageManager", block: "packageManager"}` and `{block: "runtime"}` — so R14's
+"parsed, validated, and reconciled by the same rules §03.3 applies" holds *by
+construction* rather than by a second copy of §03.3, and R14's "there is no top-level
+`runtime` field" is the absence of a `top`.
+
+* **R4 row 2 — `reconcile` picks the pin by the invoked binary's role.** It intersects
+  `getRoles(requestedName)` with the roles the project pins, matches against each in
+  order, and takes §03.5's ordinary fallback when the intersection is empty. A tool the
+  table does not carry keeps the package-manager pin (`UNKNOWN_BINARY_ROLES`), which is
+  what leaves `jup foo@1.2.3` in a pinned project on §12.5. Rows 225 and 226.
+* **§09.1 returns a list.** `resolveProjectPlans` yields one `{role, pin, descriptor}` per
+  pinned role; `resolvePatternsToDescriptors([])` is its `.map(descriptor)`. `install`,
+  `up` and `pack` loop over it through `forEachRole`, which **rethrows untouched when
+  there is exactly one plan** — so every project that pins one role gets §12.1's
+  presentation byte for byte — and otherwise prints each role's failure and returns 1.
+  Rows 227 and 228.
+* **`writePin` takes a list.** One `writeFileSync` for however many pins (R10's third
+  consequence, §15.26). Row 229's second half is the assertion that makes it observable:
+  a runtime pin refused mid-write by its own declared range leaves the package manager's
+  pin — composed into the same string a statement earlier — off the disk too.
+* **R9** is `narrowToScope`, called before any resolve in `use`, `install -g` and `pack`;
+  **R11** is `resolvePinRole`, whose step 3 (the roles the project already declares for
+  that tool) costs a second walk and is therefore reached **only** for a genuinely
+  dual-role spec. Rows 230 and 231.
+* **R11 step 2 is unanswerable today, and says so.** `pin.ts`'s `autoRoleFor` is where:
+  nothing distinguishes a package-manager use of a dual-role binary from a runtime use —
+  R2 keeps the surface one flat namespace, R3 keeps roles data, and §02.4's binary map
+  answers a name with a *tool*. R11's last paragraph settles it and row 232 is satisfied
+  **by that fallback**, deliberately not by a bin-name-to-role map.
+* **R10 row 5** refuses a scope **word** on `cache clean`/`clear`, not the role in effect:
+  R12 makes `corepack cache clean` implicitly package-manager-scoped and it must keep
+  working. `cache list` filters (row 4). Row 233.
+* **R15 and R16 needed no code and got none.** `engines.node` is not in `PIN_FIELDS` and
+  no reader looks at it; the walk's stop conditions are untouched, per §03.8's "nothing in
+  §3.1–§3.7 changes", so `.nvmrc` and friends are not in it either. The comment on
+  `stopsWalk` records why `devEngines.runtime` is *not* a stop condition: a runtime-only
+  manifest stopping the climb would strip a parent's package-manager pin, which is a
+  precedence question §17.7 has not answered.
+
+**R3 has a test.** `17-03-roles.test.ts` scans `src/` with comments stripped and fails if
+any file outside six spells a role literally — `types.ts` (the union), `config/table.ts`
+(§02.5's entries, `ROLE_ORDER`), `project/manifest.ts` (`PIN_FIELDS`, R4's enforcement),
+`project/pin.ts` (R11's tie-break), `commands/cli.ts` (R9, R11), `commands/router.ts`
+(scope words, role nouns). Everything else is parameterised by a `Role` its caller supplies
+or asks `hasRole`, which is why `cache list`'s filter and `enable`'s default set are not
+role branches.
+**Rows:** 225–233, in `test/conformance/17-03-roles.test.ts`. Every role-sensitive row was
+verified to **fail** with the behaviour reverted — the reverts are named in each test's
+comment.
 
 ### D3 — The renames C2, C3, C4 tier 2, C8, C9 — **done**
 
@@ -173,18 +221,22 @@ reachable without any `PATH` of the user's.
 
 ## Standing hazards
 
-* **The warm byte ceiling is at 223,000** (`test/unit/main.test.ts`), raised from 212,000
-  by D3's renames: `store.ts` +2,307, `env-vars.ts` +3,047, `lockfile.ts` +2,699,
-  `env.ts` +929 (measured, `warm.mjs` 80,413 -> 81,644, **+1,231 bytes, +1.53%**, against
-  +10,087 of source — the widest gap yet between the two, because a rename is nearly all
-  explanation). The next warm-path change raises it deliberately, with a reason. It is a tripwire, not a budget. The
+* **The warm byte ceiling is at 232,000** (`test/unit/main.test.ts`), raised from 223,000
+  by D2's per-role pins: `manifest.ts` +6,897 (`PIN_FIELDS`, the per-role loop in
+  `describe`, the role parameter through `readSpecFromManifest`, role-aware `reconcile`),
+  `errors.ts` +1,598, `table.ts` +600, `main.ts` +287. Measured, `_warm.mjs` 81,644 ->
+  83,425, **+1,781 bytes, +2.18%**, against +9,382 of source. **It costs no I/O:**
+  `devEngines` was already one of the two fields `scanTopLevelFields` extracts, so the
+  second pin is read out of bytes already in memory, and the walk visits the same
+  directories and reads the same files it did before. The next warm-path change raises it
+  deliberately, with a reason. It is a tripwire, not a budget. The
   companion assertion — the modules statically reachable from `src/shim.ts` **equal**
   `build.config.ts`'s `WARM_MODULES` — is what pins the emitted chunk; a new static import
   on the warm path fails until the build config is updated.
 * **`test/conformance/15-28-native.test.ts` flakes under full-suite load.** The §08.5
   row asserting `exitCode 55` / `signal null` — the child stayed in the process group and
   the tool did not die of the same signal — failed once in two consecutive full runs and
-  passes alone every time. 1707 passed / 3 skipped is the green baseline; a single failure
+  passes alone every time. 1746 passed / 3 skipped is the green baseline; a single failure
   in that file is the flake, not a regression. Worth a timing fix before it costs someone
   an afternoon.
 * **The sandbox has live network and the conformance harness does not disable it.** A row
@@ -205,6 +257,14 @@ reachable without any `PATH` of the user's.
   it by hand before believing anything about paths.
 
 ## Open follow-ups, all verified open
+
+* **§03.6's auto-pin notice is package-manager-shaped, and D2 left it that way.** The
+  verbatim sentence is `The local project doesn't define a 'packageManager' field. …will
+  now add one referencing <name>@<reference>.` For a **runtime-only** tool `autoRoleFor`
+  answers `runtime`, so the pin is written into `devEngines.runtime` while the notice
+  still names `packageManager`. No §17.9 row covers it (row 232 is the dual-role case,
+  where R11's tie-break makes the notice true), and §12's text is frozen — so this wants a
+  spec ruling on what the runtime spelling of that notice is, not an invented one.
 
 * **§15.38 row 153's text is now stale.** It says the unknown-CA message names
   `COREPACK_CAFILE`; C4 makes every tier-2 variable `JUP_`-named in this spec's own

@@ -9,19 +9,21 @@ import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { ENV, readEnv } from "../config/env-vars.ts";
-import { isSupportedPackageManager } from "../config/table.ts";
+import { getRoles, isSupportedPackageManager, ROLE_ORDER } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, validationWarningPrefix } from "../errors.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type {
   Descriptor,
+  DevEnginesBlock,
   DevEnginesDeclaration,
-  DevEnginesPackageManager,
   DevEnginesRange,
   LazyLocator,
   Manifest,
   ParseSpecOptions,
+  ProjectPin,
+  Role,
   SpecResult,
 } from "../types.ts";
 
@@ -33,6 +35,47 @@ const MANIFEST_NAME = "package.json";
 
 /** §03.4 — the `source` reported for anything the user typed on the command line. */
 export const CLI_SOURCE = "CLI arguments";
+
+/** §17.3 R4 row 1 — the manifest fields that encode one role's pin. */
+export interface PinFields {
+  /**
+   * The top-level field, for the one role that has one. §17.5 R14: "There is no
+   * top-level `runtime` field and this specification MUST NOT invent one;
+   * `packageManager` is a historical shape, not a pattern to repeat."
+   */
+  readonly top?: "packageManager";
+  /** The `devEngines` sub-key, which every role has (§02.7). */
+  readonly block: "packageManager" | "runtime";
+}
+
+/**
+ * §17.3 R4 row 1, §17.5 R14 — where each role's pin lives, as **data**.
+ *
+ * This map and `table.ts`'s `ROLE_ORDER` are the whole of "which field does this
+ * role read": every reader below is parameterised by a role and looks its fields
+ * up here, so R3's "adding a runtime MUST be a data-only change" holds for §03
+ * too. Nothing in this file compares a role against a literal.
+ *
+ * `devEngines.runtime` is therefore "parsed, validated, and reconciled by the
+ * same rules §03.3 applies to `devEngines.packageManager`, `onFail` included"
+ * (R14) by construction rather than by a second copy of §03.3.
+ */
+export const PIN_FIELDS: Readonly<Record<Role, PinFields>> = {
+  "package-manager": { top: "packageManager", block: "packageManager" },
+  runtime: { block: "runtime" },
+};
+
+/**
+ * How a message names the field that holds this role's pin.
+ *
+ * `packageManager` for a package manager — which is what every §12 string
+ * carrying the name says today, byte for byte — and `devEngines.runtime` for a
+ * role whose pin has no top-level home (§17.5 R14).
+ */
+export function pinFieldLabel(role: Role): string {
+  const fields = PIN_FIELDS[role];
+  return fields.top ?? `devEngines.${fields.block}`;
+}
 
 /** §03.3 — every field of the manifest the discovery walk actually looks at. */
 const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
@@ -67,6 +110,15 @@ const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
  * Both fields are stop conditions here, and the test is **key presence**, not
  * truthiness: a declared-but-invalid value stops the walk and is then reported
  * by `parseSpec`, which is where an invalid value belongs.
+ *
+ * `devEngines.runtime` (§17.5 R14) is deliberately **not** a stop condition, and
+ * neither is any other role's field. §03.8 is explicit: "Until a runtime enters
+ * the table (§02.5), the walk's stop conditions, precedence, and error messages
+ * are exactly as specified above" — so the walk still selects one manifest by the
+ * package-manager fields, and every role's pin is then read out of that manifest
+ * (§17.4 R10 row 2's "every role the project pins"). Making a runtime-only
+ * manifest stop the climb would silently strip the package-manager pin a parent
+ * declares, which is a precedence question §17.7 has not answered.
  */
 function stopsWalk(data: Manifest | undefined): boolean {
   if (data === undefined) return false;
@@ -266,6 +318,16 @@ export function discoverProjectSpec(
  * The `SpecResult` for one already-read manifest — the walk's selection, or
  * §15.35d's external file, which get identical treatment. devEngines validation
  * is eager (a bad `onFail: "error"` must fail the run); `parseSpec` is deferred.
+ *
+ * §17.4 R10 row 2 — one pin per role the manifest declares, in {@link ROLE_ORDER}
+ * (package manager first). The result is `Found` when at least one role is
+ * pinned and `NoSpec` when none is, which for a table containing only
+ * package-manager tools is the same test this made before, run once.
+ *
+ * The extra role costs no I/O: `devEngines` is already one of the two fields
+ * {@link scanTopLevelFields} extracts, so its `runtime` sub-key arrives with the
+ * `packageManager` one and the warm path still answers a two-field question
+ * (§16.3).
  */
 function describe(
   data: Manifest,
@@ -273,22 +335,28 @@ function describe(
   initialCwd: string,
   envFilePath: string | undefined,
 ): SpecResult {
-  const { raw, range, hasPin, devEngines } = readSpecFromManifest(data, target);
-  if (raw === undefined) {
+  // Messages name the manifest relative to where the user was standing.
+  const source = relative(initialCwd, target);
+  const pins: Partial<Record<Role, ProjectPin>> = {};
+
+  for (const role of ROLE_ORDER) {
+    const { raw, range, hasPin, devEngines } = readSpecFromManifest(data, target, role);
+    if (raw === undefined) continue;
+
+    const pin: ProjectPin = {
+      hasPin,
+      getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, opts),
+    };
+    if (range !== undefined) pin.range = range;
+    if (devEngines !== undefined) pin.devEngines = devEngines;
+    pins[role] = pin;
+  }
+
+  if (ROLE_ORDER.every((role) => pins[role] === undefined)) {
     return { type: "NoSpec", target, envFilePath };
   }
 
-  // Messages name the manifest relative to where the user was standing.
-  const source = relative(initialCwd, target);
-  return {
-    type: "Found",
-    target,
-    range,
-    devEngines,
-    hasPin,
-    envFilePath,
-    getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, opts),
-  };
+  return { type: "Found", target, pins, envFilePath };
 }
 
 /** §15.35d — `COREPACK_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
@@ -390,14 +458,22 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
 }
 
 /**
- * §03.3 — resolve `packageManager` against `devEngines.packageManager`.
+ * §03.3 — resolve a role's top-level pin against its `devEngines` block.
  *
  * Validation happens in a specific order because each failure has a different
- * outcome, and `packageManager` always wins when present.
+ * outcome, and the top-level field always wins when present.
+ *
+ * §17.5 R14 — the *role* selects the fields, out of {@link PIN_FIELDS}, and
+ * nothing else here changes: `devEngines.runtime` is validated by these rules,
+ * `onFail` included, because it is these rules. A role with no top-level field
+ * (every role but the package manager) simply has no `pm` to cross-check
+ * against, so the two mismatch branches below are unreachable for it — which is
+ * why those two messages stay spelled as §12.3 froze them.
  */
 export function readSpecFromManifest(
   manifest: unknown,
   manifestPath: string,
+  role: Role = "package-manager",
 ): {
   raw: unknown;
   range?: DevEnginesRange;
@@ -407,9 +483,10 @@ export function readSpecFromManifest(
 } {
   void manifestPath; // Reserved: §15.25/§15.26 need it to report *which* file is at fault.
 
+  const fields = PIN_FIELDS[role];
   const data = (manifest ?? {}) as Manifest;
-  const pm = data.packageManager;
-  const de = data.devEngines?.packageManager;
+  const pm = fields.top === undefined ? undefined : data[fields.top];
+  const de = data.devEngines?.[fields.block];
 
   // Only a *string* counts as a declared pin: `packageManager: 42` is a spec
   // error waiting to be reported, not a range `up` could refresh.
@@ -422,26 +499,26 @@ export function readSpecFromManifest(
   // These first two never throw, whatever `onFail` says: the field is too
   // malformed for its own `onFail` to be trustworthy.
   if (typeof de !== "object") {
-    console.warn(messages.devEnginesNotObject(de));
+    console.warn(messages.devEnginesNotObject(de, fields.block));
     return { raw: pm, hasPin };
   }
   if (Array.isArray(de)) {
-    console.warn(messages.devEnginesArray());
+    console.warn(messages.devEnginesArray(fields.block));
     return { raw: pm, hasPin };
   }
 
-  const { name, version, onFail } = de as DevEnginesPackageManager;
+  const { name, version, onFail } = de as DevEnginesBlock;
   // §15.12 — the sidecar spelling of the pin. Read here so the same `onFail`
   // routing governs it as governs every other field of the block.
   const integrity = (de as Record<string, unknown>).integrity;
 
   if (typeof name !== "string" || name.includes("@")) {
-    warnOrThrow(messages.devEnginesBadName(name), onFail);
+    warnOrThrow(messages.devEnginesBadName(name, fields.block), onFail);
     return { raw: pm, hasPin };
   }
   if (version !== undefined && version !== null) {
     if (typeof version !== "string" || !isValidRange(version)) {
-      warnOrThrow(messages.devEnginesBadVersion(version), onFail);
+      warnOrThrow(messages.devEnginesBadVersion(version, fields.block), onFail);
       return { raw: pm, hasPin };
     }
   }
@@ -477,11 +554,11 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
     }
     // `packageManager` wins whenever it is present, even after a warning.
-    return { raw: withSidecarIntegrity(pm, integrity, onFail), range, devEngines, hasPin };
+    return { raw: withSidecarIntegrity(pm, integrity, onFail, role), range, devEngines, hasPin };
   }
 
   return {
-    raw: withSidecarIntegrity(`${name}@${version ?? "*"}`, integrity, onFail),
+    raw: withSidecarIntegrity(`${name}@${version ?? "*"}`, integrity, onFail, role),
     range,
     devEngines,
     hasPin,
@@ -511,18 +588,23 @@ export function readSpecFromManifest(
  *   one on the first resolve;
  * * a URL reference, which carries its hash in the fragment (§02.1).
  */
-function withSidecarIntegrity(raw: unknown, integrity: unknown, onFail: unknown): unknown {
+function withSidecarIntegrity(
+  raw: unknown,
+  integrity: unknown,
+  onFail: unknown,
+  role: Role,
+): unknown {
   if (integrity === undefined || integrity === null) return raw;
   if (typeof raw !== "string") return raw;
 
   if (typeof integrity !== "string") {
-    warnOrThrow(messages.devEnginesBadIntegrity(integrity), onFail);
+    warnOrThrow(messages.devEnginesBadIntegrity(integrity, PIN_FIELDS[role].block), onFail);
     return raw;
   }
 
   const hash = hashFromIntegrity(integrity);
   if (hash === undefined) {
-    warnOrThrow(messages.devEnginesBadIntegrity(integrity), onFail);
+    warnOrThrow(messages.devEnginesBadIntegrity(integrity, PIN_FIELDS[role].block), onFail);
     return raw;
   }
 
@@ -541,7 +623,15 @@ function withSidecarIntegrity(raw: unknown, integrity: unknown, onFail: unknown)
 
   if (suffix !== "") {
     if (parsed.build.join(".").toLowerCase() !== hash) {
-      warnOrThrow(messages.devEnginesIntegrityMismatch(raw, integrity), onFail);
+      warnOrThrow(
+        messages.devEnginesIntegrityMismatch(
+          raw,
+          integrity,
+          pinFieldLabel(role),
+          PIN_FIELDS[role].block,
+        ),
+        onFail,
+      );
     }
     return raw;
   }
@@ -617,7 +707,40 @@ export function isOutsideProject(manifestPath: string): boolean {
   return target === dir || target.startsWith(dir + sep);
 }
 
-/** §03.5 — reconcile the discovered spec with the requested binary. */
+/**
+ * §17.3 R4 row 2 — the roles an invoked binary is enforced under.
+ *
+ * A name the table does not carry has none, and falls back to the
+ * package-manager role: that is the pin corepack compares against today, so
+ * `jup foo@1.2.3` in a pinned project keeps reaching §12.5's message rather than
+ * silently running something the project forbids. It is the same tie-break R11's
+ * last paragraph makes for an ambiguous invocation, for the same reason — the
+ * package-manager pin is the one every existing project has.
+ */
+const UNKNOWN_BINARY_ROLES: readonly Role[] = ["package-manager"];
+
+/**
+ * §03.5, §17.3 R4 row 2 — reconcile the discovered spec with the requested
+ * binary, **against the pin for that binary's role**.
+ *
+ * This is the row R4 calls "the one an implementation is most likely to miss",
+ * and its symptom is severe: comparing every invocation against *the* project
+ * spec makes `node foo.js` in a pnpm project fail with `This project is
+ * configured to use pnpm` — for running the runtime. So the invoked tool's roles
+ * select which of {@link SpecResult}'s per-role pins apply, and a role the
+ * project does not pin contributes nothing:
+ *
+ * * a pin for a role this binary does not fill is **not** consulted, in either
+ *   direction (rows 225 and 226);
+ * * a binary whose roles are all unpinned takes "the ordinary fallback path
+ *   (§03.5, §04.5)", exactly as `NoSpec` does;
+ * * a dual-role binary matches if *any* of its roles is pinned to it — one
+ *   artifact, one locator (R5), so there is nothing to choose between.
+ *
+ * With §02.5's table — every tool `package-manager`, every pin
+ * `packageManager` — the loop runs once over the one role and the answer is
+ * identical to the single-pin test it replaces.
+ */
 export function reconcile(
   result: SpecResult,
   fallback: LazyLocator,
@@ -649,16 +772,41 @@ export function reconcile(
       return withBinaryVersion(fallback);
     }
     case "Found": {
-      const spec = result.getSpec({ requireVersion: binaryVersion === undefined });
-      if (spec.name !== requestedName) {
-        if (transparent) {
-          return withBinaryVersion(fallback);
-        }
-        throw new UsageError(
-          messages.projectConfigured(spec.name, result.target, isOutsideProject(result.target)),
-        );
+      // The roles the invoked binary fills, intersected with the roles the
+      // project pins — in `ROLE_ORDER`, so a mismatch reports the same pin
+      // whichever way the manifest was written.
+      const roles = getRoles(requestedName) ?? UNKNOWN_BINARY_ROLES;
+      const pinned = ROLE_ORDER.filter((role) => roles.includes(role) && result.pins[role]);
+
+      // R4 — "a binary whose role has no pin takes the ordinary fallback path".
+      // This is what stops a runtime-only project from rejecting `pnpm install`,
+      // and a package-manager-only project from rejecting the runtime.
+      if (pinned.length === 0) {
+        return withBinaryVersion(fallback);
       }
-      return withBinaryVersion(spec);
+
+      // Every pin is parsed before any of them is rejected, and the *first*
+      // pinned role in `ROLE_ORDER` is what a mismatch reports — so the message
+      // names one field, deterministically, rather than whichever loop iteration
+      // happened to run last.
+      let mismatched: string | undefined;
+      for (const role of pinned) {
+        const spec = result.pins[role]!.getSpec({ requireVersion: binaryVersion === undefined });
+        if (spec.name === requestedName) return withBinaryVersion(spec);
+        mismatched ??= spec.name;
+      }
+
+      if (transparent) {
+        return withBinaryVersion(fallback);
+      }
+      throw new UsageError(
+        messages.projectConfigured(
+          mismatched!,
+          result.target,
+          isOutsideProject(result.target),
+          pinFieldLabel(pinned[0]!),
+        ),
+      );
     }
   }
 }

@@ -96,8 +96,13 @@ describe("§17.9 the test-only table fixture", () => {
   it("installs a runtime-role tool through the mock registry", async () => {
     const fixture = createFixture();
 
+    // `as: "jup"`, because §17.4 R12 makes the `corepack` entry point mean
+    // `jup pm` — and R9 then declines a spec naming a tool without the
+    // package-manager role. That refusal is row 230's subject; what this row is
+    // about is that the machinery installs a runtime at all.
     const result = await run(["install", "-g", `${RUNTIME_TOOL}@${FIXTURE_VERSION}`], {
       ...fixture,
+      as: "jup",
       registry,
       table: FIXTURE_TOOLS,
       env: trusted(),

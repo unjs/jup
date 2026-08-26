@@ -237,19 +237,28 @@ export const messages = {
 
   /* §12.3 — devEngines validation ---------------------------------------- */
 
+  /**
+   * §17.5 R14 — `block` is the `devEngines` sub-key the complaint is about, and
+   * it defaults to `packageManager` so every one of these renders byte for byte
+   * as §12.3 froze it for the only role §02.5's table has. A `devEngines.runtime`
+   * validated "by the same rules" (R14) has to be able to say so: a message
+   * naming `devEngines.packageManager` for a fault in the field beside it sends
+   * the reader to the wrong line of their manifest.
+   */
+
   /** Unconditional warning, regardless of `onFail`. Emitted with the `! ` already attached. */
-  devEnginesNotObject: (value: unknown) =>
-    `! ${ToolName()} only supports objects as valid value for devEngines.packageManager. The current value (${json(value)}) will be ignored.`,
+  devEnginesNotObject: (value: unknown, block = "packageManager") =>
+    `! ${ToolName()} only supports objects as valid value for devEngines.${block}. The current value (${json(value)}) will be ignored.`,
 
   /** Unconditional warning, regardless of `onFail`. */
-  devEnginesArray: () =>
-    `! ${ToolName()} does not currently support array values for devEngines.packageManager`,
+  devEnginesArray: (block = "packageManager") =>
+    `! ${ToolName()} does not currently support array values for devEngines.${block}`,
 
-  devEnginesBadName: (value: unknown) =>
-    `The value of devEngines.packageManager.name ${json(value)} is not a supported string value`,
+  devEnginesBadName: (value: unknown, block = "packageManager") =>
+    `The value of devEngines.${block}.name ${json(value)} is not a supported string value`,
 
-  devEnginesBadVersion: (value: unknown) =>
-    `The value of devEngines.packageManager.version ${json(value)} is not a valid semver range`,
+  devEnginesBadVersion: (value: unknown, block = "packageManager") =>
+    `The value of devEngines.${block}.version ${json(value)} is not a valid semver range`,
 
   devEnginesNameMismatch: (packageManager: unknown, name: unknown) =>
     `"packageManager" field is set to ${json(packageManager)} which does not match the "devEngines.packageManager" field set to ${json(name)}`,
@@ -344,8 +353,17 @@ export const messages = {
    * *every* directory on the machine (#424). Without the clause the user is
    * named a file they have no memory of creating and left to work out why.
    */
-  projectConfigured: (name: string, manifestPath: string, outsideProject?: boolean) =>
-    `This project is configured to use ${name} because ${manifestPath} has a "packageManager" field${
+  projectConfigured: (
+    name: string,
+    manifestPath: string,
+    outsideProject?: boolean,
+    // §17.3 R4 row 2 — the field that actually carries the pin the invocation
+    // was reconciled against. `packageManager` for the only role §02.5 has, so
+    // §12.5's text is unchanged; a runtime mismatch names the runtime's field
+    // rather than pointing the reader at one their manifest may not even have.
+    field = "packageManager",
+  ) =>
+    `This project is configured to use ${name} because ${manifestPath} has a "${field}" field${
       outsideProject === true
         ? ` (this manifest is outside any project — a stray "packageManager" field there affects every directory)`
         : ""
@@ -651,8 +669,8 @@ export const messages = {
    * like every other `devEngines` complaint (§03.3): a pin nobody can check is
    * exactly the state §15.11 exists to refuse, so silence is the wrong default.
    */
-  devEnginesBadIntegrity: (value: unknown) =>
-    `Invalid "devEngines.packageManager.integrity" field: ${JSON.stringify(value) ?? String(value)}`,
+  devEnginesBadIntegrity: (value: unknown, block = "packageManager") =>
+    `Invalid "devEngines.${block}.integrity" field: ${JSON.stringify(value) ?? String(value)}`,
 
   /**
    * Both spellings of the pin are present and they disagree. §15.12 requires
@@ -660,8 +678,25 @@ export const messages = {
    * conflicting other, and two different digests for one artifact means at most
    * one of them describes what will run.
    */
-  devEnginesIntegrityMismatch: (packageManager: string, integrity: string) =>
-    `The "packageManager" field (${packageManager}) and "devEngines.packageManager.integrity" (${integrity}) pin different hashes`,
+  devEnginesIntegrityMismatch: (
+    packageManager: string,
+    integrity: string,
+    field = "packageManager",
+    block = "packageManager",
+  ) =>
+    `The "${field}" field (${packageManager}) and "devEngines.${block}.integrity" (${integrity}) pin different hashes`,
+
+  /**
+   * §17.5 R14 — a pin whose only field could not be written surgically.
+   *
+   * The package-manager role always has `packageManager` to fall back to, so
+   * this is unreachable for it; a role whose pin lives only inside a
+   * `devEngines` block has nowhere else, and R14 forbids inventing a top-level
+   * field to make one. Reporting the manifest as unwritable beats reporting a
+   * success that changed nothing.
+   */
+  pinFieldUnwritable: (field: string) =>
+    `Couldn't write the "${field}" field into package.json; the file's shape is not one ${toolName()} can edit surgically`,
 
   /* §14.5 — env-file eligibility ------------------------------------------ */
 
