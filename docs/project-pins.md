@@ -1,0 +1,133 @@
+---
+icon: i-lucide-pin
+title: Project pins
+---
+
+# Choose a package manager for a project
+
+A **pin** records the package manager and version a project uses. jup reads pins from `package.json`.
+
+## Use `packageManager`
+
+The usual form is:
+
+```json
+{
+  "packageManager": "pnpm@11.1.2+sha512.abc123..."
+}
+```
+
+The part after `+sha512.` is a digest of the downloaded file. jup checks it before using the package manager, including when the file is already cached.
+
+You do not need to write this by hand:
+
+```sh
+jup use pnpm@11
+```
+
+## Use `devEngines.packageManager`
+
+jup also understands Node's `devEngines` form:
+
+```json
+{
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "11.x",
+      "onFail": "error"
+    }
+  }
+}
+```
+
+The `version` may be an exact version or a **semver range**. Semver means semantic versioning, such as `11.1.2`; a range such as `11.x` allows more than one release.
+
+`onFail` controls what happens when a request does not match. Use `error` to stop, `warn` to print a warning, or `ignore` to continue silently.
+
+When both fields exist, `packageManager` is the active pin. jup also validates it against `devEngines.packageManager`. A command that changes a pin updates the fields that encode the pin so they do not disagree. A range in `devEngines` remains a range because it describes what the project accepts.
+
+## Exact versions, ranges, and tags
+
+These are all valid inputs to `jup use`:
+
+```sh
+jup use pnpm@11.1.2   # exact version
+jup use pnpm@^11.0.0  # choose from a semver range
+jup use pnpm@latest   # choose from a registry tag
+jup use pnpm          # choose the current stable release
+```
+
+A range or tag passed to `jup use` is a selector. jup chooses a release and writes that exact version to `package.json`.
+
+When jup chooses a version for you, it does not choose a prerelease such as `12.0.0-beta.1` by default. Ask for that version directly, use a range that includes prereleases, or set `COREPACK_ENABLE_PRERELEASES=1`.
+
+## Range pins and `.corepack.lock`
+
+A project can also keep a range directly in `package.json`:
+
+```json
+{
+  "packageManager": "pnpm@^11.0.0"
+}
+```
+
+Because a range can point to a different version later, jup records the chosen version and digest in `.corepack.lock`:
+
+```json
+{
+  "version": 1,
+  "resolutions": {
+    "pnpm@^11.0.0": {
+      "resolved": "11.1.2",
+      "integrity": "sha512-..."
+    }
+  }
+}
+```
+
+Commit this file. Later runs use the recorded version without contacting the registry.
+
+In CI, the lockfile is frozen by default. jup will not silently add a missing range resolution. Set `COREPACK_FROZEN_LOCKFILE=0` to allow it, or run `jup up` as an explicit update.
+
+Exact version pins do not need `.corepack.lock`.
+
+## Choose which file to edit
+
+Without `--here`, jup walks up from the current directory. For a workspace, it stops at the workspace root. Every command that changes a manifest prints the path it changed.
+
+Use `--here` to change `package.json` in the current directory instead:
+
+```sh
+jup use --here pnpm@11.1.2
+jup up --here
+```
+
+If `package.json` does not exist there, `jup use --here` creates it.
+
+Reading is different from writing. A package with no pin can still inherit a pin from an ancestor. This lets one workspace pin cover its packages.
+
+## Keep the version text clean
+
+The default pin style stores the digest in `packageManager`. For tools that only accept a plain version there, use the sidecar style:
+
+```sh
+jup use --pin-style=sidecar yarn@4.14.1
+```
+
+This writes:
+
+```json
+{
+  "packageManager": "yarn@4.14.1",
+  "devEngines": {
+    "packageManager": {
+      "name": "yarn",
+      "version": "4.14.1",
+      "integrity": "sha512-..."
+    }
+  }
+}
+```
+
+jup reads and verifies both styles in the same way. The default suffix style is more widely compatible with Corepack.

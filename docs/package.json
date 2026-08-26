@@ -1,0 +1,11 @@
+{
+  "name": "jup-docs",
+  "private": true,
+  "scripts": {
+    "dev": "undocs dev",
+    "build": "undocs build"
+  },
+  "devDependencies": {
+    "undocs": "latest"
+  }
+}

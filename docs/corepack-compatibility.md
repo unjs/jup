@@ -1,0 +1,78 @@
+---
+icon: i-lucide-git-compare-arrows
+title: Corepack compatibility
+---
+
+# Compatibility with Corepack
+
+jup is designed as a Corepack replacement. Existing projects can keep:
+
+- `packageManager` and `devEngines.packageManager` in `package.json`
+- `.corepack.env`
+- `COREPACK_*` environment variables
+- the familiar npm, pnpm, and Yarn command names
+- Corepack's cache layout and common error text
+
+You can use `JUP_*` instead of `COREPACK_*`. If both forms are set, `JUP_*` wins.
+
+jup also adds `.corepack.lock` for repeatable range pins. Standard Corepack does not create this file.
+
+## Differences you may notice
+
+jup deliberately changes some Corepack behavior to be safer or clearer.
+
+### Shims are safer
+
+- Shims go into a per-user directory, so `sudo` is normally unnecessary.
+- npm is included by default. Use `jup enable --exclude npm` to keep Corepack's default.
+- jup does not overwrite another tool's command unless you use `--force`.
+- `disable` restores a command that `enable --force` replaced.
+- jup warns when its shim directory is missing from `PATH` or another version manager wins first.
+
+### Project edits are predictable
+
+- `use` and `up` stop at a workspace root instead of editing an unrelated ancestor.
+- `--here` edits only the current directory.
+- The command prints the file it changed.
+- `packageManager` and `devEngines.packageManager` are kept consistent.
+- A `packageManager` field in your home directory is called out when it unexpectedly affects other folders.
+
+### Version choice is more cautious
+
+- jup does not choose a prerelease unless you ask for one or enable prereleases.
+- `COREPACK_MINIMUM_RELEASE_AGE` can keep very new releases out of automatic choices.
+- A new package manager major can still run when jup's built-in table has not yet learned that major's entry point, as long as the downloaded package describes it safely.
+
+### Network configuration works without extra flags
+
+- jup reads the useful registry, auth, and TLS parts of `.npmrc`.
+- standard proxy environment variables work directly.
+- requests have timeouts and safe retries.
+- TLS errors identify common certificate problems.
+- `COREPACK_REGISTRY_<NAME>` can mirror one manager without moving the others.
+
+### Trust boundaries are stricter
+
+- A project `.corepack.env` cannot disable verification, add trust keys, enable unsafe URLs, or supply registry credentials.
+- A project `.npmrc` can select a registry but cannot provide credentials or certificate authorities.
+- Credentials are scoped to the intended registry.
+- Tarball URLs and extracted paths are checked.
+- Signing-key expiry is enforced.
+- Every artifact needs a pinned digest, a valid signature, or a registry digest. Direct Yarn Berry downloads may need a one-time digest pin; see [Cache, offline use, and security](./cache-and-security#yarn-berry-and-unsigned-downloads).
+
+### Cache and execution behavior is clearer
+
+- A digest is checked even when an entry is already cached.
+- `cache clean` reports what it removed.
+- Package manager subprocesses receive the resolved manager on `PATH`, so scripts that run `pnpm` again get the same version.
+- Global npm installs are not blocked by a project pinned to another manager.
+
+## Compatibility details
+
+Some jup errors still say `corepack`. Existing scripts and CI jobs match these strings, so changing them would break compatibility.
+
+`prepare` and `hydrate` still work for compatibility, but they are deprecated. Prefer `pack` and `install -g`.
+
+jup's built-in package managers are npm, pnpm, and Yarn. The implementation can run native package managers, but no additional manager is enabled by default.
+
+If behavior differs unexpectedly, run `jup info`. It gives an offline explanation of the project pin, registry, lockfile, cache, and shims. Then see [Troubleshooting](./troubleshooting).

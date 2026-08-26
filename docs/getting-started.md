@@ -1,0 +1,113 @@
+---
+icon: i-lucide-rocket
+title: Getting started
+---
+
+# Install and set up jup
+
+jup manages npm, pnpm, and Yarn versions for each project.
+
+## Install jup
+
+jup requires Node.js 22.18 or newer. It does not have a published npm release yet. To try the current source:
+
+```sh
+git clone https://github.com/pithings/jup.git
+cd jup
+corepack enable
+pnpm install
+pnpm pack
+npm install -g ./jup-0.0.0.tgz
+```
+
+The archive name includes the version from `package.json`, so it may change. After a release is published, installation will be:
+
+```sh
+npm install -g jup
+```
+
+Check the installation:
+
+```sh
+jup --version
+```
+
+## Enable package manager commands
+
+```sh
+jup enable
+```
+
+This installs shims for `npm`, `npx`, `pnpm`, `pnpx`, `yarn`, and `yarnpkg`. A **shim** is a small command that sends your request to jup.
+
+By default, jup puts shims in a user-owned directory. You should not need `sudo`. If that directory is not on `PATH`, jup prints the line to add to your shell setup. `PATH` is the list of directories your shell searches for commands.
+
+Open a new terminal after changing `PATH`. In an existing POSIX shell, `hash -r` may also be needed.
+
+To choose the directory yourself:
+
+```sh
+jup enable --install-directory "$HOME/bin"
+```
+
+To leave npm alone:
+
+```sh
+jup enable --exclude npm
+```
+
+Unlike Corepack, jup includes npm by default. This stops `npm install` from bypassing a project that is pinned to pnpm or Yarn.
+
+jup will not overwrite another tool's command by default. If you choose to replace it, jup records it and restores it when you disable the shims:
+
+```sh
+jup enable --force
+jup disable
+```
+
+## Pin a package manager
+
+Go to your project and run:
+
+```sh
+jup use pnpm@11
+```
+
+jup resolves the newest suitable pnpm 11 release, downloads and checks it, then writes the exact version and digest to `package.json`. A **digest** is a hash that identifies the downloaded bytes.
+
+For example:
+
+```json
+{
+  "packageManager": "pnpm@11.1.2+sha512.abc123..."
+}
+```
+
+Commit this change. Everyone who opens the project will use the same package manager bytes.
+
+## Run the package manager
+
+Use the normal command:
+
+```sh
+pnpm install
+```
+
+You can also run through jup without enabling shims:
+
+```sh
+jup pnpm install
+jup yarn@4.9.0 --version
+```
+
+The version after `@` overrides the project for that one command.
+
+## Check your setup
+
+```sh
+jup info
+```
+
+Look at the `Project`, `Resolution`, `Store`, and `Shims` sections. They show which manifest was read, which version was chosen, whether it is cached, and whether another command is shadowing jup's shim.
+
+Next, read [Project pins](./project-pins) to learn exactly what jup writes.

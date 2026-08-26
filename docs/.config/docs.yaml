@@ -1,0 +1,11 @@
+# yaml-language-server: $schema=https://unpkg.com/undocs/schema/config.json
+
+name: "jup"
+shortDescription: "Run the package manager your project pinned."
+description: "A fast, small, zero-dependency package manager version manager."
+github: "pithings/jup"
+url: "https://jup.unjs.io"
+themeColor: "yellow"
+
+# Flat docs for now: `/` is served from `index.md` instead of a generated hero.
+landing: false
