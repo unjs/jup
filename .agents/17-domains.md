@@ -131,8 +131,8 @@ Everything else — resolution, cache probe, integrity, store layout, last-known
 > `Unsupported package manager specification`, `Invalid package manager name '<name>'`,
 > `please specify the package manager to pack`, `This package manager (<name>) isn't
 > supported…`. Under the `corepack` entry point they are frozen (§13, R12) and stay
-> as they are. Under `jup` they are wrong the moment a runtime exists, and §17.6 C10
-> decides what they say instead. This is not deferred to §17.7 because the wording is
+> as they are. Under `jup` they are wrong the moment a runtime exists, and §17.6 C10a
+> decides what they say instead: the noun is the scope in effect. This is not deferred to §17.7 because the wording is
 > the compatibility contract.
 
 **R5 — A dual-role tool needs a role only where a field is written.** Resolution and
@@ -456,6 +456,46 @@ still match the two — and it never applies to a name that belongs to something
 `https://nodejs.org/api/packages.html#packagemanager`). §12.1 states the rule; §13
 runs its rows through the `corepack` entry point (§13.1).
 
+**C10a — The noun follows the scope in effect.** R4 defers to this section a second
+set of verbatim strings: the ones that hardcode *package manager* as the **kind of
+thing** being named — `Unsupported package manager specification`, `Invalid package
+manager name '<name>'`, `please specify the package manager to pack`, `This package
+manager (<name>) isn't supported…`. They are decided here on the same terms as the
+name, and for the same reason: `jup runtime install -g node@22` answering
+`Unsupported package manager specification` is not a compatibility win, it is a
+sentence that contradicts the command that produced it.
+
+The noun is **the scope in effect** (§17.4), not the role of anything resolved:
+
+| Invocation | Noun |
+|---|---|
+| the `corepack` entry point | `package manager`, frozen byte for byte (R12) |
+| an explicit scope | that scope's noun — `runtime` under `jup runtime`, `package manager` under `jup pm` |
+| unscoped `jup` | `package manager` |
+
+Unscoped stays corepack's wording deliberately. A command that fails *before* it has
+resolved a name has no role to report, and R10's inference cannot supply one — the
+name it would infer from is the name that just failed. Guessing there would trade a
+wording that is merely dated for one that is wrong.
+
+Two constraints, mirroring the name substitution:
+
+* It is a **noun** substitution, not a rewrite: the same sentence, the same
+  punctuation, the same interpolations.
+* It applies only where the noun names *the kind of tool the command is acting on*.
+  It MUST NOT touch a `packageManager` or `devEngines.packageManager` **field name**,
+  which names something else — including in the messages that validate that field,
+  where the field is the subject of the sentence and the noun is not a noun about the
+  command at all (`Invalid package manager specification in <source>; expected a
+  string` is a statement about a malformed `packageManager` field under every scope).
+
+Where one sentence carries **both** — `The local project doesn't feature a
+'packageManager' field nor a 'devEngines.packageManager' field - please specify the
+package manager to pack` — the field names move with the noun, to the fields that
+scope's role actually reads (§17.5 R14). A message that names the package-manager
+fields while asking for a runtime is the incoherence this clause exists to remove,
+and naming half of it correctly is worse than naming none of it.
+
 **C8 — No migration is performed.** C2 and C3 abandon an existing corepack cache
 rather than moving it, exactly as §07.1's `v1` segment abandons an old layout. The
 cost is one re-download per tool per machine; the alternative is migration code that
@@ -550,6 +590,9 @@ released binary, from the environment, or from any file a project can contain.
 | 231 | *(fixture)* `jup use <dual-role tool>@<v>` with nothing declared | R11's both-spellings usage error; with the tool already declared in one field, that field is updated and no error |
 | 232 | *(fixture)* Auto-pin in proxy mode for the dual-role fixture, nothing declared | the pin is written for the role the binary was invoked under — no usage error (R11 step 2) |
 | 233 | `jup runtime cache clean` | usage error; the store is untouched. `jup cache clean` removes it (R10 row 5) |
+| 234 | `install -g <unknown name>@<v>` under each of `corepack`, `jup`, `jup pm`, `jup runtime` | the first three say `Unsupported package manager specification (<raw>)` byte for byte; the fourth says `Unsupported runtime specification (<raw>)` (C10a) |
+| 235 | *(fixture)* `jup runtime pack` in a project pinning only a package manager | the "no spec" error names the **runtime** and `devEngines.runtime`; the same command under `jup pm` is byte-identical to today's (C10a's both-halves rule) |
+| 236 | A manifest whose `packageManager` field is not a string, read under `jup runtime` | `Invalid package manager specification in <source>; expected a string` — unchanged, because the field is the subject of the sentence (C10a's exclusion). The negative row: it fails if the substitution overreaches |
 
 Rows conditional on a *real* runtime being in the table — which one, its artifact
 shape, its platform matrix — are not written here; they belong with the revision that

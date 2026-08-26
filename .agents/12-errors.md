@@ -37,6 +37,16 @@ sentence, same punctuation, same interpolations, and never applied to a name tha
 belongs to something else — `packageManager`, `devEngines`, a `COREPACK_*` variable
 under its legacy spelling (§11.6), or the `nodejs.org` documentation URL.
 
+**And so does the noun** (§17.6 C10a). The strings that hardcode *package manager* as
+the kind of thing being named — `Unsupported package manager specification`, `Invalid
+package manager name '<name>'`, `please specify the package manager to pack`, `This
+package manager (<name>) isn't supported…` — take the noun of **the scope in effect**:
+`package manager` under the `corepack` entry point and unscoped, `runtime` under
+`jup runtime`. Same discipline as the name: a substitution, not a rewrite, and never
+applied to a `packageManager` or `devEngines.packageManager` *field name* — including
+in the messages that validate that field, where the field is the sentence's subject.
+Where one sentence names both, the field names move with the noun (§17.6 C10a).
+
 ## 12.2 Spec parsing (§03.4)
 
 | Condition | Message |

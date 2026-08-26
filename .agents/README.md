@@ -49,7 +49,7 @@ An implementation conforms to this specification when it:
 - satisfies the additional requirements in §15 and §17;
 - passes tests 1–147 in §13;
 - passes tests 148–207 in §15.38; and
-- passes tests 208–233 in §17.9.
+- passes tests 208–236 in §17.9.
 
 Sections 14, 15, and 17 define intentional differences from Corepack. Section 14 records differences found while studying Corepack's source. Section 15 adds requirements derived from its issue tracker. Section 17 widens the subject from *package manager* to *tool* and fixes the parts of the design that cannot change after 1.0. Where two sections cover the same behavior, the later one takes precedence.
 
