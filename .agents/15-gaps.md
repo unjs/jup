@@ -379,7 +379,7 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
    `COREPACK_SHIM_DIRECTORY`, else the **per-user default**:
    * Linux/BSD: `$XDG_BIN_HOME`, else `~/.local/bin`
    * macOS: `~/.local/bin`
-   * Windows: `%LOCALAPPDATA%\node\corepack\bin`
+   * Windows: `%LOCALAPPDATA%\jup\bin` (§17.6 C9; corepack's is `node\corepack\bin`)
 2. **Probe writability before writing anything.** On `EROFS`/`EACCES`/`EPERM`, fall
    back to the per-user default and say so:
    `! <dir> is not writable; installing shims to <fallback> instead`
@@ -388,9 +388,11 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
 4. `--install-directory=<the directory containing the tool>` remains available for
    anyone who wants the old behaviour.
 5. **`LOCALAPPDATA` MUST only be consulted on Windows** (closes #673). This narrows
-   §07.1's documented chain; it is the one place this spec breaks store-location
-   compatibility with corepack, and it is correct — a Linux process inheriting
-   `LOCALAPPDATA` from WSL interop should not put its cache on `/mnt/c`.
+   §07.1's documented chain, and it is correct — a Linux process inheriting
+   `LOCALAPPDATA` from WSL interop should not put its cache on `/mnt/c`. It is no
+   longer the *one* place store-location compatibility breaks: §17.6 C2 moves the
+   store home off `node/corepack` entirely, which is why §07.1 now points here for
+   the chain rather than preserving corepack's quirk for its own sake.
 
 ## 15.14 Native shims — [required]
 
@@ -567,6 +569,11 @@ things.
 * An unknown name in `packageManager` remains an error, not a URL-fetch fallback
   (§03.4).
 
+§17.3 R3 extends the data-only rule to roles: a runtime is another table entry, not
+another code path. The consent requirement above governs runtimes exactly as it
+governs package managers, and §17.7 records what must be decided before any runtime
+is added.
+
 ## 15.22 Publish through channels resistant to typosquatting — [advisory]
 
 > Driven by **#803**: a lookalike domain outranked the real repository in search
@@ -613,7 +620,8 @@ ranges. Both halves are obtainable:
 * `packageManager` and `devEngines.packageManager.version` MUST accept a semver range
   or a dist-tag as well as an exact version.
 * When the spec is not an exact version, the resolved concrete version **and its hash**
-  are recorded in a resolution file at the project root, `.corepack.lock`:
+  are recorded in a resolution file at the project root, `.jup.lock` (§17.6 C9 —
+  `.corepack.lock` is still read when it is the only one present):
   ```json
   {"version": 1,
    "resolutions": {"pnpm@^11.0.0": {"resolved": "11.1.2", "integrity": "sha512-…"}}}
@@ -625,7 +633,7 @@ ranges. Both halves are obtainable:
 * When the file is absent and the spec is a range, resolution hits the registry and
   writes the file. `COREPACK_FROZEN_LOCKFILE=1` (and CI defaults, matching package
   manager convention) makes that a hard error instead:
-  `<name>@<range> is not resolved in .corepack.lock and lockfile updates are disabled.`
+  `<name>@<range> is not resolved in .jup.lock and lockfile updates are disabled.`
 * An exact-version spec continues to work with no lockfile involvement whatsoever.
   Projects that want corepack's current guarantees change nothing.
 
@@ -762,6 +770,12 @@ This assumption is load-bearing across corepack: one URL template per version
 > maintainers' agreement (§15.21). This requirement is about not *foreclosing* native
 > support in the architecture, which is a separate question from who gets added.
 
+The native path this section requires is also what makes a *runtime* describable by
+the same table (§17.2): a per-platform artifact executed directly is the shape both
+have. Note that Bun and Deno are each a package manager **and** a runtime, and §17.3
+R1 requires one table entry with two roles rather than two entries — the artifact is
+one artifact, and splitting it would download it twice.
+
 ## 15.29 Verify that `enable` actually took effect — [required, bug]
 
 > Driven by **#507** (12👍): `corepack enable` exits 0 with no output, and `yarn` still
@@ -802,7 +816,12 @@ one command.
 * the store path, whether it is writable, and the cached versions present;
 * the recorded global defaults;
 * for each supported binary name: whether a shim is installed, and what that name
-  currently resolves to on `PATH`.
+  currently resolves to on `PATH`;
+* for each tool: its role set (§17.3), so that a user can see why `jup enable` shimmed
+  one name and not another (§17.6 C5).
+
+`info` is role-blind; a scope word filters what it reports and changes nothing else
+(§17.4 R10).
 
 `info` MUST NOT perform any network request and MUST NOT fail when the project spec is
 invalid — reporting *why* it is invalid is the point. `--json` output is stable and
@@ -846,6 +865,13 @@ directory holding their extracted binary.
 The prepended entry MUST be the only modification to `PATH`, and MUST NOT leak into the
 tool's own process.
 
+> **Interaction with §17.6 C7.** Once a runtime can be shimmed, this rule puts a
+> `node` shim ahead of the real runtime for every process the package manager spawns.
+> That is the intended behaviour for a *pinned* runtime and a recursion hazard for the
+> tool's own interpreter lookups; C7's exclusion is what separates the two, and it is
+> why that exclusion is specified as a property of every lookup rather than of
+> §08.3.1's `PATH` search alone.
+
 ## 15.33 No stale or shadowed defaults — [required, bug]
 
 > Driven by **#812** (`yarn create` freshly after install downloads Yarn Classic
@@ -884,11 +910,18 @@ const fallbackReference = isTransparentCommand
 > declined to expand scope. These rulings are adopted deliberately, not inherited by
 > omission.
 
+> **One expansion is made, and it is not among these.** §14.24 brings language
+> runtimes into scope; §17.8 restates the resulting boundary. Every ruling in the
+> table below stands unchanged — none of them is about runtimes, and the test §17.8
+> gives for a future addition ("does a version mismatch here break the project for
+> everyone who clones it, before any dependency is installed?") rejects each of them
+> for the same reason its authors did.
+
 | Request | Ruling | This spec |
 |---|---|---|
 | **#57** `corepack run <script>` (26 comments, 9👍) | Out of scope — *"each package manager has different implementations of run… which Corepack couldn't replicate without becoming a package manager"* | **Adopted.** The semantic divergence is real (Yarn resolves scripts workspace-wide, npm does not). `node --run` and `$npm_execpath` are the right mechanisms. |
 | **#352** `corepack manager <verb>` passthrough (14 comments) | Out of scope — *"its only purpose is to change how they are installed"* | **Adopted.** Userland wrappers are the right home. |
-| **#465** pin duplicated into the package manager's lockfile | Belongs in the package manager | **Adopted**, and §15.23's `.corepack.lock` serves the underlying Docker-layer-caching need without touching another tool's file format. |
+| **#465** pin duplicated into the package manager's lockfile | Belongs in the package manager | **Adopted**, and §15.23's `.jup.lock` serves the underlying Docker-layer-caching need without touching another tool's file format. |
 | **#683** extend pinning to monorepo task runners | Same boundary | **Adopted.** |
 
 One narrower request is accepted:
@@ -958,7 +991,9 @@ better implementation.
 
 ## 15.37 New environment variables
 
-Introduced by this section. All follow §11.6's precedence.
+Introduced by this section. All follow §11.6's precedence, and all are **tier 2**
+under §17.6 C4: their name is `JUP_<NAME>`, and the `COREPACK_` spelling below is a
+legacy alias. The table keeps the `COREPACK_` spelling because §15.38's rows use it.
 
 | Variable | Values | Effect | Env file |
 |---|---|---|---|
@@ -970,7 +1005,7 @@ Introduced by this section. All follow §11.6's precedence.
 | `COREPACK_REQUIRE_SIGNATURES` | `1` | Turn §15.7's soft-fail into a hard failure | yes |
 | `COREPACK_ALLOW_UNVERIFIED` | `1` | Permit an artifact with no verification tier (§15.11) | **no** |
 | `COREPACK_SHIM_DIRECTORY` | path | Default shim install directory (§15.13) | yes |
-| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write/refresh `.corepack.lock` (§15.23) | yes |
+| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write/refresh `.jup.lock` (§15.23) | yes |
 | `COREPACK_ENABLE_PRERELEASES` | `1` | Allow implicit resolution to select a prerelease (§15.24) | yes |
 | `COREPACK_SPEC_FILE` | path | External file supplying the project spec (§15.35d) | **no** |
 | `COREPACK_MINIMUM_RELEASE_AGE` | hours | Minimum publish age for implicit resolution (§15.35e) | yes |
@@ -1014,7 +1049,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 178 | Uncached version with `COREPACK_ENABLE_NETWORK=0` | the error names the seeding command (§15.19) |
 | 179 | `cache list --json` | installed pairs and recorded defaults (§15.19) |
 | 180 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` via a shim entry point | fully silent (§15.20) |
-| 181 | `packageManager: "pnpm@^11.0.0"` | resolves; `.corepack.lock` records version + integrity (§15.23) |
+| 181 | `packageManager: "pnpm@^11.0.0"` | resolves; `.jup.lock` records version + integrity (§15.23) |
 | 182 | Second run with that lockfile present | **no** network request (§15.23, §01.3) |
 | 183 | Range with no lockfile and `COREPACK_FROZEN_LOCKFILE=1` | refused (§15.23) |
 | 184 | Registry publishes `11.0.0-dev.1005` above stable `10.x`; `corepack use pnpm` | resolves to the **stable** release (§15.24) |

@@ -135,6 +135,15 @@ The `PATHEXT` manipulation removes `.JS` from the executable-extension list so t
 `node` resolves to `node.exe` rather than recursing into a `node.js` file. The double
 spaces are real (an empty interpolated argument slot).
 
+> **§17.6 C7 applies to `%~dp0\node.exe` and to the sh shim's `$basedir/node`.** Both
+> prefer a sibling `node` in the shim directory — which, once `node` is a name this
+> tool shims, is the tool itself, making it the interpreter for every other shim
+> beside it. A generator that emits these forms MUST emit a form that cannot select a
+> sibling shim: either omit the sibling preference, or have it test that the sibling
+> is not a shim the tool recorded (§15.15). §14.15's self-dispatching shims and
+> §15.14's native shims have no such lookup and are unaffected — which is a third
+> argument for them.
+
 **`<B>`** (sh)
 ```sh
 #!/bin/sh
@@ -219,9 +228,31 @@ a correct relative-path computation.
 
 ## 10.5 Target set
 
-Default targets: every supported package manager **except npm**. npm is excluded
-because it ships with Node through other means and shadowing it is more likely to
-break a machine than to help it. `enable npm` explicitly is supported.
+**The default target set, as this spec requires it:** every tool with the
+`package-manager` role, npm included, minus anything named by `--exclude`.
+
+Two changes are folded into that sentence, and this is the whole of them:
+
+* **Corepack excludes npm** (it ships with Node through other means, and shadowing it
+  is likelier to break a machine than to help). §15.16 reverses this: npm is shimmed
+  by default and `--exclude npm` restores the old behaviour. §13 row 117 asserts
+  corepack's default and holds only under the `corepack` entry point (§13.1).
+* **§17.6 C5 confines the default set to one role.** A tool with the `runtime` role is
+  shimmed only when it is **named explicitly** (`jup enable node`) or the command is
+  scoped (`jup runtime enable`).
+
+The role scoping is not a symmetry the implementation may tidy away:
+
+* occupying `node` on `PATH` intercepts every program a user or another tool
+  launches, which is an intervention of a different order from occupying `yarn`, and
+  a user who typed `jup enable` did not ask for it;
+* the tool may itself need a real `node` to execute a JavaScript package manager, and
+  §17.6 C7's exclusion is the guard against that search finding the shim it just
+  wrote. That guard is a correctness requirement; not creating the shim by default is
+  the ordinary-care version of the same concern.
+
+`jup runtime enable` with no names targets every runtime-role tool, and is the
+explicit opt-in the paragraph above describes.
 
 Each name expands to every binary name it declares across all range entries, deduped:
 

@@ -1,21 +1,23 @@
 # 09 — Command Surface
 
-This is the complete surface. Anything not here is out of scope (§01.7).
+This is the complete surface. Anything not here is out of scope (§01.7, §17.8).
 
 ```
 <tool> <binary>[@<version>] [...args]     proxy mode (§01.2)
 
-<tool> cache clean
-<tool> cache clear
-<tool> disable [--install-directory <path>] [...name]
-<tool> enable  [--install-directory <path>] [...name]
-<tool> install
-<tool> install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
-<tool> pack [--json] [-o|--output <path>] [...name[@<version>]]
-<tool> up
-<tool> use <name[@<version>]>
+<tool> [<scope>] cache clean
+<tool> [<scope>] cache clear
+<tool> [<scope>] disable [--install-directory <path>] [...name]
+<tool> [<scope>] enable  [--install-directory <path>] [...name]
+<tool> [<scope>] install
+<tool> [<scope>] install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
+<tool> [<scope>] pack [--json] [-o|--output <path>] [...name[@<version>]]
+<tool> [<scope>] up
+<tool> [<scope>] use <name[@<version>]>
 <tool> --version
 <tool> --help | -h | help
+
+<scope> := pm | runtime
 ```
 
 Deprecated, retained for compatibility only:
@@ -27,6 +29,37 @@ Deprecated, retained for compatibility only:
 
 > A minimal re-implementation MAY omit `hydrate` and `prepare` entirely and print a
 > pointer to `install -g` / `pack`. They are strict subsets of the modern commands.
+
+## 9.0 Scopes and the router
+
+The optional `<scope>` names a role (§17.3). It **narrows** a command; it never
+changes what the command does.
+
+| Form | Meaning |
+|---|---|
+| `jup use pnpm@10` | the role is inferred from the tool named in the spec (§17.4 R10) |
+| `jup pm use pnpm@10` | the same command, scope stated explicitly |
+| `jup install` | acts on **every** role the project pins, package manager first |
+| `jup pm install` | acts on the project's package manager only |
+| `jup pm yarn --version` | **usage error** — a scope word is followed by a verb, never a binary |
+| `jup yarn --version` | proxy mode; Yarn's version. The proxy test outranks the verb table (§17.4 R7) |
+| `corepack <verb> …` | exactly `jup pm <verb> …`, with corepack's spellings and no scope words (§17.4 R12) |
+
+Four properties this MUST have:
+
+1. **The unscoped form is not deprecated** and MUST NOT print a migration notice
+   (§17.4 R13). A router that can infer the role is friendlier than a namespace that
+   demands one; the namespace exists for the cases where inference cannot decide.
+2. **Classification order is fixed** by §17.4 R7. In particular the proxy tests come
+   first, so a tool named after a verb would shadow that verb — which is why §17.4 R8
+   makes the name sets disjoint at build time.
+3. **A scope that excludes the named tool is an error**, not a silent widening
+   (§17.4 R9).
+4. **Only pin-writing commands need a role at all** (§17.3 R5). `cache`, `info`,
+   `--version` and `--help` are role-blind; a scope filters what they *report*.
+
+Each command below is specified once, in its role-blind form. Where a role is needed
+the rule is §17.4 R10–R11, not a per-command exception.
 
 ## 9.1 Pattern resolution (shared by `install`, `pack`, `up`, `use`)
 
@@ -180,7 +213,7 @@ for each:
     setLastKnownGood(resolved)
     collect info.location
 
-output := --output ?? "./corepack.tgz"
+output := --output ?? "./jup.tgz"      # §17.6 C9; corepack's default was corepack.tgz
 tar.create({gzip: true, cwd: <installFolder>, file: resolve(output)},
            locations.map(l => relative(<installFolder>, l)))
 
@@ -207,7 +240,9 @@ enable  [--install-directory <path>] [...name]
 disable [--install-directory <path>] [...name]
 ```
 
-* With no names, the target set is **every supported package manager except `npm`**.
+* With no names, the target set is **every tool with the `package-manager` role**,
+  npm included, minus `--exclude` (§10.5 — corepack excludes npm, §15.16 reverses
+  that, and §17.6 C5 is what confines the set to one role).
 * Each name is validated: `Invalid package manager name '<name>'` for anything not in
   the supported set.
 * Each name expands to all of its binary names across all range entries
@@ -219,6 +254,11 @@ disable [--install-directory <path>] [...name]
 `--version` prints the tool's own version. `--help` / `-h` / `help` prints usage.
 Both are ordinary management-mode commands and are shadowed by proxy mode — note
 that `<tool> yarn --version` is a *proxy* invocation and prints **Yarn's** version.
+
+`--help` is **scope-aware** (§17.6 C6): unscoped it lists both scopes, `jup pm --help`
+and `corepack --help` list the package-manager surface, and the usage lines it prints
+name the invoked binary and the scope in effect — `$ jup use <pattern>`,
+`$ jup pm use <pattern>`, `$ corepack use <pattern>` (§12.1, §17.4 R12).
 
 ## 9.10 Deprecated commands
 
@@ -233,7 +273,7 @@ archive handling, except:
 of `pack` + `install -g`. Its "no spec in project" error omits the `devEngines`
 mention: `The local project doesn't feature a 'packageManager' field - please specify
 the package manager to pack, or update the manifest to reference it`. `--output`
-tolerates a bare flag, defaulting to `corepack.tgz`.
+tolerates a bare flag, defaulting to the same name `pack` uses (§17.6 C9).
 
 ## 9.11 Output stream discipline
 

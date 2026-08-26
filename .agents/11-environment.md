@@ -9,6 +9,15 @@ same §14.5 deny-list entry. `JUP_` wins when both are set (§11.6). The full ru
 including what this means for the env file and for diagnostics, is §11.6; the
 rationale is §14.22.
 
+**`JUP_` is the canonical prefix, and the `COREPACK_` alias list is closed in
+two tiers** (§17.6 C4). §11.1–§11.4 are corepack's own variables: two spellings,
+permanently, because that is what compatibility means. §11.5 and §15.37 are
+variables *this spec invents*; their name is `JUP_<NAME>`, they accept
+`COREPACK_<NAME>` as a legacy alias only because earlier drafts and §13's rows
+spell them that way, and documentation and diagnostics use the `JUP_` spelling.
+Anything introduced after §17 answers to `JUP_<NAME>` alone. §11.6 states the
+rule normatively.
+
 Legend for **Env file** column: whether the variable may be supplied by
 `.corepack.env` (§03.2), under either spelling. A real environment variable
 always wins over the file.
@@ -25,7 +34,7 @@ always wins over the file.
 | `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* package manager name. Without it, `yarn@https://…` is refused. Unknown names may always use URLs. | **no** (§14.5) |
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT` | `0` / `1` | `1` prints `! Corepack is about to download <url>` before each artifact download and, on a TTY outside CI, asks for confirmation. Default is `0` when invoked as the tool itself, `1` when invoked through a package-manager shim. | **no** |
 | `COREPACK_ENV_FILE` | `0` or a path | `0` disables env-file loading. Otherwise names the file to look for instead of `.corepack.env`. | **no** |
-| `COREPACK_HOME` | path | Root of the store and `lastKnownGood.json`. Default `$XDG_CACHE_HOME/node/corepack`, else `%LOCALAPPDATA%\node\corepack`, else `~/.cache/node/corepack` (`~/AppData/Local/node/corepack` on Windows). | yes |
+| `COREPACK_HOME` | path | Root of the store and `lastKnownGood.json`. Default `$XDG_CACHE_HOME/jup`, else `%LOCALAPPDATA%\jup`, else `~/.cache/jup` (`~/AppData/Local/jup` on Windows) — **not** corepack's `node/corepack`, per §17.6 C2. `JUP_HOME` is the canonical spelling and wins when both are set. | yes |
 
 ## 11.2 Registry and auth
 
@@ -52,24 +61,39 @@ always wins over the file.
 | `CI` | When set, the download prompt prints its notice but does not wait for confirmation. |
 | `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location fallback chain (§07.1). |
 | `PATH` | Shim install-directory lookup (§10.4); locating a JavaScript runtime in a native implementation (§08.3). |
-| `DEBUG` | Containing `corepack` enables verbose diagnostic logging to stderr. |
+| `DEBUG` | Containing `corepack` **or `jup`** enables verbose diagnostic logging to stderr. |
 
 ## 11.5 New in this spec
 
+Tier 2 (§17.6 C4): named `JUP_`, `COREPACK_` accepted as a legacy alias.
+
 | Variable | Accepted values | Effect | Env file |
 |---|---|---|---|
-| `COREPACK_NODE_EXECPATH` | path | Path to the JavaScript runtime used to execute package managers. Only meaningful for a native implementation (§08.3.1). Falls back to a sibling runtime, then `PATH`. | yes |
-| `COREPACK_QUIET_ADVISORIES` | `1` | Silence the advisory `!` lines this spec adds on top of corepack's own (§14.23). Corepack's six — the download notice and its prompt, the auto-pin notice, the three `devEngines` warnings, and `enable`/`disable`'s Yarn Switch skip — are unaffected, as is every error. | **no** (§14.5) |
+| `JUP_NODE_EXECPATH` | path | Path to the JavaScript runtime used to execute package managers. Only meaningful for a native implementation (§08.3.1). Falls back to a sibling runtime, then `PATH` — skipping any candidate that is one of the tool's own shims (§17.6 C7). | yes |
+| `JUP_QUIET_ADVISORIES` | `1` | Silence the advisory `!` lines this spec adds on top of corepack's own (§14.23). Corepack's six — the download notice and its prompt, the auto-pin notice, the three `devEngines` warnings, and `enable`/`disable`'s Yarn Switch skip — are unaffected, as is every error. | **no** (§14.5) |
 
 ## 11.6 Precedence
 
 Every variable in this file has **two spellings**. The tables are written in
 corepack's, because that is what existing projects, CI configuration and §13's
 rows already set; the implementation is `jup`, and answers to `JUP_<NAME>` for
-each `COREPACK_<NAME>` above. The pair is one variable: the same default, the
-same env-file eligibility, the same deny-list entry (§14.5's list is keyed by the
-`COREPACK_` spelling and canonicalised before it is checked, so renaming a key is
-not a way past it). The two variables §11.3 *sets* are written under both names.
+each `COREPACK_<NAME>` above. The set of pairs is **closed** as of §17.6 C4, in
+two tiers:
+
+| Tier | Variables | Canonical name | `COREPACK_` spelling |
+|---|---|---|---|
+| 1 | §11.1–§11.4 — corepack's own | either; both are equal and permanent | accepted forever; this is the compatibility surface |
+| 2 | §11.5, §15.37 — invented here | `JUP_<NAME>` | accepted as a **legacy alias**; not used in this spec's own documentation, diagnostics, or `info` output |
+| — | anything added after §17 | `JUP_<NAME>` | **not accepted** |
+
+An implementation MUST NOT accept `COREPACK_<NAME>` for a variable outside tiers 1
+and 2, and MUST NOT report a tier-2 variable under its `COREPACK_` spelling in
+`info` (§15.30) unless that is the spelling the user actually set.
+
+Within the list, the pair is one variable: the same default, the same env-file
+eligibility, the same deny-list entry (§14.5's list is keyed by the `COREPACK_`
+spelling and canonicalised before it is checked, so renaming a key is not a way
+past it). The two variables §11.3 *sets* are written under both names.
 
 For any variable:
 
@@ -83,7 +107,7 @@ For any variable:
 Presence decides, not truthiness: `JUP_NPM_PASSWORD=` shadows a
 `COREPACK_NPM_PASSWORD` that is set, because §11.2 makes the empty string a
 meaningful value. A diagnostic that names the variable that supplied a value
-(§15.4's `set by COREPACK_CAFILE`, `info`'s `frozenSource`) MUST name the
+(§15.4's `set by JUP_CAFILE`, `info`'s `frozenSource`) MUST name the
 spelling the user actually set.
 
 Only the **closest** env file to `cwd` is consulted, and only directories at or below

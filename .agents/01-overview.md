@@ -2,18 +2,27 @@
 
 ## 1.1 What the tool is
 
-A PMVM is a **trampoline**. It occupies the names `npm`, `npx`, `pnpm`, `pnpx`,
-`yarn`, `yarnpkg` on `PATH`. When invoked under one of those names it:
+The tool is a **trampoline**. It occupies the names of the tools it manages on
+`PATH` — today `npm`, `npx`, `pnpm`, `pnpx`, `yarn`, `yarnpkg`. When invoked under
+one of those names it:
 
 1. determines *which version* of that package manager this project wants,
 2. makes sure that exact version is present locally and verified,
 3. transfers control to it, transparently.
 
 The user must not be able to tell the difference between running `yarn` under the
-PMVM and running a directly-installed `yarn`, except that the version is now
+tool and running a directly-installed `yarn`, except that the version is now
 project-pinned.
 
-## 1.2 The two entry modes
+Files 01–16 are written in terms of *package managers*, which is what the built-in
+table (§02.5) contains. [§17](./17-domains.md) generalises the noun to **tool** — a
+package manager is a tool with the `package-manager` role, and a language runtime is
+a tool with the `runtime` role — and fixes the command surface, the store location,
+and the environment namespace so that a second role can be added without breaking
+users. Read §17 before making a structural decision; read the rest of this file for
+how the pipeline works.
+
+## 1.2 Entry modes
 
 The binary dispatches on `argv[0]`-equivalent (the name it was invoked as) and on
 `argv[1]`.
@@ -21,18 +30,23 @@ The binary dispatches on `argv[0]`-equivalent (the name it was invoked as) and o
 ```
                     invocation
                         │
-        ┌───────────────┴────────────────┐
-        │                                │
-  first token names a               otherwise
-  known binary (npm, npx,                │
-  pnpm, pnpx, yarn, yarnpkg)             │
-  OR is `<anything>@<version>`           │
-        │                                │
-        ▼                                ▼
-  PROXY MODE                       MANAGEMENT MODE
-  run the package manager          run the PMVM's own CLI
-  (§08)                            (`enable`, `use`, …) (§09)
+        ┌───────────────┼────────────────┬───────────────┐
+        │               │                │               │
+  invoked under    first token      first token is   otherwise
+  a known binary   names a known    a scope word         │
+  name (§10.1)     binary, OR is    (`pm`,               │
+        │          `<x>@<version>`  `runtime`)           │
+        │               │                │               │
+        ▼               ▼                ▼               ▼
+      PROXY MODE                   SCOPED MANAGEMENT   MANAGEMENT MODE
+      run the tool                 the same CLI,       run the tool's own
+      (§08)                        one role only       CLI (`enable`,
+                                        (§09)          `use`, …) (§09)
 ```
+
+The full classification order, including why the proxy tests come first and what
+guarantees a scope word can never collide with a binary name, is §17.4 R7–R8. The
+two rules below are the parts corepack already had, and their precedence is fixed.
 
 ### Proxy mode trigger
 
@@ -56,7 +70,7 @@ In practice proxy mode is entered two ways:
 
 | Entry | `argv` seen by the tool | Notes |
 |---|---|---|
-| Via a shim (`yarn add x`) | shim re-execs the PMVM with `["yarn", "add", "x"]` | The normal path once `enable` has run (§10) |
+| Via a shim (`yarn add x`) | shim re-execs the tool with `["yarn", "add", "x"]` | The normal path once `enable` has run (§10) |
 | Directly (`corepack yarn add x`) | `["yarn", "add", "x"]` | Same code path — the shim is only a PATH convenience |
 | Version-pinned (`corepack yarn@4.1.0 add x`) | `["yarn@4.1.0", "add", "x"]` | `binaryVersion` overrides the project spec (§04.6) |
 
@@ -105,8 +119,9 @@ A conforming implementation **MUST** be able to complete a warm proxy invocation
 
 * **zero** network requests,
 * **zero** reads of the last-known-good file,
-* at most: one `.corepack.env` `open` attempt per directory walked, one
-  `package.json` read, one `.corepack` read, plus the execution syscalls.
+* at most: one env-file `open` attempt per directory walked (two on a project that
+  has only the legacy `.corepack.env`, §17.6 C9), one `package.json` read, one marker
+  read (two on a store inherited from corepack, §07.2), plus the execution syscalls.
 
 Corepack itself satisfies this because `findInstalledVersion` short-circuits before
 any registry call and `installVersion` returns early on a `.corepack` hit. Any
@@ -158,11 +173,11 @@ the newly-pinned package manager's install command as their last act.
 
 ## 1.6 State
 
-The tool owns exactly one directory (`COREPACK_HOME`, §07.1) containing:
+The tool owns exactly one directory (`JUP_HOME`, §07.1) containing:
 
 ```
 <home>/
-├── lastKnownGood.json     # {"<pm name>": "<version>"} — the global default per PM
+├── lastKnownGood.json     # {"<tool name>": "<version>"} — the global default per tool
 └── v1/                    # store, versioned by layout revision
     ├── npm/<version>/…
     ├── pnpm/<version>/…
@@ -170,8 +185,9 @@ The tool owns exactly one directory (`COREPACK_HOME`, §07.1) containing:
 ```
 
 It writes to the project only when explicitly asked (`use`, `up`, or
-`COREPACK_ENABLE_AUTO_PIN=1`), and then only to `package.json`'s `packageManager`
-field.
+`COREPACK_ENABLE_AUTO_PIN=1`), and then only to the `package.json` fields that encode
+a pin — `packageManager` and `devEngines` (§15.26) — plus the resolution lockfile
+`.jup.lock` when a range is in play (§15.23).
 
 It writes to a bin directory only during `enable` / `disable` (§10).
 
@@ -180,7 +196,13 @@ It writes to a bin directory only during `enable` / `disable` (§10).
 A conforming implementation MUST NOT:
 
 * install project dependencies itself,
-* manage Node.js versions,
 * provide a plugin/hook system,
 * phone home, collect telemetry, or auto-update itself,
-* rewrite any project file other than the `packageManager` field of `package.json`.
+* rewrite any project file other than the fields of `package.json` that encode a
+  pin (§15.26).
+
+> **Superseded in part.** This list previously also forbade managing Node.js
+> versions. That prohibition is withdrawn by §17.2 — it was a statement of fact about
+> corepack, which ships inside Node.js, not a scope decision that survives a
+> standalone binary. §17.8 restates the scope line that replaces it; everything else
+> above is unchanged, as are §15.34's adopted rulings.

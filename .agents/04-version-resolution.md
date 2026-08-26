@@ -147,8 +147,8 @@ Three things to preserve:
 
 ## 4.4 The last-known-good file
 
-`<COREPACK_HOME>/lastKnownGood.json`, a flat `{"<pm name>": "<version reference>"}`
-map. It is the *global* default: the version used when a project has no spec.
+`<JUP_HOME>/lastKnownGood.json`, a flat `{"<tool name>": "<version reference>"}`
+map, keyed by tool name and shared across roles (§17.3 R2). It is the *global* default: the version used when a project has no spec.
 
 **Reading** (`getLastKnownGood`) is maximally forgiving. Every failure mode returns
 `{}` rather than erroring:

@@ -73,12 +73,17 @@ For `type: "url"`:
 present, the downloader extracts only that one file (§07.4) rather than the whole
 package — this is how `@yarnpkg/cli-dist` is reduced to a single `yarn.js`.
 
-## 2.3 Package manager definition
+## 2.3 Tool definition
 
-Each supported package manager has one definition:
+Each supported tool has one definition. Every entry in §02.5 is a *package manager*
+today; §17.3 generalises the noun and adds the `roles` field, which is what lets a
+language runtime be described by the same structure.
 
 ```ts
+type Role = "package-manager" | "runtime"
+
 {
+  roles: Role[],                // non-empty; §17.3 R4 lists what a role decides
   default: string,              // built-in fallback version, hash-pinned
   fetchLatestFrom: RegistrySpec,// where "what's the newest stable?" is answered
   transparent: {
@@ -86,10 +91,16 @@ Each supported package manager has one definition:
     commands: string[][],       // command prefixes that bypass the project check
   },
   ranges: {                     // semver range → how to fetch that version band
-    [range: string]: PackageManagerSpec
+    [range: string]: ToolSpec
   }
 }
 ```
+
+Every entry in §02.5 declares `roles: ["package-manager"]`; the field is written out
+here rather than defaulted, because a default would make the one-role case invisible
+and the two-role case (§17.3 R1) look like an exception. Tool names and binary names
+share one flat namespace across roles (§17.3 R2), and §17.4 R8 makes that namespace
+disjoint from the scope words and verbs at build time.
 
 `ranges` exists because a package manager's *download shape* changes across major
 versions (pnpm's bin moved `.js` → `.cjs` → `.mjs`; Yarn 2+ is a single JS file from
@@ -110,16 +121,21 @@ against `ranges[last key]` — the newest band (`Engine::resolveDescriptor`). So
 `yarn@latest` consults `https://repo.yarnpkg.com/tags`, never the npm `yarn` package,
 even though `yarn@1.22.22` would download from npm.
 
-## 2.4 PackageManagerSpec
+## 2.4 ToolSpec
+
+Named `PackageManagerSpec` in corepack; renamed by §17.3 along with §02.3. The fields
+are unchanged.
 
 ```ts
 {
   url: string,                  // download URL template; "{}" ← version
+                                // and, per §15.28, "{platform}" / "{arch}"
   bin: BinSpec | BinList,       // see below
   registry: RegistrySpec,       // default version source
   npmRegistry?: NpmRegistrySpec,// used INSTEAD of `registry` when the user has set
                                 // a custom npm registry (§05.3)
-  commands?: { use?: string[] } // argv to run after `corepack use`/`up`
+  commands?: { use?: string[] },// argv to run after `corepack use`/`up`
+  exec?: "native"               // §15.28: run the bin target directly, no interpreter
 }
 ```
 
@@ -137,15 +153,20 @@ For a **tarball**, the table's `BinSpec` is a fallback rather than the authority
 stale cannot break an install. A `BinList` *is* authoritative, because a single-file
 download carries no manifest to read.
 
-The union of all `bin` names across all ranges of all package managers is the set of
-binary names the tool answers to (`Engine::getPackageManagerFor`,
-`Engine::getBinariesFor`). It is also the set of shims `enable` creates (§10).
+The union of all `bin` names across all ranges of all tools is the set of binary
+names the tool answers to (`Engine::getPackageManagerFor`, `Engine::getBinariesFor`).
+It is also the set of shims `enable` may create — though `enable` with no arguments
+creates them only for the `package-manager` role (§17.6 C5, §10).
 
 ## 2.5 The embedded registry table
 
 A conforming implementation MUST embed an equivalent of this table. It is the only
 "configuration" the tool has, and it is compiled in — there is deliberately no
 mechanism for a user to supply a different one at runtime.
+
+Every entry below has `roles: ["package-manager"]`. No entry has the `runtime` role:
+adding one requires the maintainers' agreement (§15.21, §15.28) and the decisions
+§17.7 leaves open, neither of which this revision settles.
 
 > **Size/perf note.** In a native implementation this SHOULD be a `const` static
 > structure (arrays of string slices), not a JSON blob parsed at startup. Parsing

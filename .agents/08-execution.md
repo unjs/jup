@@ -74,16 +74,33 @@ specified precisely.
 
 ### 8.3.1 Choosing the interpreter
 
-The package manager entry points are JavaScript. The tool must locate a JavaScript
-runtime:
+The package manager entry points are JavaScript — unless the band declares
+`"exec": "native"` (§15.28), in which case this whole subsection is skipped and the
+bin target is executed directly. Otherwise the tool must locate a JavaScript runtime:
 
-1. If `COREPACK_NODE_EXECPATH` is set, use it. *(New in this spec — see §11.)*
-2. Otherwise search `PATH` for `node`.
-3. If not found → error:
-   `Unable to locate a Node.js runtime to execute <binName>; set COREPACK_NODE_EXECPATH to point at one`
+1. If `JUP_NODE_EXECPATH` is set, use it. *(New in this spec — see §11.)*
+2. Otherwise, a tool distributed *alongside* a runtime (the way corepack ships inside
+   Node) SHOULD prefer the sibling runtime binary — **unless that sibling is one of
+   its own shims** (§17.6 C7), which after `enable node` it may well be.
+3. Otherwise search `PATH` for `node`, **skipping every candidate that is one of the
+   tool's own shims** and continuing past it (§17.6 C7).
+4. If not found → error:
+   `Unable to locate a Node.js runtime to execute <binName>; set JUP_NODE_EXECPATH to point at one`
+   — or, when every candidate was excluded by steps 2–3:
+   `Every 'node' on PATH is a jup shim; set JUP_NODE_EXECPATH to a real runtime`
 
-A tool distributed *alongside* a runtime (the way corepack ships inside Node) SHOULD
-prefer the sibling runtime binary before consulting `PATH`.
+> **The exclusions in steps 2 and 3 are not optional.** Once `node` is a name this
+> tool can shim (§17.3 R4), either lookup can find the tool's own shim, which
+> re-enters the tool, which looks up `node` again. The recursion is unbounded and its
+> symptom — a hang or a fork bomb, not an error — is why the rule is written before
+> the feature that creates it. §17.6 C7 specifies how a shim is recognised (from the
+> record `enable` keeps, per §15.15, *not* from identity with the tool's own
+> executable, which only holds for §14.15's link-based shims), and lists the two
+> further lookups outside this section that need the same guard: §10.3's generated
+> shims and §15.32's `PATH` injection.
+>
+> §17.7 #3 leaves open whether a *project-pinned* runtime is preferred here. When it
+> is decided it lands between steps 1 and 2, and it does not change either exclusion.
 
 ### 8.3.2 Spawning
 

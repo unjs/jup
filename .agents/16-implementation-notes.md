@@ -47,9 +47,9 @@ getenv × N                        (one pass over environ, in-process; the
                                    JUP_/COREPACK_ pair resolves in that pass)
 openat  ./package.json            → read → close
   ...plus one openat per ancestor directory until found
-openat  ./.corepack.env           → ENOENT (cheap; only until a manifest is found)
-stat    <store>/<pm>/<ver>/.corepack
-openat  <store>/<pm>/<ver>/.corepack → read → close
+openat  ./.jup.env                → ENOENT (cheap; only until a manifest is found)
+stat    <store>/<tool>/<ver>/.jup
+openat  <store>/<tool>/<ver>/.jup    → read → close
 execve  <node> <binPath> <args...>
 ```
 
@@ -149,7 +149,7 @@ The reference implementation's suite is the right model and worth copying wholes
   serve a *validly signed but wrong* artifact is what makes the integrity tests real.
 * A **record/replay HTTP cache** so the suite runs offline against real registry
   responses, keyed by `sha256(url + headers)`.
-* **Fake package managers**: a directory in the store with a hand-written `.corepack`
+* **Fake package managers**: a directory in the store with a hand-written `.jup`
   and a trivial entry script. This is how §13.12's exit-code, signal, and stdio tests
   get written without downloading anything.
 * A **live staleness test** comparing the embedded trust store against
@@ -184,11 +184,19 @@ Run a scheduled job that:
 A bin-path change requires a new `ranges` entry and human review; it cannot be
 automated safely.
 
+The same job SHOULD assert §17.4 R8's disjointness over the regenerated table. It is
+a set intersection over five small lists, it costs nothing, and the failure it catches
+— a new binary name that collides with a scope word or a verb — is invisible at
+runtime rather than loud (§14.25).
+
 ## 16.10 Suggested module layout
 
 ```
 main            argv classification, dispatch (§01.2)
-config          the static embedded table (§02.5), trust store (§02.6)
+router          scope words, verb table, role inference (§17.4) — used by `main`,
+                and the only module that knows a role exists outside `config`
+config          the static embedded table (§02.5), trust store (§02.6), roles (§17.3),
+                and the build-time disjointness assertion (§17.4 R8)
 semver          parse, compare, ranges, both satisfaction modes (§04.2)
 manifest        discovery walk, spec parsing, devEngines, surgical rewrite (§03, §16.4)
 envfile         dotenv parse, prefix filter, eligibility filter (§03.2, §14.5)

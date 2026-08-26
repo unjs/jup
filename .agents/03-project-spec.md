@@ -66,17 +66,22 @@ until the consumer asks for it.
 `range` is populated only when `devEngines.packageManager.version` is present:
 `{name, range: version, onFail}`.
 
-## 3.2 Env file (`.corepack.env`)
+## 3.2 Env file (`.jup.env`)
 
 Before reading each directory's manifest, and only until one is found:
 
-* Path = `resolve(d, COREPACK_ENV_FILE ?? ".corepack.env")`.
+* Path = `resolve(d, JUP_ENV_FILE ?? ".jup.env")`, falling back to
+  `resolve(d, ".corepack.env")` in the same directory when the first is absent and
+  the variable is unset (§17.6 C9). `.jup.env` wins where both exist; the two are
+  never merged, and the deny-list (§14.5) and prefix sandbox apply identically to
+  both. Elsewhere in this specification `.corepack.env` names the env file under
+  either spelling, exactly as `.corepack` names either install marker (§07.2).
 * If `COREPACK_ENV_FILE === "0"` → env files are disabled entirely; skip.
 * Parse as a dotenv-style file (Node's `util.parseEnv` semantics).
 * **Filter**: keep only keys carrying one of the tool's two prefixes — `JUP_` or
   `COREPACK_` (§11.6). Everything else is dropped.
 * **Merge**: `{...filteredFileVars, ...process.env}` — i.e. the **real environment
-  wins**. A `.corepack.env` value can only supply a variable the ambient environment
+  wins**. An env-file value can only supply a variable the ambient environment
   has not set. "Has not set" means *neither* spelling of it (§11.6): a file's
   `JUP_HOME` must not out-rank a real `COREPACK_HOME`, which a plain key-wise merge
   would let it do, since the two keys do not collide and `JUP_` is the one that
@@ -285,3 +290,21 @@ Returns `{previousPackageManager}`, which the caller exports as
 > **Note.** The BOM is stripped for parsing but **not** re-emitted. A file that had a
 > BOM loses it. This spec keeps that behaviour for byte-compatibility but flags it in
 > §14.7 as a candidate fix.
+
+## 3.8 Where a runtime pin would come from — reserved
+
+Normative today only in what it forbids; the machinery is specified by §17.5.
+
+* **`devEngines.runtime` is the pin.** It is parsed, validated, and reconciled by the
+  rules §3.3 applies to `devEngines.packageManager`, `onFail` included, and it
+  participates in §15.26's rule that every field encoding one logical pin is written
+  atomically. There is no top-level `runtime` field; `packageManager` is a historical
+  shape, not a pattern to repeat (§17.5 R14).
+* **`engines.node` MUST NOT drive resolution** (§17.5 R15). It declares the range a
+  package is *compatible with* — written by library authors for their consumers, and
+  routinely open-ended. It MAY be checked against a resolved runtime and reported.
+* **`.nvmrc`, `.node-version`, and `.tool-versions` are not read** (§17.5 R16), and
+  MUST NOT be added to the walk in §3.1 as a silent input.
+
+Until a runtime enters the table (§02.5), the walk's stop conditions, precedence, and
+error messages are exactly as specified above: nothing in §3.1–§3.7 changes.

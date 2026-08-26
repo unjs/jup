@@ -5,7 +5,7 @@ implementation must do instead. Numbered to match the `§14.n` references throug
 
 Categories: **[perf]** serves the fast/small goals · **[sec]** closes a security hole ·
 **[correct]** fixes a defect · **[native]** required because the implementation is not
-a Node module.
+a Node module · **[scope]** changes what the tool is for.
 
 These divergences come from **reading corepack's code**. A second set, derived from
 its **open issue tracker**, is specified in [§15](./15-gaps.md) and is equally
@@ -320,9 +320,52 @@ did not have. A blunt mute is not the answer: the `devEngines` text is matched
 byte for byte by §13's rows, so silencing everything breaks the contract §12
 establishes.
 
-**Required:** `COREPACK_QUIET_ADVISORIES=1` (§11.5) silences exactly the lines
+**Required:** `JUP_QUIET_ADVISORIES=1` (§11.5) silences exactly the lines
 this spec adds. Corepack's six are unaffected, and so is every error — the
 variable changes what is *reported*, never what is done. It is env-file
 ineligible under §14.5: several of the lines it covers are the notice that a
 verification step was skipped, and a cloned repository must not be able to
 silence them, least of all §14.5's own "Ignoring `<NAME>`" warning.
+
+## 14.24 Runtimes are within scope — [scope]
+
+**Corepack:** manages package managers only, and its documentation says so. The
+constraint is structural rather than chosen: corepack ships *inside* Node.js, so the
+runtime is its host and cannot also be its subject. §01.7 inherited the prohibition
+as a flat "MUST NOT manage Node.js versions".
+
+**Consequence:** the largest version-skew problem a project has — which runtime
+executes its code — is left to a second tool, with a second cache, a second shim
+directory, and a second set of failure modes, while the manifest field that would
+express the pin (`devEngines.runtime`, beside `devEngines.packageManager`) already
+exists and is already parsed.
+
+**Required:** the data model's noun is **tool**, with a role set; a package manager is
+a tool with the `package-manager` role and a runtime is a tool with the `runtime`
+role (§17.3). §01.7's prohibition is withdrawn and replaced by §17.8's scope line,
+which keeps every other non-goal and every ruling §15.34 adopts. This revision adds
+no runtime to §02.5 and requires no implementation to install one: what it fixes is
+the noun, the command surface, the store location, the environment namespace, and the
+shim policy, each of which is free to change now and expensive to change later
+(§17.6). Consent (§15.21, §15.28) is unaffected — capability is not permission.
+
+## 14.25 A scoped surface with an inferring router — [correct]
+
+**Corepack:** the command surface is flat, and the tool it acts on comes from the
+argument or from the project. With one kind of tool that is unambiguous.
+
+**Consequence:** with two, three verbs stop being well-defined (`install`, `up`, and
+`enable` with no arguments), and any fix that simply prefixes every command with a
+namespace — `jup pm use pnpm@10` — makes the common case wordier than the tool it
+replaces, for the benefit of a case the router can decide on its own.
+
+**Required:** §17.4. `pm` and `runtime` are optional scope words that narrow a
+command; an unscoped command infers the role from the tool it was given, or acts on
+every role the project pins, and is **not** deprecated. `corepack` is defined as an
+alias for `jup pm` — the same code path with corepack's spellings and no scope
+words — so the compatibility promise stays exactly as wide as it is today. Two rules
+protect the arrangement: classification order is fixed (the proxy tests keep their
+precedence, so `jup yarn --version` still prints Yarn's version), and the four sets
+of §17.4 R8 — the table's names, the scope words, the verbs, and the reserved words —
+are pairwise disjoint, checked at **build** time — a collision there does not raise an error, it
+silently makes one spelling unreachable.
