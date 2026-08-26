@@ -98,8 +98,8 @@ beforeEach(async () => {
     delete process.env[key];
   }
 
-  home = await mkdtemp(join(tmpdir(), "pipack-install-home-"));
-  scratch = await mkdtemp(join(tmpdir(), "pipack-install-work-"));
+  home = await mkdtemp(join(tmpdir(), "jup-install-home-"));
+  scratch = await mkdtemp(join(tmpdir(), "jup-install-work-"));
   process.env.COREPACK_HOME = home;
 
   routes = {};

@@ -457,7 +457,7 @@ describe("request shape", () => {
 
     const agent = server.last().headers["user-agent"];
     expect(agent).toBe(USER_AGENT);
-    expect(agent).toMatch(/^pipack\/\d+\.\d+\.\d+/);
+    expect(agent).toMatch(/^jup\/\d+\.\d+\.\d+/);
     for (const secret of [process.env.USER, process.env.HOME, process.platform]) {
       if (secret) expect(agent).not.toContain(secret);
     }
@@ -1017,7 +1017,7 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
 
   beforeEach(() => {
     savedHome = process.env.HOME;
-    const root = mkdtempSync(join(tmpdir(), "pipack-http-npmrc-"));
+    const root = mkdtempSync(join(tmpdir(), "jup-http-npmrc-"));
     roots.push(root);
     home = join(root, "home");
     project = join(root, "project");

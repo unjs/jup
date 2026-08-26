@@ -125,7 +125,7 @@ describe("§15.30 corepack info", () => {
     const report = await info(fixture);
 
     expect(report.version).toBe(1);
-    expect(report.tool.name).toBe("pipack");
+    expect(report.tool.name).toBe("jup");
     expect(report.project).toMatchObject({
       status: "found",
       // Absolute (§15.30): a relative path is useless in a pasted report.

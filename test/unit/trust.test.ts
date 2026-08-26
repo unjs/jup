@@ -151,7 +151,7 @@ function cacheFile(): string {
 }
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "pipack-trust-"));
+  home = mkdtempSync(join(tmpdir(), "jup-trust-"));
   roots.push(home);
   process.env.COREPACK_HOME = home;
   delete process.env.COREPACK_INTEGRITY_KEYS;
@@ -407,7 +407,7 @@ describe("the keys cache — §15.9, §07.8", () => {
   it("never fails a run over an unwritable home (§07.8)", () => {
     // A *file* where the home directory should be: `mkdirSync` throws ENOTDIR,
     // and the run carries on.
-    const blocked = join(mkdtempSync(join(tmpdir(), "pipack-trust-ro-")), "home");
+    const blocked = join(mkdtempSync(join(tmpdir(), "jup-trust-ro-")), "home");
     roots.push(blocked);
     writeFileSync(blocked, "not a directory");
     process.env.COREPACK_HOME = blocked;

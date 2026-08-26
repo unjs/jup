@@ -18,7 +18,7 @@ import { findEntryModule, getOwnRoot } from "../../src/utils/self.ts";
 describe("locating ourselves", () => {
   function scaffold() {
     const root = mkdtempSync(join(tmpdir(), "self-"));
-    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "pipack", version: "9.9.9" }));
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "jup", version: "9.9.9" }));
     mkdirSync(join(root, "dist", "_chunks"), { recursive: true });
     writeFileSync(join(root, "dist", "index.mjs"), "export {};");
     writeFileSync(join(root, "dist", "_chunks", "cli.mjs"), "export {};");

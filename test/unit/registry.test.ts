@@ -1160,7 +1160,7 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
     // the fetchers as well is what makes §15.38 row 150's configuration —
     // `@yarnpkg:registry` and nothing else — move the *tag document* too, not
     // only the download.
-    const root = mkdtempSync(join(tmpdir(), "pipack-registry-npmrc-"));
+    const root = mkdtempSync(join(tmpdir(), "jup-registry-npmrc-"));
     const home = join(root, "home");
     mkdirSync(home, { recursive: true });
     const savedHome = process.env.HOME;

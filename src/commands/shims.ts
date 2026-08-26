@@ -59,13 +59,13 @@ import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder } from "../cache/store.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
-const TOOL_NAME = "pipack";
+const TOOL_NAME = "jup";
 
 /**
  * §14.16 — how we recognise a stub we wrote. A regular file that does not carry
  * this marker is somebody else's binary and is never replaced without `--force`.
  */
-export const SHIM_MARKER = "@pipack-shim";
+export const SHIM_MARKER = "@jup-shim";
 
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;

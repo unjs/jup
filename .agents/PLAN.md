@@ -862,7 +862,7 @@ quiet machine (41 spawns; read the **min**, which is least noise-contaminated):
 | | min | median | vs bare node (min) |
 |---|---|---|---|
 | `node -e ""` | 18.4 ms | 22.5 ms | — |
-| `pipack pnpm --version` (cache hit) | 33.2 ms | 36.3 ms | **+14 ms** |
+| `jup pnpm --version` (cache hit) | 33.2 ms | 36.3 ms | **+14 ms** |
 | `corepack pnpm --version` (cache hit) | 50.8 ms | 53.7 ms | +32 ms |
 
 So the real growth across the whole of phase 2 is roughly **1 ms** (~13 ms → ~14 ms), not

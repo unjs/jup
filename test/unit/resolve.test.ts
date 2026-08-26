@@ -122,7 +122,7 @@ beforeEach(() => {
     delete process.env[key];
   }
 
-  home = mkdtempSync(join(tmpdir(), "pipack-resolve-"));
+  home = mkdtempSync(join(tmpdir(), "jup-resolve-"));
   process.env.COREPACK_HOME = home;
   // Nothing here exercises signature verification; the registry mock serves a
   // legacy `shasum`-only `dist`, which is the quietest shape.

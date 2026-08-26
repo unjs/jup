@@ -128,7 +128,7 @@ async function installShim(shimDir: string, options: Parameters<typeof run>[1]):
   // it lands on carries our marker, and it is the marker's own default that the
   // control row below observes.
   expect(realpathSync(shim).startsWith(TOOL_ROOT)).toBe(true);
-  expect(readFileSync(shim, "utf8")).toContain("@pipack-shim");
+  expect(readFileSync(shim, "utf8")).toContain("@jup-shim");
   return shim;
 }
 

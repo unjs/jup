@@ -167,7 +167,7 @@ export async function startProxy(mockOrigin: () => string): Promise<ProxyFixture
   await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
 
   fixture.origin = `http://127.0.0.1:${(proxy.address() as AddressInfo).port}`;
-  fixture.caFile = join(mkdtempSync(join(tmpdir(), "pipack-ca-")), "ca.pem");
+  fixture.caFile = join(mkdtempSync(join(tmpdir(), "jup-ca-")), "ca.pem");
   writeFileSync(fixture.caFile, `${CERT}\n`);
 
   return fixture;

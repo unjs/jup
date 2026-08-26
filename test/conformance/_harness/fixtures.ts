@@ -47,7 +47,7 @@ export interface Fixture {
  * and BOM rows get their fixtures.
  */
 export function createFixture(manifest?: unknown): Fixture {
-  const root = mkdtempSync(join(tmpdir(), "pipack-conf-"));
+  const root = mkdtempSync(join(tmpdir(), "jup-conf-"));
   roots.push(root);
 
   const cwd = join(root, "project");
@@ -98,7 +98,7 @@ export function cleanupFixtures(): void {
  * indistinguishable — the copy is the same source, type-stripped the same way.
  */
 export function copyTool(): string {
-  const root = mkdtempSync(join(tmpdir(), "pipack-tool-"));
+  const root = mkdtempSync(join(tmpdir(), "jup-tool-"));
   roots.push(root);
   cpSync(new URL("../../../src", import.meta.url), join(root, "src"), { recursive: true });
   // The published package has one, and two things depend on it: `.js` files —
@@ -106,10 +106,7 @@ export function copyTool(): string {
   // `COREPACK_ROOT` (§08.7) is the directory that holds it. Without it a shim
   // written into the copy could not run, and `COREPACK_ROOT` would point
   // somewhere outside the copy entirely.
-  writeFileSync(
-    join(root, "package.json"),
-    `{"name":"pipack","version":"0.0.0","type":"module"}\n`,
-  );
+  writeFileSync(join(root, "package.json"), `{"name":"jup","version":"0.0.0","type":"module"}\n`);
   return join(root, "src", "bin.ts");
 }
 

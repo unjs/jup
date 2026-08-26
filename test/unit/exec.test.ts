@@ -57,7 +57,7 @@ function run(
 }
 
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), "pipack-exec-"));
+  root = mkdtempSync(join(tmpdir(), "jup-exec-"));
   driver = join(root, "driver.mjs");
   writeFileSync(
     driver,

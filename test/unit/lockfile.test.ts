@@ -39,7 +39,7 @@ function read(): string {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "pipack-lock-"));
+  dir = mkdtempSync(join(tmpdir(), "jup-lock-"));
 });
 
 afterEach(() => {

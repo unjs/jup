@@ -167,7 +167,7 @@ const wait = (milliseconds: number): Promise<void> =>
  * the machine. Native HTTP stacks generally must send *something*, and a
  * registry operator needs a name to point at when something misbehaves.
  */
-export const USER_AGENT = "pipack/0.0.0 (+https://github.com/pi0/pipack)";
+export const USER_AGENT = "jup/0.0.0 (+https://github.com/pithings/jup)";
 
 export interface HttpOptions {
   headers?: Record<string, string>;

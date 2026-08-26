@@ -1,5 +1,5 @@
 {
-  "name": "pipack",
+  "name": "jup",
   "version": "0.0.0",
   "description": "A fast, small, zero-dependency package manager version manager.",
   "keywords": [
@@ -14,7 +14,7 @@
   "repository": "pithings/jup",
   "bin": {
     "corepack": "./dist/bin.mjs",
-    "pipack": "./dist/bin.mjs"
+    "jup": "./dist/bin.mjs"
   },
   "files": [
     "dist"

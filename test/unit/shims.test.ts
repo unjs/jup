@@ -79,7 +79,7 @@ function write(file: string, content: string, mode = 0o644): void {
 beforeEach(() => {
   // realpath: macOS puts the temp directory behind a symlink, and `enable`
   // resolves the install directory (§10.4) before computing relative targets.
-  root = realpathSync(mkdtempSync(join(tmpdir(), "pipack-shims-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "jup-shims-")));
   dist = join(root, "dist");
   binDir = join(root, "bin");
   xdgBin = join(root, "xdg-bin");
@@ -178,10 +178,10 @@ describe("install directory resolution (§15.13)", () => {
   );
 
   it("no longer looks itself up on PATH — that is what #71 is about", () => {
-    // A `pipack` sitting in a directory on `PATH` used to *be* the answer
+    // A `jup` sitting in a directory on `PATH` used to *be* the answer
     // (§10.4). §15.13 replaced that chain wholesale; the old behaviour is
     // reachable only by naming the directory.
-    write(join(binDir, "pipack"), "#!/bin/sh\n", 0o755);
+    write(join(binDir, "jup"), "#!/bin/sh\n", 0o755);
     expect(resolveInstallDirectory({}, false)).toBe(xdgBin);
   });
 });
@@ -514,7 +514,7 @@ describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
 
 describe("disable (§10.6, §15.15)", () => {
   it("125: removes the shims and leaves everything else alone", async () => {
-    write(join(binDir, "pipack"), "#!/bin/sh\n", 0o755);
+    write(join(binDir, "jup"), "#!/bin/sh\n", 0o755);
     write(join(binDir, "unrelated"), "#!/bin/sh\n", 0o755);
     await cmdEnable([`--install-directory=${binDir}`], dist);
 
@@ -523,7 +523,7 @@ describe("disable (§10.6, §15.15)", () => {
     for (const binName of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
       expect(lstatSync(join(binDir, binName), { throwIfNoEntry: false })).toBeUndefined();
     }
-    expect(existsSync(join(binDir, "pipack"))).toBe(true);
+    expect(existsSync(join(binDir, "jup"))).toBe(true);
     expect(existsSync(join(binDir, "unrelated"))).toBe(true);
     expect(warn).not.toHaveBeenCalled();
   });

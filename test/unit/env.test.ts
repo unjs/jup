@@ -37,7 +37,7 @@ beforeEach(() => {
       delete process.env[key];
     }
   }
-  dir = mkdtempSync(join(tmpdir(), "pipack-env-"));
+  dir = mkdtempSync(join(tmpdir(), "jup-env-"));
 });
 
 afterEach(() => {

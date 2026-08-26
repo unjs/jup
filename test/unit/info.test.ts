@@ -60,8 +60,8 @@ beforeEach(async () => {
     delete process.env[key];
   }
 
-  home = await mkdtemp(join(tmpdir(), "pipack-info-home-"));
-  project = await mkdtemp(join(tmpdir(), "pipack-info-proj-"));
+  home = await mkdtemp(join(tmpdir(), "jup-info-home-"));
+  project = await mkdtemp(join(tmpdir(), "jup-info-proj-"));
   process.env.COREPACK_HOME = home;
 
   stdout = "";
@@ -528,7 +528,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     mkdirSync(bin, { recursive: true });
     // §15.13 replaced §14.17's "wherever our own binary lives" with an explicit
     // per-user chain, so the fixture names the directory instead of planting a
-    // `pipack` beside it.
+    // `jup` beside it.
     process.env.COREPACK_SHIM_DIRECTORY = bin;
 
     // A stub carrying the marker, plus the relative symlink `enable` writes.
@@ -643,7 +643,7 @@ describe("cmdInfo / cmdCacheList (§15.19, §15.30)", () => {
 
   it("reports the tool's own version and root", () => {
     const info = report().tool;
-    expect(info.name).toBe("pipack");
+    expect(info.name).toBe("jup");
     expect(info.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(existsSync(join(info.root, "package.json"))).toBe(true);
   });

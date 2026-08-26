@@ -86,7 +86,7 @@ export function cleanEnv(): Record<string, string> {
     if (key.startsWith("COREPACK_") || key === "DEBUG" || key === "FORCE_COLOR") continue;
     // `CI` gates the interactive half of the download prompt (§05.5), and
     // `NODE_OPTIONS` could smuggle a loader into the child.
-    if (key === "CI" || key === "NODE_OPTIONS" || key === "PIPACK_MOCK_ORIGIN") continue;
+    if (key === "CI" || key === "NODE_OPTIONS" || key === "JUP_MOCK_ORIGIN") continue;
     // §14.8 makes the proxy variables live with no second opt-in, so a developer
     // who has one configured would otherwise route every fixture request through
     // it. The rows that want a proxy set these themselves.
@@ -115,7 +115,7 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
 
   const nodeArgs: string[] = [];
   if (options.registry !== undefined) {
-    env.PIPACK_MOCK_ORIGIN =
+    env.JUP_MOCK_ORIGIN =
       typeof options.registry === "string" ? options.registry : options.registry.origin;
     nodeArgs.push("--import", INTERCEPT);
   }

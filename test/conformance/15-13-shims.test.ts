@@ -197,7 +197,7 @@ describe("§15.14 — stale shims", () => {
     expect(result.stderr).toBe("");
     // Now it points at something that exists, and that something is ours.
     expect(existsSync(join(shimDir, "yarn"))).toBe(true);
-    expect(readFileSync(join(shimDir, "yarn"), "utf8")).toContain("@pipack-shim");
+    expect(readFileSync(join(shimDir, "yarn"), "utf8")).toContain("@jup-shim");
   });
 
   it.skipIf(IS_WINDOWS)("173: disable removes such a shim rather than skipping it", async () => {

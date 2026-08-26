@@ -11,7 +11,7 @@
  * Generated with:
  *
  *     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
- *       -keyout key.pem -out cert.pem -days 36500 -subj "/CN=pipack test" \
+ *       -keyout key.pem -out cert.pem -days 36500 -subj "/CN=jup test" \
  *       -addext "subjectAltName=DNS:example.com,DNS:*.example.com,DNS:*.example,DNS:example,DNS:localhost,IP:127.0.0.1" \
  *       -addext "basicConstraints=critical,CA:TRUE" \
  *       -addext "keyUsage=digitalSignature,keyEncipherment,keyCertSign"

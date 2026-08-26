@@ -32,7 +32,7 @@ import {
 const registry = new MockRegistry();
 
 /** A PEM file holding the fixture CA, for `COREPACK_CAFILE`. */
-const caFile = join(mkdtempSync(join(tmpdir(), "pipack-conf-ca-")), "bundle.pem");
+const caFile = join(mkdtempSync(join(tmpdir(), "jup-conf-ca-")), "bundle.pem");
 writeFileSync(caFile, `${CERT}\n`);
 
 interface TlsFront {

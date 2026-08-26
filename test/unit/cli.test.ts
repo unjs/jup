@@ -82,8 +82,8 @@ beforeEach(async () => {
     delete process.env[key];
   }
 
-  home = await mkdtemp(join(tmpdir(), "pipack-cli-home-"));
-  project = await mkdtemp(join(tmpdir(), "pipack-cli-proj-"));
+  home = await mkdtemp(join(tmpdir(), "jup-cli-home-"));
+  project = await mkdtemp(join(tmpdir(), "jup-cli-proj-"));
   process.env.COREPACK_HOME = home;
 
   stdout = "";
@@ -441,7 +441,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
     // A brand-new home, and the network switched off: the archive is the only
     // possible source of these versions.
-    const fresh = await mkdtemp(join(tmpdir(), "pipack-cli-home2-"));
+    const fresh = await mkdtemp(join(tmpdir(), "jup-cli-home2-"));
     process.env.COREPACK_HOME = fresh;
     process.env.COREPACK_ENABLE_NETWORK = "0";
     stdout = "";
@@ -471,7 +471,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     await cmdPack(["yarn@2.2.2"]);
     const archive = join(project, "corepack.tgz");
 
-    const fresh = join(tmpdir(), `pipack-cli-missing-${process.pid}-${Date.now()}`);
+    const fresh = join(tmpdir(), `jup-cli-missing-${process.pid}-${Date.now()}`);
     process.env.COREPACK_HOME = fresh;
     process.env.COREPACK_ENABLE_NETWORK = "0";
     expect(existsSync(fresh)).toBe(false);
@@ -514,7 +514,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   });
 
   it("rejects a tarball that did not come from pack (test 93)", async () => {
-    const source = await mkdtemp(join(tmpdir(), "pipack-cli-other-"));
+    const source = await mkdtemp(join(tmpdir(), "jup-cli-other-"));
     await mkdir(join(source, "stuff"), { recursive: true });
     await writeFile(join(source, "stuff", "readme.txt"), "not a store subtree\n");
     const archive = join(project, "other.tgz");
@@ -528,7 +528,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   });
 
   it("rejects an archive whose markers sit too shallow", async () => {
-    const source = await mkdtemp(join(tmpdir(), "pipack-cli-short-"));
+    const source = await mkdtemp(join(tmpdir(), "jup-cli-short-"));
     await mkdir(join(source, "yarn"), { recursive: true });
     await writeFile(join(source, "yarn", ".corepack"), "{}");
     const archive = join(project, "short.tgz");
@@ -573,7 +573,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   });
 
   it("refuses an archive naming a package manager this build doesn't support", async () => {
-    const source = await mkdtemp(join(tmpdir(), "pipack-cli-bogus-"));
+    const source = await mkdtemp(join(tmpdir(), "jup-cli-bogus-"));
     await mkdir(join(source, "bun", "1.0.0"), { recursive: true });
     await writeFile(join(source, "bun", "1.0.0", ".corepack"), "{}");
     const archive = join(project, "bogus.tgz");
@@ -840,7 +840,7 @@ describe("up (§09.4, tests 111-115)", () => {
 
 describe("hydrate and prepare (§09.10)", () => {
   it("hydrate names 'corepack prepare' in its format error", async () => {
-    const source = await mkdtemp(join(tmpdir(), "pipack-cli-hyd-"));
+    const source = await mkdtemp(join(tmpdir(), "jup-cli-hyd-"));
     await mkdir(join(source, "stuff"), { recursive: true });
     await writeFile(join(source, "stuff", "readme.txt"), "nope\n");
     const archive = join(project, "legacy.tgz");
@@ -859,7 +859,7 @@ describe("hydrate and prepare (§09.10)", () => {
     await cmdPack(["yarn@2.2.2"]);
     const archive = join(project, "corepack.tgz");
 
-    const fresh = await mkdtemp(join(tmpdir(), "pipack-cli-home3-"));
+    const fresh = await mkdtemp(join(tmpdir(), "jup-cli-home3-"));
     process.env.COREPACK_HOME = fresh;
     process.env.COREPACK_ENABLE_NETWORK = "0";
 

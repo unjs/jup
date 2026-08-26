@@ -96,7 +96,7 @@ async function listen(server: Server | ReturnType<typeof createHttpServer>): Pro
 
 /** A PEM bundle at a path nothing has seen before, so the memo cannot mask a bug. */
 function bundleFile(...certificates: string[]): string {
-  const path = join(mkdtempSync(join(tmpdir(), "pipack-ca-")), "bundle.pem");
+  const path = join(mkdtempSync(join(tmpdir(), "jup-ca-")), "bundle.pem");
   writeFileSync(path, `${certificates.join("\n")}\n`);
   return path;
 }
@@ -213,7 +213,7 @@ describe("readCaBundle", () => {
   });
 
   it("reports an unreadable bundle by path", () => {
-    const path = join(tmpdir(), "pipack-nonexistent-ca.pem");
+    const path = join(tmpdir(), "jup-nonexistent-ca.pem");
 
     expect(() => readCaBundle(path)).toThrow(messages.cafileUnreadable(path));
     expect(() => readCaBundle(path)).toThrow(
@@ -368,7 +368,7 @@ describe("an untrusted certificate authority (row 153)", () => {
 
   it("reports a COREPACK_CAFILE that does not exist", async () => {
     const origin = await startTlsOrigin();
-    const path = join(tmpdir(), "pipack-missing-bundle.pem");
+    const path = join(tmpdir(), "jup-missing-bundle.pem");
     process.env.COREPACK_CAFILE = path;
 
     await expect(httpGet(`https://127.0.0.1:${origin.port}/pkg`)).rejects.toThrow(
@@ -555,7 +555,7 @@ describe("tlsSettings — the .npmrc tier (§15.1, §15.4)", () => {
 
   beforeEach(() => {
     savedHome = process.env.HOME;
-    const root = mkdtempSync(join(tmpdir(), "pipack-tls-npmrc-"));
+    const root = mkdtempSync(join(tmpdir(), "jup-tls-npmrc-"));
     roots.push(root);
     home = join(root, "home");
     mkdirSync(home, { recursive: true });

@@ -127,7 +127,7 @@ const scratch: string[] = [];
 
 /** A throwaway `COREPACK_HOME` plus project directory, cleaned up afterwards. */
 function makeProject(manifest: unknown): { cwd: string; home: string } {
-  const root = mkdtempSync(join(tmpdir(), "pipack-main-"));
+  const root = mkdtempSync(join(tmpdir(), "jup-main-"));
   scratch.push(root);
   const cwd = join(root, "project");
   const home = join(root, "home");

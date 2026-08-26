@@ -346,7 +346,7 @@ describe("tunnelling (§05.1, §14.8)", () => {
     await httpGet("http://example.com/pkg", { headers: { accept: "application/json" } });
 
     expect(proxy.requests[0]!.headers.accept).toBe("application/json");
-    expect(proxy.requests[0]!.headers["user-agent"]).toMatch(/^pipack\//);
+    expect(proxy.requests[0]!.headers["user-agent"]).toMatch(/^jup\//);
   });
 
   it("streams the body through the tunnel rather than buffering it", async () => {
@@ -814,7 +814,7 @@ describe("TLS inside the tunnel (§15.4)", () => {
 
   /** A CA bundle at a path nothing has seen before — the module memoises by path. */
   function bundleFile(): string {
-    const path = join(mkdtempSync(join(tmpdir(), "pipack-proxy-ca-")), "bundle.pem");
+    const path = join(mkdtempSync(join(tmpdir(), "jup-proxy-ca-")), "bundle.pem");
     writeFileSync(
       path,
       `${CERT}

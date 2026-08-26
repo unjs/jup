@@ -28,7 +28,7 @@ beforeEach(() => {
       delete process.env[key];
     }
   }
-  root = realpathSync(mkdtempSync(join(tmpdir(), "pipack-manifest-")));
+  root = realpathSync(mkdtempSync(join(tmpdir(), "jup-manifest-")));
   warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 

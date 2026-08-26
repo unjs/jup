@@ -281,7 +281,7 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
 
   return {
     version: INFO_REPORT_VERSION,
-    tool: { name: "pipack", version: getOwnVersion(), root: getOwnRoot(import.meta.url) },
+    tool: { name: "jup", version: getOwnVersion(), root: getOwnRoot(import.meta.url) },
     project,
     resolution,
     lockfile,

@@ -32,7 +32,7 @@ const savedEnv = { ...process.env };
  * tier) and a `project/` holding a manifest that stops §03.1's walk.
  */
 function tree(): { root: string; home: string; prefix: string; project: string } {
-  const root = mkdtempSync(join(tmpdir(), "pipack-npmrc-"));
+  const root = mkdtempSync(join(tmpdir(), "jup-npmrc-"));
   roots.push(root);
   const home = join(root, "home");
   const prefix = join(root, "prefix");
@@ -107,15 +107,15 @@ describe("parseNpmrc — the INI-ish line format", () => {
 
 describe("expandVariables — §15.1's `${VAR}`", () => {
   it("substitutes a defined variable", () => {
-    process.env.PIPACK_TEST_TOKEN = "s3cret";
-    expect(expandVariables("${PIPACK_TEST_TOKEN}")).toEqual({ value: "s3cret" });
+    process.env.JUP_TEST_TOKEN = "s3cret";
+    expect(expandVariables("${JUP_TEST_TOKEN}")).toEqual({ value: "s3cret" });
   });
 
   it("reports an undefined one rather than expanding to the literal text", () => {
-    delete process.env.PIPACK_TEST_MISSING;
+    delete process.env.JUP_TEST_MISSING;
     // The failure mode this guards: sending the eight characters `${VAR}` to a
     // registry as if they were a bearer token.
-    expect(expandVariables("${PIPACK_TEST_MISSING}")).toEqual({ missing: "PIPACK_TEST_MISSING" });
+    expect(expandVariables("${JUP_TEST_MISSING}")).toEqual({ missing: "JUP_TEST_MISSING" });
   });
 
   it("leaves a value with no reference alone", () => {
@@ -321,11 +321,11 @@ describe("loadNpmrc — credentials", () => {
   it("drops a credential whose ${VAR} is not set, rather than sending the literal", () => {
     const { home, project } = tree();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    delete process.env.PIPACK_TEST_MISSING;
-    write(join(home, ".npmrc"), "//registry.example.org/:_authToken=${PIPACK_TEST_MISSING}\n");
+    delete process.env.JUP_TEST_MISSING;
+    write(join(home, ".npmrc"), "//registry.example.org/:_authToken=${JUP_TEST_MISSING}\n");
 
     expect(loadNpmrc(project).auth).toEqual([]);
-    expect(String(warn.mock.calls[0]?.[0])).toContain("${PIPACK_TEST_MISSING}");
+    expect(String(warn.mock.calls[0]?.[0])).toContain("${JUP_TEST_MISSING}");
     warn.mockRestore();
   });
 });

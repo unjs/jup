@@ -437,9 +437,9 @@ describe("§13.7 registry, auth and integrity", () => {
 
   it("81: the embedded trust store matches registry.npmjs.org/-/npm/v1/keys", async (context) => {
     // A *live* staleness check, so it is the one row that needs the network.
-    // `PIPACK_OFFLINE=1` opts out, and an unreachable registry skips rather than
+    // `JUP_OFFLINE=1` opts out, and an unreachable registry skips rather than
     // fails — CI without egress must not go red over a freshness check.
-    if (process.env.PIPACK_OFFLINE === "1") {
+    if (process.env.JUP_OFFLINE === "1") {
       context.skip();
       return;
     }

@@ -102,7 +102,7 @@ async function exists(path: string): Promise<boolean> {
 let dest: string;
 
 beforeEach(async () => {
-  dest = await mkdtemp(join(tmpdir(), "pipack-tar-"));
+  dest = await mkdtemp(join(tmpdir(), "jup-tar-"));
 });
 
 afterEach(async () => {
@@ -211,7 +211,7 @@ describe("§07.4 rule 2 — escaping the extraction root", () => {
 
 describe("§07.4 rule 3 — link entries", () => {
   it("skips a symlink entry pointing outside the root", async () => {
-    const outside = join(dest, "..", `pipack-outside-${process.pid}.txt`);
+    const outside = join(dest, "..", `jup-outside-${process.pid}.txt`);
     await writeFile(outside, "SAFE");
     try {
       await extract(
@@ -265,7 +265,7 @@ describe("§07.4 rule 4 — entry types", () => {
 
 describe("§07.4 rule 5 — never follow a planted symlink", () => {
   it("replaces the link instead of writing through it", async () => {
-    const outside = join(dest, "..", `pipack-victim-${process.pid}.txt`);
+    const outside = join(dest, "..", `jup-victim-${process.pid}.txt`);
     await writeFile(outside, "SAFE");
     try {
       await symlink(outside, join(dest, "evil.js"));
@@ -280,7 +280,7 @@ describe("§07.4 rule 5 — never follow a planted symlink", () => {
   });
 
   it("replaces a symlinked parent directory instead of descending through it", async () => {
-    const outside = await mkdtemp(join(tmpdir(), "pipack-victim-dir-"));
+    const outside = await mkdtemp(join(tmpdir(), "jup-victim-dir-"));
     try {
       await symlink(outside, join(dest, "bin"));
       await extract(gzipStream([{ name: "package/bin/yarn.js", body: "PWNED" }]), dest, {
@@ -537,7 +537,7 @@ describe("create", () => {
   let source: string;
 
   beforeEach(async () => {
-    source = await mkdtemp(join(tmpdir(), "pipack-tar-src-"));
+    source = await mkdtemp(join(tmpdir(), "jup-tar-src-"));
     await mkdir(join(source, "yarn/2.2.2/bin"), { recursive: true });
     await writeFile(join(source, "yarn/2.2.2/.corepack"), `{"locator":{"name":"yarn"}}`);
     await writeFile(join(source, "yarn/2.2.2/bin/yarn.js"), "console.log(1)\n", { mode: 0o755 });

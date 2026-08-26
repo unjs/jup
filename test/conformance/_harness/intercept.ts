@@ -11,7 +11,7 @@
  * `src/`.
  */
 
-const target = process.env.PIPACK_MOCK_ORIGIN;
+const target = process.env.JUP_MOCK_ORIGIN;
 
 const REWRITTEN_HOSTS = new Set(["registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com"]);
 

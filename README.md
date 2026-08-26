@@ -1,9 +1,9 @@
-# pipack
+# jup
 
 <!-- automd:badges color=yellow -->
 
-[![npm version](https://img.shields.io/npm/v/pipack?color=yellow)](https://npmjs.com/package/pipack)
-[![npm downloads](https://img.shields.io/npm/dm/pipack?color=yellow)](https://npm.chart.dev/pipack)
+[![npm version](https://img.shields.io/npm/v/jup?color=yellow)](https://npmjs.com/package/jup)
+[![npm downloads](https://img.shields.io/npm/dm/jup?color=yellow)](https://npm.chart.dev/jup)
 
 <!-- /automd -->
 
@@ -32,7 +32,7 @@ A project that pins `pnpm@11.1.2` and gets pnpm 9 produces a different lockfile,
 different dependency tree, and a bug that reproduces on one machine and not another.
 Pinning the package manager fixes that — but only if something enforces the pin.
 
-pipack is that something. It occupies the names `npm`, `npx`, `pnpm`, `pnpx`, `yarn`, and
+jup is that something. It occupies the names `npm`, `npx`, `pnpm`, `pnpx`, `yarn`, and
 `yarnpkg` on your `PATH`. When you type `yarn`, it works out which Yarn this project
 wants, makes sure that exact version is present and verified, and hands over. You should
 not be able to tell the difference from a directly-installed Yarn, except that the
@@ -46,13 +46,13 @@ holes — those differences are listed under [Divergences](#divergences).
 ## Install
 
 ```sh
-npm install -g pipack
+npm install -g jup
 ```
 
 Then put the shims on your `PATH`:
 
 ```sh
-pipack enable
+jup enable
 ```
 
 ## Usage
@@ -60,8 +60,8 @@ pipack enable
 ### Pinning a package manager
 
 ```sh
-pipack use pnpm@11        # resolve, install, and write the pin into package.json
-pipack up                 # bump the pin to the newest release in the same major line
+jup use pnpm@11        # resolve, install, and write the pin into package.json
+jup up                 # bump the pin to the newest release in the same major line
 ```
 
 Both write a hash-bearing pin, computed from the bytes actually downloaded:
@@ -85,7 +85,7 @@ Both write a hash-bearing pin, computed from the bytes actually downloaded:
 Every command that changes your project prints the path it changed:
 
 ```console
-$ pipack use pnpm@11.1.2
+$ jup use pnpm@11.1.2
 Installing pnpm@11.1.2 in the project...
 Updated /home/you/monorepo/package.json to use pnpm@11.1.2+sha512.b0c1…
 
@@ -93,20 +93,20 @@ Updated /home/you/monorepo/package.json to use pnpm@11.1.2+sha512.b0c1…
 ```
 
 That line exists because "corepack edited a file I did not expect" is a whole class of
-bug report ([#607]), and it is invisible without it. `pipack cache clean` reports the
+bug report ([#607]), and it is invisible without it. `jup cache clean` reports the
 same way — `Removed 3 cached version(s) from …`, or `Nothing to remove` — so you can
 tell a successful clean from a no-op.
 
 The file itself is chosen by walking up from where you are standing, and the walk
 **stops at the repository**: a manifest declaring `workspaces`, or a directory holding a
-`pnpm-workspace.yaml`. Standing in `packages/app` of a monorepo, `pipack use` pins at
+`pnpm-workspace.yaml`. Standing in `packages/app` of a monorepo, `jup use` pins at
 the workspace root — which is what you want — and never climbs past it into a manifest
 that happens to live in your home directory.
 
 `--here` overrides that and writes `./package.json`, creating it if it does not exist:
 
 ```sh
-pipack use --here pnpm@11.1.2   # pins packages/app/package.json, not the root
+jup use --here pnpm@11.1.2   # pins packages/app/package.json, not the root
 ```
 
 Reading is deliberately unchanged: a package with no pin of its own still inherits its
@@ -127,7 +127,7 @@ the next run refuses to read ([#874]).
 The distinction in the last row is between a *pin* and a *constraint*. An exact
 `devEngines.packageManager.version` says "this release", so it is replaced. A **range**
 says "anything in here", so it is honoured and left alone — collapsing `1.x || 2.x` into
-`2.4.3` would destroy the declaration `pipack up` relies on to cross a major boundary,
+`2.4.3` would destroy the declaration `jup up` relies on to cross a major boundary,
 and would silently narrow what the project accepts. A pin that violates a declared range
 is still refused, through that entry's own `onFail`.
 
@@ -184,11 +184,11 @@ the bytes it produced:
 
 Commit that file. From then on the range costs nothing: every run uses the recorded
 version with **no network access at all**, and the recorded digest is enforced exactly
-like a hash you pinned by hand. The resolution changes only when you run `pipack up`, or
+like a hash you pinned by hand. The resolution changes only when you run `jup up`, or
 when the recorded version stops satisfying the range.
 
 ```sh
-pipack up                            # re-resolve the range, keeping the range
+jup up                            # re-resolve the range, keeping the range
 COREPACK_FROZEN_LOCKFILE=1 pnpm i    # refuse to resolve anything not already recorded
 ```
 
@@ -200,16 +200,16 @@ an exact version never involves the file at all — nothing is read, nothing is 
 
 A version you did not spell out is never a prerelease.
 
-`pipack use pnpm` resolves to the newest **stable** release, even on the days when a
+`jup use pnpm` resolves to the newest **stable** release, even on the days when a
 `11.2.0-dev.1005` is the semver maximum of everything published. Corepack picks the dev
 build, every prerelease cycle, and has done since 2023 ([#473], [#774]).
 
 What still resolves to a prerelease, because you asked for one:
 
 ```sh
-pipack use pnpm@11.2.0-dev.1005      # an exact pin
-pipack use 'pnpm@>=11.0.0-0'         # a range that names a prerelease
-COREPACK_ENABLE_PRERELEASES=1 pipack use pnpm
+jup use pnpm@11.2.0-dev.1005      # an exact pin
+jup use 'pnpm@>=11.0.0-0'         # a range that names a prerelease
+COREPACK_ENABLE_PRERELEASES=1 jup use pnpm
 ```
 
 An already-pinned prerelease keeps running from the cache exactly as a stable release
@@ -220,13 +220,13 @@ does; what narrowed is only the set of candidates the tool will choose *for* you
 
 ### Running a package manager
 
-Once `pipack enable` has run, nothing is different — `yarn add x`, `pnpm install`, and
+Once `jup enable` has run, nothing is different — `yarn add x`, `pnpm install`, and
 `npx cowsay` all work as they always did, at the version your project declares. You can
 also be explicit, which needs no shims:
 
 ```sh
-pipack yarn add lodash
-pipack yarn@1.22.4 --version   # override the project's pin for one invocation
+jup yarn add lodash
+jup yarn@1.22.4 --version   # override the project's pin for one invocation
 ```
 
 ### Offline and container images
@@ -234,9 +234,9 @@ pipack yarn@1.22.4 --version   # override the project's pin for one invocation
 Warm the cache in a build layer, then run with no network at all:
 
 ```sh
-pipack install                       # cache the version this project pins
-pipack pack pnpm@11.1.2              # or: build a portable archive on a networked machine
-pipack install -g corepack.tgz       # and seed a cache from it elsewhere
+jup install                       # cache the version this project pins
+jup pack pnpm@11.1.2              # or: build a portable archive on a networked machine
+jup install -g corepack.tgz       # and seed a cache from it elsewhere
 ```
 
 A cache miss with the network off names the two commands that would have filled it,
@@ -258,7 +258,7 @@ pnpm@11.9.9 does not exist in https://registry.npmjs.org. Run 'corepack info' to
 resolved spec and where it came from.
 ```
 
-Both name `corepack` rather than `pipack`: error strings are matched verbatim by
+Both name `corepack` rather than `jup`: error strings are matched verbatim by
 real-world scripts and CI, so they are reproduced byte for byte.
 
 [#204]: https://github.com/nodejs/corepack/issues/204
@@ -266,39 +266,39 @@ real-world scripts and CI, so they are reproduced byte for byte.
 ## Enabling the shims
 
 ```sh
-pipack enable
+jup enable
 ```
 
 That puts `npm`, `npx`, `pnpm`, `pnpx`, `yarn` and `yarnpkg` on your `PATH`, each pointing
-back at pipack. `disable` takes them off again.
+back at jup. `disable` takes them off again.
 
 **Two differences from corepack you will notice immediately.**
 
 *npm is shimmed by default.* Corepack excludes it deliberately, but the exclusion is an
 inter-team agreement between the corepack and npm maintainers ([#138]), not a technical
-limit, and pipack is not party to it. What the exclusion costs is the very thing the tool
+limit, and jup is not party to it. What the exclusion costs is the very thing the tool
 exists to prevent: a project pinned to `yarn` correctly blocks `pnpm`, while `npm install`
-silently works anyway and writes the inconsistent lockfile state. `pipack enable --exclude
+silently works anyway and writes the inconsistent lockfile state. `jup enable --exclude
 npm` restores the old default.
 
 *Shims go to a per-user directory, and never need `sudo`.* Corepack writes them next to
 its own binary — `C:\Program Files\nodejs` on Windows, `/usr` under a distro package, a
-read-only path on NixOS ([#71], 34 👍 and open since 2021; also [#265], [#416]). pipack
+read-only path on NixOS ([#71], 34 👍 and open since 2021; also [#265], [#416]). jup
 uses `--install-directory`, else `COREPACK_SHIM_DIRECTORY`, else `$XDG_BIN_HOME` or
 `~/.local/bin` (`%LOCALAPPDATA%\node\corepack\bin` on Windows). The directory is created
-and probed for writability *before* anything is written; if it is not writable, pipack
+and probed for writability *before* anything is written; if it is not writable, jup
 falls back to the per-user default and says so rather than failing. To keep corepack's
-behaviour: `pipack enable --install-directory "$(dirname "$(command -v pipack)")"`.
+behaviour: `jup enable --install-directory "$(dirname "$(command -v jup)")"`.
 
 `LOCALAPPDATA` is read **only on Windows** — corepack honours it everywhere, which is why
 a Linux process started through WSL interop puts its cache on `/mnt/c` with alien
-permissions ([#673]). The same rule governs the store, and it is the one place pipack
+permissions ([#673]). The same rule governs the store, and it is the one place jup
 deliberately breaks cache-location compatibility.
 
 ### `enable` tells you when it did nothing
 
 `corepack enable` exits 0 in silence even when `yarn` still resolves to the previous
-install ([#507], 12 👍). pipack checks its own post-condition — if the shim directory is
+install ([#507], 12 👍). jup checks its own post-condition — if the shim directory is
 not on `PATH` it prints the exact line to add, for the shell you are using:
 
 ```
@@ -321,12 +321,12 @@ Both are warnings; the exit code stays 0.
 
 It refuses to replace a binary it did not install. With `--force` it goes ahead, but
 records what it displaced — path, type, symlink target, and for a regular file the file
-itself — under `<COREPACK_HOME>/shims.json`. `disable` removes only what pipack created,
+itself — under `<COREPACK_HOME>/shims.json`. `disable` removes only what jup created,
 restores anything on that record, and clears it, so this round-trips:
 
 ```sh
-pipack enable --force     # your distro's yarn is set aside
-pipack disable            # ...and put back, mode and all
+jup enable --force     # your distro's yarn is set aside
+jup disable            # ...and put back, mode and all
 ```
 
 Corepack deletes whatever occupies the name, in both directions ([#112], 10 👍). A shim
@@ -347,18 +347,18 @@ version manager ([#751]) — is recognised as a shim rather than as a missing fi
 
 | Command                              | What it does                                                             |
 | ------------------------------------ | ------------------------------------------------------------------------ |
-| `pipack <binary>[@<version>] [...]`  | Run a package manager at the project's version, or an explicit one        |
-| `pipack enable [...name]`            | Install shims for each package manager onto `PATH`                        |
-| `pipack disable [...name]`           | Remove them again                                                         |
-| `pipack use [--here] <name[@<version>]>` | Resolve, install, pin into `package.json`, then run the install command |
-| `pipack up [--here]`                 | Bump the project's pin within its current major line, or re-resolve its range |
-| `pipack install`                     | Download and cache the version this project pins                          |
-| `pipack install -g [...name\|<file>]`| Install globally, or seed the cache from a `pack` archive                 |
-| `pipack pack [...name]`              | Build a portable archive of cached versions                               |
-| `pipack info [--json]`               | Explain what this project resolves to, and why                            |
-| `pipack cache list [--json]`         | List the cached versions and the recorded defaults                        |
-| `pipack cache clean [--all]`         | Empty the download cache, and with `--all` the recorded defaults too      |
-| `pipack --version`, `pipack --help`  | The usual                                                                 |
+| `jup <binary>[@<version>] [...]`  | Run a package manager at the project's version, or an explicit one        |
+| `jup enable [...name]`            | Install shims for each package manager onto `PATH`                        |
+| `jup disable [...name]`           | Remove them again                                                         |
+| `jup use [--here] <name[@<version>]>` | Resolve, install, pin into `package.json`, then run the install command |
+| `jup up [--here]`                 | Bump the project's pin within its current major line, or re-resolve its range |
+| `jup install`                     | Download and cache the version this project pins                          |
+| `jup install -g [...name\|<file>]`| Install globally, or seed the cache from a `pack` archive                 |
+| `jup pack [...name]`              | Build a portable archive of cached versions                               |
+| `jup info [--json]`               | Explain what this project resolves to, and why                            |
+| `jup cache list [--json]`         | List the cached versions and the recorded defaults                        |
+| `jup cache clean [--all]`         | Empty the download cache, and with `--all` the recorded defaults too      |
+| `jup --version`, `jup --help`  | The usual                                                                 |
 
 `enable` and `disable` accept `--install-directory <path>` and `--exclude <name>`, and
 `enable` also takes `--force`; `install -g` accepts `--cache-only`; `pack` accepts
@@ -366,19 +366,19 @@ version manager ([#751]) — is recognised as a shim rather than as a missing fi
 write to the manifest in the current directory — see
 [Which file gets edited](#which-file-gets-edited).
 
-Note that `pipack yarn --version` prints **Yarn's** version, not pipack's — proxy mode
+Note that `jup yarn --version` prints **Yarn's** version, not jup's — proxy mode
 shadows the built-in commands, by design.
 
-## When something is surprising: `pipack info`
+## When something is surprising: `jup info`
 
 Everything the tool decided, and where each decision came from, in one command. It makes
 **no network request** and it does **not fail on a broken project** — telling you *why*
 the project is broken is the point.
 
 ```console
-$ pipack info
-pipack 0.1.0
-  root            /usr/local/lib/node_modules/pipack
+$ jup info
+jup 0.1.0
+  root            /usr/local/lib/node_modules/jup
 
 Project
   status          found
@@ -468,7 +468,7 @@ A pin the tool cannot resolve is reported rather than resolved, because resolvin
 would need the network:
 
 ```console
-$ pipack info
+$ jup info
 Resolution
   status          network
   package manager pnpm
@@ -476,7 +476,7 @@ Resolution
   reason          pnpm@^11.0.0 has no recorded resolution and nothing in the store satisfies it; resolving it needs a registry request, which 'info' does not make
 ```
 
-### `pipack info --json`
+### `jup info --json`
 
 The JSON form is a stable, documented contract — it is what a bug report template or a
 CI check should read. It carries its own schema `version` (currently `1`), bumped only
@@ -485,7 +485,7 @@ for a breaking change; new fields may be added without one.
 | Field | Contents |
 | --- | --- |
 | `version` | Schema version of this report. Read it first. |
-| `tool` | `{ name, version, root }` — pipack's own version and installation root |
+| `tool` | `{ name, version, root }` — jup's own version and installation root |
 | `project` | `status` (`found` / `invalid` / `no-spec` / `no-project`), the absolute `manifest` path, the `field` (`packageManager` or `devEngines.packageManager`), the `spec` as written, its `name` / `range` / `kind` (`exact`, `range`, `tag`, `url`), any `devEngines` block, and `problem` — the sentence explaining why an invalid spec is invalid |
 | `resolution` | `status` (`pinned`, `locked`, `cache`, `network`, `frozen`, `fallback`, `unknown`), the `version` and `hash`, the `source` it came from, whether it is `installed`, and a `reason` when nothing could be decided offline |
 | `lockfile` | `path`, `present`, the `key` this project's spec uses, the recorded `resolution`, and whether writes are `frozen` (with `frozenSource`: `COREPACK_FROZEN_LOCKFILE`, `CI`, or `default`) |
@@ -498,12 +498,12 @@ for a breaking change; new fields may be added without one.
 | `defaults` | The `lastKnownGood.json` path and its `entries` |
 | `shims` | The shim `directory` (or a `problem` explaining why it could not be determined) and, per binary name, whether a `shim` is installed, what `PATH` resolves it to, whether that is `ours`, and whether the shim is `shadowed` |
 
-`pipack cache list [--json]` is the store half of the same report — `version`, `store`
+`jup cache list [--json]` is the store half of the same report — `version`, `store`
 and `defaults` — for answering "did my container image actually get seeded?"
 
 ## Configuration
 
-Every knob is an environment variable. There is no config format of pipack's own, no
+Every knob is an environment variable. There is no config format of jup's own, no
 plugin system, and no telemetry — the only file it reads for configuration is the
 `.npmrc` you already wrote, and only for the handful of keys described
 [below](#the-npmrc-you-already-wrote). The full list lives in
@@ -529,7 +529,7 @@ to want:
 | `COREPACK_NETWORK_RETRIES`          | Attempts per request, the first included (default `3`); `0` disables retrying |
 | `COREPACK_SHIM_DIRECTORY`           | Where `enable` installs shims and `disable` looks for them |
 | `COREPACK_SPEC_FILE`                | Read `packageManager` / `devEngines.packageManager` from this file instead of the project's `package.json` |
-| `COREPACK_MINIMUM_RELEASE_AGE`      | Hours a release must have been published for before pipack will choose it *for* you; `0` or unset means no minimum |
+| `COREPACK_MINIMUM_RELEASE_AGE`      | Hours a release must have been published for before jup will choose it *for* you; `0` or unset means no minimum |
 | `XDG_BIN_HOME`                      | Per-user shim directory on Linux and BSD; not consulted on macOS or Windows |
 
 A project may also ship a `.corepack.env` file supplying the *behavioural* variables.
@@ -540,7 +540,7 @@ own downloads are checked against. Nor does its `.npmrc` — see below.
 
 ## The `.npmrc` you already wrote
 
-If your organisation runs a mirror, you have already configured it once. pipack reads a
+If your organisation runs a mirror, you have already configured it once. jup reads a
 deliberately small part of that file rather than making you configure it again:
 
 | Key | Effect |
@@ -571,13 +571,13 @@ The whole configuration space, highest precedence first:
 ```
 
 **A project-level `.npmrc` may set `registry` and `@scope:registry`, and nothing else.**
-npm honours project-level auth; pipack does not, because unlike npm it runs *before* you
+npm honours project-level auth; jup does not, because unlike npm it runs *before* you
 have decided to trust the repository — `git clone && yarn install` executes this code with
 the clone's `.npmrc` already on disk. A project file's `_authToken`, `_auth`, `_password`,
 `ca`, `cafile` and `strict-ssl` are refused, and refused out loud:
 
 ```console
-$ pipack pnpm --version
+$ jup pnpm --version
 ! Ignoring //npm.corp.example.com/:_authToken from /home/you/app/.npmrc: a project-level .npmrc may only set registry and @scope:registry
 ```
 
@@ -596,7 +596,7 @@ pnpm as collateral.
 `COREPACK_REGISTRY_<NAME>` mirrors exactly one:
 
 ```sh
-COREPACK_REGISTRY_YARN=https://mirror.corp.example.com/yarn pipack yarn --version
+COREPACK_REGISTRY_YARN=https://mirror.corp.example.com/yarn jup yarn --version
 ```
 
 Every URL derived from that package manager's table entry moves — the download, the tag
@@ -641,7 +641,7 @@ Every artifact must clear a check before it is allowed into the cache:
   `integrity` it covers becomes the expected hash. That chains a trusted key all the way
   to the bytes on disk.
 - **The registry's own digest, with a warning.** Proxies such as Artifactory and Nexus
-  routinely strip `dist.signatures`. When they do — and only then — pipack asks the
+  routinely strip `dist.signatures`. When they do — and only then — jup asks the
   package-root endpoint once, and if that is unsigned too it falls back to checking the
   bytes against the registry's `integrity`, saying so once. Set
   `COREPACK_REQUIRE_SIGNATURES=1` to refuse instead. A registry publishing neither a
@@ -651,7 +651,7 @@ Every artifact must clear a check before it is allowed into the cache:
 ### When npm rotates its signing keys
 
 The trust store ships inside the binary, which is why npm's February 2025 key rotation
-[broke every released corepack at once][#612] and the remedy was "upgrade". pipack keeps
+[broke every released corepack at once][#612] and the remedy was "upgrade". jup keeps
 the built-in keys and adds one repair on top of them:
 
 - The **only** thing that triggers it is a signature whose key id matches nothing in the
@@ -692,7 +692,7 @@ Same outcome, honest reason. corepack ships that expired key and never looks at 
 ### Trust for a registry that signs its own packages
 
 A private registry that re-signs what it serves (Cloudsmith and similar) fails against
-npm's keys, and corepack has [no way to say otherwise][#884]. pipack's trust store is
+npm's keys, and corepack has [no way to say otherwise][#884]. jup's trust store is
 keyed by registry origin:
 
 ```jsonc
@@ -729,12 +729,12 @@ repository cannot open the hole that repository would benefit from.
 
 **This is a breaking change for Yarn Berry from `repo.yarnpkg.com`** — every form of it,
 since that origin publishes nothing to verify against: a range (`yarn@4.x`), a tag
-(`yarn@stable`), a bare `pipack use yarn`, and an exact version with no hash are all
+(`yarn@stable`), a bare `jup use yarn`, and an exact version with no hash are all
 refused. The remedies, best first:
 
 1. **Point `COREPACK_NPM_REGISTRY` at an npm registry.** Berry then comes from
    `@yarnpkg/cli-dist`, which npm signs, and nothing needs an opt-out at all.
-2. **Pin the digest.** `COREPACK_ALLOW_UNVERIFIED=1 pipack use yarn@4` once writes
+2. **Pin the digest.** `COREPACK_ALLOW_UNVERIFIED=1 jup use yarn@4` once writes
    `yarn@4.x.y+sha512.…` into `package.json`; every later run, on every machine, is
    verified against it.
 3. **Keep the range and commit `.corepack.lock`.** It records the resolved version *and*
@@ -750,7 +750,7 @@ configuration.
 The store directory is named after the plain semver version, so `pnpm@9.0.0+sha512.<A>`
 and `pnpm@9.0.0+sha512.<B>` share one directory — and corepack re-attaches the marker's
 hash to the locator rather than comparing it, so the second project silently runs whatever
-the first installed. pipack compares them. When they disagree the pinned reference gets a
+the first installed. jup compares them. When they disagree the pinned reference gets a
 directory of its own, `<version>+<algo>.<hex>`, so both projects get the bytes they asked
 for and neither has to wipe a cache. The cost on the warm path is one file: the probe that
 used to `stat` the marker now reads it. No request, no directory scan, nothing new loaded.
@@ -783,7 +783,7 @@ rather than silently succeeding.
 
 ## Divergences
 
-pipack matches corepack's observable behaviour — same fields, same variables, same
+jup matches corepack's observable behaviour — same fields, same variables, same
 strings — with a set of deliberate departures, each closing a defect or a security hole.
 The full list with rationale is in
 [`.agents/14-divergences.md`](./.agents/14-divergences.md); the ones you might notice:
@@ -800,7 +800,7 @@ The full list with rationale is in
 - **Credentials never leave the configured registry's origin**, on any request path.
 - **`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` just work.** Corepack leaves
   proxying to the host runtime, which needs `NODE_USE_ENV_PROXY=1` before any of them do
-  anything; pipack tunnels through the proxy itself, with no second flag to discover.
+  anything; jup tunnels through the proxy itself, with no second flag to discover.
 - **TLS failures say what went wrong.** Corepack has no TLS surface at all, so an
   interception proxy, an expired certificate and a wrong hostname are all the same
   sentence; here each has its own, and there is a `COREPACK_CAFILE` to point at.
@@ -818,7 +818,7 @@ The full list with rationale is in
   `devEngines.packageManager` a project declares is what gets written, so the two can
   never disagree — and either one stops the upward walk.
 - **`transparent.default` is a floor, not an override.** After
-  `pipack install -g yarn@4.9.0`, `yarn dlx` runs 4.9.0; corepack keeps running the
+  `jup install -g yarn@4.9.0`, `yarn dlx` runs 4.9.0; corepack keeps running the
   table's compiled-in pin with no way to change it ([#202]). A recorded default from an
   older *major line* does not shadow the floor, so `yarn create` cannot fall back to Yarn
   Classic ([#812]). And the compiled-in `default` itself is now Yarn 4, not the Classic
@@ -844,17 +844,17 @@ The full list with rationale is in
 - **`COREPACK_SPEC_FILE` supplies the spec for a tree whose manifest cannot be edited**
   ([#682], [#402]). It overrides the manifest — and the broken manifest is not even read,
   which is the point — and it is deliberately not settable from `.corepack.env`.
-- **A release can be made to wait before pipack will pick it.**
+- **A release can be made to wait before jup will pick it.**
   `COREPACK_MINIMUM_RELEASE_AGE=24` (hours) keeps anything published in the last day out
-  of the versions pipack chooses *for* you ([#850]), the same `minimumReleaseAge` gate npm
+  of the versions jup chooses *for* you ([#850]), the same `minimumReleaseAge` gate npm
   and pnpm now ship — a compromised release is usually pulled within hours, and this is
   what stops it being installed in the meantime. It applies to a range, to a bare name and
-  to a dist-tag, which are all pipack choosing on your behalf; a version you pinned
+  to a dist-tag, which are all jup choosing on your behalf; a version you pinned
   exactly is never filtered, and neither is one already in the store. A typo'd value
   (`24h`, `-1`) is an error rather than a silent fallback to off: a security control that
   quietly stops applying is worse than one that stops. And where a source publishes no
   release dates at all — Yarn Berry's `repo.yarnpkg.com/tags` document is the one in the
-  built-in table — pipack **refuses** rather than resolving from it and reporting success
+  built-in table — jup **refuses** rather than resolving from it and reporting success
   it cannot back up. Pin the version, or point `COREPACK_NPM_REGISTRY` at an npm registry,
   which routes Berry through `@yarnpkg/cli-dist` and its publish times; the error says so.
 - **A package manager does not have to be JavaScript.** Corepack's most-upvoted open
@@ -863,7 +863,7 @@ The full list with rationale is in
   implemented in JS."* Here a band's `url` may carry `{platform}` and `{arch}`, and a band
   may declare `"exec": "native"` so its binaries run directly, with no JavaScript runtime
   looked up and none interposed — exit codes, signals and stdio behave exactly as they do
-  on the JavaScript path, so a child killed by `SIGTERM` kills pipack with `SIGTERM`
+  on the JavaScript path, so a child killed by `SIGTERM` kills jup with `SIGTERM`
   rather than with exit code 143. **No package manager was added**: §15.21 requires a
   project's maintainers to agree first, and Bun's asked not to be. The built-in table is
   still npm, pnpm and yarn — this is headroom, and adding an entry stays a data-only
@@ -882,7 +882,7 @@ The full list with rationale is in
   script that shells out to `pnpm` gets the one the project pinned rather than whatever
   the machine happens to have.
 - **Signing-key expiry is honoured** rather than stored and ignored — which is why a bare
-  `pipack yarn` currently fails online, and corepack does not. npm signs the `yarn`
+  `jup yarn` currently fails online, and corepack does not. npm signs the `yarn`
   packument's `latest` with a key its own `/-/npm/v1/keys` marks
   `expires: 2025-01-29`; corepack ships that key and ignores expiry, so the signature is
   effectively unchecked. `COREPACK_DEFAULT_TO_LATEST=0` uses the table's hash-pinned
@@ -941,7 +941,7 @@ per-package-manager registries (§15.1–§15.3), TLS diagnostics, retries and p
 (§15.4–§15.6), registry-metadata tiering (§15.7, §15.8), shims and enablement (§15.13,
 §15.15, §15.16, §15.29), semver ranges in the pin with `.corepack.lock` (§15.23),
 prereleases (§15.24), the manifest-walk and pin-write defects (§15.25–§15.27),
-`pipack info` (§15.30), stale and shadowed defaults (§15.33, both bullets), bin paths from
+`jup info` (§15.30), stale and shadowed defaults (§15.33, both bullets), bin paths from
 signed metadata (§15.17), native package-manager support (§15.28), one verification tier
 for every source with sidecar integrity (§15.11, §15.12), signing-key rotation and
 per-origin trust (§15.9, §15.10), global invocations and `PATH` (§15.31, §15.32), and most

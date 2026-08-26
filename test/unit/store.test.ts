@@ -61,7 +61,7 @@ const mkdirSyncActual = fsActual.mkdirSync;
 let home: string;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "pipack-store-"));
+  home = mkdtempSync(join(tmpdir(), "jup-store-"));
   vi.stubEnv("COREPACK_HOME", home);
 });
 

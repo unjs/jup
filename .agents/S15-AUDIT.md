@@ -1,4 +1,4 @@
-# §15 conformance audit — pipack @ `fed9e24`
+# §15 conformance audit — jup @ `fed9e24`
 
 **Scope.** Every `## 15.x` section of `.agents/15-gaps.md` (38 sections), checked against
 `src/` and `test/`. A section is **Done** only where something *tests* it; code with no
