@@ -4,22 +4,24 @@
 breakdown: what is left, in what order, and which conformance rows prove each piece.
 Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
 
-## Where things stand — `2261d95` + D1, 2026-08-26
+## Where things stand — `2261d95` + D1 + D3, 2026-08-26
 
 * **§01–§16 are implemented.** Every row of §13 (1–147) and §15.38 (148–207) has a test
-  whose title names it. `pnpm vitest run`: **1707 passed, 3 skipped**, the skips all
+  whose title names it. `pnpm vitest run`: **1733 passed, 3 skipped**, the skips all
   platform-conditional (Windows, root, no TTY). `pnpm test:corepack` (corepack's own
-  suite): **103 passed, 1 expected fail, 37 skipped**, each skip a §14 divergence with a
-  stated reason.
+  suite): **100 passed, 1 expected fail, 40 skipped**, each skip a §14/§17 divergence with
+  a stated reason.
 * **§17 is partly implemented.** Two pieces landed early: the one-executable
   / two-names packaging (`bin.corepack` and `bin.jup` are the same file, C1′) and the
   `JUP_`/`COREPACK_` pair resolution in `src/config/env-vars.ts`. The latter is **tier 1
   only** — C4's second tier, under which §11.5's and §15.37's invented variables are named
   `JUP_` and merely *accept* the `COREPACK_` spelling, is not implemented; the table treats
-  every variable as an equal pair. D0 has since landed §17.3's noun and its roles as data
-  plus §17.9's table fixture, and D1 the command router, the entry-point name, and C6/C10.
-  What is left is role-sensitive *behaviour* (D2), the renames (D3), and the shim policy
-  and interpreter guard (D4). Rows 208–215 have tests; 216–233 do not.
+  every variable as an equal pair — **superseded by D3**, which split `ENV` into §11.6's
+  two closed tiers. D0 landed §17.3's noun and its roles as data plus §17.9's table
+  fixture, D1 the command router, the entry-point name, and C6/C10, and D3 the renames
+  (C2, C3, C8, C9) and C4's second tier. What is left is role-sensitive *behaviour* (D2)
+  and the shim policy and interpreter guard (D4). Rows 208–221 have tests; 222–233 do
+  not.
 * **Nothing is published**; `package.json` is at `0.0.0`.
 
 ## Remaining work — §17
@@ -120,20 +122,42 @@ while it stays inert; R15 keeps `engines.node` out of selection; R16 defers `.nv
 friends. §15.26's single atomic manifest write has to carry both pins at once.
 **Rows:** 225–233.
 
-### D3 — The renames C2, C3, C9
+### D3 — The renames C2, C3, C4 tier 2, C8, C9 — **done**
 
-Write the `jup` spelling, accept the `corepack` spelling on read, prefer `jup` in every
-message: `JUP_HOME` ?? `COREPACK_HOME` ?? `<cache>/jup`; `.jup` marker written, `.corepack`
-still accepted; `.jup.env`, `.jup.lock`, `jup.tgz`, `jup-<pid>-<hex>` temp dirs, and the
-Windows shim directory. C8: **no migration** — an abandoned corepack cache costs one
-re-download, migration code costs the hot path forever. The lockfile is the urgent one: it
-sits at the project root, is committed, and is named in a verbatim error.
+One rule, five files: **write the `jup` spelling, accept the `corepack` spelling on read,
+prefer `jup` in every message.** The store home is `JUP_HOME` ?? `COREPACK_HOME` ??
+`<cache>/jup` (§15.13's Windows-only `LOCALAPPDATA` narrowing unchanged); `.jup` is the
+marker written and `.corepack` still accepted; `.jup.env`, `.jup.lock`, `jup.tgz`,
+`jup-<pid>-<hex>` temp dirs, and `%LOCALAPPDATA%\jup\bin`. C8 holds: **nothing migrates**.
 
-C4's tier 2 belongs here too: `JUP_NODE_EXECPATH` and `JUP_QUIET_ADVISORIES` (§11.5) and
-§15.37's twelve are `JUP_`-named, keep the `COREPACK_` spelling as a legacy alias, and are
-reported under `JUP_` by `info` unless that is the spelling the user set. §12's
-`JUP_NODE_EXECPATH` message and §15.4's `set by JUP_CAFILE` move with them.
-**Rows:** 216–221.
+* **The dual-read costs a store this tool wrote nothing.** `.jup` is probed first at all
+  three marker sites (`readMarker`, the §04.1 step-4 fast path, `listInstalled`), so the
+  second `stat`/`open` happens only after the first missed. An inherited corepack store
+  pays one extra `stat` per warm probe until its entries are reinstalled — C3's stated
+  price. The env-file walk is the one place the cost is *not* conditional on an old store:
+  a directory with no `.jup.env` costs one extra `ENOENT` `open` before `.corepack.env` is
+  tried, on each directory the walk visits until a manifest is found. §03.2 mandates it.
+* **`save()` retires the legacy lockfile.** A write always produces `.jup.lock`; when a
+  `.corepack.lock` supplied the data, every resolution it held has just been rewritten, so
+  it is removed rather than left as a duplicate that wins the moment `.jup.lock` is
+  deleted. `removeResolution` removes both names when the last key goes, for the same
+  reason. This is a *record* moving, not the cache migration C8 forbids.
+* **C4's tier 2 is recorded in the table, not beside it.** `config/env-vars.ts` defines
+  `TIER_1` (§11.1–§11.3) and `TIER_2` (§11.5, §15.37) and composes `ENV` from them, so a
+  variable is in exactly one tier by construction. `envTier()` answers under either
+  spelling and treats `COREPACK_REGISTRY_*` as tier 2 by prefix; `canonicalEnvName()` is
+  what a diagnostic prints for a variable the user has **not** set, while `envEntry()`
+  keeps naming the spelling they did set (§11.6's last paragraph) — which is why
+  `frozenSource`, the registry source and `minimumReleaseAge`'s error all go through it.
+  Reading is unchanged: both spellings resolve, `JUP_` wins, presence beats truthiness.
+* `messages.lockfileUnresolved` and `messages.cafileUnreadable` both take the name as a
+  parameter now — C9 requires the frozen-mode error to name the file it actually looked
+  at, and `(set by COREPACK_CAFILE)` was a lie whenever an `.npmrc` `cafile` supplied the
+  path. That closes the `errors.ts` follow-up.
+
+**Rows:** 216–221, in `test/conformance/17-02-renames.test.ts`; the tier table is
+`test/unit/env.test.ts`, including a scan that fails if `errors.ts` or `usage.ts` prints a
+tier-2 variable under its legacy spelling.
 
 ### D4 — Shim policy and the interpreter guard C5, C7
 
@@ -149,10 +173,11 @@ reachable without any `PATH` of the user's.
 
 ## Standing hazards
 
-* **The warm byte ceiling is at 212,000** (`test/unit/main.test.ts`), raised from 206,000
-  by D1's C1′ and C10 (+4,782 source bytes, most of it prose; measured, `warm.mjs`
-  79,952 -> 80,413, +0.58%). The next warm-path
-  change raises it deliberately, with a reason. It is a tripwire, not a budget. The
+* **The warm byte ceiling is at 223,000** (`test/unit/main.test.ts`), raised from 212,000
+  by D3's renames: `store.ts` +2,307, `env-vars.ts` +3,047, `lockfile.ts` +2,699,
+  `env.ts` +929 (measured, `warm.mjs` 80,413 -> 81,644, **+1,231 bytes, +1.53%**, against
+  +10,087 of source — the widest gap yet between the two, because a rename is nearly all
+  explanation). The next warm-path change raises it deliberately, with a reason. It is a tripwire, not a budget. The
   companion assertion — the modules statically reachable from `src/shim.ts` **equal**
   `build.config.ts`'s `WARM_MODULES` — is what pins the emitted chunk; a new static import
   on the warm path fails until the build config is updated.
@@ -181,12 +206,17 @@ reachable without any `PATH` of the user's.
 
 ## Open follow-ups, all verified open
 
+* **§15.38 row 153's text is now stale.** It says the unknown-CA message names
+  `COREPACK_CAFILE`; C4 makes every tier-2 variable `JUP_`-named in this spec's own
+  diagnostics (§11.6: "not used in this spec's own documentation, diagnostics, or `info`
+  output"), so the message says `JUP_CAFILE` and the row asserts that. §17 taking
+  precedence over §15 is what resolves it, so the implementation is right and the row's
+  prose is what wants amending on the next spec pass. The same reading applies to any
+  other §15 row that quotes a tier-2 variable's legacy spelling in a *diagnostic*.
 * `src/version/resolve.ts` still carries its own `hasRegistryOverride()` reading only
   `COREPACK_NPM_REGISTRY`. The consequence is neutralised (§05.2 rewrite 1 also applies
   inside `registry.ts`'s fetchers, idempotently), but the redundant, incomplete copy
   should go.
-* `errors.ts`'s `cafileUnreadable` hardcodes `(set by COREPACK_CAFILE)`, which is wrong for
-  an `.npmrc` `cafile`. §12 wants a parameterised message.
 * `manifest.ts`'s private `hashFromIntegrity` duplicates `lockfile.ts`'s exported one; both
   are warm now, so the copy buys nothing.
 * **`use` and `install -g <spec>` never load the project env file.** Both call `parseSpec`

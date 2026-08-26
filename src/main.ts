@@ -15,7 +15,7 @@ import {
 import { envDisabled, envFlag, isFrozenLockfile } from "./project/env.ts";
 import { explainFetchFailure, messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./run/exec.ts";
-import { readResolution, usesLockfile, writeResolution } from "./project/lockfile.ts";
+import { lockfileName, readResolution, usesLockfile, writeResolution } from "./project/lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./project/manifest.ts";
 import { isValidVersion, parse } from "./version/semver.ts";
 import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./cache/store.ts";
@@ -177,7 +177,7 @@ export async function runProxy(
         }
       : { name, reference: () => fallbackReference(name, transparent) };
 
-  // Step 3 — one `package.json` read plus at most one `.corepack.env` open per
+  // Step 3 — one `package.json` read plus at most one `.jup.env` open per
   // directory walked. The env file it loads is applied to `process.env` here,
   // before anything reads a `COREPACK_*` variable below.
   const cwd = process.cwd();
@@ -213,15 +213,19 @@ export async function runProxy(
   }
 
   // §15.23 — a project spec that is a range or a tag resolves through
-  // `.corepack.lock`; an exact pin never touches it at all.
+  // `.jup.lock`; an exact pin never touches it at all.
   const lockDir = lockfileDirFor(specResult, reconciled, descriptor, binaryVersion);
 
   // Step 5 — resolution. For an exact pin this is answered inline by
-  // {@link resolveExactPin}; for a recorded range it is one `.corepack.lock`
+  // {@link resolveExactPin}; for a recorded range it is one `.jup.lock`
   // read and nothing else.
   const recorded = lockDir === undefined ? null : readResolution(lockDir, descriptor);
   if (recorded === null && lockDir !== undefined && isFrozenLockfile()) {
-    throw new UsageError(messages.lockfileUnresolved(descriptor.name, descriptor.range));
+    // §17.6 C9 — name the file that was actually looked at, which for a project
+    // still carrying the older name is `.corepack.lock`.
+    throw new UsageError(
+      messages.lockfileUnresolved(descriptor.name, descriptor.range, lockfileName(lockDir)),
+    );
   }
 
   const locator = recorded ?? resolveExactPin(descriptor) ?? (await resolveOrExplain(descriptor));
@@ -229,7 +233,7 @@ export async function runProxy(
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
-  // Step 6 — one `.corepack` read on a hit; download, verify and promote on a miss.
+  // Step 6 — one `.jup` read on a hit; download, verify and promote on a miss.
   const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
   // §15.23 — record only what we had to go and resolve. The hash comes from the
@@ -418,7 +422,7 @@ async function usageLineFor(args: string[]): Promise<string> {
 }
 
 /**
- * §15.23 — the directory whose `.corepack.lock` governs this run, or `undefined`
+ * §15.23 — the directory whose `.jup.lock` governs this run, or `undefined`
  * when no lockfile is involved.
  *
  * Three conditions, all necessary:

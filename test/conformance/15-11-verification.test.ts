@@ -54,7 +54,7 @@ const BERRY_HASH = hashOf(Buffer.from(BERRY, "utf8"));
 const REFUSAL =
   `Refusing to install yarn@4.0.0: https://repo.yarnpkg.com provides no signature ` +
   `and no hash was pinned. Pin a hash in the packageManager field, or set ` +
-  `COREPACK_ALLOW_UNVERIFIED=1.`;
+  `JUP_ALLOW_UNVERIFIED=1.`;
 
 beforeAll(async () => {
   await registry.start();
@@ -117,7 +117,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
     expect(result.stdout).toBe("4.0.0\n");
     // §15.11's opt-out is per-run and must never be silent.
     expect(result.stderr).toBe(
-      `! Installing yarn@4.0.0 from https://repo.yarnpkg.com with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)\n`,
+      `! Installing yarn@4.0.0 from https://repo.yarnpkg.com with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
     );
   });
 
@@ -138,13 +138,13 @@ describe("§15.11 — every artifact clears a verification tier", () => {
 
   it("167: the env file cannot open the hole (§14.5)", async () => {
     const fixture = createFixture({ packageManager: "yarn@4.0.0" });
-    fixture.write(".corepack.env", "COREPACK_ALLOW_UNVERIFIED=1\n");
+    fixture.write(".jup.env", "COREPACK_ALLOW_UNVERIFIED=1\n");
 
     const result = await run(["yarn", "--version"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      `! Ignoring COREPACK_ALLOW_UNVERIFIED from ${join(fixture.cwd, ".corepack.env")}: this variable can only be set in the environment`,
+      `! Ignoring COREPACK_ALLOW_UNVERIFIED from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
     );
     expect(result.stderr).toContain(REFUSAL);
   });
@@ -206,7 +206,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
 
     const warm = await run(["yarn", "--version"], { ...first, registry });
     expect(warm.exitCode).toBe(0);
-    expect(existsSync(join(first.home, "v1", "yarn", "4.0.0", ".corepack"))).toBe(true);
+    expect(existsSync(join(first.home, "v1", "yarn", "4.0.0", ".jup"))).toBe(true);
 
     // A second project, same version, a digest that describes something else,
     // sharing the store the first run warmed.
@@ -223,7 +223,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain("Mismatch hashes.");
     // The entry the first project verified is untouched.
-    expect(existsSync(join(first.home, "v1", "yarn", "4.0.0", ".corepack"))).toBe(true);
+    expect(existsSync(join(first.home, "v1", "yarn", "4.0.0", ".jup"))).toBe(true);
   });
 
   it("a differing-algorithm pin re-verifies rather than refusing", async () => {
@@ -244,7 +244,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
 
     expect(second.exitCode).toBe(0);
     expect(second.stdout).toBe("4.0.0\n");
-    expect(existsSync(join(home, "v1", "yarn", "4.0.0", ".corepack"))).toBe(true);
+    expect(existsSync(join(home, "v1", "yarn", "4.0.0", ".jup"))).toBe(true);
     expect(
       existsSync(
         join(
@@ -252,7 +252,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
           "v1",
           "yarn",
           `4.0.0+sha256.${hashOf(Buffer.from(BERRY, "utf8"), "sha256")}`,
-          ".corepack",
+          ".jup",
         ),
       ),
     ).toBe(true);

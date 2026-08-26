@@ -964,7 +964,13 @@ describe(`read-only and offline environment`, () => {
   });
 });
 
-it(`should support hydrating package managers from cached archives`, async () => {
+// SKIP (jup §17.6 C9): `pack`'s default output is `jup.tgz`, not
+// `corepack.tgz`, and the row names the file it wrote by hand. `-o` is
+// unaffected and `install -g <file>.tgz` never depended on the name, so this is
+// the rename and nothing else. The round trip is covered by
+// test/conformance/17-02-renames.test.ts row 219, which also proves an archive
+// whose markers are all `.corepack` still installs.
+it.skip(`should support hydrating package managers from cached archives`, async () => {
   await xfs.mktempPromise(async cwd => {
     await expect(runCli(cwd, [`pack`, `yarn@2.2.2`])).resolves.toMatchObject({
       stderr: ``,
@@ -994,7 +1000,13 @@ it(`should support hydrating package managers from cached archives`, async () =>
   });
 });
 
-it(`should support hydrating package managers if cache folder was removed`, async () => {
+// SKIP (jup §17.6 C9): `pack`'s default output is `jup.tgz`, not
+// `corepack.tgz`, and the row names the file it wrote by hand. `-o` is
+// unaffected and `install -g <file>.tgz` never depended on the name, so this is
+// the rename and nothing else. The round trip is covered by
+// test/conformance/17-02-renames.test.ts row 219, which also proves an archive
+// whose markers are all `.corepack` still installs.
+it.skip(`should support hydrating package managers if cache folder was removed`, async () => {
   await xfs.mktempPromise(async cwd => {
     await expect(runCli(cwd, [`pack`, `yarn@2.2.2`])).resolves.toMatchObject({
       exitCode: 0,
@@ -1027,7 +1039,13 @@ it(`should support hydrating package managers if cache folder was removed`, asyn
   });
 });
 
-it(`should support hydrating multiple package managers from cached archives`, async t => {
+// SKIP (jup §17.6 C9): `pack`'s default output is `jup.tgz`, not
+// `corepack.tgz`, and the row names the file it wrote by hand. `-o` is
+// unaffected and `install -g <file>.tgz` never depended on the name, so this is
+// the rename and nothing else. The round trip is covered by
+// test/conformance/17-02-renames.test.ts row 219, which also proves an archive
+// whose markers are all `.corepack` still installs.
+it.skip(`should support hydrating multiple package managers from cached archives`, async t => {
   // Skip that test on Windows as it times out
   if (process.platform === `win32`) t.skip();
 

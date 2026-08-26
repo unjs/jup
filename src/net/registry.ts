@@ -190,13 +190,16 @@ function rebase(url: string, base: string): string {
  * can never act on.
  */
 export function minimumReleaseAge(): number | undefined {
-  const raw = readEnv(ENV.MINIMUM_RELEASE_AGE);
+  // §11.6 — the diagnostic names the spelling the user actually set, so a typo'd
+  // `COREPACK_MINIMUM_RELEASE_AGE` is not reported against `JUP_`.
+  const entry = envEntry(ENV.MINIMUM_RELEASE_AGE);
+  const raw = entry?.value;
   if (raw === undefined || raw.trim() === "") return undefined;
 
   const hours = Number(raw.trim());
   if (!Number.isFinite(hours) || hours < 0) {
     throw new UsageError(
-      `COREPACK_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(raw)}`,
+      `${entry!.name} must be a non-negative number of hours, got ${JSON.stringify(raw)}`,
     );
   }
 

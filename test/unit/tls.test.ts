@@ -212,12 +212,20 @@ describe("readCaBundle", () => {
     expect(certificates[0]).not.toContain("subject=");
   });
 
-  it("reports an unreadable bundle by path", () => {
+  it("reports an unreadable bundle, naming the source that supplied the path", () => {
     const path = join(tmpdir(), "jup-nonexistent-ca.pem");
 
-    expect(() => readCaBundle(path)).toThrow(messages.cafileUnreadable(path));
+    // §17.6 C4 — the default names the tier-2 canonical spelling, not the legacy
+    // one; §12's `(set by <source>)` is a parameter because an `.npmrc` `cafile`
+    // is just as able to supply the path.
+    expect(() => readCaBundle(path)).toThrow(messages.cafileUnreadable(path, "JUP_CAFILE"));
     expect(() => readCaBundle(path)).toThrow(
-      `Unable to read the TLS certificate bundle at ${path} (set by COREPACK_CAFILE)`,
+      `Unable to read the TLS certificate bundle at ${path} (set by JUP_CAFILE)`,
+    );
+
+    const npmrc = `cafile (${join(tmpdir(), ".npmrc")})`;
+    expect(() => readCaBundle(path, npmrc)).toThrow(
+      `Unable to read the TLS certificate bundle at ${path} (set by ${npmrc})`,
     );
   });
 
@@ -270,7 +278,7 @@ describe("classifyTlsFailure (§15.4)", () => {
 
   it("says the three sentences byte for byte", () => {
     expect(messages.tlsUnknownAuthority("npm.corp")).toBe(
-      "TLS certificate verification failed for npm.corp: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.",
+      "TLS certificate verification failed for npm.corp: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.",
     );
     expect(messages.tlsBadValidity("npm.corp")).toBe(
       "TLS certificate for npm.corp is expired or not yet valid (check the system clock).",
@@ -339,7 +347,7 @@ describe("an untrusted certificate authority (row 153)", () => {
     // Not `Error when performing the request to …`: §15.4 forbids surfacing a
     // bare transport error for exactly this case.
     expect((error as Error).message).toBe(messages.tlsUnknownAuthority(`127.0.0.1:${origin.port}`));
-    expect((error as Error).message).toContain("COREPACK_CAFILE");
+    expect((error as Error).message).toContain("JUP_CAFILE");
     expect((error as Error).message).not.toContain("performing the request");
     // §15.5 — the underlying reason survives, on the chain and in the stack.
     expect((error as Error).cause).toBeDefined();
@@ -366,13 +374,14 @@ describe("an untrusted certificate authority (row 153)", () => {
     });
   });
 
-  it("reports a COREPACK_CAFILE that does not exist", async () => {
+  it("reports a COREPACK_CAFILE that does not exist, under the spelling that was set", async () => {
     const origin = await startTlsOrigin();
     const path = join(tmpdir(), "jup-missing-bundle.pem");
     process.env.COREPACK_CAFILE = path;
 
+    // §11.6 — the legacy spelling is what the user set, so that is what is named.
     await expect(httpGet(`https://127.0.0.1:${origin.port}/pkg`)).rejects.toThrow(
-      messages.cafileUnreadable(path),
+      messages.cafileUnreadable(path, "COREPACK_CAFILE"),
     );
     // Nothing was sent: the bundle is applied before a socket is opened.
     expect(origin.connections).toBe(0);

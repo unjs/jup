@@ -233,7 +233,7 @@ describe("§15.38 network resilience (§15.5)", () => {
       expect(result.stderr).toContain(
         `Timed out after 300ms waiting for ${stalled.origin}/pnpm/6.6.2`,
       );
-      expect(result.stderr).toContain("COREPACK_NETWORK_TIMEOUT");
+      expect(result.stderr).toContain("JUP_NETWORK_TIMEOUT");
       expect(stalled.requests).toEqual(["/pnpm/6.6.2"]);
     } finally {
       await stalled.stop();

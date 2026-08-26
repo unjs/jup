@@ -32,8 +32,29 @@ import {
 import type { SemVer } from "../version/semver.ts";
 import type { CorepackMarker, InstallSpec, Locator } from "../types.ts";
 
-/** §07.2 — the file whose presence means "this install is complete and valid". */
-export const MARKER_NAME = ".corepack";
+/**
+ * §07.2 — the file whose presence means "this install is complete and valid".
+ *
+ * §17.6 C3 renamed it. A writer MUST always write `.jup`; a reader MUST also
+ * accept {@link LEGACY_MARKER_NAME}, so a store inherited from corepack — or from
+ * an older `COREPACK_HOME` still in use — is warm rather than re-downloaded.
+ */
+export const MARKER_NAME = ".jup";
+
+/**
+ * §07.2 / §17.6 C3 — the marker corepack wrote, accepted on read only.
+ *
+ * The price is one extra `stat` per probe **and only on a store this tool did not
+ * write**: {@link MARKER_NAME} is tried first, so a jup store pays nothing and an
+ * inherited one pays a miss on every warm run until its entries are reinstalled
+ * (§01.3's budget becomes "one marker read, or two on an inherited store"). No
+ * attempt is made to *upgrade* an inherited entry: writing `.jup` beside a
+ * `.corepack` a download never touched would be a migration, and C8 has none.
+ */
+export const LEGACY_MARKER_NAME = ".corepack";
+
+/** Both marker names, in probe order (§07.2). */
+export const MARKER_NAMES = [MARKER_NAME, LEGACY_MARKER_NAME] as const;
 
 /** §04.4 — the global default map. Lives outside `v1`, so `cache clean` spares it. */
 export const LAST_KNOWN_GOOD_NAME = "lastKnownGood.json";
@@ -59,19 +80,27 @@ function randomSuffix(): string {
 }
 
 /**
- * §07.1 — `COREPACK_HOME`, else `XDG_CACHE_HOME`/`LOCALAPPDATA`/platform default,
- * joined with `node/corepack`.
+ * §07.1 — `JUP_HOME` ?? `COREPACK_HOME`, else
+ * `XDG_CACHE_HOME`/`LOCALAPPDATA`/platform default, joined with `jup`.
+ *
+ * §17.6 C2 moved that last segment off `node/corepack`. Two reasons, both about
+ * ownership: a directory named after another program is the wrong place to write
+ * artifacts that program never created (§17.2's runtime), and a real corepack's
+ * `cache clean` is `rm -rf` on exactly that path (§07.9). `COREPACK_HOME` stays
+ * honoured, and no migration is performed (C8): the move costs one re-download
+ * per tool per machine, migration code would cost the warm path forever.
  *
  * `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA` on every platform,
  * including Windows. That is a quirk of corepack's fallback chain rather than
- * design, and it is reproduced for cache compatibility.
+ * design, and it is kept because there is no reason to invent a different one.
  *
  * §15.13 point 5 narrows the other half: `LOCALAPPDATA` is consulted **only on
  * Windows** (row 171). Corepack reads it on POSIX too, which is #673 — a Linux
  * process started from WSL interop inherits `LOCALAPPDATA` and lands its cache
- * on `/mnt/c`, with alien permissions and Windows path semantics. This is the
- * one place the spec deliberately breaks store-location compatibility, and the
- * same rule governs §15.13's per-user shim directory.
+ * on `/mnt/c`, with alien permissions and Windows path semantics. The same rule
+ * governs §15.13's per-user shim directory. (§15.13 calls itself "the one place
+ * this spec breaks store-location compatibility"; C2 above supersedes that —
+ * it breaks it wholesale and deliberately.)
  *
  * Nullish coalescing, not truthiness: an explicitly empty `COREPACK_HOME` is
  * honoured verbatim, exactly as corepack honours it.
@@ -86,7 +115,7 @@ export function getHomeFolder(): string {
     (isWindows ? process.env[SYSTEM_ENV.LOCALAPPDATA] : undefined) ??
     join(homedir(), isWindows ? join("AppData", "Local") : ".cache");
 
-  return join(cacheRoot, "node", "corepack");
+  return join(cacheRoot, "jup");
 }
 
 /** `<home>/v1` — a layout-version segment. Incrementing it abandons old caches wholesale. */
@@ -121,18 +150,24 @@ function versionDirFor(locator: Locator, parsed: SemVer | null): string {
 }
 
 /**
- * §07.2 — read the `.corepack` marker. Its presence is the "this install is
- * complete and valid" signal, and reading it is the entire warm path: `ENOENT`
- * proceeds to download, any other error propagates.
+ * §07.2 — read the install marker. Its presence is the "this install is complete
+ * and valid" signal, and reading it is the entire warm path: `ENOENT` proceeds to
+ * download, any other error propagates.
+ *
+ * `.jup` first, then `.corepack` (§17.6 C3). The second `open` happens only when
+ * the first missed, so a store this tool wrote costs exactly what it always did.
  */
 export function readMarker(dir: string): CorepackMarker | null {
-  let text: string;
-  try {
-    text = readFileSync(join(dir, MARKER_NAME), "utf8");
-  } catch (error) {
-    if (errorCode(error) === "ENOENT") return null;
-    throw error;
+  let text: string | undefined;
+  for (const name of MARKER_NAMES) {
+    try {
+      text = readFileSync(join(dir, name), "utf8");
+      break;
+    } catch (error) {
+      if (errorCode(error) !== "ENOENT") throw error;
+    }
   }
+  if (text === undefined) return null;
 
   // A truncated or corrupt marker is a broken install, not a cache miss:
   // propagate rather than silently re-downloading over it.
@@ -297,6 +332,28 @@ export function readHashPin(reference: string, build?: readonly string[]): HashP
   return { algo: fragment.slice(0, dot), digest: fragment.slice(dot + 1) };
 }
 
+/**
+ * §07.2 — "is there a marker here?", the cheapest form of {@link readMarker}.
+ *
+ * `.jup` first (§17.6 C3); the `.corepack` `stat` runs only after that missed, so
+ * §14.1's single-`stat` budget is unchanged for a store this tool wrote. `ENOTDIR`
+ * counts as absent; anything else (`EACCES`) propagates rather than being reported
+ * as a cache miss that would silently re-download.
+ */
+function markerExists(dir: string): boolean {
+  for (const name of MARKER_NAMES) {
+    try {
+      statSync(join(dir, name));
+      return true;
+    } catch (error) {
+      const code = errorCode(error);
+      if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
+    }
+  }
+  return false;
+}
+
+/** §07.2 / §17.6 C3 — a writer always writes `.jup`, whatever the store holds. */
 export function writeMarker(dir: string, marker: CorepackMarker): void {
   writeFileSync(join(dir, MARKER_NAME), JSON.stringify(marker), "utf8");
 }
@@ -306,7 +363,7 @@ export function writeMarker(dir: string, marker: CorepackMarker): void {
  * bookkeeping, carrying the hash of the bytes we actually have.
  *
  * `ensureInstalled` rewrites `locator.reference` on the download path, but the
- * warm path returns from the `.corepack` marker without touching it, so the hash
+ * warm path returns from the `.jup` marker without touching it, so the hash
  * has to be re-attached here. The installed artifact's hash always wins:
  * composing the result from `parse().version` rather than appending means a
  * reference that already carries a suffix is rewritten, not grown a second one.
@@ -343,7 +400,7 @@ export function createTempDir(): string {
 
   // The name only has to be unique; `EEXIST` simply means "draw again".
   for (;;) {
-    const dir = join(installFolder, `corepack-${process.pid}-${randomSuffix()}`);
+    const dir = join(installFolder, `jup-${process.pid}-${randomSuffix()}`);
     try {
       mkdirSync(dir);
       return dir;
@@ -433,14 +490,7 @@ export function findInstalledVersion(name: string, range: string): string | null
     // §15.11 — a reference with no digest has nothing to prove, so this stays
     // the single `stat` §14.1 budgets.
     if (pin.digest === undefined) {
-      try {
-        statSync(join(installFolder, name, version, MARKER_NAME));
-        return version;
-      } catch (error) {
-        const code = errorCode(error);
-        if (code === "ENOENT" || code === "ENOTDIR") return null;
-        throw error;
-      }
+      return markerExists(join(installFolder, name, version)) ? version : null;
     }
 
     // §15.11 — a hash-bearing reference is a cache *hit* only if the stored
@@ -593,7 +643,7 @@ export function bumpLastKnownGood(locator: Locator): void {
  * Every complete install in the store, sorted by name then version.
  *
  * "Complete" means §07.2's definition and nothing looser: a directory carrying a
- * `.corepack` marker. A half-extracted temp folder (`corepack-<pid>-<rand>`) and
+ * install marker. A half-extracted temp folder (`jup-<pid>-<rand>`) and
  * a `.DS_Store` are both directory entries, and neither is a cached version —
  * counting them would make `cache list` (§15.19) report an image as seeded when
  * it is not.
@@ -612,12 +662,7 @@ export function listInstalled(): Array<{ name: string; version: string }> {
       // The marker's *presence* is the signal (§07.2); its contents are not
       // parsed here, so a corrupt one still lists rather than throwing out of a
       // read-only command.
-      if (
-        statSync(join(installFolder, name, version, MARKER_NAME), { throwIfNoEntry: false }) ===
-        undefined
-      ) {
-        continue;
-      }
+      if (!markerExists(join(installFolder, name, version))) continue;
       found.push({ name, version });
     }
   }

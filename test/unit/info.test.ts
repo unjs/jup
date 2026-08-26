@@ -110,7 +110,7 @@ function seed(name: string, version: string, hash = "sha512.seeded"): string {
     bin: { [name]: `./bin/${name}.js` },
     hash,
   };
-  writeFileSync(join(location, ".corepack"), JSON.stringify(marker));
+  writeFileSync(join(location, ".jup"), JSON.stringify(marker));
   return location;
 }
 
@@ -287,7 +287,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
     await manifest({ packageManager: "pnpm@^11.0.0" });
     seed("pnpm", "11.1.2");
     await writeFile(
-      join(project, ".corepack.lock"),
+      join(project, ".jup.lock"),
       `${JSON.stringify({
         version: 1,
         // `sha512-AQI=` is the SRI spelling of the bytes `01 02`.
@@ -298,7 +298,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
     const info = report();
 
     expect(info.lockfile).toMatchObject({
-      path: join(project, ".corepack.lock"),
+      path: join(project, ".jup.lock"),
       present: true,
       key: "pnpm@^11.0.0",
       resolution: { resolved: "11.1.2", integrity: "sha512-AQI=" },
@@ -307,7 +307,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
       status: "locked",
       version: "11.1.2",
       hash: "sha512.0102",
-      source: join(project, ".corepack.lock"),
+      source: join(project, ".jup.lock"),
       installed: true,
     });
   });
@@ -375,7 +375,7 @@ describe("buildReport — the env file (§03.2, §15.30)", () => {
   it("sorts every line into applied, overridden, refused and ignored", async () => {
     await manifest({ packageManager: "pnpm@11.1.2" });
     await writeFile(
-      join(project, ".corepack.env"),
+      join(project, ".jup.env"),
       [
         "COREPACK_ENABLE_STRICT=0",
         "COREPACK_NPM_REGISTRY=https://mirror.example.org",
@@ -389,7 +389,7 @@ describe("buildReport — the env file (§03.2, §15.30)", () => {
 
     const info = report().envFile!;
 
-    expect(info.path).toBe(join(project, ".corepack.env"));
+    expect(info.path).toBe(join(project, ".jup.env"));
     expect(info.applied).toEqual(["COREPACK_ENABLE_STRICT"]);
     expect(info.overridden).toEqual(["COREPACK_NPM_REGISTRY"]);
     // §14.5 — a project file may never supply a credential.

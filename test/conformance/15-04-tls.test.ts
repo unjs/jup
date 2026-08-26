@@ -126,7 +126,7 @@ describe("§15.38 TLS (§15.4)", () => {
       const host = new URL(front.origin).host;
       expect(result.stderr).toContain(messages.tlsUnknownAuthority(host));
       expect(result.stderr).toContain(
-        `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.`,
+        `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.`,
       );
       // §15.4 forbids surfacing a bare transport error for this case.
       expect(result.stderr).not.toContain("Error when performing the request");
@@ -181,10 +181,10 @@ describe("§15.38 TLS (§15.4)", () => {
     }
   });
 
-  it("a project's .corepack.env cannot disable verification or nominate a CA (§15.37)", async () => {
+  it("a project's .jup.env cannot disable verification or nominate a CA (§15.37)", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
-    fixture.write(".corepack.env", `COREPACK_STRICT_SSL=0\nCOREPACK_CAFILE=${caFile}\n`);
+    fixture.write(".jup.env", `COREPACK_STRICT_SSL=0\nCOREPACK_CAFILE=${caFile}\n`);
 
     try {
       const result = await run(["pnpm", "--version"], {

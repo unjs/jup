@@ -1,5 +1,5 @@
 /**
- * `.corepack.lock` — the resolution file for non-exact project specs (§15.23).
+ * `.jup.lock` — the resolution file for non-exact project specs (§15.23).
  *
  * Corepack's four-year objection to ranges in `packageManager` is that they
  * "prevent using hashes" and "give a false sense of confidence". That is an
@@ -20,7 +20,7 @@
  *   degrades to "resolve normally" rather than blocking a run.
  */
 
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   isValidRange,
@@ -31,7 +31,18 @@ import {
 import type { Descriptor, Locator } from "../types.ts";
 
 /** §15.23 — the file lives at the project root, next to the manifest that declared the spec. */
-export const LOCKFILE_NAME = ".corepack.lock";
+export const LOCKFILE_NAME = ".jup.lock";
+
+/**
+ * §15.23 / §17.6 C9 — the name an older build wrote, read when
+ * {@link LOCKFILE_NAME} is absent.
+ *
+ * Only jup has ever written this file — corepack has no lockfile — so the
+ * compatibility is with our own past, and it is worth having because the file
+ * sits at the **project root** and is committed. A write always produces
+ * `.jup.lock`, and `save` retires the legacy file once its contents have moved.
+ */
+export const LEGACY_LOCKFILE_NAME = ".corepack.lock";
 
 /** The only `version` this build understands; anything else reads as "no resolutions". */
 export const LOCKFILE_VERSION = 1;
@@ -68,6 +79,42 @@ export function resolutionKey(descriptor: Descriptor): string {
   return `${descriptor.name}@${descriptor.range}`;
 }
 
+/** Both lockfile names, in probe order (§17.6 C9). */
+const LOCKFILE_NAMES = [LOCKFILE_NAME, LEGACY_LOCKFILE_NAME] as const;
+
+/**
+ * The lockfile's text, or `undefined`.
+ *
+ * `.jup.lock` first; the legacy name is opened only after that missed, so a
+ * project on the current name still costs the one `readFileSync` §15.23 budgets.
+ * Every failure is a miss — the file is derived state (§07.8) and a damaged one
+ * degrades to "resolve normally", never to a broken checkout.
+ */
+function readLockfileText(dir: string): string | undefined {
+  for (const name of LOCKFILE_NAMES) {
+    try {
+      return readFileSync(join(dir, name), "utf8");
+    } catch {
+      // Missing, unreadable, a directory: try the other name, then give up.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The lockfile this directory is governed by — the one that exists, else the one
+ * a write would create. §17.6 C9 requires the frozen-mode error to name **the
+ * file it actually looked at**, which is why this is a function rather than the
+ * constant; it is reached only while building a message or a report, never on the
+ * resolution path, so its `stat` is off the warm path.
+ */
+export function lockfileName(dir: string): string {
+  for (const name of LOCKFILE_NAMES) {
+    if (statSync(join(dir, name), { throwIfNoEntry: false }) !== undefined) return name;
+  }
+  return LOCKFILE_NAME;
+}
+
 /**
  * Read the file, or `null`.
  *
@@ -77,12 +124,8 @@ export function resolutionKey(descriptor: Descriptor): string {
  * resolution", never to a broken checkout.
  */
 export function readLockfile(dir: string): LockfileData | null {
-  let text: string;
-  try {
-    text = readFileSync(join(dir, LOCKFILE_NAME), "utf8");
-  } catch {
-    return null;
-  }
+  const text = readLockfileText(dir);
+  if (text === undefined) return null;
 
   let data: unknown;
   try {
@@ -194,10 +237,16 @@ export function removeResolution(dir: string, key: string): void {
 
   delete data.resolutions[key];
   if (Object.keys(data.resolutions).length === 0) {
-    try {
-      rmSync(join(dir, LOCKFILE_NAME), { force: true });
-    } catch {
-      // Derived state: see `writeResolution`.
+    // Both names, because the file that became empty may be the legacy one and
+    // leaving it behind would resurrect the resolution the caller just retired.
+    // This is the one place jup removes a `.corepack.lock` it did not write, and
+    // it is removing a record it has just emptied rather than migrating a file.
+    for (const name of LOCKFILE_NAMES) {
+      try {
+        rmSync(join(dir, name), { force: true });
+      } catch {
+        // Derived state: see `writeResolution`.
+      }
     }
     return;
   }
@@ -217,7 +266,16 @@ function serialise(data: LockfileData): string {
   return `${JSON.stringify({ version: LOCKFILE_VERSION, resolutions }, undefined, 2)}\n`;
 }
 
-/** Write-temp-then-rename, so a concurrent reader never sees a half-written file (§14.3). */
+/**
+ * Write-temp-then-rename, so a concurrent reader never sees a half-written file (§14.3).
+ *
+ * The target is always `.jup.lock` (§17.6 C9). When a legacy `.corepack.lock`
+ * supplied the data it is removed afterwards: every resolution it held has just
+ * been rewritten into the new file, so what would remain is a duplicate that
+ * disagrees the moment either is edited — and one the reader would fall back to
+ * if `.jup.lock` ever went away. A rename in `git status` is a better answer than
+ * two lockfiles at the project root.
+ */
 function save(dir: string, data: LockfileData): void {
   const target = join(dir, LOCKFILE_NAME);
   const content = serialise(data);
@@ -236,6 +294,7 @@ function save(dir: string, data: LockfileData): void {
     tmp = `${target}.${process.pid}.tmp`;
     writeFileSync(tmp, content, "utf8");
     renameSync(tmp, target);
+    rmSync(join(dir, LEGACY_LOCKFILE_NAME), { force: true });
   } catch {
     if (tmp !== undefined) {
       try {

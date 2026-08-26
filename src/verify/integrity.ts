@@ -164,7 +164,7 @@ export function shouldSkipIntegrityCheck(): boolean {
  * and the origin-keyed `{"https://registry.npmjs.org": [...]}` of §02.6.
  * Malformed JSON throws here, at verification time, not at startup (§06.4).
  *
- * Note the env var is ineligible in `.corepack.env` (§14.5); `env.ts` drops it
+ * Note the env var is ineligible in `.jup.env` (§14.5); `env.ts` drops it
  * before it can reach `process.env`, so reading it here is safe.
  */
 export function getTrustedKeys(registryOrigin?: string): TrustedKey[] {

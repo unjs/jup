@@ -55,7 +55,7 @@ describe("§13.2 spec parsing and discovery", () => {
     // reach the real repo.yarnpkg.com — exit 0 is therefore also the assertion
     // that the recorded resolution answered without any network at all.
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "yarn@stable": { resolved: "1.22.4" } } })}\n`,
     );
 
@@ -78,7 +78,7 @@ describe("§13.2 spec parsing and discovery", () => {
     // No `integrity`: this store entry was hand-planted with a placeholder hash
     // rather than downloaded, and an unusable digest is recorded as none at all.
     // Row 181 covers the real thing, against bytes that were actually fetched.
-    expect(fixture.json(".corepack.lock")).toEqual({
+    expect(fixture.json(".jup.lock")).toEqual({
       version: 1,
       resolutions: { "yarn@^1.0.0": { resolved: "1.22.4" } },
     });

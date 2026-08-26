@@ -258,10 +258,20 @@ describe("§17.6 C10 — a name substitution, not a rewrite", () => {
     expect(jupUrl).toContain("https://github.com/nodejs/corepack#troubleshooting");
   });
 
-  it("leaves a corepack-named *file* alone — that is C9, and it is not this", () => {
-    const [asCorepack, asJup] = bothWays(() => messages.lockfileUnresolved("pnpm", "10.x"));
+  it("leaves the file name alone — that is C9's rename, not this substitution", () => {
+    // C9 renamed the file; C10 does not touch it. The name is the same under
+    // both entry points, and it is whichever file the caller actually read.
+    const [asCorepack, asJup] = bothWays(() =>
+      messages.lockfileUnresolved("pnpm", "10.x", ".jup.lock"),
+    );
     expect(asJup).toBe(asCorepack);
-    expect(asJup).toContain(".corepack.lock");
+    expect(asJup).toContain(".jup.lock");
+
+    const [legacyAsCorepack, legacyAsJup] = bothWays(() =>
+      messages.lockfileUnresolved("pnpm", "10.x", ".corepack.lock"),
+    );
+    expect(legacyAsJup).toBe(legacyAsCorepack);
+    expect(legacyAsJup).toContain(".corepack.lock");
   });
 
   it("capitalises to match the sentence", () => {

@@ -91,7 +91,7 @@ interface ArtifactSource {
 }
 
 /**
- * Returns the install spec, downloading only on a `.corepack` miss.
+ * Returns the install spec, downloading only on a marker miss.
  *
  * Verification follows §06.1's decision table exactly. Two of its consequences
  * are deliberate and must not be "fixed": a user-supplied hash overrides
@@ -614,7 +614,7 @@ async function resolveExpectedIntegrity(
  *   signatures and no digests at all (§02.5), so a version resolved from
  *   `/tags` rather than pinned had *nothing* checking it. This is the breaking
  *   half of §15.11: `packageManager: "yarn@4.x"` now needs a pinned hash, a
- *   `.corepack.lock` resolution (§15.23 records one, with its integrity), or
+ *   `.jup.lock` resolution (§15.23 records one, with its integrity), or
  *   the opt-out.
  * * A custom `packageManager` URL with no `#<algo>.<hex>` fragment. That path
  *   is already behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`, which permits the

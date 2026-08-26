@@ -21,7 +21,7 @@ jup is not published to npm yet. Follow the source installation steps in [Gettin
 ## Start here
 
 - [Getting started](./getting-started) — install jup, enable its shims, and pin a package manager.
-- [Projects and workspaces](./projects-and-workspaces) — configure exact versions, ranges, `devEngines`, workspaces, and `.corepack.lock`.
+- [Projects and workspaces](./projects-and-workspaces) — configure exact versions, ranges, `devEngines`, workspaces, and `.jup.lock`.
 
 ## Deployment guides
 

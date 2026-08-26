@@ -1,11 +1,13 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { parseEnv } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   applyEnvFile,
   DEFAULT_ENV_FILE_NAME,
+  LEGACY_ENV_FILE_NAME,
   ENV_FILE_INELIGIBLE,
   SECURITY_ONLY_FROM_ENVIRONMENT,
   envDisabled,
@@ -17,10 +19,12 @@ import {
   parseEnvFile,
 } from "../../src/project/env.ts";
 import {
+  canonicalEnvName,
   corepackSpelling,
   defaultEnv,
   ENV,
   envEntry,
+  envTier,
   isToolEnvName,
   jupSpelling,
   readEnv,
@@ -295,7 +299,7 @@ describe("parseEnvFile — differential against node:util's parseEnv", () => {
 });
 
 describe("loadEnvFileFrom", () => {
-  it("reads .corepack.env from the given directory", () => {
+  it("reads .jup.env from the given directory", () => {
     const path = writeEnvFile(DEFAULT_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
 
     expect(loadEnvFileFrom(dir)).toEqual({
@@ -309,7 +313,7 @@ describe("loadEnvFileFrom", () => {
   });
 
   it("propagates read errors other than ENOENT", () => {
-    // A directory named `.corepack.env` fails with EISDIR, not ENOENT.
+    // A directory named `.jup.env` fails with EISDIR, not ENOENT.
     mkdirSync(join(dir, DEFAULT_ENV_FILE_NAME));
 
     expect(() => loadEnvFileFrom(dir)).toThrow();
@@ -324,7 +328,7 @@ describe("loadEnvFileFrom", () => {
   });
 
   // Test 58.
-  it("reads the file named by COREPACK_ENV_FILE and ignores .corepack.env", () => {
+  it("reads the file named by COREPACK_ENV_FILE and ignores .jup.env", () => {
     writeEnvFile(DEFAULT_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
     const other = writeEnvFile(".other.env", "COREPACK_ENABLE_STRICT=0\n");
     process.env.COREPACK_ENV_FILE = ".other.env";
@@ -436,7 +440,7 @@ describe("applyEnvFile", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     process.env.COREPACK_ENV_FILE = "0";
 
-    applyEnvFile({ COREPACK_ENV_FILE: ".corepack.env" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    applyEnvFile({ COREPACK_ENV_FILE: ".jup.env" }, join(dir, DEFAULT_ENV_FILE_NAME));
 
     expect(process.env.COREPACK_ENV_FILE).toBe("0");
   });
@@ -530,7 +534,7 @@ describe("isEnvFileEligible", () => {
 
     // §15.35d / §15.37 — the same trap, and the same two assertions. The file
     // named here supplies `packageManager` for the whole project, so a
-    // `.corepack.env` able to set it could run a package manager the manifest
+    // `.jup.env` able to set it could run a package manager the manifest
     // never names — a repository silently choosing its own tooling, which is
     // precisely what §03.2's prefix sandbox exists to prevent.
     expect(isEnvFileEligible("COREPACK_SPEC_FILE")).toBe(false);
@@ -605,7 +609,7 @@ describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
   });
 
   // §15.37 marks it env-file eligible: it is a behavioural preference, not a
-  // security decision, so a project may ship it in `.corepack.env`.
+  // security decision, so a project may ship it in `.jup.env`.
   it("is settable from an env file", () => {
     expect(isEnvFileEligible("COREPACK_FROZEN_LOCKFILE")).toBe(true);
 
@@ -740,5 +744,154 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
   it("still applies the other spelling when nothing real is set", () => {
     applyEnvFile({ JUP_HOME: "/from-file" }, join(dir, DEFAULT_ENV_FILE_NAME));
     expect(readEnv(ENV.HOME)).toBe("/from-file");
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §11.6 / §17.6 C4 — the two closed tiers                                     */
+/* -------------------------------------------------------------------------- */
+
+describe("§11.6 — the two closed tiers (§17.6 C4)", () => {
+  /** §11.5 and §15.37 — the fourteen variables this spec invented. */
+  const TIER_2 = [
+    ENV.NODE_EXECPATH,
+    ENV.QUIET_ADVISORIES,
+    ENV.CAFILE,
+    ENV.STRICT_SSL,
+    ENV.NETWORK_TIMEOUT,
+    ENV.NETWORK_RETRIES,
+    ENV.REQUIRE_SIGNATURES,
+    ENV.ALLOW_UNVERIFIED,
+    ENV.SHIM_DIRECTORY,
+    ENV.FROZEN_LOCKFILE,
+    ENV.ENABLE_PRERELEASES,
+    ENV.SPEC_FILE,
+    ENV.MINIMUM_RELEASE_AGE,
+  ];
+
+  /** §11.1–§11.3 — corepack's own, where both spellings are permanent equals. */
+  const TIER_1 = [
+    ENV.ENABLE_PROJECT_SPEC,
+    ENV.ENABLE_STRICT,
+    ENV.ENABLE_AUTO_PIN,
+    ENV.DEFAULT_TO_LATEST,
+    ENV.ENABLE_NETWORK,
+    ENV.ENABLE_UNSAFE_CUSTOM_URLS,
+    ENV.ENABLE_DOWNLOAD_PROMPT,
+    ENV.ENV_FILE,
+    ENV.HOME,
+    ENV.NPM_REGISTRY,
+    ENV.NPM_TOKEN,
+    ENV.NPM_USERNAME,
+    ENV.NPM_PASSWORD,
+    ENV.INTEGRITY_KEYS,
+    ENV.ROOT,
+    ENV.MIGRATE_FROM,
+  ];
+
+  it("puts every variable in exactly one tier, and the tiers cover ENV", () => {
+    // The pair of lists above is §11.6's table read back. `ENV` is composed
+    // from the two tier tables, so a variable added to one of them shows up
+    // here and a variable added to neither cannot exist at all.
+    expect([...TIER_1, ...TIER_2].sort()).toEqual(Object.values(ENV).sort());
+    expect(new Set([...TIER_1, ...TIER_2]).size).toBe(TIER_1.length + TIER_2.length);
+  });
+
+  it("reports the tier under either spelling", () => {
+    for (const name of TIER_2) {
+      expect(envTier(name), name).toBe(2);
+      expect(envTier(jupSpelling(name)), name).toBe(2);
+    }
+    for (const name of TIER_1) {
+      expect(envTier(name), name).toBe(1);
+      expect(envTier(jupSpelling(name)), name).toBe(1);
+    }
+    // §15.2's per-package-manager override is tier 2 too, and it is a *prefix*
+    // rather than a member of either table.
+    expect(envTier(registryVariableFor("yarn"))).toBe(2);
+    expect(envTier(jupSpelling(registryVariableFor("yarn")))).toBe(2);
+    // A name in neither table is treated as tier 1 — "print it as given".
+    expect(envTier("PATH")).toBe(1);
+  });
+
+  it("canonicalises a tier-2 name to JUP_ and leaves tier 1 alone", () => {
+    for (const name of TIER_2) {
+      expect(canonicalEnvName(name), name).toBe(jupSpelling(name));
+      expect(canonicalEnvName(name).startsWith("JUP_"), name).toBe(true);
+    }
+    for (const name of TIER_1) {
+      expect(canonicalEnvName(name), name).toBe(name);
+    }
+    expect(canonicalEnvName(registryVariableFor("yarn"))).toBe("JUP_REGISTRY_YARN");
+    expect(canonicalEnvName("cafile (/home/u/.npmrc)")).toBe("cafile (/home/u/.npmrc)");
+  });
+
+  it("changes nothing about reading: both spellings resolve, JUP_ wins", () => {
+    for (const name of [...TIER_1, ...TIER_2]) {
+      process.env[name] = "legacy";
+      expect(readEnv(name), name).toBe("legacy");
+      expect(envEntry(name)?.name, name).toBe(name);
+
+      process.env[jupSpelling(name)] = "";
+      // Presence, not truthiness (§11.6): an empty `JUP_` still shadows.
+      expect(readEnv(name), name).toBe("");
+      expect(envEntry(name)?.name, name).toBe(jupSpelling(name));
+
+      delete process.env[name];
+      delete process.env[jupSpelling(name)];
+    }
+  });
+
+  it("keeps the COREPACK_ spelling out of this tool's own text", () => {
+    // §11.6 — "not used in this spec's own documentation, diagnostics, or
+    // `info` output". The messages and the help text are where a tier-2 name is
+    // *printed*, so they are what is scanned; a doc comment naming §11's table
+    // spelling is not user-facing and does not count.
+    const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+    const sources = ["src/errors.ts", "src/commands/usage.ts"].map((file) => ({
+      file,
+      // Comment lines are dropped: a doc comment may — and does — quote §11's
+      // and §15's tables, which are written in the `COREPACK_` spelling. What
+      // must not carry it is the text the tool prints.
+      code: readFileSync(join(repoRoot, file), "utf8")
+        .split("\n")
+        .filter((line) => {
+          const trimmed = line.trimStart();
+          return !trimmed.startsWith("*") && !trimmed.startsWith("//") && trimmed !== "/**";
+        })
+        .join("\n"),
+    }));
+    for (const name of TIER_2) {
+      for (const { file, code } of sources) {
+        expect(code, `${file} names ${name}`).not.toContain(name);
+      }
+    }
+  });
+});
+
+describe("§17.6 C9 — .corepack.env is the fallback name", () => {
+  it("reads the legacy name when .jup.env is absent, and prefers .jup.env", () => {
+    writeEnvFile(LEGACY_ENV_FILE_NAME, "COREPACK_ENABLE_STRICT=0\n");
+    expect(loadEnvFileFrom(dir)).toEqual({
+      vars: { COREPACK_ENABLE_STRICT: "0" },
+      path: join(dir, LEGACY_ENV_FILE_NAME),
+    });
+
+    // Never merged: the closer name wins outright, and the path reported is the
+    // file that was actually read.
+    writeEnvFile(DEFAULT_ENV_FILE_NAME, "COREPACK_ENABLE_STRICT=1\n");
+    expect(loadEnvFileFrom(dir)).toEqual({
+      vars: { COREPACK_ENABLE_STRICT: "1" },
+      path: join(dir, DEFAULT_ENV_FILE_NAME),
+    });
+  });
+
+  it("has no fallback once COREPACK_ENV_FILE names a file", () => {
+    writeEnvFile(LEGACY_ENV_FILE_NAME, "COREPACK_ENABLE_STRICT=0\n");
+    process.env.COREPACK_ENV_FILE = "named.env";
+
+    // The user said which file they meant; falling back would read one they did
+    // not name.
+    expect(loadEnvFileFrom(dir)).toBeNull();
   });
 });

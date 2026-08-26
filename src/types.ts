@@ -39,7 +39,7 @@ export type BinSpec = Record<string, string>;
 /** §02.4 — `[binaryName, …]`, used when the download is a single `.js` file. */
 export type BinList = string[];
 
-/** §07.2 — the parsed `.corepack` marker plus the directory it was found in. */
+/** §07.2 — the parsed `.jup` marker plus the directory it was found in. */
 export interface InstallSpec {
   location: string;
   /** Optional: a marker written by an older corepack may not carry one (§08.1). */
@@ -47,7 +47,7 @@ export interface InstallSpec {
   hash: string;
 }
 
-/** §07.2 — the on-disk shape of the `.corepack` marker file. */
+/** §07.2 — the on-disk shape of the `.jup` marker file. */
 export interface CorepackMarker {
   locator: Locator;
   /** Optional: markers written by older corepack releases omit it (§08.1). */
@@ -240,7 +240,7 @@ export interface DevEnginesDeclaration {
  * `yarn` is still the "No version specified" error), but that version may now be
  * a semver range or a dist-tag as well as an exact release. Nothing in the
  * pipeline demands an exact version any more; what a range costs instead is a
- * recorded resolution in `.corepack.lock`.
+ * recorded resolution in `.jup.lock`.
  */
 export interface ParseSpecOptions {
   requireVersion: boolean;

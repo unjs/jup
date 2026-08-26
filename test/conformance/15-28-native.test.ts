@@ -494,7 +494,7 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     // Nothing in §07 is JavaScript-specific: the same store, the same marker,
     // the same layout — and the artifact is still an executable afterwards.
     expect(statSync(stored(fixture.home, ENTRIES.executable.path)).mode & 0o111).not.toBe(0);
-    expect(JSON.parse(readFileSync(stored(fixture.home, ".corepack"), "utf8"))).toMatchObject({
+    expect(JSON.parse(readFileSync(stored(fixture.home, ".jup"), "utf8"))).toMatchObject({
       locator: { name: NAME, reference: REFERENCE },
       bin: { [NAME]: `./${ENTRIES.executable.path}` },
     });

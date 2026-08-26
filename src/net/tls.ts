@@ -24,7 +24,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { corepackSpelling, ENV, envEntry, readEnv } from "../config/env-vars.ts";
+import { canonicalEnvName, ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { advisory, messages } from "../errors.ts";
 import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";
 
@@ -48,8 +48,8 @@ export interface TlsSettings {
 }
 
 /**
- * §15.4's precedence: `COREPACK_CAFILE`, then `.npmrc`'s `cafile`/`ca`, then the
- * platform trust store.
+ * §15.4's precedence: `JUP_CAFILE` (or its legacy `COREPACK_` spelling), then
+ * `.npmrc`'s `cafile`/`ca`, then the platform trust store.
  *
  * The `.npmrc` middle tier is §15.1's, and it is read from the **user and
  * global files only** — a project-level `.npmrc` is attacker-controlled in a
@@ -138,7 +138,10 @@ let installed: string | undefined;
  * delimiter. Anything outside it — the human-readable subject dumps `openssl`
  * likes to interleave — is ignored, exactly as OpenSSL ignores it.
  */
-export function readCaBundle(path: string, source: string = ENV.CAFILE): string[] {
+export function readCaBundle(
+  path: string,
+  source: string = canonicalEnvName(ENV.CAFILE),
+): string[] {
   const cached = bundles.get(path);
   if (cached !== undefined) return cached;
 
@@ -146,7 +149,7 @@ export function readCaBundle(path: string, source: string = ENV.CAFILE): string[
   try {
     content = readFileSync(path, "utf8");
   } catch (error) {
-    throw new Error(unreadable(path, source), { cause: error });
+    throw new Error(messages.cafileUnreadable(path, source), { cause: error });
   }
 
   const certificates = certificatesIn(content);
@@ -157,17 +160,6 @@ export function readCaBundle(path: string, source: string = ENV.CAFILE): string[
 
   bundles.set(path, certificates);
   return certificates;
-}
-
-/**
- * §12's table words this failure as `(set by COREPACK_CAFILE)`, which is exactly
- * right when the environment set it and a lie when `.npmrc`'s `cafile` did. The
- * normative string is kept for the normative case; the other names the file.
- */
-function unreadable(path: string, source: string): string {
-  return corepackSpelling(source) === ENV.CAFILE
-    ? messages.cafileUnreadable(path)
-    : `Unable to read the TLS certificate bundle at ${path} (set by ${source})`;
 }
 
 /**
@@ -248,7 +240,7 @@ export function tlsConnectOptions(): { ca?: string[]; rejectUnauthorized?: boole
 /** The configured trust store, from either spelling, or `undefined` for the platform's. */
 function trustStoreFor(settings: TlsSettings): string[] | undefined {
   if (settings.cafile !== undefined) {
-    return readCaBundle(settings.cafile, settings.cafileSource ?? ENV.CAFILE);
+    return readCaBundle(settings.cafile, settings.cafileSource ?? canonicalEnvName(ENV.CAFILE));
   }
   if (settings.ca !== undefined) {
     return inlineCertificates(settings.ca, settings.caSource ?? ".npmrc ca");

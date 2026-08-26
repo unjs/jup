@@ -50,7 +50,7 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-**141 rows: 103 pass, 37 skipped, 1 expected fail, 0 failing.**
+**141 rows: 100 pass, 40 skipped, 1 expected fail, 0 failing.**
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
 which green means green. Without it, 52 rows fail — see *Compat mode* below.
@@ -69,6 +69,7 @@ red row is a regression, which is the whole point of keeping the port.
 | 4 | **§15.23** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
 | 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe `.corepack.env` discovery. |
 | 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
+| 3 | **§17.6 C9** — `pack`'s default output is `jup.tgz`; the three hydration rows name `corepack.tgz` by hand. `-o` is unaffected and `install -g <file>.tgz` never depended on the name. Covered by row 219, which also proves a `.corepack`-markered archive still installs. |
 | 1 | **§15, #138** — `enable`'s default target set includes npm. |
 | 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |
 

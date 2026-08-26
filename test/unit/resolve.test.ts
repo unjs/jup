@@ -194,7 +194,7 @@ function seedInstalled(name: string, version: string, hash?: string): void {
   const dir = join(home, "v1", name, version);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, ".corepack"),
+    join(dir, ".jup"),
     JSON.stringify({
       locator: { name, reference: version },
       ...(hash === undefined ? {} : { hash }),

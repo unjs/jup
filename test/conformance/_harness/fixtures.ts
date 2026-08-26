@@ -188,8 +188,10 @@ export function seedPackageManager(
   const pinned = parse(reference)?.build ?? [];
   const hash = pinned.length > 0 ? pinned.join(".") : "sha512.seeded";
 
+  // §17.6 C3 — a writer always writes `.jup`; row 218 plants a `.corepack`-only
+  // store itself, which is the whole point of that row.
   writeFileSync(
-    join(location, ".corepack"),
+    join(location, ".jup"),
     JSON.stringify({ locator: { name, reference }, bin: spec.bin, hash }),
   );
 

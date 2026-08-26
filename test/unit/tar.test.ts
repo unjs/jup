@@ -549,7 +549,7 @@ describe("create", () => {
   });
 
   it("round-trips through listEntries and extract", async () => {
-    const archive = join(source, "corepack.tgz");
+    const archive = join(source, "jup.tgz");
     await create(source, ["yarn/2.2.2"], archive);
 
     const listed = await listEntries(streamOf(await readFile(archive)));
@@ -572,7 +572,7 @@ describe("create", () => {
 
   it("never packs a symlink", async () => {
     await symlink("/etc/passwd", join(source, "yarn/2.2.2/escape"));
-    const archive = join(source, "corepack.tgz");
+    const archive = join(source, "jup.tgz");
     await create(source, ["yarn/2.2.2"], archive);
 
     const listed = await listEntries(streamOf(await readFile(archive)));

@@ -76,7 +76,7 @@ function seedInstall(name: string, version: string, marker?: unknown): string {
   const dir = join(getInstallFolder(), name, version);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, ".corepack"),
+    join(dir, ".jup"),
     JSON.stringify(
       marker ?? { locator: { name, reference: version }, bin: [name], hash: "sha1.ab" },
     ),
@@ -99,7 +99,7 @@ describe("getHomeFolder — §07.1", () => {
     vi.stubEnv("COREPACK_HOME", undefined);
     vi.stubEnv("XDG_CACHE_HOME", join("/xdg", "cache"));
     vi.stubEnv("LOCALAPPDATA", join("/lad"));
-    expect(getHomeFolder()).toBe(join("/xdg", "cache", "node", "corepack"));
+    expect(getHomeFolder()).toBe(join("/xdg", "cache", "jup"));
   });
 
   // §15.13 point 5 redirected this row (conformance 171). Corepack honours
@@ -111,9 +111,7 @@ describe("getHomeFolder — §07.1", () => {
     vi.stubEnv("LOCALAPPDATA", join("/lad"));
 
     const expected =
-      process.platform === "win32"
-        ? join("/lad", "node", "corepack")
-        : join(homedir(), ".cache", "node", "corepack");
+      process.platform === "win32" ? join("/lad", "jup") : join(homedir(), ".cache", "jup");
     expect(getHomeFolder()).toBe(expected);
   });
 
@@ -124,8 +122,7 @@ describe("getHomeFolder — §07.1", () => {
     const expected = join(
       homedir(),
       process.platform === "win32" ? join("AppData", "Local") : ".cache",
-      "node",
-      "corepack",
+      "jup",
     );
     expect(getHomeFolder()).toBe(expected);
   });
@@ -189,7 +186,7 @@ describe("readMarker / writeMarker — §07.2", () => {
   it("propagates a corrupt marker rather than silently re-downloading", () => {
     const dir = join(getInstallFolder(), "yarn", "4.1.0");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, ".corepack"), "{ truncated");
+    writeFileSync(join(dir, ".jup"), "{ truncated");
     expect(() => readMarker(dir)).toThrow(SyntaxError);
   });
 });
@@ -198,9 +195,9 @@ describe("readMarker / writeMarker — §07.2", () => {
 /* §15.11 — the cache hit checks the pin                                       */
 /* -------------------------------------------------------------------------- */
 
-/** How many of the recorded `readFileSync` calls asked for a `.corepack`. */
+/** How many of the recorded `readFileSync` calls asked for a `.jup`. */
 function markerReads(mock: { mock: { calls: unknown[][] } }): number {
-  return mock.mock.calls.filter((call) => String(call[0]).endsWith(".corepack")).length;
+  return mock.mock.calls.filter((call) => String(call[0]).endsWith(".jup")).length;
 }
 
 describe("readHashPin — §02.1", () => {
@@ -470,7 +467,7 @@ describe("createTempDir — §07.4", () => {
     const tmp = createTempDir();
     expect(dirname(tmp)).toBe(getInstallFolder());
     expect(statSync(tmp).isDirectory()).toBe(true);
-    expect(tmp).toMatch(/[\\/]corepack-\d+-[\da-f]{8}$/);
+    expect(tmp).toMatch(/[\\/]jup-\d+-[\da-f]{8}$/);
   });
 
   it("creates the install folder on demand and hands out unique names", () => {
@@ -926,5 +923,54 @@ describe("bumpLastKnownGood (§04.7)", () => {
 
     bumpLastKnownGood({ name: "yarn", reference: "1.22.4" });
     expect(readLastKnownGoodFile()).toEqual({ yarn: "not-a-version" });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §17.6 C3 — the legacy install marker                                        */
+/* -------------------------------------------------------------------------- */
+
+describe("§17.6 C3 — .corepack is accepted on read, .jup is what gets written", () => {
+  const MARKER = {
+    locator: { name: "yarn", reference: "3.3.3" },
+    bin: { yarn: "./bin/yarn.js" },
+    hash: "sha512.abcd",
+  };
+
+  it("reads a marker written under the older name", () => {
+    const dir = join(getInstallFolder(), "yarn", "3.3.3");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".corepack"), JSON.stringify(MARKER));
+
+    expect(readMarker(dir)).toEqual(MARKER);
+    // …and the probe agrees, so a warm run does not re-download it.
+    expect(findInstalledVersion("yarn", "3.3.3")).toBe("3.3.3");
+  });
+
+  it("prefers .jup, and opens the legacy name only after the first missed", () => {
+    const dir = join(getInstallFolder(), "yarn", "3.4.0");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".jup"), JSON.stringify(MARKER));
+    writeFileSync(join(dir, ".corepack"), JSON.stringify({ ...MARKER, hash: "sha512.legacy" }));
+
+    vi.mocked(readFileSync).mockClear();
+    expect(readMarker(dir)).toEqual(MARKER);
+    // One `open`, not two: §01.3's budget is unchanged for a store jup wrote.
+    expect(markerReads(vi.mocked(readFileSync))).toBe(1);
+    expect(
+      vi.mocked(readFileSync).mock.calls.filter((call) => String(call[0]).endsWith(".corepack")),
+    ).toEqual([]);
+  });
+
+  it("writes .jup even into a directory that already holds .corepack", () => {
+    const dir = join(getInstallFolder(), "yarn", "3.5.0");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, ".corepack"), JSON.stringify(MARKER));
+
+    writeMarker(dir, MARKER);
+
+    expect(existsSync(join(dir, ".jup"))).toBe(true);
+    // C8 — nothing is migrated, so the inherited file is left exactly as found.
+    expect(existsSync(join(dir, ".corepack"))).toBe(true);
   });
 });

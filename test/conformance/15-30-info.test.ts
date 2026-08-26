@@ -216,7 +216,7 @@ describe("§15.30 corepack info", () => {
     expect(report.project.kind).toBe("range");
     expect(report.project.spec).toBe("pnpm@^11.0.0");
     expect(report.lockfile).toMatchObject({
-      path: join(fixture.cwd, ".corepack.lock"),
+      path: join(fixture.cwd, ".jup.lock"),
       present: false,
       key: "pnpm@^11.0.0",
       resolution: null,
@@ -230,7 +230,7 @@ describe("§15.30 corepack info", () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({
         version: 1,
         resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", integrity: "sha512-AQI=" } },
@@ -240,7 +240,7 @@ describe("§15.30 corepack info", () => {
     const report = await info(fixture);
 
     expect(report.lockfile).toMatchObject({
-      path: join(fixture.cwd, ".corepack.lock"),
+      path: join(fixture.cwd, ".jup.lock"),
       present: true,
       key: "pnpm@^11.0.0",
       resolution: { resolved: "11.1.2", integrity: "sha512-AQI=" },
@@ -249,7 +249,7 @@ describe("§15.30 corepack info", () => {
       status: "locked",
       version: "11.1.2",
       hash: "sha512.0102",
-      source: join(fixture.cwd, ".corepack.lock"),
+      source: join(fixture.cwd, ".jup.lock"),
       installed: true,
     });
   });
@@ -273,21 +273,21 @@ describe("§15.30 corepack info", () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write("packages/app/keep.txt", "");
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2" } } })}\n`,
     );
 
     const report = await info(fixture, { cwd: fixture.path("packages/app") });
 
     expect(report.project.manifest).toBe(join(fixture.cwd, "package.json"));
-    expect(report.lockfile.path).toBe(join(fixture.cwd, ".corepack.lock"));
+    expect(report.lockfile.path).toBe(join(fixture.cwd, ".jup.lock"));
     expect(report.resolution.version).toBe("11.1.2");
   });
 
   it("196: names the env file and the variables it contributed", async () => {
     const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
     fixture.write(
-      ".corepack.env",
+      ".jup.env",
       [
         "COREPACK_ENABLE_STRICT=0",
         "COREPACK_NPM_REGISTRY=https://from-the-file.example.org",
@@ -302,7 +302,7 @@ describe("§15.30 corepack info", () => {
     });
 
     expect(report.envFile).toMatchObject({
-      path: join(fixture.cwd, ".corepack.env"),
+      path: join(fixture.cwd, ".jup.env"),
       applied: ["COREPACK_ENABLE_STRICT"],
       // §11.6 — the real environment wins over the file.
       overridden: ["COREPACK_NPM_REGISTRY"],

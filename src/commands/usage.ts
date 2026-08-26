@@ -217,11 +217,10 @@ export function helpText(options: HelpOptions): string {
     `With no names, enable and disable target every supported package manager,`,
     `npm included (§15.16) — pass --exclude npm to leave npm alone. Shims are`,
     `installed to a per-user directory that never needs elevation (§15.13):`,
-    `COREPACK_SHIM_DIRECTORY, else $XDG_BIN_HOME or ~/.local/bin, else`,
-    // §17.6 C9 renames this directory to `%LOCALAPPDATA%\jup\bin`; that is a
-    // file-name rename, not C10's tool-name substitution, and it lands with the
-    // code that writes the directory rather than with the text describing it.
-    String.raw`%LOCALAPPDATA%\node\corepack\bin on Windows.`,
+    // §17.6 C4 — a tier-2 variable is named `JUP_` in this tool's own help text,
+    // whatever spelling the reader's CI happens to set (both are read).
+    `JUP_SHIM_DIRECTORY, else $XDG_BIN_HOME or ~/.local/bin, else`,
+    String.raw`%LOCALAPPDATA%\jup\bin on Windows.`,
     ``,
     `Configuration is by environment variable only; COREPACK_ENABLE_DOWNLOAD_PROMPT`,
     `defaults to 1 when invoked through a package-manager shim and 0 when invoked as`,

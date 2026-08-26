@@ -31,6 +31,7 @@ import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
 import {
   LOCKFILE_NAME,
+  lockfileName,
   readResolution,
   removeResolution,
   resolutionKey,
@@ -47,7 +48,7 @@ import {
   getHomeFolder,
   getInstallFolder,
   listInstalled,
-  MARKER_NAME,
+  MARKER_NAMES,
   promote,
   readLastKnownGood,
   referenceWithHash,
@@ -56,8 +57,8 @@ import {
 import { create, extract, listEntries } from "../cache/tar.ts";
 import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
 
-/** §09.6 — the default `pack` output, relative to the cwd. */
-const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
+/** §09.6 / §17.6 C9 — the default `pack` output, relative to the cwd. */
+const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
 import { invocationPrefix, type Route, routeArgv } from "./router.ts";
 import { type DispatchedVerb, helpText } from "./usage.ts";
@@ -270,7 +271,7 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
  * The project's own spec, plus the lookup that produced it.
  *
  * `up` needs both halves: the descriptor to resolve, and the lookup to tell a
- * declared `packageManager` range (which §15.23 refreshes in `.corepack.lock`)
+ * declared `packageManager` range (which §15.23 refreshes in `.jup.lock`)
  * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
  */
 function resolveProjectSpec(
@@ -320,7 +321,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
 
   // §15.23 — warm the cache with the version the project will actually run.
   // `install` exists to fill a Docker layer, and resolving a range afresh here
-  // can legitimately answer something newer than `.corepack.lock` records — which
+  // can legitimately answer something newer than `.jup.lock` records — which
   // would cache one version and then run another, offline, in the layer that has
   // no network to fix it with. The recorded resolution is consulted under the
   // same key the proxy path uses: the pin itself, not the `devEngines` range that
@@ -392,11 +393,19 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
 /**
  * §07.10 — validate that the archive came from `pack` before touching anything.
  *
- * Only entries whose **last** path segment is the `.corepack` marker are
- * considered; anything shorter than `<name>/<version>/.corepack` poisons the
- * whole archive. This guards against passing the wrong tarball by accident — it
- * is **not** a security boundary, which is why the extraction below still runs
- * through §07.4's rules with nothing relaxed.
+ * Only entries whose **last** path segment is an install marker are considered;
+ * anything shorter than `<name>/<version>/<marker>` poisons the whole archive.
+ * This guards against passing the wrong tarball by accident — it is **not** a
+ * security boundary, which is why the extraction below still runs through §07.4's
+ * rules with nothing relaxed.
+ *
+ * **Both** marker names count (§07.10, §17.6 C3). `pack` copies cache subtrees
+ * verbatim, so an archive made from an inherited store carries `.corepack`, and
+ * an archive corepack itself produced carries nothing else; rejecting either as
+ * `Invalid archive format` would be the one place the dual-read stopped being
+ * transparent. This is the one site §07.2 exempts from "`.corepack` names either
+ * file": the scan compares literal path segments, so the accepted set is spelled
+ * out.
  */
 async function readArchiveEntries(
   filePath: string,
@@ -407,7 +416,7 @@ async function readArchiveEntries(
 
   for (const entry of await listEntries(fileStream(filePath))) {
     const segments = entry.path.split("/");
-    if (segments[segments.length - 1] !== MARKER_NAME) continue;
+    if (!(MARKER_NAMES as readonly string[]).includes(segments[segments.length - 1]!)) continue;
 
     if (segments.length < 3) {
       hasInvalidEntries = true;
@@ -531,13 +540,15 @@ export async function cmdUp(args: string[]): Promise<number> {
   // `devEngines` is a different case and still becomes a real pin (row 114).
   const pin = lookup.hasPin === true ? lookup.getSpec({ requireVersion: false }) : undefined;
   if (pin !== undefined && usesLockfile(pin)) {
+    const dir = dirname(lookup.target);
     if (!isValidRange(pin.range)) {
       // A dist-tag pin. §09.4 has always refused these, and recording a tag's
       // current expansion is `use`'s job, not `up`'s.
       throw new UsageError(messages.upNotSemver());
     }
     if (isFrozenLockfile({ refresh: true })) {
-      throw new UsageError(messages.lockfileUnresolved(pin.name, pin.range));
+      // §17.6 C9 — the file the run would have refreshed, by the name it has.
+      throw new UsageError(messages.lockfileUnresolved(pin.name, pin.range, lockfileName(dir)));
     }
 
     // No second, major-confining resolve here: for an exact pin that step is what
@@ -546,7 +557,6 @@ export async function cmdUp(args: string[]): Promise<number> {
     // would pick a version the range itself rejects, which the next run would
     // then discard as unsatisfying.
     const refreshed = await resolveOrThrow(pin, { useCache: false });
-    const dir = dirname(lookup.target);
     return applyToProject(refreshed, (reference, spec) => {
       writeResolution(dir, pin, { name: pin.name, reference }, spec.hash);
       // §15.35l — the resolution file is what changed, so that is what is named.
@@ -713,7 +723,7 @@ function readPinStyle(parsed: ParsedArgs): PinStyle | undefined {
 }
 
 /**
- * The `.corepack.lock` key a replaced `packageManager` value used to own, or
+ * The `.jup.lock` key a replaced `packageManager` value used to own, or
  * `undefined` when it owned none (the literal `unknown`, or an exact pin).
  */
 function staleResolutionKey(previous: string): string | undefined {
@@ -926,7 +936,7 @@ export async function cmdPrepare(args: string[]): Promise<number> {
     if (activate) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }
 
-  // §09.10 — `--output` tolerates a bare flag, defaulting to `corepack.tgz`.
+  // §09.10 — `--output` tolerates a bare flag, defaulting to `jup.tgz` (C9).
   const output = firstValue(parsed, "-o", "--output");
   const bare = hasFlag(parsed, "-o", "--output");
   if (output !== undefined || bare) {

@@ -321,18 +321,18 @@ describe("the upward walk — §03.1", () => {
   describe("env files — §03.2", () => {
     it("loads the closest env file before reading the manifest", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
-      write(".corepack.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
+      write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
 
       const result = discoverProjectSpec(root);
-      expect(result.envFilePath).toBe(join(root, ".corepack.env"));
+      expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_ENABLE_AUTO_PIN).toBe("1");
     });
 
     it("prefers the closest env file and stops looking", () => {
       manifest(".", { name: "monorepo" });
-      write(".corepack.env", "COREPACK_NPM_REGISTRY=https://root.test\n");
+      write(".jup.env", "COREPACK_NPM_REGISTRY=https://root.test\n");
       dir("sub");
-      write("sub/.corepack.env", "COREPACK_NPM_REGISTRY=https://sub.test\n");
+      write("sub/.jup.env", "COREPACK_NPM_REGISTRY=https://sub.test\n");
 
       discoverProjectSpec(join(root, "sub"));
       expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://sub.test");
@@ -340,7 +340,7 @@ describe("the upward walk — §03.1", () => {
 
     it("never reads an env file from inside node_modules", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
-      write("node_modules/foo/.corepack.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
+      write("node_modules/foo/.jup.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
 
       const result = discoverProjectSpec(join(root, "node_modules", "foo"));
       expect(result.envFilePath).toBeUndefined();
@@ -348,7 +348,7 @@ describe("the upward walk — §03.1", () => {
     });
 
     it("never reaches an env file above the manifest that stopped the walk", () => {
-      write(".corepack.env", "COREPACK_NPM_REGISTRY=https://root.test\n");
+      write(".jup.env", "COREPACK_NPM_REGISTRY=https://root.test\n");
       manifest("sub", { packageManager: "yarn@1.22.4" });
 
       const result = discoverProjectSpec(join(root, "sub"));
@@ -358,7 +358,7 @@ describe("the upward walk — §03.1", () => {
 
     it("skips env files entirely when COREPACK_ENV_FILE=0", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
-      write(".corepack.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
+      write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
       process.env.COREPACK_ENV_FILE = "0";
 
       const result = discoverProjectSpec(root);
@@ -368,11 +368,11 @@ describe("the upward walk — §03.1", () => {
 
     it("envOnly loads the env file and never reads a manifest", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
-      write(".corepack.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
+      write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
 
       const result = discoverProjectSpec(root, { envOnly: true });
       expect(result.type).toBe("NoProject");
-      expect(result.envFilePath).toBe(join(root, ".corepack.env"));
+      expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_ENABLE_AUTO_PIN).toBe("1");
     });
 
@@ -407,11 +407,11 @@ describe("the upward walk — §03.1", () => {
 
     it("still loads the env file, which is what may set the variable", () => {
       write("package.json", "{ this is not json");
-      write(".corepack.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
+      write(".jup.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
 
       const result = discoverProjectSpec(root, { projectSpecFlag: true });
       expect(result.type).toBe("NoProject");
-      expect(result.envFilePath).toBe(join(root, ".corepack.env"));
+      expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_ENABLE_PROJECT_SPEC).toBe("0");
     });
 
@@ -420,7 +420,7 @@ describe("the upward walk — §03.1", () => {
       // env file that disables the spec only turns up one directory later.
       manifest("sub", {});
       manifest(".", { packageManager: "pnpm@10.0.0" });
-      write(".corepack.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
+      write(".jup.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
 
       const result = discoverProjectSpec(join(root, "sub"), { projectSpecFlag: true });
       expect(result.type).toBe("NoProject");
@@ -1156,12 +1156,12 @@ describe("discoverProjectSpec — §15.27 mutating walks", () => {
   it("`here` still loads an ancestor's env file", () => {
     // §03.2's walk is about configuration, not about which manifest to edit, so
     // confining the write must not also cut off the registry settings.
-    write(".corepack.env", "COREPACK_ENABLE_PRERELEASES=1\n");
+    write(".jup.env", "COREPACK_ENABLE_PRERELEASES=1\n");
     dir("nested");
 
     const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
 
-    expect(result.envFilePath).toBe(join(root, ".corepack.env"));
+    expect(result.envFilePath).toBe(join(root, ".jup.env"));
     expect(process.env.COREPACK_ENABLE_PRERELEASES).toBe("1");
   });
 });

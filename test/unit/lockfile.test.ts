@@ -1,5 +1,5 @@
 /**
- * §15.23 — `.corepack.lock`.
+ * §15.23 — `.jup.lock`.
  *
  * The conformance rows prove the pipeline end to end; these prove the rules the
  * pipeline leans on, in particular the two that are invisible from outside: an
@@ -14,7 +14,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   hashFromIntegrity,
   integrityFromHash,
+  LEGACY_LOCKFILE_NAME,
   LOCKFILE_NAME,
+  lockfileName,
   readLockfile,
   readResolution,
   removeResolution,
@@ -279,5 +281,63 @@ describe("the SRI codec — §15.23", () => {
     expect(hashFromIntegrity("sha512-4mgVEQ==?foo=bar sha256-abcd")).toBe(
       hashFromIntegrity("sha512-4mgVEQ=="),
     );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §17.6 C9 — the legacy file name                                             */
+/* -------------------------------------------------------------------------- */
+
+describe("§17.6 C9 — .corepack.lock is read, .jup.lock is written", () => {
+  const legacy = (content: string) => writeFileSync(join(dir, LEGACY_LOCKFILE_NAME), content);
+  const recorded = (name: string) =>
+    JSON.parse(readFileSync(join(dir, name), "utf8")) as {
+      resolutions: Record<string, { resolved: string }>;
+    };
+
+  it("reads the legacy name when the current one is absent", () => {
+    legacy(`{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.0.0"}}}`);
+
+    expect(readResolution(dir, RANGE)).toEqual({ name: "pnpm", reference: "11.0.0" });
+    expect(lockfileName(dir)).toBe(LEGACY_LOCKFILE_NAME);
+  });
+
+  it("prefers the current name where both exist, and never merges them", () => {
+    write(`{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.1.2"}}}`);
+    legacy(`{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.0.0"}}}`);
+
+    expect(readResolution(dir, RANGE)).toEqual({ name: "pnpm", reference: "11.1.2" });
+    expect(lockfileName(dir)).toBe(LOCKFILE_NAME);
+  });
+
+  it("writes .jup.lock and retires the legacy file it read", () => {
+    legacy(`{"version":1,"resolutions":{"pnpm@~10.0.0":{"resolved":"10.0.1"}}}`);
+
+    writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, undefined);
+
+    // Both resolutions moved across, so nothing was lost — and the old file is
+    // gone rather than left as a duplicate that would win if `.jup.lock` were
+    // ever deleted. That is a record moving, not §17.6 C8's cache migration.
+    expect(Object.keys(recorded(LOCKFILE_NAME).resolutions).sort()).toEqual([
+      "pnpm@^11.0.0",
+      "pnpm@~10.0.0",
+    ]);
+    expect(readLockfile(dir)!.resolutions["pnpm@~10.0.0"]).toEqual({ resolved: "10.0.1" });
+    expect(() => readFileSync(join(dir, LEGACY_LOCKFILE_NAME), "utf8")).toThrow();
+  });
+
+  it("removes both names when the last resolution goes", () => {
+    legacy(`{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.0.0"}}}`);
+
+    removeResolution(dir, resolutionKey(RANGE));
+
+    // Leaving the legacy file behind would resurrect the resolution the caller
+    // just retired, the moment anything looked for one.
+    expect(readLockfile(dir)).toBeNull();
+    expect(lockfileName(dir)).toBe(LOCKFILE_NAME);
+  });
+
+  it("names the file a write would create when neither is there", () => {
+    expect(lockfileName(dir)).toBe(LOCKFILE_NAME);
   });
 });

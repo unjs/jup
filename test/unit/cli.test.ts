@@ -163,7 +163,7 @@ async function seed(name: string, version: string, hash?: string): Promise<strin
     bin: { [name]: `./bin/${name}.js` },
     hash: digest,
   };
-  await writeFile(join(location, ".corepack"), JSON.stringify(marker));
+  await writeFile(join(location, ".jup"), JSON.stringify(marker));
   return location;
 }
 
@@ -226,7 +226,7 @@ describe("resolvePatternsToDescriptors (§09.1)", () => {
   it("loads only the env file when patterns are given, never the manifest", async () => {
     // A manifest that would be a hard parse error if it were read at all.
     await writeFile(join(project, "package.json"), "{ not json");
-    await writeFile(join(project, ".corepack.env"), "COREPACK_ENABLE_NETWORK=0\n");
+    await writeFile(join(project, ".jup.env"), "COREPACK_ENABLE_NETWORK=0\n");
 
     expect(resolvePatternsToDescriptors(["yarn@2.2.2"])).toEqual([
       { name: "yarn", range: "2.2.2" },
@@ -326,7 +326,7 @@ describe("install (§09.2, test 86)", () => {
     await expect(cmdInstall([])).resolves.toBe(0);
 
     // It really did download: the store was empty before this ran.
-    expect(existsSync(join(home, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
+    expect(existsSync(join(home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
     // Same major and strictly upward, so §04.7 alone would have advanced it.
     expect(lastKnownGood()).toEqual({ yarn: "2.1.0" });
   });
@@ -430,12 +430,12 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
     await expect(cmdPack(["yarn@2.2.2", "pnpm@5.8.0"])).resolves.toBe(0);
 
-    const archive = join(project, "corepack.tgz");
+    const archive = join(project, "jup.tgz");
     expect(existsSync(archive)).toBe(true);
     expect(stdout).toBe(
       `Adding yarn@2.2.2 to the cache...\n` +
         `Adding pnpm@5.8.0 to the cache...\n` +
-        `Packing the selected tools in corepack.tgz...\n` +
+        `Packing the selected tools in jup.tgz...\n` +
         `All done!\n`,
     );
 
@@ -448,8 +448,8 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
     await expect(runManagementCommand(["install", "-g", archive])).resolves.toBe(0);
 
-    expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
-    expect(existsSync(join(fresh, "v1", "pnpm", "5.8.0", ".corepack"))).toBe(true);
+    expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
+    expect(existsSync(join(fresh, "v1", "pnpm", "5.8.0", ".jup"))).toBe(true);
     expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", "bin", "yarn.js"))).toBe(true);
     expect(stdout).toContain(`Installing yarn@2.2.2...\n`);
     expect(stdout).toContain(`Installing pnpm@5.8.0...\n`);
@@ -469,7 +469,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   it("recreates a COREPACK_HOME that does not exist yet (test 91)", async () => {
     await seed("yarn", "2.2.2");
     await cmdPack(["yarn@2.2.2"]);
-    const archive = join(project, "corepack.tgz");
+    const archive = join(project, "jup.tgz");
 
     const fresh = join(tmpdir(), `jup-cli-missing-${process.pid}-${Date.now()}`);
     process.env.COREPACK_HOME = fresh;
@@ -478,7 +478,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
     await expect(runManagementCommand(["install", "-g", archive])).resolves.toBe(0);
 
-    expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
+    expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
 
     await rm(fresh, { recursive: true, force: true });
   });
@@ -498,7 +498,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
     await cmdPack([]);
 
-    expect(existsSync(join(project, "corepack.tgz"))).toBe(true);
+    expect(existsSync(join(project, "jup.tgz"))).toBe(true);
   });
 
   it("--json prints only the output path, and -o redirects it", async () => {
@@ -855,7 +855,7 @@ describe("hydrate and prepare (§09.10)", () => {
   it("hydrate opts in to activation and says All done!", async () => {
     await seed("yarn", "2.2.2");
     await cmdPack(["yarn@2.2.2"]);
-    const archive = join(project, "corepack.tgz");
+    const archive = join(project, "jup.tgz");
 
     const fresh = await mkdtemp(join(tmpdir(), "jup-cli-home3-"));
     process.env.COREPACK_HOME = fresh;
@@ -879,13 +879,13 @@ describe("hydrate and prepare (§09.10)", () => {
     await rm(fresh, { recursive: true, force: true });
   });
 
-  it("prepare tolerates a bare --output flag, defaulting to corepack.tgz", async () => {
+  it("prepare tolerates a bare --output flag, defaulting to jup.tgz", async () => {
     await seed("yarn", "2.2.2");
 
     // Bare: the following token is a spec, not a path, so the default is used.
     await expect(cmdPrepare(["--output", "yarn@2.2.2"])).resolves.toBe(0);
 
-    expect(existsSync(join(project, "corepack.tgz"))).toBe(true);
+    expect(existsSync(join(project, "jup.tgz"))).toBe(true);
     expect(stdout).toContain(`All done!`);
 
     // With a value, `=` disambiguates it from the spec list.
@@ -898,7 +898,7 @@ describe("hydrate and prepare (§09.10)", () => {
     await seed("yarn", "2.2.2");
 
     await cmdPrepare(["yarn@2.2.2"]);
-    expect(existsSync(join(project, "corepack.tgz"))).toBe(false);
+    expect(existsSync(join(project, "jup.tgz"))).toBe(false);
     expect(lastKnownGood()).toEqual({});
 
     await cmdPrepare(["--activate", "yarn@2.2.2"]);

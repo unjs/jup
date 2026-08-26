@@ -831,7 +831,7 @@ describe("timeouts (§15.5, row 155)", () => {
 
     expect((error as Error).message).toBe(messages.requestFailed(url));
     expect((error as Error).stack).toContain(`Caused by: Timed out after 50ms waiting for ${url}`);
-    expect((error as Error).stack).toContain("COREPACK_NETWORK_TIMEOUT");
+    expect((error as Error).stack).toContain("JUP_NETWORK_TIMEOUT");
   });
 
   it("reads COREPACK_NETWORK_TIMEOUT when the caller names no timeout", async () => {

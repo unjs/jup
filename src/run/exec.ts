@@ -35,7 +35,11 @@ function getOwnRoot(): string {
 
 /**
  * §15.13 point 1 — the per-user shim directory, the one place a shim can always
- * be written without elevation. `LOCALAPPDATA` only on Windows (point 5, #673).
+ * be written without elevation. `LOCALAPPDATA` only on Windows (point 5, #673),
+ * and under `jup\bin` rather than corepack's `node\corepack\bin` (§17.6 C9).
+ * No read-compat is needed: `disable` restores what `enable` recorded (§15.15),
+ * so a shim written to the old directory is still found by the record that names
+ * it, not by re-deriving the path.
  *
  * It lives here rather than in `shims.ts`, which imports it: §15.32 needs it on
  * every proxy invocation, and the directory this prepends and the one `enable`
@@ -47,10 +51,10 @@ export function perUserShimDirectory(): string | undefined {
   if (process.platform === "win32") {
     const localAppData = process.env[SYSTEM_ENV.LOCALAPPDATA];
     if (localAppData !== undefined && localAppData !== "") {
-      return join(localAppData, "node", "corepack", "bin");
+      return join(localAppData, "jup", "bin");
     }
     const home = homedir();
-    return home === "" ? undefined : join(home, "AppData", "Local", "node", "corepack", "bin");
+    return home === "" ? undefined : join(home, "AppData", "Local", "jup", "bin");
   }
 
   // macOS has no XDG convention; Linux and the BSDs do.
@@ -63,7 +67,7 @@ export function perUserShimDirectory(): string | undefined {
   return home === "" ? undefined : join(home, ".local", "bin");
 }
 
-/** §15.13 point 1 — `COREPACK_SHIM_DIRECTORY`, else the per-user default. */
+/** §15.13 point 1 — `JUP_SHIM_DIRECTORY` (or its legacy spelling), else the per-user default. */
 function defaultShimDirectory(): string | undefined {
   const configured = readEnv(ENV.SHIM_DIRECTORY);
   if (configured !== undefined && configured !== "") return resolve(configured);

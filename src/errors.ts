@@ -36,10 +36,11 @@ import { getEntryName } from "./utils/self.ts";
  *   so substituting would turn a working pointer into a 404 — and pointing the
  *   sentence somewhere else entirely would be a rewrite, which C10 forbids.
  *
- * The corepack-named *files* — `.corepack.lock`, `.corepack.env`,
- * `corepack.tgz`, the `.corepack` marker — are §17.6 C9's rename, not C10's
- * substitution. Where a message names one, the file name stays as it is and only
- * the tool name around it moves.
+ * The corepack-named *files* were §17.6 C9's rename, not C10's substitution:
+ * `.jup.lock`, `.jup.env`, `jup.tgz` and the `.jup` marker are what a message
+ * names today, and each is still *read* under its old spelling. Where a message
+ * names one, the name comes from the module that owns the file — the tool name
+ * around it is the only thing this file substitutes.
  */
 export const toolName = getEntryName;
 
@@ -305,12 +306,14 @@ export const messages = {
     `Failed to find the highest release for ${name} ${major}.x`,
 
   /**
-   * §15.23 — verbatim. The file name is spelled out rather than imported from
-   * `lockfile.ts` because every module imports this one, and it must stay free
-   * of the imports that would make it a cycle.
+   * §15.23 — verbatim, except for the file name, which §17.6 C9 requires to be
+   * **the file actually looked at**: `.jup.lock` normally, `.corepack.lock` for a
+   * project still carrying the older name. It arrives as a parameter rather than
+   * as an import from `lockfile.ts` because every module imports this one, and it
+   * must stay free of the imports that would make it a cycle.
    */
-  lockfileUnresolved: (name: string, range: string) =>
-    `${name}@${range} is not resolved in .corepack.lock and lockfile updates are disabled.`,
+  lockfileUnresolved: (name: string, range: string, file: string) =>
+    `${name}@${range} is not resolved in ${file} and lockfile updates are disabled.`,
 
   /**
    * §15.35j — a version that was never published.
@@ -387,7 +390,7 @@ export const messages = {
    * the proxy's when the proxy is itself `https://`.
    */
   tlsUnknownAuthority: (host: string) =>
-    `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.`,
+    `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.`,
 
   tlsBadValidity: (host: string) =>
     `TLS certificate for ${host} is expired or not yet valid (check the system clock).`,
@@ -399,8 +402,15 @@ export const messages = {
   strictSslDisabled: (source: string) =>
     `! TLS certificate verification is disabled (set by ${source})`,
 
-  cafileUnreadable: (path: string) =>
-    `Unable to read the TLS certificate bundle at ${path} (set by COREPACK_CAFILE)`,
+  /**
+   * §15.4. `<source>` names what supplied the path — `JUP_CAFILE`, the legacy
+   * `COREPACK_CAFILE` when that is the spelling the user set (§11.6), or
+   * `cafile (/home/u/.npmrc)`. §12's table words this as `(set by COREPACK_CAFILE)`,
+   * which was exactly right for the environment and a lie for an `.npmrc`, so the
+   * name is a parameter rather than a constant.
+   */
+  cafileUnreadable: (path: string, source: string) =>
+    `Unable to read the TLS certificate bundle at ${path} (set by ${source})`,
 
   cafileEmpty: (path: string) =>
     `The TLS certificate bundle at ${path} contains no PEM certificate`,
@@ -413,11 +423,11 @@ export const messages = {
    * message", and §15.5 requires the underlying reason to survive alongside it.
    */
   networkTimeout: (milliseconds: number, url: string) =>
-    `Timed out after ${milliseconds}ms waiting for ${url_(url)} (set COREPACK_NETWORK_TIMEOUT to allow longer)`,
+    `Timed out after ${milliseconds}ms waiting for ${url_(url)} (set JUP_NETWORK_TIMEOUT to allow longer)`,
 
   /** The last of several attempts; the wrapper above still names the URL. */
   retriesExhausted: (attempts: number) =>
-    `Giving up after ${attempts} attempt${attempts === 1 ? "" : "s"} (set COREPACK_NETWORK_RETRIES to change)`,
+    `Giving up after ${attempts} attempt${attempts === 1 ? "" : "s"} (set JUP_NETWORK_RETRIES to change)`,
 
   /* §12.7 — integrity ----------------------------------------------------- */
 
@@ -528,7 +538,7 @@ export const messages = {
    * trees whose manifest says the *wrong* thing, so ignoring a typo runs the
    * package manager the file was pointed at to override.
    */
-  specFileMissing: (path: string) => `COREPACK_SPEC_FILE points at ${path}, which does not exist`,
+  specFileMissing: (path: string) => `JUP_SPEC_FILE points at ${path}, which does not exist`,
 
   /* §12.12 — new in this spec --------------------------------------------- */
 
@@ -536,7 +546,7 @@ export const messages = {
     `The package was signed with an expired key (${keyid}, expired ${expires})`,
 
   noNodeRuntime: (binName: string) =>
-    `Unable to locate a Node.js runtime to execute ${binName}; set COREPACK_NODE_EXECPATH to point at one`,
+    `Unable to locate a Node.js runtime to execute ${binName}; set JUP_NODE_EXECPATH to point at one`,
 
   noShimDirectory: () => `Unable to determine where to install the shims; pass --install-directory`,
 
@@ -623,7 +633,7 @@ export const messages = {
    * construction. TLS is not a verification tier, so neither clears one.
    */
   refusingUnverified: (name: string, version: string, source: string) =>
-    `Refusing to install ${name}@${version}: ${source} provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set COREPACK_ALLOW_UNVERIFIED=1.`,
+    `Refusing to install ${name}@${version}: ${source} provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.`,
 
   /**
    * The opt-out's warning half. §15.11 requires the escape hatch to be loud:
@@ -631,7 +641,7 @@ export const messages = {
    * the verified path it replaces.
    */
   allowingUnverified: (name: string, version: string, source: string) =>
-    `! Installing ${name}@${version} from ${source} with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)`,
+    `! Installing ${name}@${version} from ${source} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)`,
 
   /* §15.12 — the sidecar integrity ---------------------------------------- */
 

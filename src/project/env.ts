@@ -1,5 +1,5 @@
 /**
- * Environment and `.corepack.env` — §03.2, §11, §14.5.
+ * Environment and `.jup.env` — §03.2, §11, §14.5.
  *
  * Reading the environment is the *only* configuration input the tool has. There
  * is no config file, no user profile, no registry of registries.
@@ -28,8 +28,18 @@ import { advisory, messages } from "../errors.ts";
  */
 export const ENV_FILE_PREFIX = COREPACK_PREFIX;
 
-/** §03.2 — the file looked for when `COREPACK_ENV_FILE` is unset. */
-export const DEFAULT_ENV_FILE_NAME = ".corepack.env";
+/** §03.2 / §17.6 C9 — the file looked for when `COREPACK_ENV_FILE` is unset. */
+export const DEFAULT_ENV_FILE_NAME = ".jup.env";
+
+/**
+ * §03.2 / §17.6 C9 — the name corepack used, read when {@link DEFAULT_ENV_FILE_NAME}
+ * is absent *and* the variable is unset.
+ *
+ * Same directory, same rules, same §14.5 deny-list, and never merged: `.jup.env`
+ * wins outright where both exist. An explicit `COREPACK_ENV_FILE` names one file
+ * and there is no fallback from it — the user said which file they meant.
+ */
+export const LEGACY_ENV_FILE_NAME = ".corepack.env";
 
 /**
  * §03.2 + §14.5 — variables an env file may never supply.
@@ -81,14 +91,14 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   ENV.CAFILE,
   ENV.STRICT_SSL,
   // §15.11 / §15.37 — the one opt-out from "every artifact clears a verification
-  // tier". A cloned repository that could set it from `.corepack.env` would be
+  // tier". A cloned repository that could set it from `.jup.env` would be
   // able to turn its own unsigned, unpinned download into a permitted one, which
   // is the whole of what §15.11 refuses; the deny-list is what keeps the opt-out
   // a decision the person running the tool makes.
   ENV.ALLOW_UNVERIFIED,
   // §15.35d / §15.37 — the file that supplies the project spec. Eligibility is a
   // *deny*-list, so a variable is project-settable until it is named here: a
-  // cloned repository whose `.corepack.env` set this could point the spec at a
+  // cloned repository whose `.jup.env` set this could point the spec at a
   // file of its own and run a package manager the manifest never names.
   ENV.SPEC_FILE,
   // §11.5 / §14.23 — the advisory mute covers TLS verification being off
@@ -124,7 +134,7 @@ const CH_BACKTICK = 0x60;
  * Written out by hand rather than delegating, because `node:util` is ~40 kB of
  * JavaScript and 3 native modules loaded on **every** invocation to serve a file
  * that, for almost every project, does not exist: `parseEnvFile` runs only when
- * `.corepack.env` is actually there. `await import` cannot help — the walk in
+ * `.jup.env` is actually there. `await import` cannot help — the walk in
  * §03.1 is synchronous — so the ~80 lines §16.2 budgets are what buys it back
  * (measured: −0.85 ms on a warm run, out of ~10 ms of our own).
  *
@@ -321,9 +331,12 @@ function withoutExport(key: string): string {
 /**
  * Load the env file for one directory, if any.
  *
- * Path is `resolve(dir, COREPACK_ENV_FILE ?? ".corepack.env")`; `COREPACK_ENV_FILE === "0"`
- * disables env files entirely. `ENOENT` is not an error. Only the **closest**
- * file is ever loaded.
+ * Path is `resolve(dir, JUP_ENV_FILE ?? COREPACK_ENV_FILE ?? ".jup.env")`, falling
+ * back to `.corepack.env` in the same directory when the variable is unset and
+ * the first name is absent (§17.6 C9); `COREPACK_ENV_FILE === "0"` disables env
+ * files entirely. `ENOENT` is not an error. Only the **closest** file is ever
+ * loaded — and "closest" is per directory, so a `.corepack.env` here outranks a
+ * `.jup.env` in the parent, exactly as two files of the same name would.
  */
 export function loadEnvFileFrom(
   dir: string,
@@ -333,19 +346,21 @@ export function loadEnvFileFrom(
     return null;
   }
 
-  const path = resolve(dir, configured ?? DEFAULT_ENV_FILE_NAME);
+  const names =
+    configured === undefined ? [DEFAULT_ENV_FILE_NAME, LEGACY_ENV_FILE_NAME] : [configured];
 
-  let content: string;
-  try {
-    content = readFileSync(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
+  for (const name of names) {
+    const path = resolve(dir, name);
+    try {
+      return { vars: parseEnvFile(readFileSync(path, "utf8")), path };
+    } catch (error) {
+      // Only "not there" falls through to the next name; anything else — a
+      // directory, a permission failure — is a real error, as it always was.
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
-    throw error;
   }
 
-  return { vars: parseEnvFile(content), path };
+  return null;
 }
 
 /**
@@ -431,7 +446,7 @@ export function isCI(): boolean {
 }
 
 /**
- * §15.23 / §15.37 — whether `.corepack.lock` may be written or refreshed.
+ * §15.23 / §15.37 — whether `.jup.lock` may be written or refreshed.
  *
  * `COREPACK_FROZEN_LOCKFILE` wins in **both** directions when it is set: `1`
  * freezes, anything else thaws, including inside CI. With it unset, CI defaults

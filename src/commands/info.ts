@@ -35,8 +35,9 @@ import {
   realpathSync,
   statSync,
 } from "node:fs";
-import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
+import { basename, delimiter, dirname, join, resolve as resolvePath } from "node:path";
 import {
+  canonicalEnvName,
   corepackSpelling,
   ENV,
   envEntry,
@@ -49,7 +50,7 @@ import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../config/table.ts
 import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
 import { redactUserinfo, toolName, UsageError } from "../errors.ts";
 import { parseManifest } from "../utils/json.ts";
-import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "../project/lockfile.ts";
+import { lockfileName, readLockfile, resolutionKey, usesLockfile } from "../project/lockfile.ts";
 import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "../project/manifest.ts";
 import {
   loadNpmrc,
@@ -115,7 +116,7 @@ export interface ProjectInfo {
 
 export interface ResolutionInfo {
   /**
-   * `pinned` — the field names the version outright; `locked` — `.corepack.lock`
+   * `pinned` — the field names the version outright; `locked` — `.jup.lock`
    * answers it; `cache` — nothing is recorded, but an installed version
    * satisfies the range; `network` — resolving needs a request, which `info`
    * does not make; `frozen` — a request is needed and is refused; `fallback` —
@@ -531,7 +532,9 @@ function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
   const data = readLockfile(dir);
 
   return {
-    path: join(dir, LOCKFILE_NAME),
+    // §17.6 C9 — the file actually looked at, so a project still on the older
+    // name sees `.corepack.lock` reported rather than a path nothing read.
+    path: join(dir, lockfileName(dir)),
     present: data !== null,
     key,
     resolution: key === null || data === null ? null : (data.resolutions[key] ?? null),
@@ -618,7 +621,7 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
     return {
       ...base,
       status: "frozen",
-      reason: `${project.name}@${project.range} is not resolved in ${LOCKFILE_NAME} and lockfile updates are disabled (${lockfile.frozenSource})`,
+      reason: `${project.name}@${project.range} is not resolved in ${basename(lockfile.path)} and lockfile updates are disabled (${lockfile.frozenSource})`,
     };
   }
 
@@ -632,7 +635,7 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
       ...base,
       status: "cache",
       version: cached,
-      source: `the store (nothing recorded in ${LOCKFILE_NAME})`,
+      source: `the store (nothing recorded in ${basename(lockfile.path)})`,
       installed: true,
     };
   }
@@ -689,7 +692,7 @@ function displayValue(name: string, value: string): string {
  *
  * The four buckets are the four things that can happen to a line in that file,
  * and the difference between them is the whole answer to "why is my
- * `.corepack.env` not doing anything": it was refused for security (§14.5), it
+ * `.jup.env` not doing anything": it was refused for security (§14.5), it
  * was shadowed by a real environment variable (§11.6), or it was never
  * `COREPACK_`-prefixed in the first place.
  */
@@ -787,7 +790,7 @@ function describePackageManagers(
 
       if (spec.npmRegistry === undefined) {
         notes.push(
-          `${name}@${range} is fetched from ${origin}; only ${registryVariableFor(name)} redirects it`,
+          `${name}@${range} is fetched from ${origin}; only ${canonicalEnvName(registryVariableFor(name))} redirects it`,
         );
         continue;
       }
@@ -795,7 +798,7 @@ function describePackageManagers(
       const alternative = effectiveRegistry(name, spec.npmRegistry.package);
       if (alternative.source === "built-in") {
         notes.push(
-          `${name}@${range} is fetched from ${origin}; a configured npm registry switches it to ${spec.npmRegistry.package}, and ${registryVariableFor(name)} mirrors it as it is`,
+          `${name}@${range} is fetched from ${origin}; a configured npm registry switches it to ${spec.npmRegistry.package}, and ${canonicalEnvName(registryVariableFor(name))} mirrors it as it is`,
         );
       } else {
         notes.push(

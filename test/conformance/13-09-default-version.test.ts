@@ -196,7 +196,7 @@ describe("§13.9 default version and last-known-good", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Installing yarn@4.9.9...\n");
-    expect(result.stderr).toContain("COREPACK_ALLOW_UNVERIFIED=1");
+    expect(result.stderr).toContain("JUP_ALLOW_UNVERIFIED=1");
     expect(lastKnownGood(fixture).yarn).toMatch(/^4\.9\.9/);
   });
 

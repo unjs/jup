@@ -20,9 +20,9 @@ changed and why, in the imperative.
 ## Verifying
 
 `pnpm test` runs lint, typecheck, and the suite with coverage; `pnpm vitest run` is the
-suite alone. The green baseline is **1707 passed, 3 skipped** — the skips are
+suite alone. The green baseline is **1733 passed, 3 skipped** — the skips are
 platform-conditional. `pnpm test:corepack` runs corepack's own suite against jup, where
-every skip is a deliberate §14 divergence with a stated reason.
+every skip is a deliberate §14/§17 divergence with a stated reason.
 
 `.agents/PLAN.md` is the working plan: what is left, in what order, and which
 conformance rows prove each piece. Read it before starting and update it as part of the

@@ -218,7 +218,7 @@ function packument(options: {
 }
 
 function marker(location: string): CorepackMarker {
-  return JSON.parse(readFileSync(join(location, ".corepack"), "utf8")) as CorepackMarker;
+  return JSON.parse(readFileSync(join(location, ".jup"), "utf8")) as CorepackMarker;
 }
 
 /** Nothing at all under `<home>/v1` — not the version dir, not a stray temp dir. */
@@ -245,7 +245,7 @@ describe("marker hit (§07.2, test 96)", () => {
     const location = join(home, "v1", "pnpm", "9.1.0");
     await mkdir(location, { recursive: true });
     await writeFile(
-      join(location, ".corepack"),
+      join(location, ".jup"),
       JSON.stringify({
         locator: { name: "pnpm", reference: "9.1.0+sha512.abc" },
         bin: { pnpm: "./bin/pnpm.cjs" },
@@ -271,7 +271,7 @@ describe("marker hit (§07.2, test 96)", () => {
     const location = join(home, "v1", "pnpm", "9.1.0");
     await mkdir(location, { recursive: true });
     await writeFile(
-      join(location, ".corepack"),
+      join(location, ".jup"),
       // §15.11 redirected this row: the marker used to be allowed to record any
       // hash at all, so a pinned reference adopted whatever was in the
       // directory. §07.2's *directory* name still carries no build suffix —
@@ -299,7 +299,7 @@ describe("marker hit (§07.2, test 96)", () => {
     const location = join(home, "v1", "pnpm", "9.1.0");
     await mkdir(location, { recursive: true });
     await writeFile(
-      join(location, ".corepack"),
+      join(location, ".jup"),
       JSON.stringify({
         locator: { name: "pnpm", reference: "9.1.0+sha256.aaaa" },
         bin: ["pnpm"],

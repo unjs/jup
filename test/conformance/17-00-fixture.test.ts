@@ -108,9 +108,7 @@ describe("§17.9 the test-only table fixture", () => {
     // §07.2's layout, and the request that filled it: nothing here is
     // package-manager-specific, which is §17.2's "the machinery already
     // generalises" stated as a test.
-    expect(existsSync(join(fixture.home, "v1", RUNTIME_TOOL, FIXTURE_VERSION, ".corepack"))).toBe(
-      true,
-    );
+    expect(existsSync(join(fixture.home, "v1", RUNTIME_TOOL, FIXTURE_VERSION, ".jup"))).toBe(true);
     expect(registry.requests.map((request) => request.path)).toContain(
       `/${RUNTIME_TOOL}/${FIXTURE_VERSION}`,
     );

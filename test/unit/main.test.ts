@@ -78,7 +78,7 @@ function installFake(home: string, name: string, reference: string, body?: strin
   }
 
   writeFileSync(
-    join(location, ".corepack"),
+    join(location, ".jup"),
     // §15.11 — a cache hit is now checked against the pin, so a seeded install
     // has to record the digest the reference it stands for actually names.
     JSON.stringify({
@@ -587,7 +587,7 @@ describe("runProxy — dispatch and errors", () => {
     const location = installFake(home, "yarn", "1.0.0");
     // A truncated marker is a broken install, not a cache miss (§07.2): it must
     // surface as a bug, with a stack, not as a friendly usage error.
-    writeFileSync(join(location, ".corepack"), "{ not json");
+    writeFileSync(join(location, ".jup"), "{ not json");
 
     const result = run(cwd, home, ["yarn", "--version"]);
 
@@ -620,11 +620,11 @@ describe("runProxy — the package manager owns the exit code (§08.4)", () => {
   });
 });
 
-describe("runProxy — .corepack.env applies before the flags are read (test 52)", () => {
+describe("runProxy — .jup.env applies before the flags are read (test 52)", () => {
   it("auto-pins when only the env file asks for it", () => {
     const { cwd, home } = makeProject({});
     installFake(home, "yarn", YARN_DEFAULT);
-    writeFileSync(join(cwd, ".corepack.env"), "COREPACK_ENABLE_AUTO_PIN=1\n");
+    writeFileSync(join(cwd, ".jup.env"), "COREPACK_ENABLE_AUTO_PIN=1\n");
 
     const result = run(cwd, home, ["yarn", "--version"]);
 
@@ -781,7 +781,7 @@ const COLD_PATH_MODULES = [
  * At the time of writing all three entries cost **2**, against a ceiling that
  * was 25 and had 24 of them spent: `node:util`, imported by `env.ts` for
  * `parseEnv`, was dragging in `internal/util/parse_args`, `internal/util/colors`
- * and `internal/util/diff` on every invocation to parse a `.corepack.env` that
+ * and `internal/util/diff` on every invocation to parse a `.jup.env` that
  * usually does not exist. The hand-rolled parser that replaced it (§16.2) is
  * what freed the headroom, and this is now a real ceiling again rather than one
  * a single import would breach.
@@ -1030,6 +1030,22 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * message is *built*, not where it is printed: a proxy-mode `UsageError` goes
    * straight to stderr with no second pass over the text. Held at 212,000 rather
    * than the 210,555 this leaves.
+   *
+   * And from 212,000 to 223,000 for §17.6 C2/C3/C4/C9 — the renames. Four warm
+   * modules carry them: `store.ts` (+2,307) gained the second marker name, the
+   * `markerExists` probe and the dual-read loop in `readMarker`; `env-vars.ts`
+   * (+3,048) split `ENV` into the two closed tiers §11.6 defines and grew
+   * `envTier`/`canonicalEnvName`; `lockfile.ts` (+2,699) gained the legacy name,
+   * `readLockfileText` and `lockfileName`, which is what lets §12's frozen-mode
+   * error name the file it actually looked at; `env.ts` (+929) walks two names
+   * per directory. Measured, `warm.mjs` went 80,413 -> 81,644, **+1,231 bytes, or
+   * +1.53%**, against +10,087 of source — the widest gap yet between the two
+   * numbers, because a rename is nearly all explanation. **The dual-read costs
+   * nothing on a store this tool wrote**: `.jup` is probed first at every one of
+   * the three sites, so the second `stat`/`open` happens only after the first
+   * missed. An inherited corepack store pays one extra `stat` per warm probe
+   * until its entries are reinstalled, which is C3's stated price. Held at
+   * 223,000 rather than the 220,867 this leaves.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1041,6 +1057,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(212_000);
+    ).toBeLessThanOrEqual(223_000);
   });
 });

@@ -20,9 +20,13 @@
  * would silently see only one of them. That keeps this module a leaf, so every
  * other file can import it without a cycle.
  *
- * Doc comments and `errors.ts`' user-facing messages keep their literal
- * `COREPACK_` spellings on purpose: §12's strings are matched byte-for-byte by
- * CI scripts, and reading one should not require resolving an identifier.
+ * Doc comments keep their literal `COREPACK_` spellings on purpose: §11's and
+ * §15's tables are written that way, and reading a comment should not require
+ * resolving an identifier. **User-facing text is not doc comments.** §17.6 C4
+ * closed the pairs into two tiers, and `errors.ts` and `usage.ts` spell a tier-2
+ * variable `JUP_` — as a literal, again so that grepping §12's byte-for-byte
+ * strings finds them. {@link envTier} is the record of which tier a name is in,
+ * and `test/unit/config.test.ts` is what keeps the two from drifting.
  */
 
 /**
@@ -49,11 +53,22 @@ export const JUP_PREFIX = "JUP_";
 /** Both prefixes, highest precedence first. */
 export const ENV_PREFIXES = [JUP_PREFIX, COREPACK_PREFIX] as const;
 
-/** §15.2 — the per-package-manager registry override. */
+/**
+ * §15.2 / §15.37 — the per-package-manager registry override.
+ *
+ * **Tier 2** (§17.6 C4): the canonical spelling is `JUP_REGISTRY_<NAME>`. The
+ * constant keeps the `COREPACK_` one because that is the key
+ * {@link corepackSpelling} canonicalises to; {@link canonicalEnvName} is what a
+ * diagnostic prints.
+ */
 export const REGISTRY_PREFIX = "COREPACK_REGISTRY_";
 
-/** The tool's own variables, keyed by name minus {@link COREPACK_PREFIX}. */
-export const ENV = {
+/**
+ * §11.6 **tier 1** — corepack's own variables (§11.1–§11.3). Both spellings are
+ * equal and permanent: this is the compatibility surface, and a CI job that has
+ * set `COREPACK_ENABLE_STRICT` for three years is why. Either may be printed.
+ */
+const TIER_1 = {
   // §11.1 — behaviour.
   ENABLE_PROJECT_SPEC: "COREPACK_ENABLE_PROJECT_SPEC",
   ENABLE_STRICT: "COREPACK_ENABLE_STRICT",
@@ -75,8 +90,21 @@ export const ENV = {
   // §11.3 — set by the tool, read by the package manager it runs.
   ROOT: "COREPACK_ROOT",
   MIGRATE_FROM: "COREPACK_MIGRATE_FROM",
+} as const;
 
-  // §11.5 / §15 — new in this spec.
+/**
+ * §11.6 **tier 2** — the variables this spec invented (§11.5, §15.37).
+ *
+ * Their name is `JUP_<NAME>`; the `COREPACK_` spelling is accepted on read and
+ * nothing more. Nobody's CI sets `COREPACK_MINIMUM_RELEASE_AGE`, because corepack
+ * never had it, so that spelling is fiction rather than compatibility (§17.6 C4).
+ * Diagnostics, `--help` and `info` name these under {@link canonicalEnvName} —
+ * except where the user set the legacy spelling, which {@link envEntry} reports
+ * verbatim. The set is **closed**: anything added after §17 gets no `COREPACK_`
+ * spelling at all.
+ */
+const TIER_2 = {
+  // §11.5 — new in this spec.
   NODE_EXECPATH: "COREPACK_NODE_EXECPATH",
   CAFILE: "COREPACK_CAFILE",
   STRICT_SSL: "COREPACK_STRICT_SSL",
@@ -91,6 +119,20 @@ export const ENV = {
   SHIM_DIRECTORY: "COREPACK_SHIM_DIRECTORY",
   QUIET_ADVISORIES: "COREPACK_QUIET_ADVISORIES",
 } as const;
+
+/**
+ * The tool's own variables, keyed by name minus {@link COREPACK_PREFIX}.
+ *
+ * Composed from the two tier tables rather than listed a third time: a variable
+ * appears in exactly one of them, so its tier cannot drift from its existence.
+ */
+export const ENV = {
+  ...TIER_1,
+  ...TIER_2,
+} as const;
+
+/** {@link TIER_2}'s names, for the tier test below. */
+const TIER_2_NAMES: ReadonlySet<string> = new Set(Object.values(TIER_2));
 
 /**
  * §11.4 — variables owned by the host environment: consumed, never set.
@@ -180,6 +222,33 @@ export function corepackSpelling(name: string): string {
 /** Whether a name belongs to this tool under either spelling (§03.2's filter). */
 export function isToolEnvName(name: string): boolean {
   return name.startsWith(JUP_PREFIX) || name.startsWith(COREPACK_PREFIX);
+}
+
+/**
+ * §11.6 / §17.6 C4 — which of the two closed tiers a variable is in. Either
+ * spelling may be passed; the name is canonicalised to `COREPACK_` first, since
+ * that is the key both tables are written in. A name in neither — an ambient
+ * `PATH`, an `.npmrc` origin string — answers `1`, so it is never rewritten into
+ * a spelling nothing reads.
+ */
+export function envTier(name: string): 1 | 2 {
+  const corepack = corepackSpelling(name);
+  return TIER_2_NAMES.has(corepack) || corepack.startsWith(REGISTRY_PREFIX) ? 2 : 1;
+}
+
+/**
+ * The spelling this tool's own diagnostics, `--help` and `info` use for a
+ * variable — §11.6's "not used in this spec's own documentation, diagnostics, or
+ * `info` output".
+ *
+ * Tier 2 canonicalises to `JUP_`; tier 1 is returned unchanged, since both its
+ * spellings are equal and §11's tables are written in the `COREPACK_` one. Use it
+ * for a variable the user has **not** necessarily set — for one they did,
+ * {@link envEntry} reports the spelling they used, which §11.6's last paragraph
+ * requires and this would override.
+ */
+export function canonicalEnvName(name: string): string {
+  return envTier(name) === 2 ? jupSpelling(corepackSpelling(name)) : name;
 }
 
 /**
