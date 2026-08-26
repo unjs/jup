@@ -1003,6 +1003,16 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * gate reads the environment, and `env.ts`'s own §14.5 warning goes through
    * it. Held at 204,000 rather than the 203,432 this leaves, so the next
    * addition is still a change worth arguing for.
+   *
+   * And from 204,000 to 206,000 for §17.3's roles: `config/table.ts` gained a
+   * `roles` field on each of the three entries, `getRoles`/`hasRole`, and the
+   * index derivation wrapped in `reindexTable` so §17.9's test-only fixture can
+   * re-derive after substituting a table (+1,799 source bytes, most of it the
+   * comments). Measured, `warm.mjs` went 79,525 -> 79,952, +427 bytes or
+   * +0.54%. The table is the warm path — `getPackageManagerFor` classifies argv
+   * on every invocation — so none of it can move off it, and the roles have to
+   * be *in* the entries because R1 makes a role a property of the tool rather
+   * than of a second table beside it.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1014,6 +1024,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(204_000);
+    ).toBeLessThanOrEqual(206_000);
   });
 });

@@ -9,14 +9,16 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { MockRegistry } from "./registry.ts";
+import type { FixtureTable } from "./table-fixture.ts";
 
 export const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 export const BIN = join(REPO_ROOT, "src", "bin.ts");
 
 const INTERCEPT = fileURLToPath(new URL("./intercept.ts", import.meta.url));
+const TABLE_PRELOAD = fileURLToPath(new URL("./table-preload.ts", import.meta.url));
 
 export interface RunResult {
   exitCode: number | null;
@@ -29,10 +31,23 @@ export interface RunOptions {
   cwd: string;
   /** §13.1 — a fresh `COREPACK_HOME` per test. */
   home: string;
-  /** Overrides applied last; an explicit `undefined` removes the variable. */
+  /**
+   * Overrides applied last; an explicit `undefined` removes the variable.
+   *
+   * That deletion is also §13.1's exemption for §17.9 rows 216–217, which have
+   * to set the store-home variables themselves rather than inherit the fresh
+   * `COREPACK_HOME` above: `env: { COREPACK_HOME: undefined }` leaves the row
+   * on §07.1's fallback chain, which `cleanEnv` keeps inside the fixture.
+   */
   env?: Record<string, string | undefined>;
   /** Route the embedded table's hardcoded hosts at this mock. */
   registry?: MockRegistry | string;
+  /**
+   * §17.9 — table entries to merge into the spawned tool's embedded table,
+   * before its entry point runs. See `table-fixture.ts`; a test that also builds
+   * artifacts for them calls `useFixtureTable()` so this process's table agrees.
+   */
+  table?: FixtureTable;
   /** Written to the child's stdin, which is then closed. */
   input?: string;
   /** Run a *copy* of the tool (see `copyTool`) rather than `src/bin.ts`. */
@@ -86,7 +101,17 @@ export function cleanEnv(): Record<string, string> {
     if (key.startsWith("COREPACK_") || key === "DEBUG" || key === "FORCE_COLOR") continue;
     // `CI` gates the interactive half of the download prompt (§05.5), and
     // `NODE_OPTIONS` could smuggle a loader into the child.
-    if (key === "CI" || key === "NODE_OPTIONS" || key === "JUP_MOCK_ORIGIN") continue;
+    if (key === "CI" || key === "NODE_OPTIONS") continue;
+    // The harness's own preload channels (§17.9). Stripped so that a value left
+    // in a developer's environment cannot reach a row that did not ask for one.
+    if (key === "JUP_MOCK_ORIGIN" || key === "JUP_TEST_TABLE") continue;
+    // §07.1's and §10.4's fallback chains, which a row that unsets the store
+    // home is at the mercy of: with the developer's own `XDG_CACHE_HOME` still
+    // in the environment, §17.9 row 216's `<cache>/jup` would be *their* cache
+    // rather than the fixture's. `HOME` is repointed below, so dropping these
+    // leaves the whole chain inside the fixture. The rows that want either set
+    // it themselves.
+    if (key === "XDG_CACHE_HOME" || key === "XDG_BIN_HOME") continue;
     // §14.8 makes the proxy variables live with no second opt-in, so a developer
     // who has one configured would otherwise route every fixture request through
     // it. The rows that want a proxy set these themselves.
@@ -113,11 +138,22 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
   env.PREFIX = options.home;
   env.npm_config_prefix = options.home;
 
+  const bin = options.bin ?? BIN;
+
   const nodeArgs: string[] = [];
   if (options.registry !== undefined) {
     env.JUP_MOCK_ORIGIN =
       typeof options.registry === "string" ? options.registry : options.registry.origin;
     nodeArgs.push("--import", INTERCEPT);
+  }
+  if (options.table !== undefined) {
+    // The table module *this* run will load, which is the copy's own when
+    // `options.bin` names one (`copyTool`).
+    env.JUP_TEST_TABLE = JSON.stringify({
+      module: pathToFileURL(join(dirname(bin), "config", "table.ts")).href,
+      tools: options.table,
+    });
+    nodeArgs.push("--import", TABLE_PRELOAD);
   }
 
   for (const [key, value] of Object.entries(options.env ?? {})) {
@@ -125,7 +161,7 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
     else env[key] = value;
   }
 
-  const child = spawn(process.execPath, [...nodeArgs, options.bin ?? BIN, ...args], {
+  const child = spawn(process.execPath, [...nodeArgs, bin, ...args], {
     cwd: options.cwd,
     env,
     stdio: options.inheritStdio ? ["pipe", "inherit", "inherit"] : "pipe",

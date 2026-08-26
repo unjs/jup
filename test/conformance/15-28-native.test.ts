@@ -160,9 +160,11 @@ function band(bin: Record<string, string>): unknown {
 /**
  * One table entry, and nothing else: `{platform}`/`{arch}` in the `url`,
  * `exec: "native"` on the band, and a `bin` map naming a file with no extension
- * at all. No code accompanies it, which is §15.21's data-only requirement.
+ * at all. No code accompanies it, which is §15.21's data-only requirement — and
+ * §17.3 R3 says the same of a role: `roles` is one more field of that data.
  */
 const DEFINITION = {
+  roles: ["package-manager"],
   default: REFERENCE,
   fetchLatestFrom: REGISTRY_SPEC,
   transparent: { commands: [] },
@@ -195,7 +197,7 @@ let toolBin: string;
 function patchTable(bin: string, name: string, definition: unknown): void {
   const file = join(dirname(bin), "config", "table.ts");
   const source = readFileSync(file, "utf8");
-  const anchor = "export const DEFINITIONS: Record<string, PackageManagerDefinition> = {";
+  const anchor = "export const DEFINITIONS: Record<string, Tool> = {";
   if (!source.includes(anchor)) {
     throw new Error(`The table's declaration moved; this fixture patches ${file} by text`);
   }
@@ -203,7 +205,7 @@ function patchTable(bin: string, name: string, definition: unknown): void {
     file,
     source.replace(
       anchor,
-      `${anchor}\n  ${name}: ${JSON.stringify(definition, undefined, 2)} as unknown as PackageManagerDefinition,\n`,
+      `${anchor}\n  ${name}: ${JSON.stringify(definition, undefined, 2)} as unknown as Tool,\n`,
     ),
   );
 }

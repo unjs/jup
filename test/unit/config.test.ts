@@ -12,7 +12,7 @@ import {
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
-import type { BinSpec, PackageManagerSpec, TrustedKey, TrustStore } from "../../src/types.ts";
+import type { BinSpec, ToolSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
   it("supports exactly npm, pnpm and yarn", () => {
@@ -370,7 +370,7 @@ describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
   const locator = { name: "bunny", reference: "1.0.0" };
-  const specFor = (url: string): PackageManagerSpec =>
+  const specFor = (url: string): ToolSpec =>
     ({ url, bin: { bunny: "./bin/bunny" }, registry: { type: "npm", package: "bunny" } }) as const;
 
   it("substitutes every placeholder, including repeats", () => {

@@ -20,7 +20,7 @@ changed and why, in the imperative.
 ## Verifying
 
 `pnpm test` runs lint, typecheck, and the suite with coverage; `pnpm vitest run` is the
-suite alone. The green baseline is **1648 passed, 3 skipped** — the skips are
+suite alone. The green baseline is **1654 passed, 3 skipped** — the skips are
 platform-conditional. `pnpm test:corepack` runs corepack's own suite against jup, where
 every skip is a deliberate §14 divergence with a stated reason.
 

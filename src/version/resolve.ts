@@ -18,13 +18,7 @@ import {
   satisfiesWithPrereleases,
 } from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "../cache/store.ts";
-import type {
-  Descriptor,
-  LazyLocator,
-  Locator,
-  PackageManagerSpec,
-  RegistrySpec,
-} from "../types.ts";
+import type { Descriptor, LazyLocator, Locator, RegistrySpec, ToolSpec } from "../types.ts";
 
 export interface ResolveOptions {
   allowTags?: boolean;
@@ -53,7 +47,7 @@ export interface ResolveOptions {
  * fails outright behind a firewall, and leaks traffic the user asked to keep
  * internal everywhere else.
  */
-function registryFor(spec: PackageManagerSpec): RegistrySpec {
+function registryFor(spec: ToolSpec): RegistrySpec {
   return hasRegistryOverride() && spec.npmRegistry !== undefined ? spec.npmRegistry : spec.registry;
 }
 

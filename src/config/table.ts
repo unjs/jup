@@ -13,16 +13,11 @@
 
 import { messages, UsageError } from "../errors.ts";
 import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
-import type {
-  Locator,
-  NpmRegistrySpec,
-  PackageManagerDefinition,
-  PackageManagerSpec,
-  RegistrySpec,
-} from "../types.ts";
+import type { Locator, NpmRegistrySpec, RegistrySpec, Role, Tool, ToolSpec } from "../types.ts";
 
-export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
+export const DEFINITIONS: Record<string, Tool> = {
   npm: {
+    roles: ["package-manager"],
     default: "11.14.1+sha1.4a6839650da0005f323fec6abd39d77ee24f842f",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
@@ -42,6 +37,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   },
 
   pnpm: {
+    roles: ["package-manager"],
     default: "11.1.2+sha1.ed39d701687311ce9345771c62376f9fe7286694",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
@@ -79,6 +75,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   },
 
   yarn: {
+    roles: ["package-manager"],
     // §15.33 bullet 2 overrides §02.5's literal and §14.21's "deliberately not
     // changed": an embedded `default` MUST track the current supported major,
     // and Classic 1.22.22 has been unsupported since 2020 (#812). So `default`
@@ -126,9 +123,16 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   },
 };
 
-export const SUPPORTED_NAMES: readonly string[] = Object.keys(DEFINITIONS);
+/**
+ * Every name the table carries.
+ *
+ * The array identity is stable and its contents are refilled by
+ * {@link reindexTable}, so a caller may hold on to it.
+ */
+const NAMES: string[] = [];
+export const SUPPORTED_NAMES: readonly string[] = NAMES;
 
-export function getDefinition(name: string): PackageManagerDefinition | undefined {
+export function getDefinition(name: string): Tool | undefined {
   return Object.hasOwn(DEFINITIONS, name) ? DEFINITIONS[name] : undefined;
 }
 
@@ -137,13 +141,32 @@ export function isSupportedPackageManager(name: string): boolean {
 }
 
 /**
+ * §17.3 R1 — the roles this tool fills, or `undefined` for a name the table
+ * does not carry.
+ *
+ * One entry per tool, not per role: a tool that is both a runtime and a package
+ * manager has one directory, one recorded default, and two roles here.
+ */
+export function getRoles(name: string): readonly Role[] | undefined {
+  return getDefinition(name)?.roles;
+}
+
+/**
+ * §17.3 R4 — does this tool fill that role?
+ *
+ * The one place a role may be *asked about* outside the table. R3 forbids
+ * branching on a literal role anywhere else, so a caller passes the role its
+ * own concern is scoped to rather than testing for a spelling.
+ */
+export function hasRole(name: string, role: Role): boolean {
+  return getDefinition(name)?.roles.includes(role) === true;
+}
+
+/**
  * §02.3 — reverse the ordered range list, first match wins, using
  * prerelease-tolerant satisfaction. `undefined` when no band covers the version.
  */
-function findBand(
-  definition: PackageManagerDefinition,
-  version: string,
-): PackageManagerSpec | undefined {
+function findBand(definition: Tool, version: string): ToolSpec | undefined {
   for (let i = definition.ranges.length - 1; i >= 0; i--) {
     const entry = definition.ranges[i]!;
     if (satisfiesWithPrereleases(version, entry[0])) return entry[1];
@@ -162,7 +185,7 @@ function findBand(
  * {@link hasRangeBand} lets `install.resolveBin` tell "the table knows this
  * version" from "the table is guessing".
  */
-export function getSpecFor(name: string, version: string): PackageManagerSpec {
+export function getSpecFor(name: string, version: string): ToolSpec {
   const definition = getDefinition(name);
   if (definition === undefined) throw new UsageError(messages.unsupportedByBuild(name));
 
@@ -179,7 +202,7 @@ export function hasRangeBand(name: string, version: string): boolean {
  * The embedded table's spec for this locator, or `undefined` when there is none
  * — an unknown package manager, or a URL reference, which is its own spec.
  */
-export function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
+export function getTableSpec(locator: Locator): ToolSpec | undefined {
   const parsed = parse(locator.reference);
   if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
   return getSpecFor(locator.name, parsed.version);
@@ -231,11 +254,7 @@ const ARCHITECTURES: Record<string, string> = {
  * unrecognised. It is deliberately not a 404 later on: a URL that still contains
  * the literal `{arch}` blames the registry for the host's own unsupportedness.
  */
-export function resolveSpecUrl(
-  spec: PackageManagerSpec,
-  locator: Locator,
-  version: string,
-): string {
+export function resolveSpecUrl(spec: ToolSpec, locator: Locator, version: string): string {
   const url = spec.url.replace("{}", version);
 
   const wantsPlatform = url.includes("{platform}");
@@ -301,15 +320,20 @@ export function isEmbeddedReference(name: string, reference: string): boolean {
 const BINARIES_BY_NAME = new Map<string, string[]>();
 const NAME_BY_BINARY = new Map<string, string>();
 
-for (const [name, definition] of Object.entries(DEFINITIONS)) {
-  const binNames = new Set<string>();
-  for (const [, spec] of definition.ranges) {
-    for (const binName of Array.isArray(spec.bin) ? spec.bin : Object.keys(spec.bin)) {
-      binNames.add(binName);
-      if (!NAME_BY_BINARY.has(binName)) NAME_BY_BINARY.set(binName, name);
+function indexBinaries(): void {
+  BINARIES_BY_NAME.clear();
+  NAME_BY_BINARY.clear();
+
+  for (const [name, definition] of Object.entries(DEFINITIONS)) {
+    const binNames = new Set<string>();
+    for (const [, spec] of definition.ranges) {
+      for (const binName of Array.isArray(spec.bin) ? spec.bin : Object.keys(spec.bin)) {
+        binNames.add(binName);
+        if (!NAME_BY_BINARY.has(binName)) NAME_BY_BINARY.set(binName, name);
+      }
     }
+    BINARIES_BY_NAME.set(name, [...binNames]);
   }
-  BINARIES_BY_NAME.set(name, [...binNames]);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -331,16 +355,40 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
 const NAME_BY_REGISTRY = new Map<RegistrySpec, string>();
 const NPM_ALTERNATIVE_BY_REGISTRY = new Map<RegistrySpec, NpmRegistrySpec>();
 
-for (const [name, definition] of Object.entries(DEFINITIONS)) {
-  NAME_BY_REGISTRY.set(definition.fetchLatestFrom, name);
-  for (const [, spec] of definition.ranges) {
-    NAME_BY_REGISTRY.set(spec.registry, name);
-    if (spec.npmRegistry !== undefined) {
-      NAME_BY_REGISTRY.set(spec.npmRegistry, name);
-      NPM_ALTERNATIVE_BY_REGISTRY.set(spec.registry, spec.npmRegistry);
+function indexRegistries(): void {
+  NAME_BY_REGISTRY.clear();
+  NPM_ALTERNATIVE_BY_REGISTRY.clear();
+
+  for (const [name, definition] of Object.entries(DEFINITIONS)) {
+    NAME_BY_REGISTRY.set(definition.fetchLatestFrom, name);
+    for (const [, spec] of definition.ranges) {
+      NAME_BY_REGISTRY.set(spec.registry, name);
+      if (spec.npmRegistry !== undefined) {
+        NAME_BY_REGISTRY.set(spec.npmRegistry, name);
+        NPM_ALTERNATIVE_BY_REGISTRY.set(spec.registry, spec.npmRegistry);
+      }
     }
   }
 }
+
+/**
+ * Derive {@link SUPPORTED_NAMES} and both index maps from {@link DEFINITIONS}.
+ *
+ * Called once at module load, which is the only call `src/` makes: the table is
+ * compiled in and nothing changes it at runtime (§01.7, §15.21). The export
+ * exists for §17.9's test-only table fixture, which substitutes a table before
+ * the entry point runs and needs the derivations to describe what it put there —
+ * re-deriving from the one source beats a harness that keeps its own copy of
+ * this loop and drifts.
+ */
+export function reindexTable(): void {
+  NAMES.length = 0;
+  NAMES.push(...Object.keys(DEFINITIONS));
+  indexBinaries();
+  indexRegistries();
+}
+
+reindexTable();
 
 /** The package manager whose table entry declares this registry spec, if any. */
 export function packageManagerForRegistry(spec: RegistrySpec): string | undefined {

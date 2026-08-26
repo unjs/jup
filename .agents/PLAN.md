@@ -7,7 +7,7 @@ Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
 ## Where things stand — `2b80f1e`, 2026-08-26
 
 * **§01–§16 are implemented.** Every row of §13 (1–147) and §15.38 (148–207) has a test
-  whose title names it. `pnpm vitest run`: **1648 passed, 3 skipped**, the skips all
+  whose title names it. `pnpm vitest run`: **1654 passed, 3 skipped**, the skips all
   platform-conditional (Windows, root, no TTY). `pnpm test:corepack` (corepack's own
   suite): **103 passed, 1 expected fail, 37 skipped**, each skip a §14 divergence with a
   stated reason.
@@ -16,22 +16,51 @@ Section-by-section verdicts on §15 live in [`S15-AUDIT.md`](./S15-AUDIT.md).
   `JUP_`/`COREPACK_` pair resolution in `src/config/env-vars.ts`. The latter is **tier 1
   only** — C4's second tier, under which §11.5's and §15.37's invented variables are named
   `JUP_` and merely *accept* the `COREPACK_` spelling, is not implemented; the table treats
-  every variable as an equal pair. Nothing else — no scope words, no roles, no rename of
-  the store home, marker, env file, or lockfile. Rows 208–233 have no tests.
+  every variable as an equal pair. D0 has since landed §17.3's noun and its roles as data,
+  plus §17.9's table fixture. Nothing else — no scope words, no role-sensitive behaviour, no
+  rename of the store home, marker, env file, or lockfile. Rows 208–233 have no tests.
 * **Nothing is published**; `package.json` is at `0.0.0`.
 
 ## Remaining work — §17
 
 Order is dependency order. D0 unblocks D2 and D4; the rest are independent.
 
-### D0 — The test-only table fixture §17.9
+### D0 — The test-only table fixture §17.9 — **done**
 
-§02.5 has no runtime, so every role-sensitive requirement is vacuously satisfied by an
-implementation that ignores roles. The harness needs to substitute a table carrying one
-`roles: ["runtime"]` tool and one dual-role tool, served by the existing mock registry.
-A test seam only: not reachable from a released binary, the environment, or any project
-file (§01.7, §15.21). Also amend the harness so rows 216–217 set the store-home variables
-themselves instead of inheriting a fresh home (§13.1 exempts them).
+`Role`, `Tool` and `ToolSpec` are in `src/types.ts` (§17.3's rename, no aliases kept), every
+§02.5 entry carries `roles: ["package-manager"]`, and `config/table.ts` exports `getRoles`
+and `hasRole`. **Nothing branches on a role yet** — R3's seam is open, R4's four behaviours
+are D2's and D4's.
+
+The seam, for the steps that use it:
+
+* `run(args, { …, table })` merges entries into the *spawned* tool's table.
+  `test/conformance/_harness/table-preload.ts` is a second `--import` module beside
+  `intercept.ts`: it imports the very `config/table.ts` the tool is about to load — named
+  in the payload, so `copyTool()`'s copy is patched rather than the checkout's — mutates
+  the exported `DEFINITIONS`, and calls `table.ts`'s new `reindexTable()`, which re-derives
+  `SUPPORTED_NAMES` and the binary/registry maps that were built at module load.
+* `useFixtureTable(tools?)` does the same to *this* process's table, so
+  `packageManagerTarball` / `seedPackageManager` read the fixture's own `bin` layout out of
+  the table. Call both: they are different processes.
+* `FIXTURE_TOOLS` is `fixture-runtime` (`roles: ["runtime"]`) and `fixture-dual` (both
+  roles), npm-protocol entries on `registry.npmjs.org` so the existing mock serves them.
+  `FIXTURE_VERSION` is `1.0.0`; publish it yourself. Names chosen to be clear of R8's
+  `SCOPE_WORDS`, verbs and `RESERVED`, so D1's build-time assertion has nothing to trip on.
+* Entries are merged, not substituted, and JSON is the wire format — so a step needing a
+  different shape (D4's C7 `node`-like interpreter, an overridden `npm`) passes its own
+  entries without another harness change.
+* The payload variable, `JUP_TEST_TABLE`, is read **only** by the preload; `src/` has no
+  reader and `cleanEnv()` strips an inherited one. `test/conformance/17-00-fixture.test.ts`
+  is the seam's own test — not a numbered row — and asserts both halves: the fixtures
+  install and run through the mock, and a run that passes no `table` has never heard of
+  them.
+
+The §13.1 amendment needed nothing new: `options.env`'s explicit `undefined` already
+deletes `COREPACK_HOME`, which is all rows 216–217 want. What was missing was isolation —
+`cleanEnv()` passed the developer's own `XDG_CACHE_HOME` and `XDG_BIN_HOME` through, so a
+row on §07.1's fallback chain would have read *their* cache. Both are now stripped, `HOME`
+is already repointed at the fixture, and the rows that want either set it themselves.
 
 ### D1 — The command router §17.4, C1′, C6, C10
 
@@ -46,7 +75,7 @@ rewrite: same sentence, same punctuation, same interpolations, and never applied
 
 ### D2 — Roles in the data model §17.3, §17.5
 
-R1–R6 (one entry per tool, roles as data), R10's inference for an unscoped command, R11's
+R1–R6's remainder (the types and the roles landed in D0), R10's inference for an unscoped command, R11's
 dual-role specs, and R4's per-role enforcement — a runtime-only pin must not produce a
 package-manager mismatch error. R14 parses, validates, and reconciles `devEngines.runtime`
 while it stays inert; R15 keeps `engines.node` out of selection; R16 defers `.nvmrc` and
@@ -82,7 +111,8 @@ reachable without any `PATH` of the user's.
 
 ## Standing hazards
 
-* **The warm byte ceiling is at 204,000** (`test/unit/main.test.ts`). The next warm-path
+* **The warm byte ceiling is at 206,000** (`test/unit/main.test.ts`), raised from 204,000
+  by D0's roles (+1,799 source bytes; measured, `warm.mjs` 79,525 -> 79,952). The next warm-path
   change raises it deliberately, with a reason. It is a tripwire, not a budget. The
   companion assertion — the modules statically reachable from `src/shim.ts` **equal**
   `build.config.ts`'s `WARM_MODULES` — is what pins the emitted chunk; a new static import
@@ -99,7 +129,9 @@ reachable without any `PATH` of the user's.
 * **A mock that collapses two sources into one cannot distinguish them.** Two high-severity
   bugs survived a green suite because the harness rewrote every host to a single mock, so
   "the mirror was used" passed whether or not the substitution happened. D0's fixture is
-  the same shape of risk.
+  the same shape of risk, which is why `17-00-fixture.test.ts` asserts that a run *without*
+  `table` does not see the fixtures — a substitution that silently did nothing would
+  otherwise leave every role row passing against three package managers.
 * **A plan organised by value will miss requirements.** Phase 2 shipped twelve items and
   left eight §15 sections unassigned; a walk of the spec found five real gaps. Walk §17
   section by section before ranking anything.

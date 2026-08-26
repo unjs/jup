@@ -88,11 +88,22 @@ export interface UrlRegistrySpec {
 export type RegistrySpec = NpmRegistrySpec | UrlRegistrySpec;
 
 /* -------------------------------------------------------------------------- */
-/* Package manager definitions — §02.3, §02.4                                 */
+/* Tool definitions — §02.3, §02.4, §17.3                                     */
 /* -------------------------------------------------------------------------- */
 
-/** §02.4 — how to download and run one version band of a package manager. */
-export interface PackageManagerSpec {
+/**
+ * §17.3 — what a tool is *for*.
+ *
+ * A package manager installs a project's dependencies; a runtime runs its code
+ * (§17.8). One tool may do both — Bun and Deno are the obvious candidates —
+ * which is why {@link Tool.roles} is a set rather than a single value, and why
+ * a dual-role tool is **one** entry with one store directory rather than two
+ * (R1).
+ */
+export type Role = "package-manager" | "runtime";
+
+/** §02.4 — how to download and run one version band of a tool. */
+export interface ToolSpec {
   /** Download URL template; `{}` is replaced by the version. */
   url: string;
   bin: BinSpec | BinList;
@@ -119,13 +130,21 @@ export interface PackageManagerSpec {
 }
 
 /**
- * §02.3 — one supported package manager.
+ * §02.3, §17.3 — one supported tool.
  *
  * `ranges` is an **ordered list**, not a map: lookup reverses it and takes the
  * first entry whose range is satisfied, so **last declared wins**. Dist-tags are
  * always resolved against the **last** entry's registry.
  */
-export interface PackageManagerDefinition {
+export interface Tool {
+  /**
+   * §17.3 R1 — non-empty, and the *only* place a role is written down.
+   *
+   * R3 makes roles data: adding a runtime is an entry in §02.5's table and no
+   * code, so nothing outside the table and R4's four role-sensitive behaviours
+   * may branch on a literal role.
+   */
+  roles: Role[];
   /** Compiled-in fallback version, hash-pinned. */
   default: string;
   /** Where "what's the newest stable?" is answered. */
@@ -136,7 +155,7 @@ export interface PackageManagerDefinition {
     /** Command prefixes that bypass the project check. */
     commands: string[][];
   };
-  ranges: Array<readonly [range: string, spec: PackageManagerSpec]>;
+  ranges: Array<readonly [range: string, spec: ToolSpec]>;
 }
 
 /* -------------------------------------------------------------------------- */
