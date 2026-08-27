@@ -126,7 +126,7 @@ describe("§15.38 TLS (§15.4)", () => {
       const host = new URL(front.origin).host;
       expect(result.stderr).toContain(messages.tlsUnknownAuthority(host));
       expect(result.stderr).toContain(
-        `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.`,
+        `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.`,
       );
       // §15.4 forbids surfacing a bare transport error for this case.
       expect(result.stderr).not.toContain("Error when performing the request");

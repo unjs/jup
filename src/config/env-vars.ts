@@ -101,7 +101,7 @@ export const ENV = {
 export const SYSTEM_ENV = {
   /** §08.6 — any non-empty value means an automated, non-interactive run. */
   CI: "CI",
-  /** §16 — a value containing `corepack` enables diagnostic logging. */
+  /** §16 — a value containing `jup` (or `corepack`) enables diagnostic logging. */
   DEBUG: "DEBUG",
   /** §07.1 / §10.4 — store and shim-directory fallback chains. */
   HOME: "HOME",

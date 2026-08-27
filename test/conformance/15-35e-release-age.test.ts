@@ -229,7 +229,7 @@ describe("§15.35e COREPACK_MINIMUM_RELEASE_AGE", () => {
 
       expect(result.exitCode, `COREPACK_MINIMUM_RELEASE_AGE=${value}`).toBe(1);
       expect(result.stderr).toContain(
-        "COREPACK_MINIMUM_RELEASE_AGE must be a non-negative number of hours",
+        "JUP_MINIMUM_RELEASE_AGE must be a non-negative number of hours",
       );
       // And it did not quietly resolve anything first.
       expect(result.stdout).toBe("");
@@ -260,7 +260,7 @@ describe("§15.35e — an undated source fails closed", () => {
     expect(result.stderr).toContain("publishes no release dates");
     expect(result.stderr).toContain("https://repo.yarnpkg.com/tags");
     expect(result.stderr).toContain("pin an exact version");
-    expect(result.stderr).toContain("COREPACK_NPM_REGISTRY");
+    expect(result.stderr).toContain("JUP_NPM_REGISTRY");
   });
 
   it("203: an exact Yarn Berry pin is unaffected — only implicit resolution refuses", async () => {

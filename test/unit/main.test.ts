@@ -393,7 +393,7 @@ describe("presentError — §08.4, §12.1", () => {
     expect(code).toBe(1);
     expect(sink.err.join("")).toBe("");
     expect(sink.out.join("")).toBe(
-      "Usage Error: boom\n\n$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>\n",
+      "Usage Error: boom\n\n$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>\n",
     );
   });
 

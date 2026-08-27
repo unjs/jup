@@ -1111,7 +1111,7 @@ export function formatReport(report: InfoReport): string {
   }
   const variables = Object.keys(report.environment);
   if (variables.length === 0) {
-    out.push(line(`variables`, `(no COREPACK_* variables set)`));
+    out.push(line(`variables`, `(no JUP_* or COREPACK_* variables set)`));
   } else {
     variables.forEach((name, index) => {
       out.push(line(index === 0 ? `variables` : ``, `${name}=${report.environment[name]!}`));
@@ -1268,19 +1268,19 @@ function wantsJson(args: string[], command: string): boolean {
   return json;
 }
 
-/** §15.30 — `corepack info [--json]`. Always exits 0 unless the CLI was misused. */
+/** §15.30 — `jup info [--json]`. Always exits 0 unless the CLI was misused. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function cmdInfo(args: string[]): Promise<number> {
-  const json = wantsJson(args, `corepack info`);
+  const json = wantsJson(args, `jup info`);
   const report = buildReport();
   process.stdout.write(json ? `${JSON.stringify(report, undefined, 2)}\n` : formatReport(report));
   return 0;
 }
 
-/** §15.19 / §15.30 — `corepack cache list [--json]`, the aliased subset. */
+/** §15.19 / §15.30 — `jup cache list [--json]`, the aliased subset. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function cmdCacheList(args: string[]): Promise<number> {
-  const json = wantsJson(args, `corepack cache list`);
+  const json = wantsJson(args, `jup cache list`);
   const report = buildReport();
   process.stdout.write(
     json ? `${JSON.stringify(cacheListView(report), undefined, 2)}\n` : formatCacheList(report),

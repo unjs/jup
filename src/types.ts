@@ -100,7 +100,7 @@ export interface PackageManagerSpec {
   registry: RegistrySpec;
   /** Used *instead of* `registry` when the user has set a custom npm registry (§05.3). */
   npmRegistry?: NpmRegistrySpec;
-  /** argv to run after `corepack use` / `up`. */
+  /** argv to run after `jup use` / `up`. */
   commands?: { use?: string[] };
   /**
    * §15.28 — how the `bin` targets are executed.

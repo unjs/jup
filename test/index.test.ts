@@ -21,16 +21,16 @@ describe("errors", () => {
       `The value of devEngines.packageManager.version "yarn@1.x" is not a valid semver range`,
     );
     expect(messages.devEnginesNotObject(10)).toBe(
-      `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
+      `! jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
     );
   });
 
   it("keeps the load-bearing env var names in the latest-version failure", () => {
     const message = messages.cannotDownloadLatest("yarn");
-    expect(message).toContain("COREPACK_INTEGRITY_KEYS");
-    expect(message).toContain("COREPACK_DEFAULT_TO_LATEST");
-    expect(message).not.toContain("COREPACK_INTEGRITY_CHECK");
-    expect(message).not.toContain("COREPACK_USE_LATEST");
+    expect(message).toContain("JUP_INTEGRITY_KEYS");
+    expect(message).toContain("JUP_DEFAULT_TO_LATEST");
+    expect(message).not.toContain("INTEGRITY_CHECK");
+    expect(message).not.toContain("USE_LATEST");
   });
 
   it("keeps the trailing space on the download prompt", () => {

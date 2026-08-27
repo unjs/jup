@@ -292,7 +292,7 @@ describe("§13.11 enable / disable", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(`Usage Error: Invalid package manager name 'cargo'`);
-    expect(result.stdout).toContain("$ corepack enable");
+    expect(result.stdout).toContain("$ jup enable");
     expect(() => lstatSync(join(shimDir, "yarn"))).toThrow();
   });
 

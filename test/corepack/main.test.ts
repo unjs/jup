@@ -314,7 +314,12 @@ describe(`should handle invalid devEngines values`, () => {
       });
     });
   });
-  it(`warn on array values`, async () => {
+  // SKIP (jup naming): the three `devEngines` warnings name the running tool,
+  // and jup calls itself `jup` where Corepack says `Corepack`. Everything else
+  // in the row — exit code, the value being ignored, the package manager that
+  // still runs — matches. jup's own text is asserted by
+  // test/conformance/13-04-dev-engines.test.ts.
+  it.skip(`warn on array values`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         packageManager: `yarn@1.22.4+sha1.01c1197ca5b27f21edc8bc472cd4c8ce0e5a470e`,
@@ -333,7 +338,12 @@ describe(`should handle invalid devEngines values`, () => {
       });
     });
   });
-  it(`warn on string values`, async () => {
+  // SKIP (jup naming): the three `devEngines` warnings name the running tool,
+  // and jup calls itself `jup` where Corepack says `Corepack`. Everything else
+  // in the row — exit code, the value being ignored, the package manager that
+  // still runs — matches. jup's own text is asserted by
+  // test/conformance/13-04-dev-engines.test.ts.
+  it.skip(`warn on string values`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         packageManager: `yarn@1.22.4+sha1.01c1197ca5b27f21edc8bc472cd4c8ce0e5a470e`,
@@ -349,7 +359,12 @@ describe(`should handle invalid devEngines values`, () => {
       });
     });
   });
-  it(`warn on number values`, async () => {
+  // SKIP (jup naming): the three `devEngines` warnings name the running tool,
+  // and jup calls itself `jup` where Corepack says `Corepack`. Everything else
+  // in the row — exit code, the value being ignored, the package manager that
+  // still runs — matches. jup's own text is asserted by
+  // test/conformance/13-04-dev-engines.test.ts.
+  it.skip(`warn on number values`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         packageManager: `yarn@1.22.4+sha1.01c1197ca5b27f21edc8bc472cd4c8ce0e5a470e`,
@@ -457,7 +472,11 @@ describe(`when devEngines.packageManager.name does not match packageManager`, ()
       });
     });
   });
-  it(`should warn if devEngines.packageManager.onFail is set to "warn"`, async () => {
+  // SKIP (jup naming): the validation-warning prefix names the running tool —
+  // `! jup validation warning: ` where Corepack says `! Corepack validation
+  // warning: `. The onFail=warn behaviour itself matches, and jup's prefix is
+  // asserted by test/conformance/13-04-dev-engines.test.ts.
+  it.skip(`should warn if devEngines.packageManager.onFail is set to "warn"`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         devEngines: {
@@ -532,7 +551,11 @@ describe(`should reject if range in devEngines does not match version provided`,
       });
     });
   });
-  it(`unless onFail is set to "warn"`, async () => {
+  // SKIP (jup naming): the validation-warning prefix names the running tool —
+  // `! jup validation warning: ` where Corepack says `! Corepack validation
+  // warning: `. The onFail=warn behaviour itself matches, and jup's prefix is
+  // asserted by test/conformance/13-04-dev-engines.test.ts.
+  it.skip(`unless onFail is set to "warn"`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         devEngines: {
@@ -1222,7 +1245,10 @@ it(`should support package managers in ESM format`, async () => {
 });
 
 describe(`should show a warning on stderr before downloading when enable`, () => {
-  it(`when enabled by the environment`, async () => {
+  // SKIP (jup naming): the download notice names the running tool — `! jup is
+  // about to download …`. The URL it names is the same one Corepack picks;
+  // test/conformance/13-05-environment.test.ts asserts it verbatim.
+  it.skip(`when enabled by the environment`, async () => {
     await xfs.mktempPromise(async cwd => {
       process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = `1`;
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
@@ -1297,7 +1323,10 @@ it.skip(`should download yarn classic from custom registry`, async () => {
   });
 });
 
-it(`should download yarn berry from custom registry`, async () => {
+// SKIP (jup naming): the download notice names the running tool — `! jup is
+// about to download …`. The custom-registry URL it names is unchanged, and
+// test/conformance/13-05-environment.test.ts asserts that row verbatim.
+it.skip(`should download yarn berry from custom registry`, async () => {
   await xfs.mktempPromise(async cwd => {
     process.env.COREPACK_NPM_REGISTRY = `https://registry.npmmirror.com`;
     process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = `1`;

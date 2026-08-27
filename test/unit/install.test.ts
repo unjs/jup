@@ -905,7 +905,7 @@ describe("download prompt (§05.5, tests 46, 47)", () => {
     await ensureInstalled({ name: "yarn", reference });
 
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
-      "! Corepack is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n",
+      "! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n",
     ]);
     // §08.6 — stdin is never touched when the confirmation is skipped.
     expect(resume).not.toHaveBeenCalled();
@@ -949,7 +949,7 @@ describe("download prompt (§05.5, tests 46, 47)", () => {
     // The metadata request came first and printed nothing: the notice is for
     // artifacts only.
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
-      `! Corepack is about to download ${origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
+      `! jup is about to download ${origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
     ]);
   });
 

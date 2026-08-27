@@ -217,7 +217,7 @@ describe("readCaBundle", () => {
 
     expect(() => readCaBundle(path)).toThrow(messages.cafileUnreadable(path));
     expect(() => readCaBundle(path)).toThrow(
-      `Unable to read the TLS certificate bundle at ${path} (set by COREPACK_CAFILE)`,
+      `Unable to read the TLS certificate bundle at ${path} (set by JUP_CAFILE)`,
     );
   });
 
@@ -270,7 +270,7 @@ describe("classifyTlsFailure (§15.4)", () => {
 
   it("says the three sentences byte for byte", () => {
     expect(messages.tlsUnknownAuthority("npm.corp")).toBe(
-      "TLS certificate verification failed for npm.corp: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.",
+      "TLS certificate verification failed for npm.corp: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.",
     );
     expect(messages.tlsBadValidity("npm.corp")).toBe(
       "TLS certificate for npm.corp is expired or not yet valid (check the system clock).",
@@ -329,7 +329,7 @@ describe("isTlsFailure", () => {
  * ------------------------------------------------------------------ */
 
 describe("an untrusted certificate authority (row 153)", () => {
-  it("names the host, the cause, and COREPACK_CAFILE", async () => {
+  it("names the host, the cause, and JUP_CAFILE", async () => {
     const origin = await startTlsOrigin();
 
     const error = await httpGet(`https://127.0.0.1:${origin.port}/pkg`).catch(
@@ -339,7 +339,7 @@ describe("an untrusted certificate authority (row 153)", () => {
     // Not `Error when performing the request to …`: §15.4 forbids surfacing a
     // bare transport error for exactly this case.
     expect((error as Error).message).toBe(messages.tlsUnknownAuthority(`127.0.0.1:${origin.port}`));
-    expect((error as Error).message).toContain("COREPACK_CAFILE");
+    expect((error as Error).message).toContain("JUP_CAFILE");
     expect((error as Error).message).not.toContain("performing the request");
     // §15.5 — the underlying reason survives, on the chain and in the stack.
     expect((error as Error).cause).toBeDefined();

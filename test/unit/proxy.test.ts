@@ -834,7 +834,7 @@ describe("TLS inside the tunnel (§15.4)", () => {
     // it, and the host named is the one whose certificate it is.
     expect(proxy.connects).toEqual(["example.com:443"]);
     expect((error as Error).message).toBe(messages.tlsUnknownAuthority("example.com"));
-    expect((error as Error).message).toContain("COREPACK_CAFILE");
+    expect((error as Error).message).toContain("JUP_CAFILE");
   });
 
   it("verifies against COREPACK_CAFILE inside the tunnel", async () => {

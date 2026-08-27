@@ -54,7 +54,7 @@ const BERRY_HASH = hashOf(Buffer.from(BERRY, "utf8"));
 const REFUSAL =
   `Refusing to install yarn@4.0.0: https://repo.yarnpkg.com provides no signature ` +
   `and no hash was pinned. Pin a hash in the packageManager field, or set ` +
-  `COREPACK_ALLOW_UNVERIFIED=1.`;
+  `JUP_ALLOW_UNVERIFIED=1.`;
 
 beforeAll(async () => {
   await registry.start();
@@ -117,7 +117,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
     expect(result.stdout).toBe("4.0.0\n");
     // §15.11's opt-out is per-run and must never be silent.
     expect(result.stderr).toBe(
-      `! Installing yarn@4.0.0 from https://repo.yarnpkg.com with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)\n`,
+      `! Installing yarn@4.0.0 from https://repo.yarnpkg.com with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
     );
   });
 
@@ -197,7 +197,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
   });
 
   it("a pinned hash the cache does not prove is not adopted from another pin", async () => {
-    // Recorded against P12 in `.agents/PLAN.md`, traced on the built binary:
+    // Recorded against §15.11 in `.agents/S15-AUDIT.md`, traced on the built binary:
     // §07.2 makes the store directory the plain version, so two references that
     // differ only in their digest share one directory and the second silently
     // runs whatever the first installed. A pin that is never checked is not a

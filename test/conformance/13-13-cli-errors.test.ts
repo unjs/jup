@@ -54,7 +54,7 @@ describe("§13.13 CLI errors", () => {
     expect(result.stdout).toContain(
       `Usage Error: Couldn't find a project in the local directory - please specify the package manager to pack, or run this command from a valid project`,
     );
-    expect(result.stdout).toContain("$ corepack install");
+    expect(result.stdout).toContain("$ jup install");
     expect(result.stderr).toBe("");
   });
 

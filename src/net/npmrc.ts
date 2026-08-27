@@ -64,7 +64,7 @@ export interface NpmrcAuthEntry {
   origin: NpmrcOrigin;
 }
 
-/** What one file contributed, for `corepack info` (§15.30). */
+/** What one file contributed, for `jup info` (§15.30). */
 export interface NpmrcFileReport {
   path: string;
   level: NpmrcLevel;
@@ -577,7 +577,7 @@ export function npmrcAuthorizationFor(
 /* The registry decision — §15.1 precedence, §15.2 per-source overrides         */
 /* -------------------------------------------------------------------------- */
 
-/** Where an effective registry setting came from, for `corepack info` (§15.30). */
+/** Where an effective registry setting came from, for `jup info` (§15.30). */
 export interface RegistryDecision {
   /** The base URL, trailing slashes stripped (§05.2). */
   registry: string;

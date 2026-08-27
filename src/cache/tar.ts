@@ -787,7 +787,7 @@ async function addPath(target: Writable, absolute: string, name: string): Promis
   if (padding(info.size) > 0) await push(target, new Uint8Array(padding(info.size)));
 }
 
-/** gzip tar rooted at `cwd`, containing `paths`. Used by `corepack pack`. */
+/** gzip tar rooted at `cwd`, containing `paths`. Used by `jup pack`. */
 export async function create(cwd: string, paths: string[], outPath: string): Promise<void> {
   const root = resolve(cwd);
   const gzip = createGzip();

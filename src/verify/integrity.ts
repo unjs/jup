@@ -72,7 +72,7 @@ export function assertSupportedAlgo(algo: string, userPinned = false): HashAlgo 
   if (userPinned && WEAK_HASH_ALGOS.has(normalized) && !warnedWeakAlgos.has(normalized)) {
     warnedWeakAlgos.add(normalized);
     advisory(
-      `! Corepack integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
+      `! jup integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
     );
   }
   return normalized as HashAlgo;
@@ -274,7 +274,7 @@ export function verifySignature(input: {
     if (expired) {
       if (ACCEPT_EXPIRED_KEY_WITH_WARNING && verifyEcdsa(expired.key, expired.signature, payload)) {
         advisory(
-          `! Corepack integrity warning: accepting a signature made with the expired key ${expired.key.keyid} (expired ${expired.expires}); check your system clock`,
+          `! jup integrity warning: accepting a signature made with the expired key ${expired.key.keyid} (expired ${expired.expires}); check your system clock`,
         );
         return;
       }

@@ -139,18 +139,19 @@ export function networkError<T extends Error>(error: T, cause: unknown): T {
 }
 
 /** §12.3 — prefix applied when a validation failure warns instead of throwing. */
-export const VALIDATION_WARNING_PREFIX = "! Corepack validation warning: ";
+export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
 
 /**
  * §11.5 — an advisory line **this** implementation adds, which
  * `COREPACK_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
  *
- * Corepack's own six advisory sites — the download notice and its prompt, the
- * auto-pin notice, the three `devEngines` warnings, `enable`/`disable`'s Yarn
- * Switch skip — call `console.warn`/`stderr` directly and are never routed
- * here, because §13's rows and existing CI jobs match their text byte for byte.
- * Routing only what §14/§15 add is what lets "quiet" mean the extra lines
- * rather than a blunt mute that takes the contract text with it (§14.23).
+ * The six advisory sites jup inherits from corepack — the download notice and
+ * its prompt, the auto-pin notice, the three `devEngines` warnings,
+ * `enable`/`disable`'s Yarn Switch skip — call `console.warn`/`stderr` directly
+ * and are never routed here, because §13's rows match their text (jup's name in
+ * place of corepack's) byte for byte. Routing only what §14/§15 add is what
+ * lets "quiet" mean the extra lines rather than a blunt mute that takes the
+ * contract text with it (§14.23).
  *
  * `readEnv`, not `envFlag`: `project/env.ts` imports this module, so reaching
  * for its flag reader would close a cycle over the warm path.
@@ -179,7 +180,7 @@ export const messages = {
     `Invalid package manager specification in ${source} (${raw}); expected a semver version, range, or tag`,
 
   illegalUrl: (raw: string) =>
-    `Illegal use of URL for known package manager. Instead, select a specific version, or set COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (${raw})`,
+    `Illegal use of URL for known package manager. Instead, select a specific version, or set JUP_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (${raw})`,
 
   invalidPackageJson: (relativePath: string) => `Invalid package.json in ${relativePath}`,
 
@@ -187,11 +188,11 @@ export const messages = {
 
   /** Unconditional warning, regardless of `onFail`. Emitted with the `! ` already attached. */
   devEnginesNotObject: (value: unknown) =>
-    `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (${json(value)}) will be ignored.`,
+    `! jup only supports objects as valid value for devEngines.packageManager. The current value (${json(value)}) will be ignored.`,
 
   /** Unconditional warning, regardless of `onFail`. */
   devEnginesArray: () =>
-    `! Corepack does not currently support array values for devEngines.packageManager`,
+    `! jup does not currently support array values for devEngines.packageManager`,
 
   devEnginesBadName: (value: unknown) =>
     `The value of devEngines.packageManager.name ${json(value)} is not a supported string value`,
@@ -224,7 +225,7 @@ export const messages = {
   tagsNotAllowed: () => `Packages managers can't be referenced via tags in this context`,
 
   unsupportedByBuild: (name: string) =>
-    `This package manager (${name}) isn't supported by this corepack build`,
+    `This package manager (${name}) isn't supported by this jup build`,
 
   /**
    * §15.17 — a version no declared band covers. Corepack's equivalent is an
@@ -248,7 +249,7 @@ export const messages = {
     `${name}@${version} declares "bin" ${JSON.stringify(declared)}, but its range band says ${JSON.stringify(band)}. The package won; update the range band.`,
 
   upNotSemver: () =>
-    `The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
+    `The 'jup up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
 
   upNoHighest: (name: string, major: number) =>
     `Failed to find the highest release for ${name} ${major}.x`,
@@ -269,7 +270,7 @@ export const messages = {
    * the user never typed. This is the sentence that names what was asked for.
    */
   versionDoesNotExist: (name: string, version: string, registry: string) =>
-    `${name}@${version} does not exist in ${url_(registry)}. Run 'corepack info' to see the resolved spec and where it came from.`,
+    `${name}@${version} does not exist in ${url_(registry)}. Run 'jup info' to see the resolved spec and where it came from.`,
 
   /**
    * §15.19 — the airgapped diagnostic.
@@ -280,7 +281,7 @@ export const messages = {
    * the difference between a Dockerfile that can be fixed and one that cannot.
    */
   notInCacheOffline: (name: string, range: string) =>
-    `${name}@${range} is not in the cache and network access is disabled. Seed it with 'corepack install -g --cache-only ${name}@${range}', or run 'corepack pack ${name}@${range}' on a networked machine.`,
+    `${name}@${range} is not in the cache and network access is disabled. Seed it with 'jup install -g --cache-only ${name}@${range}', or run 'jup pack ${name}@${range}' on a networked machine.`,
 
   /* §12.5 — project enforcement ------------------------------------------ */
 
@@ -307,10 +308,10 @@ export const messages = {
     `Network access disabled by the environment; can't reach npm repository ${url_(registryUrl)}`,
 
   requestFailed: (url: string) =>
-    `Error when performing the request to ${url_(url)}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
+    `Error when performing the request to ${url_(url)}; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting`,
 
   badStatus: (status: number, url: string) =>
-    `Server answered with HTTP ${status} when performing the request to ${url_(url)}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
+    `Server answered with HTTP ${status} when performing the request to ${url_(url)}; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting`,
 
   noValidTarball: (packageName: string, version: string) =>
     `${packageName}@${version} does not have a valid tarball.`,
@@ -319,12 +320,12 @@ export const messages = {
 
   /**
    * Both env var names here are load-bearing: the conformance suite asserts they
-   * are exactly `COREPACK_INTEGRITY_KEYS` and `COREPACK_DEFAULT_TO_LATEST`, and
-   * asserts the never-existing `COREPACK_INTEGRITY_CHECK` / `COREPACK_USE_LATEST`
-   * do **not** appear.
+   * are exactly `JUP_INTEGRITY_KEYS` and `JUP_DEFAULT_TO_LATEST` — the canonical
+   * spelling of §11's pair (§14.22) — and asserts the never-existing
+   * `INTEGRITY_CHECK` / `USE_LATEST` names do **not** appear.
    */
   cannotDownloadLatest: (packageName: string) =>
-    `Corepack cannot download the latest stable version of ${packageName}; you can disable signature verification by setting COREPACK_INTEGRITY_KEYS to 0 in your env, or instruct Corepack to use the latest stable release known by this version of Corepack by setting COREPACK_DEFAULT_TO_LATEST to 0`,
+    `jup cannot download the latest stable version of ${packageName}; you can disable signature verification by setting JUP_INTEGRITY_KEYS to 0 in your env, or instruct jup to use the latest stable release known by this version of jup by setting JUP_DEFAULT_TO_LATEST to 0`,
 
   /* §15.4 — TLS ------------------------------------------------------------ */
 
@@ -336,7 +337,7 @@ export const messages = {
    * the proxy's when the proxy is itself `https://`.
    */
   tlsUnknownAuthority: (host: string) =>
-    `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point COREPACK_CAFILE at its CA bundle.`,
+    `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.`,
 
   tlsBadValidity: (host: string) =>
     `TLS certificate for ${host} is expired or not yet valid (check the system clock).`,
@@ -349,7 +350,7 @@ export const messages = {
     `! TLS certificate verification is disabled (set by ${source})`,
 
   cafileUnreadable: (path: string) =>
-    `Unable to read the TLS certificate bundle at ${path} (set by COREPACK_CAFILE)`,
+    `Unable to read the TLS certificate bundle at ${path} (set by JUP_CAFILE)`,
 
   cafileEmpty: (path: string) =>
     `The TLS certificate bundle at ${path} contains no PEM certificate`,
@@ -362,11 +363,11 @@ export const messages = {
    * message", and §15.5 requires the underlying reason to survive alongside it.
    */
   networkTimeout: (milliseconds: number, url: string) =>
-    `Timed out after ${milliseconds}ms waiting for ${url_(url)} (set COREPACK_NETWORK_TIMEOUT to allow longer)`,
+    `Timed out after ${milliseconds}ms waiting for ${url_(url)} (set JUP_NETWORK_TIMEOUT to allow longer)`,
 
   /** The last of several attempts; the wrapper above still names the URL. */
   retriesExhausted: (attempts: number) =>
-    `Giving up after ${attempts} attempt${attempts === 1 ? "" : "s"} (set COREPACK_NETWORK_RETRIES to change)`,
+    `Giving up after ${attempts} attempt${attempts === 1 ? "" : "s"} (set JUP_NETWORK_RETRIES to change)`,
 
   /* §12.7 — integrity ----------------------------------------------------- */
 
@@ -393,9 +394,9 @@ export const messages = {
   assertUnableToLocateBinPath: (binName: string) =>
     `Assertion failed: Unable to locate path for bin '${binName}'`,
 
-  /** `hydrate` says `'corepack prepare'` instead — pass the command name. */
+  /** `hydrate` says `'jup prepare'` instead — pass the command name. */
   invalidArchiveFormat: (command: "pack" | "prepare" = "pack") =>
-    `Invalid archive format; did it get generated by 'corepack ${command}'?`,
+    `Invalid archive format; did it get generated by 'jup ${command}'?`,
 
   unsupportedPackageManagerName: (name: string) => `Unsupported package manager '${name}'`,
 
@@ -429,13 +430,13 @@ export const messages = {
 
   allDone: () => `All done!`,
 
-  aboutToDownload: (url: string) => `! Corepack is about to download ${url_(url)}`,
+  aboutToDownload: (url: string) => `! jup is about to download ${url_(url)}`,
 
   /** Trailing space, no newline. */
   downloadPrompt: () => `? Do you want to continue? [Y/n] `,
 
   autoPinNotice: (name: string, reference: string) =>
-    `! The local project doesn't define a 'packageManager' field. Corepack will now add one referencing ${name}@${reference}.`,
+    `! The local project doesn't define a 'packageManager' field. jup will now add one referencing ${name}@${reference}.`,
 
   autoPinDocs: () =>
     `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
@@ -469,7 +470,7 @@ export const messages = {
    * its own replacement, since the rule is about deprecated commands at large.
    */
   deprecatedCommand: (command: string, replacement: string) =>
-    `'corepack ${command}' is deprecated; use 'corepack ${replacement}' instead.`,
+    `'jup ${command}' is deprecated; use 'jup ${replacement}' instead.`,
 
   /**
    * §15.35d — `COREPACK_SPEC_FILE` names a file that is not there. Falling back
@@ -477,7 +478,7 @@ export const messages = {
    * trees whose manifest says the *wrong* thing, so ignoring a typo runs the
    * package manager the file was pointed at to override.
    */
-  specFileMissing: (path: string) => `COREPACK_SPEC_FILE points at ${path}, which does not exist`,
+  specFileMissing: (path: string) => `JUP_SPEC_FILE points at ${path}, which does not exist`,
 
   /* §12.12 — new in this spec --------------------------------------------- */
 
@@ -485,7 +486,7 @@ export const messages = {
     `The package was signed with an expired key (${keyid}, expired ${expires})`,
 
   noNodeRuntime: (binName: string) =>
-    `Unable to locate a Node.js runtime to execute ${binName}; set COREPACK_NODE_EXECPATH to point at one`,
+    `Unable to locate a Node.js runtime to execute ${binName}; set JUP_NODE_EXECPATH to point at one`,
 
   noShimDirectory: () => `Unable to determine where to install the shims; pass --install-directory`,
 
@@ -572,7 +573,7 @@ export const messages = {
    * construction. TLS is not a verification tier, so neither clears one.
    */
   refusingUnverified: (name: string, version: string, source: string) =>
-    `Refusing to install ${name}@${version}: ${source} provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set COREPACK_ALLOW_UNVERIFIED=1.`,
+    `Refusing to install ${name}@${version}: ${source} provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.`,
 
   /**
    * The opt-out's warning half. §15.11 requires the escape hatch to be loud:
@@ -580,7 +581,7 @@ export const messages = {
    * the verified path it replaces.
    */
   allowingUnverified: (name: string, version: string, source: string) =>
-    `! Installing ${name}@${version} from ${source} with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)`,
+    `! Installing ${name}@${version} from ${source} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)`,
 
   /* §15.12 — the sidecar integrity ---------------------------------------- */
 
@@ -620,7 +621,7 @@ export const messages = {
  */
 const BAD_STATUS_RE = new RegExp(
   String.raw`^Server answered with HTTP (\d{3}) when performing the request to ` +
-    String.raw`(\S+); for troubleshooting help, see https://github\.com/nodejs/corepack#troubleshooting$`,
+    String.raw`(\S+); for troubleshooting help, see https://github\.com/unjs/jup#troubleshooting$`,
 );
 
 export function parseBadStatus(error: unknown): { status: number; url: string } | null {

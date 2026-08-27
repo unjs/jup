@@ -138,7 +138,7 @@ describe("§13.3 version forms", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Illegal use of URL for known package manager");
-    expect(result.stderr).toContain("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1");
+    expect(result.stderr).toContain("JUP_ENABLE_UNSAFE_CUSTOM_URLS=1");
   });
 
   it("18: the same URL resolves to 1.22.21 with COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1", async () => {
@@ -157,7 +157,7 @@ describe("§13.3 version forms", () => {
     });
 
     expect(result.stderr).toBe(
-      `! Installing yarn@${url} from ${registry.origin} with no signature and no pinned hash (COREPACK_ALLOW_UNVERIFIED=1)\n`,
+      `! Installing yarn@${url} from ${registry.origin} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
     );
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.21\n");
@@ -177,7 +177,7 @@ describe("§13.3 version forms", () => {
     expect(result.stderr).toBe(
       `Refusing to install yarn@${url}: ${registry.origin} provides no signature ` +
         `and no hash was pinned. Pin a hash in the packageManager field, or set ` +
-        `COREPACK_ALLOW_UNVERIFIED=1.\n`,
+        `JUP_ALLOW_UNVERIFIED=1.\n`,
     );
   });
 
@@ -194,7 +194,7 @@ describe("§13.3 version forms", () => {
       env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" }),
     });
 
-    expect(result.stderr).toContain("COREPACK_ALLOW_UNVERIFIED=1");
+    expect(result.stderr).toContain("JUP_ALLOW_UNVERIFIED=1");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.0.0\n");
   });

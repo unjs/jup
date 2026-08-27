@@ -196,7 +196,7 @@ export function minimumReleaseAge(): number | undefined {
   const hours = Number(raw.trim());
   if (!Number.isFinite(hours) || hours < 0) {
     throw new UsageError(
-      `COREPACK_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(raw)}`,
+      `JUP_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(raw)}`,
     );
   }
 
@@ -236,7 +236,7 @@ export interface VersionCandidates {
  */
 export function undatedSourceError(url: string): UsageError {
   return new UsageError(
-    `COREPACK_MINIMUM_RELEASE_AGE is set, but ${redactUserinfo(url)} publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set COREPACK_NPM_REGISTRY to an npm registry that serves this package manager`,
+    `JUP_MINIMUM_RELEASE_AGE is set, but ${redactUserinfo(url)} publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set JUP_NPM_REGISTRY to an npm registry that serves this package manager`,
   );
 }
 

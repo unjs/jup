@@ -344,7 +344,7 @@ describe("errors (§12.6)", () => {
     await expect(httpGet(url)).rejects.toSatisfy(
       (error: Error) =>
         error.message ===
-        `Server answered with HTTP 404 when performing the request to ${url}; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting`,
+        `Server answered with HTTP 404 when performing the request to ${url}; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting`,
     );
   });
 
@@ -831,7 +831,7 @@ describe("timeouts (§15.5, row 155)", () => {
 
     expect((error as Error).message).toBe(messages.requestFailed(url));
     expect((error as Error).stack).toContain(`Caused by: Timed out after 50ms waiting for ${url}`);
-    expect((error as Error).stack).toContain("COREPACK_NETWORK_TIMEOUT");
+    expect((error as Error).stack).toContain("JUP_NETWORK_TIMEOUT");
   });
 
   it("reads COREPACK_NETWORK_TIMEOUT when the caller names no timeout", async () => {
@@ -959,7 +959,7 @@ describe("networkError (§15.5)", () => {
 
     // Byte for byte what §12.6 specifies — scripts match on it.
     expect(error.message).toBe(
-      "Error when performing the request to https://npm.corp/pnpm; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting",
+      "Error when performing the request to https://npm.corp/pnpm; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting",
     );
     expect(error.cause).toBe(outer);
     expect(error.stack).toContain("Caused by: fetch failed");

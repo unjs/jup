@@ -150,7 +150,7 @@ describe.skipIf(IS_WINDOWS)("§15.20 the download prompt from a shim entry point
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`${VERSION}\n`);
-    expect(result.stderr).toBe(`! Corepack is about to download ${TARBALL_URL}\n`);
+    expect(result.stderr).toBe(`! jup is about to download ${TARBALL_URL}\n`);
     expect(servedPaths()).toContain(TARBALL_PATH);
   });
 

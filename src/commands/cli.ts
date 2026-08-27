@@ -311,7 +311,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
   const parsed = parseArgs(args, {});
   if (parsed.positionals.length > 0) {
     throw new UsageError(
-      `The 'corepack install' command takes no arguments; use 'corepack install -g <name>@<version>' to install one globally`,
+      `The 'jup install' command takes no arguments; use 'jup install -g <name>@<version>' to install one globally`,
     );
   }
 
@@ -354,7 +354,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
 
   if (parsed.positionals.length === 0) {
     throw new UsageError(
-      `The 'corepack install -g' command requires at least one package manager or archive`,
+      `The 'jup install -g' command requires at least one package manager or archive`,
     );
   }
 
@@ -511,7 +511,7 @@ async function installFromArchive(
 export async function cmdUp(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
   if (parsed.positionals.length > 0) {
-    throw new UsageError(`The 'corepack up' command takes no arguments`);
+    throw new UsageError(`The 'jup up' command takes no arguments`);
   }
 
   // §15.27 — `--here` reads and writes `cwd`'s own manifest, ignoring the walk.
@@ -590,10 +590,10 @@ export async function cmdUse(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
   const [pattern, ...extra] = parsed.positionals;
   if (pattern === undefined) {
-    throw new UsageError(`The 'corepack use' command requires a package manager pattern`);
+    throw new UsageError(`The 'jup use' command requires a package manager pattern`);
   }
   if (extra.length > 0) {
-    throw new UsageError(`The 'corepack use' command accepts a single package manager pattern`);
+    throw new UsageError(`The 'jup use' command accepts a single package manager pattern`);
   }
 
   // Read before anything is resolved or downloaded: see {@link readPinStyle}.
@@ -791,12 +791,12 @@ export async function cmdCache(args: string[]): Promise<number> {
   }
 
   if ((subcommand !== "clean" && subcommand !== "clear") || extra.length > 0) {
-    throw new UsageError(`The 'corepack cache' command only accepts 'clean', 'clear' or 'list'`);
+    throw new UsageError(`The 'jup cache' command only accepts 'clean', 'clear' or 'list'`);
   }
   // `--json` belongs to `list`; silently ignoring it here would let a script
   // believe it was parsing output that never came.
   if (hasFlag(parsed, "--json")) {
-    throw new UsageError(`The 'corepack cache ${subcommand}' command does not accept --json`);
+    throw new UsageError(`The 'jup cache ${subcommand}' command does not accept --json`);
   }
 
   // `rm -rf <home>/v1`, forced; `lastKnownGood.json` lives outside `v1` and
@@ -865,7 +865,7 @@ export async function cmdHydrate(args: string[]): Promise<number> {
   const [file, ...extra] = parsed.positionals;
 
   if (file === undefined || extra.length > 0) {
-    throw new UsageError(`The 'corepack hydrate' command requires exactly one archive`);
+    throw new UsageError(`The 'jup hydrate' command requires exactly one archive`);
   }
 
   // Three differences from `install -g <file>.tgz`: no `.tgz` extension check,

@@ -153,7 +153,7 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
   });
 
   it("rejects an unknown package manager with a usage error", () => {
-    expect(() => getSpecFor("bun", "1.0.0")).toThrow(/isn't supported by this corepack build/);
+    expect(() => getSpecFor("bun", "1.0.0")).toThrow(/isn't supported by this jup build/);
   });
 });
 
@@ -304,10 +304,9 @@ describe("getTrustedKeys — §15.10 origin scoping", () => {
 
   /**
    * Two custom origins and npm's, which is the smallest store that can tell
-   * per-origin selection from a flattened one. The recorded lesson in
-   * `.agents/PLAN.md` is precisely this: the trust-store test that came before
-   * used the one shape — a single origin — under which every implementation
-   * agrees.
+   * per-origin selection from a flattened one. That is the whole lesson: the
+   * trust-store test that came before used the one shape — a single origin —
+   * under which every implementation agrees.
    */
   const store: TrustStore = {
     [DEFAULT_REGISTRY]: [key("SHA256:npm")],

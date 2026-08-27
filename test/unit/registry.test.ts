@@ -479,10 +479,10 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     const error = await rejection(fetchLatestStableVersion(npm("pnpm")));
 
     expect(error.message).toBe(messages.cannotDownloadLatest("pnpm"));
-    expect(error.message).toContain("COREPACK_INTEGRITY_KEYS");
-    expect(error.message).toContain("COREPACK_DEFAULT_TO_LATEST");
-    expect(error.message).not.toContain("COREPACK_INTEGRITY_CHECK");
-    expect(error.message).not.toContain("COREPACK_USE_LATEST");
+    expect(error.message).toContain("JUP_INTEGRITY_KEYS");
+    expect(error.message).toContain("JUP_DEFAULT_TO_LATEST");
+    expect(error.message).not.toContain("INTEGRITY_CHECK");
+    expect(error.message).not.toContain("USE_LATEST");
     // No signatures at all in that document.
     expect((error.cause as Error).message).toBe(messages.noCompatibleSignature());
     // §15.5 — and the reason has to survive to the *stack*, because `main.ts`
@@ -1235,7 +1235,7 @@ describe("minimumReleaseAge (§15.35e)", () => {
       process.env.COREPACK_MINIMUM_RELEASE_AGE = value;
       expect(() => minimumReleaseAge(), value).toThrow(UsageError);
       expect(() => minimumReleaseAge(), value).toThrow(
-        `COREPACK_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(value)}`,
+        `JUP_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(value)}`,
       );
     }
   });
@@ -1374,7 +1374,7 @@ describe("capToReleaseAge (§15.35e, §04.1 step 3)", () => {
     const error = await rejection(capToReleaseAge(spec, "4.14.1"));
     expect(error).toBeInstanceOf(UsageError);
     expect(error.message).toBe(
-      `COREPACK_MINIMUM_RELEASE_AGE is set, but ${server.origin}/tags publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set COREPACK_NPM_REGISTRY to an npm registry that serves this package manager`,
+      `JUP_MINIMUM_RELEASE_AGE is set, but ${server.origin}/tags publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set JUP_NPM_REGISTRY to an npm registry that serves this package manager`,
     );
   });
 

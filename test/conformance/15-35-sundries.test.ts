@@ -64,8 +64,8 @@ describe("§15.19 airgapped installs", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
       `pnpm@11.1.2 is not in the cache and network access is disabled. ` +
-        `Seed it with 'corepack install -g --cache-only pnpm@11.1.2', ` +
-        `or run 'corepack pack pnpm@11.1.2' on a networked machine.\n`,
+        `Seed it with 'jup install -g --cache-only pnpm@11.1.2', ` +
+        `or run 'jup pack pnpm@11.1.2' on a networked machine.\n`,
     );
   });
 
@@ -82,7 +82,7 @@ describe("§15.19 airgapped installs", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("pnpm@^11.0.0 is not in the cache and network access is");
-    expect(result.stderr).toContain("corepack install -g --cache-only pnpm@^11.0.0");
+    expect(result.stderr).toContain("jup install -g --cache-only pnpm@^11.0.0");
   });
 
   it("178: `corepack up` says the same, from its second resolve", async () => {
@@ -96,7 +96,7 @@ describe("§15.19 airgapped installs", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("pnpm@^11.0.0 is not in the cache and network access is");
-    expect(result.stdout).toContain("corepack install -g --cache-only pnpm@^11.0.0");
+    expect(result.stdout).toContain("jup install -g --cache-only pnpm@^11.0.0");
   });
 
   it("178: a seeded store needs no network at all, which is the point", async () => {
@@ -182,7 +182,7 @@ describe("§15.35j nonexistent versions", () => {
     // download layer was given rather than where the socket ended up.
     expect(result.stderr).toBe(
       `pnpm@11.9.9 does not exist in https://registry.npmjs.org. ` +
-        `Run 'corepack info' to see the resolved spec and where it came from.\n`,
+        `Run 'jup info' to see the resolved spec and where it came from.\n`,
     );
     expect(result.stderr).not.toContain("Server answered with HTTP 404");
   });

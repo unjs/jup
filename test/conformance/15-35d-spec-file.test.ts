@@ -114,7 +114,7 @@ describe("§15.35d — COREPACK_SPEC_FILE overrides the manifest", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
-      `COREPACK_SPEC_FILE points at ${fixture.path("vendor/spec.json")}, which does not exist\n`,
+      `JUP_SPEC_FILE points at ${fixture.path("vendor/spec.json")}, which does not exist\n`,
     );
     // Not the manifest's yarn pin, quietly: a typo must not silently restore the
     // behaviour the variable was set to override.

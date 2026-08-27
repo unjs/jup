@@ -358,9 +358,7 @@ describe("§13.7 registry, auth and integrity", () => {
       env: trusted({ COREPACK_DEFAULT_TO_LATEST: "1" }),
     });
     expect(byDefault.exitCode).toBe(1);
-    expect(byDefault.stderr).toContain(
-      "Corepack cannot download the latest stable version of pnpm",
-    );
+    expect(byDefault.stderr).toContain("jup cannot download the latest stable version of pnpm");
   });
 
   it("76: a tarball inconsistent with its signed integrity is refused", async () => {

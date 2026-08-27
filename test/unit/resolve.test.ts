@@ -224,7 +224,7 @@ describe("resolveDescriptor step 1 — URL references", () => {
 
     const error = await rejection(resolveDescriptor({ name: "yarn", range: url }));
     expect(error.message).toBe(messages.illegalUrl(`yarn@${url}`));
-    expect(error.message).toContain("COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1");
+    expect(error.message).toContain("JUP_ENABLE_UNSAFE_CUSTOM_URLS=1");
     expect([...npm.requests, ...berry.requests]).toEqual([]);
   });
 

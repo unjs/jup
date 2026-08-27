@@ -512,18 +512,23 @@ function confine(
 }
 
 /**
- * A note for whoever maintains the embedded table, on corepack's own channel.
+ * A note for whoever maintains the embedded table, on the debug channel.
  *
- * `DEBUG=corepack` is what the reference implementation documents, and §15.35l
- * is explicit that it is "a debugging aid, not a substitute for command output"
- * — so this is the one place a message is allowed to be conditional on it.
+ * `DEBUG=jup` is this tool's spelling of the `DEBUG=corepack` the reference
+ * implementation documents, and §15.35l is explicit that it is "a debugging
+ * aid, not a substitute for command output" — so this is the one place a
+ * message is allowed to be conditional on it. Both names are honoured, for the
+ * same reason §14.22 keeps both env-var prefixes.
  *
- * Not routed through `advisory()`: `DEBUG=corepack` is a request for *more*
- * output, and the more specific ask wins over §11.5's blanket mute.
+ * Not routed through `advisory()`: `DEBUG=jup` is a request for *more* output,
+ * and the more specific ask wins over §11.5's blanket mute.
  */
 function debugNote(message: string): void {
   const debug = process.env[SYSTEM_ENV.DEBUG];
-  if (debug === "*" || (debug !== undefined && debug.includes("corepack"))) {
+  if (
+    debug === "*" ||
+    (debug !== undefined && (debug.includes("jup") || debug.includes("corepack")))
+  ) {
     console.warn(`! ${message}`);
   }
 }

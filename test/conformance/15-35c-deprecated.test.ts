@@ -18,8 +18,8 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { cleanupFixtures, createFixture, run, seedPackageManager } from "./_harness/index.ts";
 
-const PREPARE_LINE = `'corepack prepare' is deprecated; use 'corepack pack' instead.\n`;
-const HYDRATE_LINE = `'corepack hydrate' is deprecated; use 'corepack install -g' instead.\n`;
+const PREPARE_LINE = `'jup prepare' is deprecated; use 'jup pack' instead.\n`;
+const HYDRATE_LINE = `'jup hydrate' is deprecated; use 'jup install -g' instead.\n`;
 
 afterAll(cleanupFixtures);
 

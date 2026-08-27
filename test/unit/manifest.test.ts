@@ -568,7 +568,7 @@ describe("devEngines — §03.3", () => {
       hasPin: true,
     });
     expect(warn).toHaveBeenCalledWith(
-      `! Corepack only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
+      `! jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
     );
 
     warn.mockClear();
@@ -577,7 +577,7 @@ describe("devEngines — §03.3", () => {
       hasPin: false,
     });
     expect(warn).toHaveBeenCalledWith(
-      `! Corepack only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
+      `! jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
     );
   });
 

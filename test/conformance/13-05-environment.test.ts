@@ -228,7 +228,7 @@ describe("§13.5 environment variables", () => {
     // §03.6". It stays on stderr because this is proxy mode and stdout belongs
     // entirely to the package manager (§09.11).
     expect(result.stderr).toBe(
-      `! The local project doesn't define a 'packageManager' field. Corepack will now add one referencing yarn@${written.packageManager!.slice("yarn@".length)}.\n` +
+      `! The local project doesn't define a 'packageManager' field. jup will now add one referencing yarn@${written.packageManager!.slice("yarn@".length)}.\n` +
         `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
         `Updated ${fixture.path("package.json")} to use ${written.packageManager}\n`,
     );
@@ -261,7 +261,7 @@ describe("§13.5 environment variables", () => {
     // row 178 requires the airgapped failure to name the package manager and
     // the seeding command. "network access is disabled" survives inside it.
     expect(result.stderr).toContain("network access is disabled");
-    expect(result.stderr).toContain("corepack install -g --cache-only yarn@1.22.4");
+    expect(result.stderr).toContain("jup install -g --cache-only yarn@1.22.4");
   });
 
   it("46: COREPACK_ENABLE_DOWNLOAD_PROMPT=1 prints exactly the download notice", async () => {
@@ -275,7 +275,7 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! Corepack is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n`,
+      `! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n`,
     );
     expect(result.stdout).toBe("3.0.0\n");
   });
@@ -331,7 +331,7 @@ describe("§13.5 environment variables", () => {
     // configured npm registry, and §15.33 put the default on the Berry line.
     expect(result.stderr).toMatch(
       new RegExp(
-        `^! Corepack is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-${versionOf(
+        `^! jup is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-${versionOf(
           YARN_DEFAULT,
         ).replaceAll(".", String.raw`\.`)}\\.tgz$`,
         "m",
@@ -354,7 +354,7 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! Corepack is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz\n`,
+      `! jup is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz\n`,
     );
     expect(result.stdout).toBe("3.0.0-rc.2\n");
   });

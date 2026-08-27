@@ -83,7 +83,7 @@ describe("§15.24 prereleases in implicit resolution", () => {
     // not here: §04.1 step 6 unions candidates across *every* range band, while
     // a dist-tag is resolved against the last band's registry only — so honouring
     // the SHOULD for `yarn` would silently drop every Yarn Classic candidate.
-    // That trade is recorded in `.agents/PLAN.md`; this row is what makes
+    // That trade is recorded in `.agents/TODO.md`; this row is what makes
     // changing the decision a deliberate act rather than an accident.
     const scoped = new MockRegistry();
     await scoped.start();

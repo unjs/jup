@@ -166,9 +166,7 @@ describe("§13.10 use / up", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
     expect(result.stdout).toContain("Usage Error:");
-    expect(result.stdout).toContain(
-      "$ corepack use [--here] [--pin-style=suffix|sidecar] <pattern>",
-    );
+    expect(result.stdout).toContain("$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>");
     expect(result.stderr).toBe("");
   });
 
@@ -261,7 +259,7 @@ describe("§13.10 use / up", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
-      `Usage Error: The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
+      `Usage Error: The 'jup up' command can only be used when your project's packageManager field is set to a semver version or semver range`,
     );
   });
 

@@ -431,8 +431,8 @@ describe("§15.30 corepack info", () => {
     const result = await run(["info", "--everything"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain(`Usage Error: The 'corepack info' command only accepts --json`);
-    expect(result.stdout).toContain(`$ corepack info [--json]`);
+    expect(result.stdout).toContain(`Usage Error: The 'jup info' command only accepts --json`);
+    expect(result.stdout).toContain(`$ jup info [--json]`);
   });
 });
 
@@ -513,7 +513,7 @@ describe("§15.18 cache clean --all", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
-      `Usage Error: The 'corepack cache clean' command does not accept --json`,
+      `Usage Error: The 'jup cache clean' command does not accept --json`,
     );
   });
 });

@@ -113,7 +113,7 @@ export interface ShimOptions {
  * OS-package case, and a raw errno tells the user nothing. Name the ways out.
  */
 export const shimDirectoryNotWritable = (directory: string) =>
-  `Unable to write shims to ${directory}: the directory is not writable. Either re-run with --install-directory <a writable directory on your PATH>, set COREPACK_SHIM_DIRECTORY, or define shell aliases instead (e.g. alias yarn="${TOOL_NAME} yarn")`;
+  `Unable to write shims to ${directory}: the directory is not writable. Either re-run with --install-directory <a writable directory on your PATH>, set JUP_SHIM_DIRECTORY, or define shell aliases instead (e.g. alias yarn="${TOOL_NAME} yarn")`;
 
 /** §15.13 point 2 — verbatim. */
 export const shimDirectoryFallback = (directory: string, fallback: string) =>
