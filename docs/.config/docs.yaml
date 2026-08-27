@@ -6,6 +6,3 @@ description: "A fast, small, zero-dependency package manager version manager."
 github: "unjs/jup"
 url: "https://jup.unjs.io"
 themeColor: "yellow"
-
-# Flat docs for now: `/` is served from `index.md` instead of a generated hero.
-landing: false

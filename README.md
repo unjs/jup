@@ -25,7 +25,7 @@ jup is designed as a fast, small, zero-dependency replacement for [Corepack](htt
 
 ## Documentation
 
-Start with the [documentation home page](./docs/index.md), or go directly to:
+Start with the [documentation home page](./docs/0.intro.md), or go directly to:
 
 - [Getting started](./docs/1.getting-started.md)
 - [Projects and workspaces](./docs/2.projects-and-workspaces.md)
@@ -34,7 +34,7 @@ Start with the [documentation home page](./docs/index.md), or go directly to:
 - [Command reference](./docs/5.commands.md)
 - [Download verification](./docs/6.security.md)
 - [Environment variables](./docs/7.settings-reference.md)
-- [Migrating from Corepack](./docs/8.corepack-migration.md)
+- [Moving from Corepack](./docs/8.corepack.md)
 - [Troubleshooting](./docs/9.troubleshooting.md)
 
 ## License
