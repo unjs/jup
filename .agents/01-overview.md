@@ -43,7 +43,7 @@ yielding `binaryName` and optional `binaryVersion`.
 
 * If `binaryName` maps to a known package manager (§02.4) → **proxy mode**.
 * Else if `binaryVersion` is present (i.e. the argument contained `@`) → **proxy
-  mode** with an unknown package manager (this is how `corepack foo@1.2.3` reaches
+  mode** with an unknown package manager (this is how `jup foo@1.2.3` reaches
   the "unsupported package manager" error rather than the CLI's "unknown command").
 * Else → **management mode**.
 
@@ -57,8 +57,8 @@ In practice proxy mode is entered two ways:
 | Entry | `argv` seen by the tool | Notes |
 |---|---|---|
 | Via a shim (`yarn add x`) | shim re-execs the PMVM with `["yarn", "add", "x"]` | The normal path once `enable` has run (§10) |
-| Directly (`corepack yarn add x`) | `["yarn", "add", "x"]` | Same code path — the shim is only a PATH convenience |
-| Version-pinned (`corepack yarn@4.1.0 add x`) | `["yarn@4.1.0", "add", "x"]` | `binaryVersion` overrides the project spec (§04.6) |
+| Directly (`jup yarn add x`) | `["yarn", "add", "x"]` | Same code path — the shim is only a PATH convenience |
+| Version-pinned (`jup yarn@4.1.0 add x`) | `["yarn@4.1.0", "add", "x"]` | `binaryVersion` overrides the project spec (§04.6) |
 
 ## 1.3 End-to-end proxy pipeline
 

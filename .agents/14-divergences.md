@@ -326,3 +326,46 @@ variable changes what is *reported*, never what is done. It is env-file
 ineligible under §14.5: several of the lines it covers are the notice that a
 verification step was skipped, and a cloned repository must not be able to
 silence them, least of all §14.5's own "Ignoring `<NAME>`" warning.
+
+## 14.24 The tool names itself in its own output — [correct]
+
+**Corepack:** every user-facing string names Corepack. The usage lines and
+`--help` synopsis are spelled `corepack <command>`, the `devEngines` warnings and
+the validation prefix say `Corepack`, the download and auto-pin notices say
+`Corepack`, the remedies name `COREPACK_*` variables, and the two network
+failures link to `nodejs/corepack#troubleshooting`.
+
+**Consequence:** a re-implementation under a different name that keeps those
+strings tells the user to run a program that is not the one they invoked. The
+seeding remedy is the sharp case — `Seed it with 'corepack install -g
+--cache-only <spec>'` is a command line the reader is expected to copy, and
+copying it either fails outright or, worse, reaches a *different* tool that is
+also installed and pins something else. The `COREPACK_*` half is the same
+mistake in slower motion: §14.22 already made `JUP_` the canonical spelling, so
+a diagnostic naming the legacy one documents the variable under a name its own
+documentation does not lead with.
+
+**Required:** user-facing text names this tool. `jup` where Corepack says
+`corepack` or `Corepack` — including sentence-initially, because the program's
+name is lowercase and a capitalised variant would be a third spelling — and the
+`JUP_` spelling in every remedy that names a variable (§11, §14.22). The
+troubleshooting link points at this project. §12 carries the resulting strings.
+
+Three things this does **not** move, because they are layout rather than prose,
+and renaming them would strand caches, env files and archives that already
+exist:
+
+* the store, its marker and its temp directories — `<cache>/node/corepack`,
+  `.corepack`, `corepack-<pid>-<suffix>` (§07.1, §07.2);
+* the env file, `.corepack.env`, and the default shim directory on Windows,
+  `%LOCALAPPDATA%\node\corepack\bin` (§03.2, §15.13);
+* `pack`'s default output, `corepack.tgz` (§07.10, §09.6).
+
+The `COREPACK_*` variables keep working exactly as §14.22 specifies — this entry
+changes which spelling a *message* names, never which spellings are read. For
+the same reason `DEBUG=jup` joins `DEBUG=corepack` (§15.35l) rather than
+replacing it.
+
+Byte-compatibility with Corepack's own text is therefore given up, deliberately
+and in exactly one dimension: a CI job matching on a message matches everything
+but the name. §13's rows assert this spec's spelling.

@@ -237,7 +237,7 @@ Before streaming any **artifact** download (not metadata JSON):
 
 ```
 if COREPACK_ENABLE_DOWNLOAD_PROMPT === "1":
-    stderr: `! Corepack is about to download <url>\n`
+    stderr: `! jup is about to download <url>\n`
     if stdin is a TTY and the CI env var is not set:
         stderr: `? Do you want to continue? [Y/n] `
         read one chunk from stdin
@@ -253,7 +253,7 @@ not by the tool's core (§10.1):
 
 | Entry point | Default |
 |---|---|
-| The tool's own name (`corepack …`) | `0` — the user explicitly asked for it |
+| The tool's own name (`jup …`) | `0` — the user explicitly asked for it |
 | A package-manager shim (`yarn …`) | `1` — the user did not ask to download anything |
 
 Both are `??=`-style defaults, so a real environment variable overrides them. This

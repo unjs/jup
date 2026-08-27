@@ -43,7 +43,7 @@ Two consequences a re-implementation MUST reproduce:
 
 > **Consequence worth knowing.** In a monorepo where neither `packages/app/package.json`
 > nor the root manifest declares `packageManager`, running from `packages/app` yields
-> `NoSpec` targeting the **root** manifest — so auto-pin (§3.6) and `corepack use`
+> `NoSpec` targeting the **root** manifest — so auto-pin (§3.6) and `jup use`
 > write the pin at the repository root, not next to the package you were standing in.
 > That is usually the right answer for a monorepo, but it is surprising and
 > undocumented. A conforming implementation MUST reproduce it, and SHOULD name the
@@ -59,7 +59,7 @@ Found     { target, getSpec(opts), range?, envFilePath? }
 
 `getSpec` is **lazy** — it is a closure that parses and validates the raw spec string
 only when called. This matters: commands that don't need a valid spec (e.g.
-`corepack use`, which is about to overwrite it) must not fail on a malformed existing
+`jup use`, which is about to overwrite it) must not fail on a malformed existing
 `packageManager` field. A conforming implementation MUST defer spec *validation*
 until the consumer asks for it.
 
@@ -130,8 +130,8 @@ Validate in this exact order, because each failure has a different outcome:
 
 | Check | Failure behaviour |
 |---|---|
-| `typeof de !== "object"` | **Always warn** (never throws, regardless of `onFail`), return `pm`.<br>`! Corepack only supports objects as valid value for devEngines.packageManager. The current value (<JSON>) will be ignored.` |
-| `Array.isArray(de)` | **Always warn**, return `pm`.<br>`! Corepack does not currently support array values for devEngines.packageManager` |
+| `typeof de !== "object"` | **Always warn** (never throws, regardless of `onFail`), return `pm`.<br>`! jup only supports objects as valid value for devEngines.packageManager. The current value (<JSON>) will be ignored.` |
+| `Array.isArray(de)` | **Always warn**, return `pm`.<br>`! jup does not currently support array values for devEngines.packageManager` |
 | `typeof de.name !== "string"` or `de.name.includes("@")` | `warnOrThrow`, return `pm`.<br>`The value of devEngines.packageManager.name <JSON> is not a supported string value` |
 | `de.version != null` and (not a string, or not a valid semver **range**) | `warnOrThrow`, return `pm`.<br>`The value of devEngines.packageManager.version <JSON> is not a valid semver range` |
 
@@ -152,7 +152,7 @@ Then, cross-check against `packageManager`:
 ```
 onFail === "ignore"            → do nothing
 onFail === "error" | undefined → throw UsageError(message)      (exit 1)
-anything else (incl. "warn")   → console.warn(`! Corepack validation warning: ${message}`)
+anything else (incl. "warn")   → console.warn(`! jup validation warning: ${message}`)
 ```
 
 > Note the default is **error**, and any unrecognised `onFail` value degrades to a
@@ -204,7 +204,7 @@ Note that `name` is the substring before the **first** `@`. `@scope/pkg@1.0.0` y
 `enforceExactVersion` is:
 * **`true`** when reading `packageManager` from a manifest in proxy mode with no CLI
   version override — the field is a *pin* and must be exact.
-* **`false`** when parsing CLI patterns (`corepack use yarn@^4`) and when a CLI
+* **`false`** when parsing CLI patterns (`jup use yarn@^4`) and when a CLI
   version override is present.
 
 ## 3.5 Reconciliation with the requested binary
@@ -231,9 +231,9 @@ switch (specResult.type):
 ```
 
 Then, unconditionally: **if `binaryVersion` was given on the CLI, it overwrites
-`descriptor.range`.** This is why `corepack yarn@1.22.4 --version` works inside a
+`descriptor.range`.** This is why `jup yarn@1.22.4 --version` works inside a
 project pinned to Yarn 4 — but note that the *name* still has to match, so
-`corepack pnpm@9 install` in a Yarn project still errors.
+`jup pnpm@9 install` in a Yarn project still errors.
 
 > `COREPACK_ENABLE_STRICT=0` "treats it like transparent" (changelog 0.15.0): the
 > effect is that using a *different* package manager than the project's falls back to
@@ -249,7 +249,7 @@ Only in the `NoSpec` case, and only in proxy mode:
 2. Install it (§07) — this yields the hash, so the written pin is hash-bearing.
 3. Emit to **stderr**, verbatim, then a blank line:
    ```
-   ! The local project doesn't define a 'packageManager' field. Corepack will now add one referencing <name>@<reference>.
+   ! The local project doesn't define a 'packageManager' field. jup will now add one referencing <name>@<reference>.
    ! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
    ```
 4. Write the pin into `dirname(specResult.target)`'s `package.json` (§3.7).

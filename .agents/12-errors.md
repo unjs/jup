@@ -4,6 +4,11 @@ User-facing strings are part of the contract. Scripts, CI logs, and support docs
 match on them. Reproduce them **byte for byte**, including the leading `! `, the
 absence of trailing periods, and the exact interpolation.
 
+Where Corepack's own text names itself, these strings name **this** tool instead —
+`jup` for the program, `JUP_` for the variable a remedy points at (§14.24). Nothing
+else about the wording moves; a row below that differs from Corepack's differs in
+that name and nowhere else.
+
 ## 12.1 Error classes
 
 | Class | Meaning | Presentation |
@@ -20,7 +25,7 @@ Management-mode format, verbatim shape:
 ```
 Usage Error: The requested version of yarn@1.22.4+sha512.… does not match the devEngines specification (yarn@2.x)
 
-$ corepack use <pattern>
+$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>
 ```
 
 ## 12.2 Spec parsing (§03.4)
@@ -32,7 +37,7 @@ $ corepack use <pattern>
 | Name-only, unsupported name | `Unsupported package manager specification (<name>)` |
 | Version present, unsupported name | `Unsupported package manager specification (<raw>)` |
 | Not a valid exact version | `Invalid package manager specification in <source> (<raw>); expected a semver version` |
-| URL for a known package manager | `Illegal use of URL for known package manager. Instead, select a specific version, or set COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (<raw>)` |
+| URL for a known package manager | `Illegal use of URL for known package manager. Instead, select a specific version, or set JUP_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (<raw>)` |
 | Malformed manifest JSON | `Invalid package.json in <relative path>` |
 
 `<source>` is `CLI arguments` or the manifest path relative to the initial cwd.
@@ -42,9 +47,9 @@ $ corepack use <pattern>
 Warnings (always stderr, always prefixed `! `):
 
 ```
-! Corepack only supports objects as valid value for devEngines.packageManager. The current value (<JSON>) will be ignored.
-! Corepack does not currently support array values for devEngines.packageManager
-! Corepack validation warning: <message>
+! jup only supports objects as valid value for devEngines.packageManager. The current value (<JSON>) will be ignored.
+! jup does not currently support array values for devEngines.packageManager
+! jup validation warning: <message>
 ```
 
 The first two are unconditional warnings regardless of `onFail`. Everything else
@@ -59,7 +64,7 @@ The requested version of <name>@<reference> does not match the devEngines specif
 ```
 
 When thrown, the message appears bare (proxy mode) or wrapped in `Usage Error:`
-(management mode). When warned, it is prefixed `! Corepack validation warning: `.
+(management mode). When warned, it is prefixed `! jup validation warning: `.
 
 `<JSON>` means `JSON.stringify(value)` — strings appear with their quotes.
 
@@ -70,9 +75,9 @@ When thrown, the message appears bare (proxy mode) or wrapped in `Usage Error:`
 | Range matched nothing | `Failed to successfully resolve '<range>' to a valid <name> release` |
 | Tag not in the registry's dist-tags | `Tag not found (<tag>)` |
 | Tag used where tags aren't allowed | `Packages managers can't be referenced via tags in this context` |
-| Unknown package manager in the table | `This package manager (<name>) isn't supported by this corepack build` |
+| Unknown package manager in the table | `This package manager (<name>) isn't supported by this jup build` |
 | No range band covers the version | `Assertion failed: Specified resolution (<reference>) isn't supported by any of <ranges joined by ", ">` |
-| `up` on a non-semver pin | `The 'corepack up' command can only be used when your project's packageManager field is set to a semver version or semver range` |
+| `up` on a non-semver pin | `The 'jup up' command can only be used when your project's packageManager field is set to a semver version or semver range` |
 | `up` cannot find the major line | `Failed to find the highest release for <name> <major>.x` |
 
 ## 12.5 Project enforcement
@@ -95,8 +100,8 @@ and exits 1.
 ```
 Network access disabled by the environment; can't reach <url>
 Network access disabled by the environment; can't reach npm repository <registryUrl>
-Error when performing the request to <url>; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting
-Server answered with HTTP <status> when performing the request to <url>; for troubleshooting help, see https://github.com/nodejs/corepack#troubleshooting
+Error when performing the request to <url>; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting
+Server answered with HTTP <status> when performing the request to <url>; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting
 <packageName>@<version> does not have a valid tarball.
 Aborted by the user
 ```
@@ -104,12 +109,13 @@ Aborted by the user
 Plus the wrapped default-version failure:
 
 ```
-Corepack cannot download the latest stable version of <packageName>; you can disable signature verification by setting COREPACK_INTEGRITY_KEYS to 0 in your env, or instruct Corepack to use the latest stable release known by this version of Corepack by setting COREPACK_DEFAULT_TO_LATEST to 0
+jup cannot download the latest stable version of <packageName>; you can disable signature verification by setting JUP_INTEGRITY_KEYS to 0 in your env, or instruct jup to use the latest stable release known by this version of jup by setting JUP_DEFAULT_TO_LATEST to 0
 ```
 
 Both env var names in that last message are asserted by the conformance suite, as is
-the *absence* of the never-existing names `COREPACK_INTEGRITY_CHECK` and
-`COREPACK_USE_LATEST`.
+the *absence* of the never-existing names `INTEGRITY_CHECK` and `USE_LATEST` under
+either prefix. Corepack's own wording is the same sentence with its name in place of
+this one's, so a log scraper keyed to either half of the remedy still matches.
 
 ## 12.7 Integrity (§06)
 
@@ -130,11 +136,11 @@ Failed to create cache directory. Please ensure the user has write access to the
 Cannot locate '<binPath>' in downloaded tarball
 Unable to locate bin in package.json
 Assertion failed: Unable to locate path for bin '<binName>'
-Invalid archive format; did it get generated by 'corepack pack'?
+Invalid archive format; did it get generated by 'jup pack'?
 Unsupported package manager '<name>'
 ```
 
-Deprecated `hydrate` uses `did it get generated by 'corepack prepare'?` instead.
+Deprecated `hydrate` uses `did it get generated by 'jup prepare'?` instead.
 
 ## 12.9 Commands (§09, §10)
 
@@ -154,9 +160,9 @@ Adding <name>@<reference> to the cache...
 Installing <name>@<reference>...
 Installing <name>@<reference> in the project...
 All done!
-! Corepack is about to download <url>
+! jup is about to download <url>
 ? Do you want to continue? [Y/n] 
-! The local project doesn't define a 'packageManager' field. Corepack will now add one referencing <name>@<reference>.
+! The local project doesn't define a 'packageManager' field. jup will now add one referencing <name>@<reference>.
 ! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
 ```
 
@@ -181,7 +187,7 @@ new, so they may be worded freely, but a conforming implementation SHOULD use th
 
 ```
 The package was signed with an expired key (<keyid>, expired <expires>)                     §06.5
-Unable to locate a Node.js runtime to execute <binName>; set COREPACK_NODE_EXECPATH to point at one   §08.3.1
+Unable to locate a Node.js runtime to execute <binName>; set JUP_NODE_EXECPATH to point at one   §08.3.1
 Unable to determine where to install the shims; pass --install-directory                    §10.4
 <binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)   §10.2
 Refusing to extract '<entry>': path escapes the extraction directory                        §07.4

@@ -16,7 +16,7 @@ Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}
         → Locator { name, reference: range }        # URL passes through untouched
 
  2. Look up the definition for `name`.
-        missing → UsageError `This package manager (<name>) isn't supported by this corepack build`
+        missing → UsageError `This package manager (<name>) isn't supported by this jup build`
 
  3. If range is neither a valid exact version nor a valid semver range → it is a TAG:
         if !allowTags → UsageError `Packages managers can't be referenced via tags in this context`
@@ -58,7 +58,7 @@ Notes a re-implementation MUST get right:
 * **Step 6 leaks prereleases — see §15.24.** Because the filter uses
   `satisfiesWithPrereleases`, which strips the prerelease tag before testing, a
   published `11.0.0-dev.1005` satisfies `*` and then sorts above every stable release.
-  So `corepack use pnpm` installs a dev build whenever one is the semver maximum.
+  So `jup use pnpm` installs a dev build whenever one is the semver maximum.
   §15.24 requires prereleases to be excluded from *implicit* resolution.
 * `useCache: false` is used by `use` and `up` so that "give me the latest" actually
   consults the registry rather than returning whatever is already installed.
@@ -75,7 +75,7 @@ Nothing more is needed.
 | `isValidRange(s)` | descriptor classification, `devEngines.version` validation |
 | `compare(a, b)` / `rcompare` | picking the highest match, sorting |
 | `lt(a, b)` | LKG bump guard, npm 9.7.0 compile-cache guard |
-| `major(v)` | `corepack up` |
+| `major(v)` | `jup up` |
 | `satisfies(v, range)` | `devEngines` cross-check (**strict**, standard semver) |
 | `satisfiesWithPrereleases(v, range)` | everywhere else (**lenient**, see below) |
 
@@ -225,10 +225,10 @@ When the invocation is a transparent command (§01.4) and the definition declare
 
 ## 4.6 CLI version override
 
-If the invocation was `<binary>@<version>` (e.g. `corepack yarn@4.1.0 install`), then
+If the invocation was `<binary>@<version>` (e.g. `jup yarn@4.1.0 install`), then
 after project reconciliation the descriptor's `range` is replaced by that version
 verbatim, and `enforceExactVersion` was already relaxed for the project spec parse.
-The *name* check still applies: `corepack pnpm@9 install` in a Yarn-pinned project is
+The *name* check still applies: `jup pnpm@9 install` in a Yarn-pinned project is
 still an error.
 
 ## 4.7 Last-known-good auto-bump

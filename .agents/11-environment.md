@@ -9,6 +9,13 @@ same §14.5 deny-list entry. `JUP_` wins when both are set (§11.6). The full ru
 including what this means for the env file and for diagnostics, is §11.6; the
 rationale is §14.22.
 
+The tables' spelling is a documentation convention, not a statement about which
+name is canonical. `JUP_` is (§14.22), and it is the spelling a **message**
+names when it points the reader at a variable — `set JUP_NETWORK_TIMEOUT to
+allow longer`, not its `COREPACK_` twin (§12, §14.24). The exception is a
+diagnostic reporting a variable the user actually set, which names the spelling
+they used (§11.6).
+
 Legend for **Env file** column: whether the variable may be supplied by
 `.corepack.env` (§03.2), under either spelling. A real environment variable
 always wins over the file.
@@ -23,7 +30,7 @@ always wins over the file.
 | `COREPACK_DEFAULT_TO_LATEST` | `0` | Never query the registry for "latest", and never auto-bump last-known-good on install. Use the compiled-in default version. | yes |
 | `COREPACK_ENABLE_NETWORK` | `0` | Refuse every network request: `Network access disabled by the environment; can't reach <url>`. | yes |
 | `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* package manager name. Without it, `yarn@https://…` is refused. Unknown names may always use URLs. | **no** (§14.5) |
-| `COREPACK_ENABLE_DOWNLOAD_PROMPT` | `0` / `1` | `1` prints `! Corepack is about to download <url>` before each artifact download and, on a TTY outside CI, asks for confirmation. Default is `0` when invoked as the tool itself, `1` when invoked through a package-manager shim. | **no** |
+| `COREPACK_ENABLE_DOWNLOAD_PROMPT` | `0` / `1` | `1` prints `! jup is about to download <url>` before each artifact download and, on a TTY outside CI, asks for confirmation. Default is `0` when invoked as the tool itself, `1` when invoked through a package-manager shim. | **no** |
 | `COREPACK_ENV_FILE` | `0` or a path | `0` disables env-file loading. Otherwise names the file to look for instead of `.corepack.env`. | **no** |
 | `COREPACK_HOME` | path | Root of the store and `lastKnownGood.json`. Default `$XDG_CACHE_HOME/node/corepack`, else `%LOCALAPPDATA%\node\corepack`, else `~/.cache/node/corepack` (`~/AppData/Local/node/corepack` on Windows). | yes |
 
@@ -52,14 +59,14 @@ always wins over the file.
 | `CI` | When set, the download prompt prints its notice but does not wait for confirmation. |
 | `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location fallback chain (§07.1). |
 | `PATH` | Shim install-directory lookup (§10.4); locating a JavaScript runtime in a native implementation (§08.3). |
-| `DEBUG` | Containing `corepack` enables verbose diagnostic logging to stderr. |
+| `DEBUG` | Containing `jup` — or `corepack`, which the reference implementation documents — enables verbose diagnostic logging to stderr (§14.24). |
 
 ## 11.5 New in this spec
 
 | Variable | Accepted values | Effect | Env file |
 |---|---|---|---|
 | `COREPACK_NODE_EXECPATH` | path | Path to the JavaScript runtime used to execute package managers. Only meaningful for a native implementation (§08.3.1). Falls back to a sibling runtime, then `PATH`. | yes |
-| `COREPACK_QUIET_ADVISORIES` | `1` | Silence the advisory `!` lines this spec adds on top of corepack's own (§14.23). Corepack's six — the download notice and its prompt, the auto-pin notice, the three `devEngines` warnings, and `enable`/`disable`'s Yarn Switch skip — are unaffected, as is every error. | **no** (§14.5) |
+| `COREPACK_QUIET_ADVISORIES` | `1` | Silence the advisory `!` lines this spec adds on top of corepack's own (§14.23). The six inherited from corepack — the download notice and its prompt, the auto-pin notice, the three `devEngines` warnings, and `enable`/`disable`'s Yarn Switch skip — are unaffected, as is every error. | **no** (§14.5) |
 
 ## 11.6 Precedence
 
@@ -83,8 +90,9 @@ For any variable:
 Presence decides, not truthiness: `JUP_NPM_PASSWORD=` shadows a
 `COREPACK_NPM_PASSWORD` that is set, because §11.2 makes the empty string a
 meaningful value. A diagnostic that names the variable that supplied a value
-(§15.4's `set by COREPACK_CAFILE`, `info`'s `frozenSource`) MUST name the
-spelling the user actually set.
+(§15.4's `set by <NAME>`, `info`'s `frozenSource`) MUST name the spelling the
+user actually set. This is the one place `COREPACK_` may appear in output; a
+message that merely *suggests* a variable names the `JUP_` spelling (§14.24).
 
 Only the **closest** env file to `cwd` is consulted, and only directories at or below
 the project root are searched (the walk stops once a manifest with a `packageManager`

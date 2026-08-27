@@ -52,3 +52,5 @@ An implementation conforms to this specification when it:
 Both §14 and §15 define intentional differences from Corepack. Section 14 records differences found while studying Corepack's source. Section 15 adds requirements derived from its issue tracker. If the two sections cover the same behavior, §15 takes precedence.
 
 Some user-facing text is part of the compatibility contract. Content marked as verbatim and shown in `fixed width` must be reproduced exactly, including capitalization, spacing, and punctuation. Existing scripts and CI jobs may compare these messages byte for byte.
+
+Those strings name **jup**, not Corepack, wherever Corepack's own text names itself — in the program name, in the usage lines, and in the `JUP_` variable a remedy points at. §14.24 states the rule and what it deliberately leaves alone; §12 carries the resulting text.

@@ -162,7 +162,7 @@ runtime-level environment variable that corepack never mentions.
 Untrusted certificate authority
     → `TLS certificate verification failed for <host>: the certificate was issued by an
        unknown authority. If your network uses a TLS-inspecting proxy, point
-       COREPACK_CAFILE at its CA bundle.`
+       JUP_CAFILE at its CA bundle.`
 Expired / not-yet-valid certificate
     → `TLS certificate for <host> is expired or not yet valid (check the system clock).`
 Hostname mismatch
@@ -325,7 +325,7 @@ and the PR that would close it has sat unmerged.
   unverified path only opens for versions resolved dynamically from an unsigned
   channel.
 * When no tier is available, refuse:
-  `Refusing to install <name>@<version>: <source> provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set COREPACK_ALLOW_UNVERIFIED=1.`
+  `Refusing to install <name>@<version>: <source> provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.`
 * `COREPACK_ALLOW_UNVERIFIED=1` opts out, per-run, with a warning. It MUST NOT be
   settable from an env file (§14.5).
 
@@ -516,10 +516,10 @@ network — and §13.8 already covers the happy path. The gap is diagnostics.
 
 * When resolution fails and `COREPACK_ENABLE_NETWORK=0`, the error MUST name what was
   missing and how to seed it:
-  `<name>@<range> is not in the cache and network access is disabled. Seed it with 'corepack install -g --cache-only <name>@<version>', or run 'corepack pack <name>@<version>' on a networked machine.`
+  `<name>@<range> is not in the cache and network access is disabled. Seed it with 'jup install -g --cache-only <name>@<version>', or run 'jup pack <name>@<version>' on a networked machine.`
 * `install -g --cache-only <file>.tgz` MUST report every locator it extracted, so a
   Dockerfile layer's log shows what the image actually contains.
-* A `corepack cache list` command printing installed `<name>@<version>` pairs and the
+* A `jup cache list` command printing installed `<name>@<version>` pairs and the
   recorded defaults, machine-readable under `--json`. This is the missing tool for
   "did my image get seeded correctly?", and it is a directory listing.
 
@@ -620,7 +620,7 @@ ranges. Both halves are obtainable:
   ```
 * On every subsequent run, a recorded resolution that still satisfies the range is used
   **without any network access** — the fast path (§01.3) is preserved for ranges too.
-* The resolution is refreshed only by an explicit `corepack up`, or when the recorded
+* The resolution is refreshed only by an explicit `jup up`, or when the recorded
   version no longer satisfies the range.
 * When the file is absent and the spec is a range, resolution hits the registry and
   writes the file. `COREPACK_FROZEN_LOCKFILE=1` (and CI defaults, matching package
@@ -788,7 +788,7 @@ This assumption is load-bearing across corepack: one URL template per version
 Exit code stays 0 — these are warnings, not failures — but silence must no longer be
 the output of an enable that did nothing.
 
-## 15.30 Introspection: `corepack info` — [required]
+## 15.30 Introspection: `jup info` — [required]
 
 > Driven by **#180** (3👍, a maintainer proposed a concrete output format and asked for
 > a PR — never implemented), **#566**, **#686** (*"there's no reliable/explicit way to
@@ -799,7 +799,7 @@ The tracker's recurring shape is *"the tool resolved something surprising and I 
 see why."* Issues #673, #412, #507, #607, and #686 would each have been diagnosed in
 one command.
 
-**Required:** `corepack info [--json]`, printing:
+**Required:** `jup info [--json]`, printing:
 
 * the resolved package manager, version, and hash;
 * **which file and which field** it came from, as an absolute path;
@@ -815,7 +815,7 @@ one command.
 invalid — reporting *why* it is invalid is the point. `--json` output is stable and
 documented; this is the tool's supportability surface.
 
-`corepack cache list` (§15.19) is a subset of this and MAY be an alias.
+`jup cache list` (§15.19) is a subset of this and MAY be an alias.
 
 ## 15.31 Global invocations bypass the project pin — [required, bug]
 
@@ -905,7 +905,7 @@ One narrower request is accepted:
 > sympathetic, noting `corepack up` already runs `<pm> install` as a side effect
 > (§09.5), so the mechanism exists. PR **#551** is open and unmerged.
 
-**Required:** `corepack install --project` (aliased `corepack project install`) resolves
+**Required:** `jup install --project` (aliased `jup project install`) resolves
 the project's package manager and runs its `commands.use` argv. It adds no new
 mechanism — §09.5 already does exactly this — and unlike `add` or `remove`, `install`
 has no meaningfully divergent semantics across the three package managers. Nothing
@@ -917,18 +917,18 @@ Smaller items, each traceable to an open issue.
 
 | # | Issue | Requirement |
 |---|---|---|
-| a | **#298** (accepted by a maintainer, never shipped) | A bare name is valid wherever a spec is accepted: `corepack use yarn` means `yarn@latest`. §03.4 already yields range `*` for a bare name; §15.24 makes `*` resolve via the `latest` dist-tag. |
+| a | **#298** (accepted by a maintainer, never shipped) | A bare name is valid wherever a spec is accepted: `jup use yarn` means `yarn@latest`. §03.4 already yields range `*` for a bare name; §15.24 makes `*` resolve via the `latest` dist-tag. |
 | b | **#833** (5👍, PR #851 open) | Binary names come **only** from the table (§02.4). Adding pnpm 11's `pn`/`pnx` aliases MUST be a data-only change, and §15.21 forbids hardcoding names elsewhere. |
-| c | **#624** (5👍; a contributor's fix PR went unreviewed) | Deprecated commands MUST print a migration line naming the replacement and still work: `'corepack prepare' is deprecated; use 'corepack pack' instead.` Never silently hide a command. |
+| c | **#624** (5👍; a contributor's fix PR went unreviewed) | Deprecated commands MUST print a migration line naming the replacement and still work: `'jup prepare' is deprecated; use 'jup pack' instead.` Never silently hide a command. |
 | d | **#682**, **#402** | `COREPACK_SPEC_FILE` names a file supplying `packageManager`/`devEngines.packageManager` for a project whose manifest cannot be edited (vendored trees). It overrides the manifest; it is **not** env-file-eligible. |
 | e | **#850** | `COREPACK_MINIMUM_RELEASE_AGE` (hours) filters candidates younger than the given age out of *implicit* resolution, matching the `minimumReleaseAge` gate npm and pnpm now ship. An explicitly pinned exact version is never filtered. |
 | f | **#629** (9👍, zero maintainer response) | The tool MUST report its own version in `info` (§15.30) and support a self-version constraint. Its own version drift is otherwise an unmanaged instance of the problem it exists to solve. |
 | g | **#316** | `use`/`up` MUST be idempotent on an already-pinned value. Corepack's current code strips an existing build suffix before re-appending, and §13 test #109 covers malformed input, but the historically-reported double-append (`+sha256…+sha256…`) MUST have a dedicated regression test. |
 | h | **#166**, **#686** | Enablement state MUST NOT depend on how the tool was installed, and MUST be reportable via `info`. |
 | i | **#496** | The project-mismatch error MUST NOT mask an unrelated failure in the invoked command. Check identity **before** executing, never by interpreting the package manager's own exit status. |
-| j | **#204** | A **nonexistent exact version** MUST be reported as such. §04.1 step 5 returns an exact version unverified, so the first sign of trouble is a bare `Server answered with HTTP 404` naming a tarball URL. Implementations MUST map a 404 on an artifact download to: `<name>@<version> does not exist in <registry>. Run 'corepack info' to see the resolved spec and where it came from.` |
+| j | **#204** | A **nonexistent exact version** MUST be reported as such. §04.1 step 5 returns an exact version unverified, so the first sign of trouble is a bare `Server answered with HTTP 404` naming a tarball URL. Implementations MUST map a 404 on an artifact download to: `<name>@<version> does not exist in <registry>. Run 'jup info' to see the resolved spec and where it came from.` |
 | k | **#424** | A `packageManager` field in `$HOME/package.json` (or any ancestor of it) silently governs *every* directory — a repeated, hard-to-diagnose confusion in the thread. When the governing manifest resolves to the home directory or above, the tool MUST append to §12.5's error: `(this manifest is outside any project — a stray "packageManager" field there affects every directory)`. |
-| l | **#679** | Commands that mutate state MUST report what they did. `cache clean` currently prints nothing (§09.7); it MUST print `Removed <n> cached version(s) from <path>` (or `Nothing to remove`). `DEBUG=corepack` is a debugging aid, not a substitute for command output. |
+| l | **#679** | Commands that mutate state MUST report what they did. `cache clean` currently prints nothing (§09.7); it MUST print `Removed <n> cached version(s) from <path>` (or `Nothing to remove`). `DEBUG=jup` (and `DEBUG=corepack`, §14.24) is a debugging aid, not a substitute for command output. |
 
 ## 15.36 A note on corepack's trajectory
 
@@ -993,7 +993,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 150 | `.npmrc` sets `@yarnpkg:registry` | Yarn Berry's `@yarnpkg/cli-dist` fetch uses it (§15.1) |
 | 151 | `COREPACK_REGISTRY_YARN` set, `COREPACK_NPM_REGISTRY` unset | Yarn mirrors; npm and pnpm still use the default (§15.2) |
 | 152 | Override registry differing only by trailing slash or host case | rewritten correctly; no doubled path (§15.3) |
-| 153 | Registry presents a certificate from an unknown CA | the CA-specific message, naming `COREPACK_CAFILE` (§15.4) |
+| 153 | Registry presents a certificate from an unknown CA | the CA-specific message, naming `JUP_CAFILE` (§15.4) |
 | 154 | Registry returns 503 twice then 200 | succeeds after retries; `COREPACK_NETWORK_RETRIES=0` fails immediately (§15.5) |
 | 155 | Registry stalls past `COREPACK_NETWORK_TIMEOUT` | times out with a timeout-specific message (§15.5) |
 | 156 | `HTTPS_PROXY` set, no other opt-in flag | request is proxied (§15.6, §14.8) |
@@ -1024,7 +1024,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 181 | `packageManager: "pnpm@^11.0.0"` | resolves; `.jup.lock` records version + integrity (§15.23) |
 | 182 | Second run with that lockfile present | **no** network request (§15.23, §01.3) |
 | 183 | Range with no lockfile and `COREPACK_FROZEN_LOCKFILE=1` | refused (§15.23) |
-| 184 | Registry publishes `11.0.0-dev.1005` above stable `10.x`; `corepack use pnpm` | resolves to the **stable** release (§15.24) |
+| 184 | Registry publishes `11.0.0-dev.1005` above stable `10.x`; `jup use pnpm` | resolves to the **stable** release (§15.24) |
 | 185 | Same with `COREPACK_ENABLE_PRERELEASES=1` | resolves to the prerelease (§15.24) |
 | 186 | Explicitly pinned prerelease | still resolves and matches its range band (§15.24, §14.2) |
 | 187 | Nested manifest with only `devEngines.packageManager`, parent pins a different one | the **nested** spec wins (§15.25) |
@@ -1036,12 +1036,12 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 193 | Table entry with `{platform}`/`{arch}` and `"exec": "native"` | correct artifact fetched; executed directly, no JS runtime consulted (§15.28) |
 | 194 | Native artifact extraction | executable bit preserved (§15.28, §07.4) |
 | 195 | `enable` where another manager shadows the shim on `PATH` | warns naming the winner; exit 0 (§15.29) |
-| 196 | `corepack info --json` with an invalid project spec | succeeds, reports why it is invalid, makes no network request (§15.30) |
+| 196 | `jup info --json` with an invalid project spec | succeeds, reports why it is invalid, makes no network request (§15.30) |
 | 197 | `npm install -g <pkg>` inside a yarn-pinned project | permitted (§15.31) |
-| 198 | A nested script invoking `pnpm` under `corepack pnpm exec` | resolves to the same pnpm (§15.32) |
+| 198 | A nested script invoking `pnpm` under `jup pnpm exec` | resolves to the same pnpm (§15.32) |
 | 199 | `install -g yarn@4.9.0`, then `yarn dlx` in a bare directory | uses `4.9.0`, not the table's `transparent.default` (§15.33) |
 | 200 | No recorded default, `yarn dlx` in a bare directory | uses `transparent.default` (§15.33) |
-| 201 | `corepack prepare` | works, and prints the migration line (§15.35c) |
+| 201 | `jup prepare` | works, and prints the migration line (§15.35c) |
 | 202 | `use` run twice on an already-pinned value | idempotent; no doubled build suffix (§15.35g) |
 | 203 | `COREPACK_MINIMUM_RELEASE_AGE` set, newest release younger than it | an older release is chosen; an exact pin is unaffected (§15.35e) |
 | 204 | `packageManager` pins an exact version that was never published | error names the version as nonexistent, not a bare HTTP 404 (§15.35j) |

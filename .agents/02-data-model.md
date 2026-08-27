@@ -119,7 +119,7 @@ even though `yarn@1.22.22` would download from npm.
   registry: RegistrySpec,       // default version source
   npmRegistry?: NpmRegistrySpec,// used INSTEAD of `registry` when the user has set
                                 // a custom npm registry (§05.3)
-  commands?: { use?: string[] } // argv to run after `corepack use`/`up`
+  commands?: { use?: string[] } // argv to run after `jup use`/`up`
 }
 ```
 

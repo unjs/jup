@@ -31,7 +31,7 @@ new here (they would fail against corepack today) — see §14/§15 for rational
 | 10 | `package.json` is `{}` | `yarn --version` | exit 0, built-in default version |
 | 11 | `package.json` contains invalid JSON | `yarn --version` | exit 1, `Invalid package.json in <path>` |
 | 12 | `package.json` with a UTF-8 BOM, valid spec | `yarn --version` | parses correctly |
-| 13 ⊕ | Same, then `corepack use yarn@1.22.4` | | the BOM is **preserved** in the rewritten file (§14.7) |
+| 13 ⊕ | Same, then `jup use yarn@1.22.4` | | the BOM is **preserved** in the rewritten file (§14.7) |
 
 ## 13.3 Version forms
 
@@ -55,12 +55,12 @@ new here (they would fail against corepack today) — see §14/§15 for rational
 | 24 | Same + `packageManager: "pnpm@6.6.2+sha224.…"` | exit 0, `6.6.2\n` |
 | 25 | `{name:"pnpm"}` + `packageManager: "pnpm@6.6.2+…"` | exit 0 — no version, no constraint |
 | 26 | `version: "yarn@1.x"` (not a range) | exit 1, `The value of devEngines.packageManager.version "yarn@1.x" is not a valid semver range\n` |
-| 27 | `devEngines.packageManager` is an array, valid `packageManager` present | exit 0, stderr `! Corepack does not currently support array values for devEngines.packageManager\n` |
-| 28 | `devEngines.packageManager` is the string `"pnpm@10.x"` | exit 0, stderr `! Corepack only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.\n` |
+| 27 | `devEngines.packageManager` is an array, valid `packageManager` present | exit 0, stderr `! jup does not currently support array values for devEngines.packageManager\n` |
+| 28 | `devEngines.packageManager` is the string `"pnpm@10.x"` | exit 0, stderr `! jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.\n` |
 | 29 | `devEngines.packageManager` is the number `10` | exit 0, stderr `…The current value (10) will be ignored.\n` |
 | 30 | Name mismatch, `onFail: "ignore"` | exit 0, no output |
-| 31 | Name mismatch, `onFail: "warn"` | exit 0, stderr `! Corepack validation warning: "packageManager" field is set to "pnpm@6.6.2+sha1.…" which does not match the "devEngines.packageManager" field set to "yarn"\n` |
-| 32 | Name mismatch, `onFail: "error"` | exit 1, same message without the `! Corepack validation warning: ` prefix |
+| 31 | Name mismatch, `onFail: "warn"` | exit 0, stderr `! jup validation warning: "packageManager" field is set to "pnpm@6.6.2+sha1.…" which does not match the "devEngines.packageManager" field set to "yarn"\n` |
+| 32 | Name mismatch, `onFail: "error"` | exit 1, same message without the `! jup validation warning: ` prefix |
 | 33 | Name mismatch, `onFail` omitted | identical to #32 |
 | 34 | Version-range mismatch, `onFail: "warn"` | exit 0, `…which does not match the value defined in "devEngines.packageManager" for "pnpm" of "10.x"\n` |
 | 35 | Version-range mismatch, no `onFail` | exit 1, same body |
@@ -84,10 +84,10 @@ row under either name. Row 41b covers the pair itself.
 | 43 | `COREPACK_ENABLE_AUTO_PIN=1`, `package.json` is `{}` | after `yarn`, `packageManager` matches `/^yarn@/`; stderr carries the two `!` notices |
 | 44 | Same without the variable | `packageManager` is **not** written |
 | 45 | `COREPACK_ENABLE_NETWORK=0`, version not cached | exit 1, stderr contains `Network access disabled by the environment` |
-| 46 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`, project pins `yarn@3.0.0` | stderr exactly `! Corepack is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n` |
+| 46 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`, project pins `yarn@3.0.0` | stderr exactly `! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n` |
 | 47 | Same, second run (cached) | stderr empty |
 | 48 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` only in `.corepack.env` | stderr empty — the file cannot set it |
-| 49 | `COREPACK_NPM_REGISTRY` + prompt, no project spec | stderr matches `! Corepack is about to download <registry>/yarn/-/yarn-1.x.y.tgz` |
+| 49 | `COREPACK_NPM_REGISTRY` + prompt, no project spec | stderr matches `! jup is about to download <registry>/yarn/-/yarn-1.x.y.tgz` |
 | 50 | Same with `packageManager: yarn@3.0.0-rc.2+sha224.…` | stderr names `<registry>/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz` |
 | 51 | Project pins `npm@6.14.2` | `npm run env` output contains `COREPACK_ROOT=<tool root>` — and `JUP_ROOT=<tool root>`, since §11.3's exports are written under both spellings |
 
@@ -142,14 +142,14 @@ row under either name. Row 41b covers the pair itself.
 
 | # | Setup | Expected |
 |---|---|---|
-| 86 | `corepack install` with `packageManager: yarn@2.2.2` | exit 0, stdout `Adding yarn@2.2.2 to the cache...\n`, stderr empty |
+| 86 | `jup install` with `packageManager: yarn@2.2.2` | exit 0, stdout `Adding yarn@2.2.2 to the cache...\n`, stderr empty |
 | 87 | Then `COREPACK_ENABLE_NETWORK=0`, `yarn --version` | `2.2.2\n` |
 | 88 | Then corrupt `lastKnownGood.json` to `{`, chmod home `0555`, proxies to `0.0.0.0` | `yarn --version` → exit 0, `2.2.2\n`, stderr empty |
-| 89 | `corepack install --global yarn@2.2.2` | stdout `Installing yarn@2.2.2...\n`; survives the same read-only/offline treatment |
-| 90 | `corepack pack yarn@2.2.2`, fresh empty `COREPACK_HOME`, network off, `install -g corepack.tgz` | exit 0; `yarn --version` → `2.2.2\n` |
+| 89 | `jup install --global yarn@2.2.2` | stdout `Installing yarn@2.2.2...\n`; survives the same read-only/offline treatment |
+| 90 | `jup pack yarn@2.2.2`, fresh empty `COREPACK_HOME`, network off, `install -g corepack.tgz` | exit 0; `yarn --version` → `2.2.2\n` |
 | 91 | Same but the new `COREPACK_HOME` directory is deleted first | still works |
-| 92 | `corepack pack yarn@2.2.2 pnpm@5.8.0`, hydrate, offline | both resolve |
-| 93 | `install -g` with a tarball that is not from `pack` | exit 1, `Invalid archive format; did it get generated by 'corepack pack'?` |
+| 92 | `jup pack yarn@2.2.2 pnpm@5.8.0`, hydrate, offline | both resolve |
+| 93 | `install -g` with a tarball that is not from `pack` | exit 1, `Invalid archive format; did it get generated by 'jup pack'?` |
 | 94 | Three concurrent `yarn --version` needing the same fresh download | all three exit 0 with identical output |
 | 95 | `cache clean`, then `cache clear` | both remove `<home>/v1`; `lastKnownGood.json` survives; second run is a no-op |
 | 96 ⊕ | Warm run with an exact pin | **zero** network requests and no `lastKnownGood.json` read (§01.3) |
@@ -181,7 +181,7 @@ row under either name. Row 41b covers the pair itself.
 | 112 | `up` with `yarn@1.1.0` + `devEngines` range `"1.x \|\| 2.x"` | bumps to `2.4.3` — crosses majors |
 | 113 | Same with `onFail: "ignore"` | identical |
 | 114 | `up` with only `devEngines`, no `packageManager` | a `packageManager` field is created |
-| 115 | `up` with a non-semver pin | exit 1, `The 'corepack up' command can only be used when…` |
+| 115 | `up` with a non-semver pin | exit 1, `The 'jup up' command can only be used when…` |
 | 116 | `use`/`up` preserve the manifest's indentation and line endings | tab-indented and CRLF files round-trip unchanged |
 
 ## 13.11 `enable` / `disable`
