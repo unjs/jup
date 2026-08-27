@@ -674,6 +674,25 @@ Two smaller things nub contributes:
 > pnpm's maintainer asked to be removed (§15.36). Shipping an entry is a maintainer
 > decision about someone else's project, and it is the one part of adding a package
 > manager that no amount of implementation work settles.
+>
+> **None of the five has been asked.** bun, deno, aube, nub and `node` are all in
+> the table and none of their maintainers has agreed to be there, so a first
+> release is blocked on a conversation rather than on code. Each ask is its own:
+> aube is the one least likely to be refused and most likely to be *wanted* — it is
+> a package manager rather than a runtime, and the only entry whose names a bare
+> `jup enable` claims. nub is squarely in scope as a package manager, but its own
+> installer owns `~/.nub/bin` and its npm launcher rewrites the on-PATH entry that
+> dispatched it into a native trampoline; jup installs no launcher so the two do
+> not collide today, which is a fact about nub's current implementation and not an
+> agreement. `node` has a different addressee altogether — `node` on npm is a
+> community package, and `node-bin-setup` is where the `{target}` map's three
+> renames come from — and a smaller ask: jup fetches the same per-host packages
+> that installer fetches, without running it.
+>
+> Two more things a first publish carries, both deliberate and both wanting a human
+> to agree: the package installs a `corepack` bin alias (§14.24), and §15.33 moved
+> yarn's compiled-in default from Classic 1.x to Berry 4.x, so a bare `yarn` in an
+> unpinned project behaves differently from corepack's.
 
 ## 15.22 Publish through channels resistant to typosquatting — [advisory]
 
