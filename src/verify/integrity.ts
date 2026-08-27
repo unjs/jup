@@ -43,18 +43,43 @@ const WEAK_HASH_ALGOS = new Set(["sha1", "md5"]);
 const warnedWeakAlgos = new Set<string>();
 
 /**
- * §14.4 — the clock-skew escape hatch, deliberately closed.
+ * §14.4 — accept an otherwise-valid signature from an expired key, loudly.
  *
- * §14.4 permits accepting an otherwise-valid signature from an expired key with
- * a loud warning, on the grounds that a wrong system clock would otherwise
- * reject good keys. It is only a SHOULD, and §13's test 82 requires that a trust
- * store whose *only* matching key is expired fails with `expiredKey` — a valid
- * signature is exactly what that test presents. Leniency would also make expiry
- * unenforceable in the common case, since the registry usually offers a single
- * key. So the strict branch is the shipped behaviour; the lenient branch below
- * stays implemented and one flag flip away, and it can never fire silently.
+ * This was `false` once, on the reading that expiry should be enforceable and
+ * that §14.4's leniency is only a SHOULD. The reading was defensible; the blast
+ * radius was not. npm rotated its signing key on **2025-01-29**, and
+ * `dist.signatures` is written at publish time and never rewritten, so *every*
+ * artifact published before that date carries the old keyid — measured, each
+ * with a fresh store:
+ *
+ * | spec | strict | lenient |
+ * | --- | --- | --- |
+ * | `yarn@1.22.19`, `yarn@1.22.22` | expired-key error | installs |
+ * | `npm@9.9.4`, `npm@10.9.2` | expired-key error | installs |
+ * | `pnpm@6.6.2`, `pnpm@8.15.0`, `pnpm@10.0.0` | expired-key error | installs |
+ * | `pnpm@9.15.9`, `pnpm@10.15.0`, `npm@11.6.0` | installs | installs |
+ *
+ * That is all of Yarn 1.x — last published in 2024, so it can never be re-signed
+ * — plus every npm through 10.9.2 and most of pnpm's history. Corepack installs
+ * every one of them. A project pinning `yarn@1.22.22` could not use this tool at
+ * all, which costs more than the property being defended: with the registry
+ * offering one key per rotation, strictness turns a *key* expiry into a
+ * retroactive expiry of everything that key ever signed.
+ *
+ * What is kept is everything that makes the signature mean something. The ECDSA
+ * check below runs first and must pass, so a forged or tampered artifact is
+ * still refused — with `expiredKey`, which now fires only when the signature
+ * does *not* verify. An expired key is never chosen over a live one (the loop
+ * above skips it and keeps walking), and acceptance is never silent.
+ *
+ * The `sha1`-style option of accepting only signatures made *before* the expiry
+ * was investigated and rejected: the publish time is not on this path. §05.1
+ * requests the abbreviated packument, whose top-level keys are `name`,
+ * `dist-tags`, `versions` and `modified` — no `time`. Only the full packument
+ * carries `time[version]`, and fetching it would put a much larger response on
+ * every install.
  */
-const ACCEPT_EXPIRED_KEY_WITH_WARNING: boolean = false;
+const ACCEPT_EXPIRED_KEY_WITH_WARNING: boolean = true;
 
 /**
  * @param userPinned Whether this algorithm came from the project's own
@@ -255,8 +280,9 @@ export function verifySignature(input: {
     }
     const expiresAt = expiryOf(key);
     if (expiresAt !== undefined) {
-      // §14.4 — an expired key is not selectable, but remember the first one so
-      // the failure can name it instead of claiming nothing matched at all.
+      // §14.4 — an expired key is never *selected*: the walk keeps going, so a
+      // live key later in the store always wins. The first expired match is
+      // remembered only for the fallback below, which needs to name it.
       expired ??= { key, signature, expires: expiresAt };
       continue;
     }
@@ -274,10 +300,13 @@ export function verifySignature(input: {
     if (expired) {
       if (ACCEPT_EXPIRED_KEY_WITH_WARNING && verifyEcdsa(expired.key, expired.signature, payload)) {
         advisory(
-          `! jup integrity warning: accepting a signature made with the expired key ${expired.key.keyid} (expired ${expired.expires}); check your system clock`,
+          messages.expiredKeyAccepted(packageName, version, expired.key.keyid, expired.expires),
         );
         return;
       }
+      // The signature did not verify under the expired key either, so this is a
+      // mismatch *and* a stale key. Naming the key is still §06.5's requirement
+      // and still the more actionable half.
       throw new Error(messages.expiredKey(expired.key.keyid, expired.expires));
     }
     // §15.9's one repairable failure — see {@link UntrustedKeyidError}. Note

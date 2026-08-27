@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs";
 import { type BuildConfig, defineBuildConfig } from "obuild/config";
+
+/** Our own version, taken from the manifest **once, here**, and baked in below. */
+const OWN_VERSION = (
+  JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as { version: string }
+).version;
 
 /**
  * Rolldown's `PreRenderedChunk`, reached through obuild's hook signature so that
@@ -115,6 +121,11 @@ export default defineBuildConfig({
     {
       type: "bundle",
       input: ["./src/index.ts", "./src/bin.ts", "./src/shim.ts"],
+      // `utils/self.ts` reads this instead of locating and parsing our own
+      // manifest at runtime. A build cannot then be wrong about its own version
+      // the way a filesystem walk can (see `getOwnVersion`), and `--version`,
+      // `info` and the `user-agent` all stop touching the disk for it.
+      rolldown: { transform: { define: { __JUP_VERSION__: JSON.stringify(OWN_VERSION) } } },
     },
   ],
   hooks: {

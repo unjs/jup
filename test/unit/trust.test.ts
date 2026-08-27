@@ -226,12 +226,14 @@ describe("verifySignatureWithRefresh — §15.9", () => {
     const npm = makeKeypair("SHA256:shipped");
     serveKeys([trustedKey(makeKeypair("SHA256:rotated"))]);
 
-    // The keyid matched — a refresh would return the same key with the same
-    // expiry, so §15.9 does not spend a request on it (§06.5 decides).
+    // The keyid matched, so §15.9 spends no request on it: a refresh would
+    // return the same key with the same expiry, and §06.5 has already decided
+    // what to do with it — accept the signature it verifies, with a warning.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     useEmbedded([trustedKey(npm, "2020-01-01T00:00:00.000Z")]);
-    await expect(verify([signature(npm)])).rejects.toThrow(
-      "The package was signed with an expired key (SHA256:shipped, expired 2020-01-01T00:00:00.000Z)",
-    );
+    await expect(verify([signature(npm)])).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("a key that expired 2020-01-01"));
+    warn.mockRestore();
 
     useEmbedded([trustedKey(npm)]);
     await expect(

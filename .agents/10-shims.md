@@ -33,6 +33,23 @@ require('./lib/corepack.cjs').runMain(process.argv.slice(2));
 
 Both `chmod 0o755`.
 
+> **Divergence (§14.25).** The relative specifier above resolves correctly only
+> because the runtime resolves the main module through its realpath, and the name
+> on `PATH` is a symlink to the stub (§10.2). A conforming implementation MUST
+> resolve the entry against the stub's **own realpath** instead, so the shim also
+> works under `node --preserve-symlinks-main` and on runtimes that resolve from
+> the link:
+>
+> ```js
+> import { realpathSync } from "node:fs";
+> import { pathToFileURL } from "node:url";
+> const entry = new URL("<entry>", pathToFileURL(realpathSync(import.meta.filename)));
+> const { runMain } = await import(entry.href);
+> ```
+>
+> `<entry>` is the bare file name from §10.4's candidate list. See §14.25 for the
+> failure this avoids and its measured cost.
+
 > **Divergence (§14.15).** For a single-binary native implementation there is nothing
 > to generate: the shim can be a **hardlink or symlink to the tool itself**, and the
 > tool dispatches on `basename(argv[0])`.

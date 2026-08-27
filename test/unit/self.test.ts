@@ -1,9 +1,14 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
-import { findEntryModule, getOwnRoot } from "../../src/utils/self.ts";
+import {
+  findEntryModule,
+  getOwnRoot,
+  getOwnVersion,
+  UNKNOWN_VERSION,
+} from "../../src/utils/self.ts";
 
 /**
  * These two questions were answered three separate times by counting `dirname`
@@ -65,6 +70,33 @@ describe("locating ourselves", () => {
     it("returns undefined when there is no entry module anywhere above", () => {
       const orphan = mkdtempSync(join(tmpdir(), "orphan-"));
       expect(findEntryModule(pathToFileURL(join(orphan, "x.mjs")).href)).toBeUndefined();
+    });
+  });
+
+  /**
+   * Row 210. In a build `getOwnVersion` is a substituted string literal
+   * (`build.config.ts`); from source it falls back to the manifest, which is the
+   * path these tests exercise. What matters either way is that the answer is
+   * never *silently* a placeholder — the previous fallback was the literal
+   * `0.0.0`, which is also this package's version, so no test could tell a
+   * successful read from a failed one and the first release would have shipped
+   * a `--version` that quietly lied.
+   */
+  describe("getOwnVersion", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as { version: string };
+
+    it("210: reports the manifest's version, not the fallback", () => {
+      expect(getOwnVersion()).toBe(manifest.version);
+      expect(getOwnVersion()).not.toBe(UNKNOWN_VERSION);
+    });
+
+    it("210: the fallback is distinguishable from any version we could ship", () => {
+      // A prerelease tag no release process produces. This is the whole reason
+      // the fallback moved off `0.0.0`.
+      expect(UNKNOWN_VERSION).not.toBe(manifest.version);
+      expect(UNKNOWN_VERSION).toContain("unknown");
     });
   });
 });

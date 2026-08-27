@@ -31,6 +31,7 @@ import {
   tlsConfigured,
   tlsTransportRequired,
 } from "./tls.ts";
+import { getOwnVersion } from "../utils/self.ts";
 
 /**
  * §15.5 — connect **and** idle timeout, in milliseconds, overridable with
@@ -168,7 +169,7 @@ const wait = (milliseconds: number): Promise<void> =>
  * the machine. Native HTTP stacks generally must send *something*, and a
  * registry operator needs a name to point at when something misbehaves.
  */
-export const USER_AGENT = "jup/0.0.0 (+https://github.com/unjs/jup)";
+export const USER_AGENT = `jup/${getOwnVersion()} (+https://github.com/unjs/jup)`;
 
 export interface HttpOptions {
   headers?: Record<string, string>;

@@ -121,9 +121,12 @@ export async function verifySignatureWithRefresh(input: {
   }
 
   // One retry, reporting *its* failure rather than the first one: the diagnostic
-  // then lists everything actually tried, which is how the npm-rotation case
-  // stops reading "no trusted key matched" and starts naming the expired key it
-  // just learned about.
+  // then lists everything actually tried. This is also what makes the
+  // npm-rotation case work at all — the embedded table ships only unexpired keys
+  // (§14.4), so a pre-2025-01-29 artifact arrives here as "no trusted key
+  // matched", the refresh supplies the expired key npm still publishes, and
+  // §06.5's leniency accepts the signature it verifies with a warning instead of
+  // failing on a keyid nobody could have recognised.
   verifySignature({ ...input, trustedKeys: mergeKeys(base, refreshed) });
 }
 
@@ -144,8 +147,9 @@ function refreshable(): boolean {
  *
  * "The cache already holds a keyid the registry signed with" is the answer that
  * makes the steady state free: after one refresh, a package signed with the
- * rotated key — or with a key that turns out to be *expired*, which is npm's
- * `yarn@latest` today — is decided from disk forever, with no further requests.
+ * rotated key — or with a key that turns out to be *expired*, which is every
+ * package manager npm published before 2025-01-29 — is decided from disk
+ * forever, with no further requests.
  *
  * Exported for the tests, and not only for convenience: `httpGet` refuses under
  * `COREPACK_ENABLE_NETWORK=0` on its own, so a test that counts sockets cannot

@@ -31,7 +31,13 @@ import {
 import { chmod } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { cleanupFixtures, copyTool, createFixture, run } from "./_harness/index.ts";
+import {
+  cleanupFixtures,
+  copyTool,
+  createFixture,
+  run,
+  seedPackageManager,
+} from "./_harness/index.ts";
 
 const TOOL = copyTool();
 
@@ -326,5 +332,50 @@ describe("§15.29 — enable verifies its own post-condition", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
+  });
+});
+
+/**
+ * §14.25 — the stub must not depend on the runtime resolving its main module
+ * through the realpath.
+ *
+ * The shim on `PATH` is a symlink to the stub (§10.2), so a relative specifier
+ * inside the stub is resolved against whichever path the runtime considers the
+ * main module's. Stock Node makes that the realpath, which is why the relative
+ * form appeared to work — but `--preserve-symlinks-main` is a supported flag
+ * that turns it off, and the stub then dies with `ERR_MODULE_NOT_FOUND` before
+ * any of this tool's code runs. Non-Node ESM runtimes resolve from the link too.
+ */
+describe("§14.25 — the stub resolves its own entry", () => {
+  it.skipIf(IS_WINDOWS)("211: the shim runs under --preserve-symlinks-main", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);
+
+    const result = await run(["--version"], {
+      ...options,
+      // `run` spawns `node <bin> <args>`, so the flag has to arrive this way.
+      bin: join(shimDir, "yarn"),
+      env: { ...options.env, NODE_OPTIONS: "--preserve-symlinks-main" },
+    });
+
+    expect(result.stderr).not.toContain("ERR_MODULE_NOT_FOUND");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+  });
+
+  it.skipIf(IS_WINDOWS)("211: and under ordinary resolution, unchanged", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);
+
+    const result = await run(["--version"], { ...options, bin: join(shimDir, "yarn") });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
   });
 });

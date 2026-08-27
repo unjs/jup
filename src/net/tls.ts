@@ -194,6 +194,63 @@ export function inlineCertificates(values: string[], source: string): string[] {
 }
 
 /**
+ * Hand the certificates to the runtime, then **check that it took them**.
+ *
+ * `setDefaultCACertificates` returns nothing, so an unchecked call is a wish. A
+ * runtime that does not have it at all throws a bare `TypeError` from inside a
+ * function the user has never heard of; one that accepts the call and ignores it
+ * leaves the request to fail later with `UNABLE_TO_GET_ISSUER_CERT`, which is
+ * precisely the unexplained certificate error §15.4 exists to abolish — except
+ * now the user has configured the fix and still sees it. Either way the
+ * diagnostic must name `JUP_CAFILE`, because that is the setting being ignored.
+ *
+ * What the readback catches is a **silent no-op setter**. It cannot catch a
+ * runtime whose HTTP stack does not consult the process trust store at all —
+ * bun 1.4 and deno 2.8 both report the new certificates from
+ * `getCACertificates("default")` and then ignore them in `fetch`, so nothing
+ * observable from here distinguishes them from Node. That is a runtime bug
+ * rather than something to detect; the check is still worth its one call for
+ * the case it does cover, and it costs nothing on a run that configures no CA.
+ *
+ * The check is skipped when the request is not going over `fetch` anyway
+ * ({@link tlsTransportRequired}): that path passes `ca` explicitly through
+ * {@link tlsConnectOptions}, so the process default is not what carries it.
+ */
+function installTrustStore(certificates: string[], source: string): void {
+  const tls = process.getBuiltinModule("node:tls") as unknown as {
+    setDefaultCACertificates?: (certificates: string[]) => void;
+    getCACertificates?: (type: string) => string[];
+  };
+
+  if (typeof tls.setDefaultCACertificates !== "function") {
+    if (tlsTransportRequired()) return;
+    throw new Error(messages.cafileUnsupported(source));
+  }
+
+  tls.setDefaultCACertificates(certificates);
+
+  if (typeof tls.getCACertificates !== "function" || tlsTransportRequired()) return;
+
+  let actual: string[];
+  try {
+    actual = tls.getCACertificates("default");
+  } catch {
+    // A runtime that cannot answer the question has not answered "no".
+    return;
+  }
+
+  const stored = new Set(actual.map(bareCertificate));
+  if (certificates.every((certificate) => stored.has(bareCertificate(certificate)))) return;
+
+  throw new Error(messages.cafileNotApplied(source));
+}
+
+/** PEM modulo whitespace: line endings and a trailing newline are not content. */
+function bareCertificate(pem: string): string {
+  return pem.replaceAll(/\s+/g, "");
+}
+
+/**
  * Install the configured trust store and announce a disabled one. Idempotent.
  *
  * Called before the first request goes out, never during module load: a run that
@@ -208,7 +265,7 @@ export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): vo
     // this same seam — replace the default set too, as does `COREPACK_CAFILE`.
     // A TLS-inspecting proxy re-signs everything with the CA being configured
     // here, so replacement is also the shape that actually works behind one.
-    process.getBuiltinModule("node:tls").setDefaultCACertificates(certificates);
+    installTrustStore(certificates, settings.cafileSource ?? settings.caSource ?? ENV.CAFILE);
     installed = key;
   }
 

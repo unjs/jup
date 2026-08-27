@@ -187,6 +187,7 @@ new, so they may be worded freely, but a conforming implementation SHOULD use th
 
 ```
 The package was signed with an expired key (<keyid>, expired <expires>)                     §06.5
+! jup integrity warning: <name>@<version> carries a valid signature from <keyid>, a key that expired <expires>; accepting it   §06.5
 Unable to locate a Node.js runtime to execute <binName>; set JUP_NODE_EXECPATH to point at one   §08.3.1
 Unable to determine where to install the shims; pass --install-directory                    §10.4
 <binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)   §10.2

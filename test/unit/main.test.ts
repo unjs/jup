@@ -1016,6 +1016,20 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * `warm.mjs` went 79,359 -> 79,597, +238 bytes or +0.30%. The fallback cannot
    * move off the warm path — it *is* the §03.1 walk. Held at 206,000 rather
    * than the 205,209 this leaves, on the same terms as the raise above.
+   *
+   * And once more, 206,000 -> 208,000, for three fixes that each land in a warm
+   * module. `errors.ts` +1,227: §06.5's expired-key acceptance warning (§14.4 —
+   * npm's 2025-01-29 rotation makes leniency the only workable policy, and the
+   * warning is what makes it safe) plus §15.4's two "the CA bundle did not take"
+   * messages. `utils/self.ts` +1,043: `getOwnVersion` reads a build-time
+   * constant instead of locating and parsing our own manifest, so it cannot be
+   * wrong about a version it could not find. Source +2,270; measured, `warm.mjs`
+   * went 79,597 -> 79,926, +329 bytes or +0.41% — the rest is prose. None of it
+   * can move off the warm path: `errors.ts` is where every message lives, and
+   * `self.ts` already answers §08.7's `COREPACK_ROOT` on the same run. Note the
+   * version constant makes the *built* warm path strictly smaller in work done —
+   * a `readFileSync` and a `JSON.parse` fold away entirely. Held at 208,000
+   * rather than the 207,479 this leaves, on the same terms as the raises above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1027,6 +1041,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(206_000);
+    ).toBeLessThanOrEqual(208_000);
   });
 });

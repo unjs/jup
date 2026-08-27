@@ -47,7 +47,7 @@ An implementation conforms to this specification when it:
 - satisfies every **MUST** in files 01 through 12;
 - satisfies the additional requirements in §15;
 - passes tests 1–147 in §13; and
-- passes tests 148–203 in §15.38.
+- passes tests 148–211 in §15.38.
 
 Both §14 and §15 define intentional differences from Corepack. Section 14 records differences found while studying Corepack's source. Section 15 adds requirements derived from its issue tracker. If the two sections cover the same behavior, §15 takes precedence.
 

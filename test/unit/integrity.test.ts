@@ -75,6 +75,9 @@ function verify(signatures: RegistrySignature[] | undefined): void {
 
 afterEach(() => {
   delete process.env.COREPACK_INTEGRITY_KEYS;
+  // §14.4's leniency is only safe because it warns, so the expiry tests spy on
+  // `console.warn`; without this the spy would swallow every later test's output.
+  vi.restoreAllMocks();
 });
 
 /* -------------------------------------------------------------------------- */
@@ -205,15 +208,44 @@ describe("verifySignature — §06.3", () => {
   });
 });
 
-describe("verifySignature — key expiry (§14.4, test 82)", () => {
-  it("fails naming the key when the only match is expired", () => {
+describe("verifySignature — key expiry (§14.4, tests 82, 208)", () => {
+  it("82: accepts a valid signature from the only, expired match — loudly", () => {
     const npm = makeKeypair("SHA256:npm-expired");
     const expires = "2025-01-29T00:00:00.000Z";
     useTrustStore([trustedKey(npm, expires)]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    // The signature itself is perfectly valid: expiry alone must fail the run.
-    expect(() => verify([{ keyid: npm.keyid, sig: signPayload(npm, PAYLOAD) }])).toThrow(
-      `The package was signed with an expired key (${npm.keyid}, expired ${expires})`,
+    // §06.5's SHOULD. Every package manager npm published before this date is
+    // signed with this key and can never be re-signed, so refusing them all is
+    // a larger failure than the expiry is a defence.
+    expect(() => verify([{ keyid: npm.keyid, sig: signPayload(npm, PAYLOAD) }])).not.toThrow();
+
+    // "MUST NOT do so silently" — the whole of what makes the leniency safe.
+    expect(warn).toHaveBeenCalledWith(
+      `! jup integrity warning: ${PACKAGE}@${VERSION} carries a valid signature from ${npm.keyid}, a key that expired ${expires}; accepting it`,
+    );
+  });
+
+  it("208: still fails, naming the key, when that signature does not verify", () => {
+    const npm = makeKeypair("SHA256:npm-expired");
+    const expires = "2025-01-29T00:00:00.000Z";
+    useTrustStore([trustedKey(npm, expires)]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Expiry buys leniency, not a bypass: the ECDSA check runs first.
+    expect(() =>
+      verify([{ keyid: npm.keyid, sig: signPayload(npm, "some other payload") }]),
+    ).toThrow(`The package was signed with an expired key (${npm.keyid}, expired ${expires})`);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("208: a malformed signature from an expired key is a failure, not an acceptance", () => {
+    const npm = makeKeypair("SHA256:npm-expired");
+    useTrustStore([trustedKey(npm, "2025-01-29T00:00:00.000Z")]);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(() => verify([{ keyid: npm.keyid, sig: "bm90LWEtc2lnbmF0dXJl" }])).toThrow(
+      "The package was signed with an expired key",
     );
   });
 

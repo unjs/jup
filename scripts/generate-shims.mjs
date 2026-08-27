@@ -31,9 +31,9 @@ const binNames = Object.keys(DEFINITIONS).flatMap((name) => getBinariesFor(name)
 await Promise.all(
   binNames.map(async (binName) => {
     const file = join(dist, `${binName}.js`);
-    await writeFile(file, shimSource(`./${entry}`, binName));
+    await writeFile(file, shimSource(entry, binName));
     await chmod(file, 0o755);
   }),
 );
 
-console.log(`Generated ${binNames.length} shim stubs for ./${entry}: ${binNames.join(", ")}`);
+console.log(`Generated ${binNames.length} shim stubs for ${entry}: ${binNames.join(", ")}`);

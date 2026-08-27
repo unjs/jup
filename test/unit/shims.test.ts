@@ -326,7 +326,7 @@ describe("enable (§10.2)", () => {
 
   it("replaces one of our own stubs left as a regular file, without --force", async () => {
     const file = join(binDir, "yarn");
-    write(file, shimSource("./index.mjs", "yarn"), 0o755);
+    write(file, shimSource("index.mjs", "yarn"), 0o755);
 
     await generatePosixLink(binDir, dist, "yarn");
 

@@ -169,6 +169,30 @@ Hostname mismatch
     → `TLS certificate for <host> does not match that hostname.`
 ```
 
+* **Confirm the bundle was actually installed.** Installing a CA is a
+  security-relevant configuration step whose API answers nothing: Node's
+  `tls.setDefaultCACertificates` returns `undefined`, so an unchecked call is a
+  wish. An implementation MUST verify that the configured certificates are
+  reflected in the runtime's default trust store afterwards — reading them back
+  where the runtime offers a way (`tls.getCACertificates("default")`) — and MUST
+  fail with a message **naming the setting that was ignored** rather than letting
+  the request fail later with the bare certificate error this section exists to
+  abolish. A runtime that provides no way to install the bundle at all MUST fail
+  the same way, not with a raw `TypeError`.
+
+  The check costs one call and only on a run that configures a CA, so §15.4's
+  "nothing here costs anything unless it is configured" is preserved. It is
+  skipped when the request will not travel over the runtime's own `fetch`
+  (§14.8's `node:https` dispatcher passes `ca` explicitly, so the process default
+  is not what carries it).
+
+  Its limit is worth stating: this detects a **no-op setter**. It cannot detect a
+  runtime whose HTTP stack simply does not consult the process trust store —
+  measured with a one-certificate bundle, `getCACertificates("default")` went
+  120 → 1 on node 24.19, 121 → 1 on bun 1.4.0 and 151 → 1 on deno 2.8.3, and only
+  node's `fetch` honoured it. All three report the change; two ignore it. That is
+  a runtime bug rather than something detectable from here.
+
 ## 15.5 Network resilience: timeouts and retries — [required]
 
 > Driven by **#458** (6👍, 9 comments): intermittent CI failures with no diagnosis. The
@@ -1048,3 +1072,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 205 | `packageManager` present in `$HOME/package.json`, run from an unrelated directory | the mismatch error flags the manifest as outside any project (§15.35k) |
 | 206 | `cache clean` with, then without, cached versions | reports the count removed, then `Nothing to remove` (§15.35l) |
 | 207 | `#440`: a store directory symlinked to a local checkout | resolves and runs, so a package manager can be debugged in place |
+| 208 | Only matching key expired **and** its signature does not verify | exit 1, `The package was signed with an expired key (<keyid>, expired <expires>)` — leniency is not a bypass (§06.5, §14.4) |
+| 209 | A CA bundle is configured and the runtime's default trust store does not reflect it afterwards | fails naming the setting that was ignored, not a bare certificate error (§15.4) |
+| 210 | `--version` and `info` in a built package | the packed version, with no manifest read; never a plausible-looking placeholder (§09.9, §15.30f) |
+| 211 | A shim run under `node --preserve-symlinks-main`, or on a runtime that resolves from the link | runs; the stub resolves its entry against its own realpath (§14.25) |

@@ -96,6 +96,9 @@ describe("§13.13 CLI errors", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`${OWN_VERSION}\n`);
+    // Row 210 — and never the "we could not find out" answer, which is a
+    // distinguishable string precisely so this assertion can exist.
+    expect(result.stdout).not.toContain("unknown");
     expect(result.stderr).toBe("");
   });
 

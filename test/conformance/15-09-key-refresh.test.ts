@@ -143,24 +143,28 @@ describe("§15.9 — key refresh on an unknown keyid", () => {
     expect(keyRequests()).toEqual([]);
   });
 
-  it("162: a refreshed key that npm has expired says so, instead of blaming the keyid", async () => {
-    // This is npm's `yarn@latest` today, reproduced hermetically: the signature's
-    // keyid is one the embedded table does not ship, and `/-/npm/v1/keys` marks
-    // it `expires: 2025-01-29`. Before §15.9 the only available answer was "not
-    // signed by any trusted keys", which reads like a bug in the tool. After it,
-    // the refresh supplies the key and §06.5 gets to name the real reason.
+  it("162: a refreshed key that npm has expired installs, naming the key it accepted", async () => {
+    // Every package manager npm published before 2025-01-29, reproduced
+    // hermetically: the signature's keyid is one the embedded table does not
+    // ship (§14.4 ships only unexpired keys), and `/-/npm/v1/keys` marks it
+    // `expires: 2025-01-29`. Before §15.9 the only available answer was "not
+    // signed by any trusted keys", which reads like a bug in the tool. The
+    // refresh supplies the key, and §06.5's leniency accepts the signature that
+    // verifies under it rather than refusing half the registry's history.
     registry.publishedKeys = [registry.keyEntry({ expires: "2025-01-29T00:00:00.000Z" })];
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry });
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
     expect(result.stderr).toContain(
-      `The package was signed with an expired key (${registry.keyid}, expired 2025-01-29T00:00:00.000Z)`,
+      `carries a valid signature from ${registry.keyid}, a key that expired 2025-01-29T00:00:00.000Z`,
     );
     expect(result.stderr).not.toContain("The package was not signed by any trusted keys");
     expect(keyRequests()).toHaveLength(1);
-    expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
+    // The refresh is what made it verifiable, so the install is cached (§07).
+    expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(true);
   });
 
   it("163: a pinned COREPACK_INTEGRITY_KEYS is final — nothing is refreshed", async () => {

@@ -167,7 +167,12 @@ timestamp. The reference implementation **stores this field and never reads it**
 > * Expiry is evaluated against the system clock. Since a wrong clock could then
 >   reject valid keys, an implementation SHOULD fall back to accepting an expired key
 >   with a warning rather than hard-failing when *no* unexpired key matches and the
->   signature is otherwise valid — but MUST NOT do so silently.
+>   signature is otherwise valid — but MUST NOT do so silently. §14.4 records why
+>   this SHOULD is not optional in practice: npm rotated its signing key on
+>   2025-01-29 and `dist.signatures` is never rewritten, so refusing an expired key
+>   refuses every package manager published before that date. The error above
+>   therefore fires only when the signature does **not** verify under the expired
+>   key.
 >
 > The embedded table's first key expired on 2025-01-29 and is dead weight today; a
 > re-implementation should ship only unexpired keys and refresh them the way the

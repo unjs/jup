@@ -467,9 +467,37 @@ describe("§13.7 registry, auth and integrity", () => {
     );
   });
 
-  it("82: a trust store whose only matching key has expired names the key (§14.4)", async () => {
+  it("82: a trust store whose only matching key has expired accepts, loudly (§14.4)", async () => {
     const expires = "2020-01-01T00:00:00.000Z";
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
+
+    const result = await run(["pnpm", "--version"], {
+      ...fixture,
+      registry,
+      env: { COREPACK_INTEGRITY_KEYS: registry.trustStore({ expires }) },
+    });
+
+    // §06.5's SHOULD, taken. npm rotated its signing key on 2025-01-29 and
+    // `dist.signatures` is never rewritten, so hard-failing here would refuse
+    // every package manager published before that date — all of Yarn 1.x
+    // included, which can never be re-signed.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.2\n");
+    // "MUST NOT do so silently."
+    expect(result.stderr).toContain(
+      `carries a valid signature from ${registry.keyid}, a key that expired ${expires}; accepting it`,
+    );
+  });
+
+  it("208: an expired key whose signature does not verify still fails (§14.4)", async () => {
+    const expires = "2020-01-01T00:00:00.000Z";
+    const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
+
+    // Expiry buys leniency, not a bypass: the ECDSA check runs first, so a
+    // tampered artifact is refused whether or not the key is current. The mode
+    // signs with a rogue keypair under the *advertised* keyid, which is exactly
+    // the shape that reaches the expired branch.
+    registry.mode = "invalid_signature";
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
@@ -481,6 +509,7 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(result.stderr).toContain(
       `The package was signed with an expired key (${registry.keyid}, expired ${expires})`,
     );
+    expect(result.stderr).not.toContain("accepting it");
   });
 
   it("83: a dist.tarball on another host is refused (§14.9)", async () => {

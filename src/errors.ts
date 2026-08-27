@@ -355,6 +355,18 @@ export const messages = {
   cafileEmpty: (path: string) =>
     `The TLS certificate bundle at ${path} contains no PEM certificate`,
 
+  /**
+   * §15.4 — the configuration was applied and did not stick. Naming the source
+   * is the whole point: without it the run fails later with a bare
+   * `UNABLE_TO_GET_ISSUER_CERT`, which is the unexplained certificate error
+   * §15.4 exists to abolish — reached by someone who already fixed it.
+   */
+  cafileNotApplied: (source: string) =>
+    `The TLS certificates from ${source} were installed, but this runtime's trust store does not reflect them; requests would fail with an unexplained certificate error`,
+
+  cafileUnsupported: (source: string) =>
+    `This runtime cannot apply the TLS certificates from ${source}: node:tls provides no setDefaultCACertificates`,
+
   /* §15.5 — resilience ----------------------------------------------------- */
 
   /**
@@ -484,6 +496,15 @@ export const messages = {
 
   expiredKey: (keyid: string, expires: string) =>
     `The package was signed with an expired key (${keyid}, expired ${expires})`,
+
+  /**
+   * §06.5/§14.4 — the leniency, and never silent. The signature *verified*; only
+   * the key that made it has since been rotated out, which is the permanent
+   * state of everything npm published before 2025-01-29. So the line says what
+   * was accepted, not that the reader has something to fix.
+   */
+  expiredKeyAccepted: (name: string, version: string, keyid: string, expires: string) =>
+    `! jup integrity warning: ${name}@${version} carries a valid signature from ${keyid}, a key that expired ${expires}; accepting it`,
 
   noNodeRuntime: (binName: string) =>
     `Unable to locate a Node.js runtime to execute ${binName}; set JUP_NODE_EXECPATH to point at one`,

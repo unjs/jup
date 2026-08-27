@@ -138,7 +138,7 @@ row under either name. Row 41b covers the pair itself.
 | 79 | Re-run after any integrity failure | fails identically — nothing was cached |
 | 80 | `COREPACK_INTEGRITY_KEYS` = unset / `"0"` / `""` / arbitrary JSON | skip = false / true / true / false |
 | 81 | Built-in trust store vs `GET https://registry.npmjs.org/-/npm/v1/keys` | identical (live staleness check) |
-| 82 ⊕ | Trust store contains only an expired matching key | exit 1, `The package was signed with an expired key (<keyid>, expired <expires>)` (§14.4) |
+| 82 ⊕ | Trust store contains only an expired matching key, signature valid | exit 0; stderr names the key it accepted and its expiry — never silent (§06.5, §14.4) |
 | 83 ⊕ | `dist.tarball` points at a host other than the configured registry | refused (§14.9) |
 | 84 ⊕ | Tarball entry with a `../` path, an absolute path, or an escaping symlink | refused, `Refusing to extract '<entry>': path escapes the extraction directory` (§07.4) |
 | 85 ⊕ | Gzip bomb (implausible expansion ratio) | refused before exhausting disk (§07.4) |

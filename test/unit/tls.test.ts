@@ -496,6 +496,65 @@ describe("applyTlsConfiguration", () => {
     expect(getCACertificates("default")).toEqual(defaultCertificates);
     expect(warn).not.toHaveBeenCalled();
   });
+
+  /**
+   * §15.4, row 209 — `setDefaultCACertificates` returns nothing, so an unchecked
+   * call is a wish. Without the readback both shapes below fail much later as a
+   * bare `UNABLE_TO_GET_ISSUER_CERT`, which is the unexplained certificate error
+   * §15.4 exists to abolish — reached, this time, by a user who has already
+   * configured the fix.
+   */
+  function stubTls(tls: Record<string, unknown>): void {
+    const real = process.getBuiltinModule.bind(process);
+    vi.spyOn(process, "getBuiltinModule").mockImplementation(((name: string) =>
+      name === "node:tls" ? tls : real(name as never)) as typeof process.getBuiltinModule);
+  }
+
+  it("209: fails, naming the source, when the runtime ignores the installed bundle", () => {
+    stubTls({
+      setDefaultCACertificates: () => {},
+      getCACertificates: () => defaultCertificates,
+    });
+
+    expect(() =>
+      applyTlsConfiguration({ cafile: bundleFile(CERT), cafileSource: "JUP_CAFILE", verify: true }),
+    ).toThrow(
+      "The TLS certificates from JUP_CAFILE were installed, but this runtime's trust store does not reflect them",
+    );
+  });
+
+  it("209: fails when the runtime has no setDefaultCACertificates at all", () => {
+    stubTls({});
+
+    expect(() =>
+      applyTlsConfiguration({ cafile: bundleFile(CERT), cafileSource: "JUP_CAFILE", verify: true }),
+    ).toThrow("node:tls provides no setDefaultCACertificates");
+  });
+
+  it("209: says nothing when the runtime cannot be asked", () => {
+    // A runtime with the setter and no reader has not answered "no".
+    stubTls({ setDefaultCACertificates: () => {} });
+
+    expect(() =>
+      applyTlsConfiguration({ cafile: bundleFile(CERT), cafileSource: "JUP_CAFILE", verify: true }),
+    ).not.toThrow();
+  });
+
+  it("209: leaves the check alone when the request is not going over fetch", () => {
+    // `COREPACK_STRICT_SSL=0` routes through `node:https` with `ca` passed
+    // explicitly (§14.8), so the process trust store is not what carries it.
+    process.env.COREPACK_STRICT_SSL = "0";
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    stubTls({ setDefaultCACertificates: () => {}, getCACertificates: () => defaultCertificates });
+
+    expect(() =>
+      applyTlsConfiguration({
+        cafile: bundleFile(CERT),
+        cafileSource: "JUP_CAFILE",
+        verify: false,
+      }),
+    ).not.toThrow();
+  });
 });
 
 /* ------------------------------------------------------------------ *

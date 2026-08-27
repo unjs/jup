@@ -58,18 +58,38 @@ export function getOwnRoot(moduleUrl: string): string {
 }
 
 /**
- * The tool's own version (§09.9, §15.30f), read from our own manifest.
+ * Baked in by the bundler (`build.config.ts`'s rolldown `define`), and absent
+ * when running from source. `typeof` rather than a direct read, because an
+ * undeclared identifier is only safe to touch through it.
+ */
+declare const __JUP_VERSION__: string | undefined;
+
+/** What `--version` answers when neither the build nor a manifest could say. */
+export const UNKNOWN_VERSION = "0.0.0-unknown";
+
+/**
+ * The tool's own version (§09.9, §15.30f).
  *
- * The walk above is what makes this correct in a built package: two fixed levels
- * is right from `<root>/src/cli.ts` and wrong from `<root>/dist/_chunks/cli.mjs`,
- * where a bundler puts the caller — and the shipped package would then answer
- * `--version` with the `0.0.0` fallback forever.
+ * **In a build this is a string literal**, and rolldown folds the rest of the
+ * function away. That is smaller and faster — no `readFileSync`, no
+ * `JSON.parse`, for `--version`, `info` or the `user-agent` — but the reason is
+ * that it *cannot be wrong*. The manifest read has to locate the manifest first,
+ * and any packaging that moves the entry file away from it makes that walk fail
+ * quietly: the fallback used to be the literal `0.0.0`, which is also this
+ * package's version, so nothing could tell success from failure and the first
+ * release would have started lying with no test able to notice.
  *
- * It lives here rather than in `cli.ts` because `info` reports it too, and
- * §15.35f asks the tool to report its own version: two copies of a path
- * computation that is only wrong when built is exactly the drift to avoid.
+ * From source there is no substitution and the manifest is read as before;
+ * {@link getOwnRoot}'s walk is what keeps that right from `src/` and from a
+ * bundler's chunk directory alike. The last resort is {@link UNKNOWN_VERSION}
+ * rather than a believable `0.0.0` — `--version` must answer something, but not
+ * something it did not find.
+ *
+ * It lives here rather than in `cli.ts` because `info` and `http.ts` want it
+ * too: three copies of a version lookup is exactly the drift to avoid.
  */
 export function getOwnVersion(): string {
+  if (typeof __JUP_VERSION__ === "string") return __JUP_VERSION__;
   try {
     const raw = readFileSync(join(getOwnRoot(import.meta.url), "package.json"), "utf8");
     const data = JSON.parse(raw) as { version?: unknown };
@@ -77,7 +97,7 @@ export function getOwnVersion(): string {
   } catch {
     // A package without a readable manifest still answers `--version`.
   }
-  return "0.0.0";
+  return UNKNOWN_VERSION;
 }
 
 /**
