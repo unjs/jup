@@ -48,8 +48,31 @@
 
 ## Standing hazards
 
-* **The warm byte ceiling is a tripwire, not a budget** (`test/unit/main.test.ts:1030`,
-  206,000). Raising it is allowed; raising it silently is not.
+* **The warm byte ceiling is a tripwire, not a budget** (`test/unit/main.test.ts`,
+  now 226,000). Raising it is allowed; raising it silently is not. §15.28's bun and
+  deno entries took it from 208,000 and cost a measured **+6,005 bytes (+7.5%)** in
+  `dist/_warm.mjs` — by far the largest raise so far, and the first where the cost is
+  code rather than prose. The accounting is in the test's own docstring; read it
+  before adding a third native entry, because the machinery is now paid for and the
+  next one should be nearly free.
+* **A per-host digest is host-local, and references travel** (§15.28). Both places a
+  reference is stored are copied between machines — `packageManager` is committed,
+  `lastKnownGood.json` is baked into images and warmed caches — and §06.1 row 1 reads
+  a reference-borne digest as an explicit pin, so a digest that travels turns the
+  *correct* artifact into a hash mismatch on arrival.
+
+  Two of the four sites now share a choke point: `store.referenceWithHash` is where a
+  reference gains a digest, and it declines for a per-host name, which covers `use`,
+  the auto-pin, and every `setLastKnownGood` caller at once. The other two are
+  §07.6 step 3 (`install.ts`) and §04.5's default-version lookup (`registry.ts`), plus
+  a repair-on-read in `getDefaultVersion` for files earlier builds poisoned. Rows 216,
+  217, 220 and 221 guard them.
+
+  Both §15.28 bugs that shipped were the *same* mistake in a place nothing pinned
+  reaches — a bare `deno` with no project spec — so the whole conformance suite passed
+  while the actual first-run experience failed. Prefer widening the choke point over
+  adding a fifth site: anything that answers "does this reference get a digest?" a
+  second way is the next bug.
 * **The sandbox has live network and the conformance harness does not disable it.** A row
   relying on a fallback version can pass over the wire. Seed the store and set
   `COREPACK_ENABLE_NETWORK=0` wherever the answer must come from the fixture.
@@ -69,8 +92,17 @@
 
 ## Not an engineering decision
 
+**Bun's and Deno's maintainers have not been asked.** §15.21 and §15.28 both require a
+package manager's maintainers to agree before an entry ships, and the entries are in
+the table now. Bun's reportedly declined the same request from corepack (#295). This
+is not a technical loose end and no further implementation work resolves it; it is a
+conversation someone has to have before a release carries these entries. Until then it
+is one more reason the item below stands.
+
+
 `package.json` is still `0.0.0` and nothing has been published. Shipping is not neutral: the
-package installs a `corepack` bin alias, and §15.33 moved yarn's compiled-in default from
-Classic 1.x to Berry 4.x, so a bare `yarn` in an unpinned project behaves differently from
-corepack's. Both are deliberate and documented; both want a human to agree before a release
+package installs a `corepack` bin alias, §15.33 moved yarn's compiled-in default from
+Classic 1.x to Berry 4.x so a bare `yarn` in an unpinned project behaves differently from
+corepack's, and the table now ships two entries whose maintainers have not been consulted.
+All three are deliberate and documented; all three want a human to agree before a release
 carries them.

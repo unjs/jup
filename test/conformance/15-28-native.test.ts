@@ -177,6 +177,33 @@ const DEFINITION = {
  * Without it, `execNative`'s `error` handler is unreachable from any row, and a
  * version of it that silently resolved 0 would look exactly like success.
  */
+/**
+ * A third entry: a per-host band whose `targets` map covers everything **except**
+ * this host.
+ *
+ * §15.28's `{target}` exists to make "this version has no build for you" a table
+ * lookup rather than a 404, and this is the entry that exercises the miss. The
+ * map is deliberately non-empty — a band with no targets at all could fail for
+ * the trivial reason, and the message names what the band *does* ship for.
+ */
+const NO_TARGET_DEFINITION = {
+  default: VERSION,
+  fetchLatestFrom: REGISTRY_SPEC,
+  transparent: { commands: [] },
+  ranges: [
+    [
+      "*",
+      {
+        url: `https://registry.npmjs.org/native/${NAME}-{}-{target}.tgz`,
+        bin: { tortoise: `./${ENTRIES.executable.path}` },
+        registry: REGISTRY_SPEC,
+        targets: { "plan9-sparc": "plan9-sparc" },
+        exec: "native",
+      },
+    ],
+  ],
+};
+
 const BROKEN_DEFINITION = {
   ...DEFINITION,
   ranges: [band({ hare: `./${ENTRIES.data.path}` })],
@@ -239,6 +266,7 @@ beforeAll(async () => {
   toolBin = copyTool();
   patchTable(toolBin, NAME, DEFINITION);
   patchTable(toolBin, "hare", BROKEN_DEFINITION);
+  patchTable(toolBin, "tortoise", NO_TARGET_DEFINITION);
 });
 
 afterAll(async () => {
@@ -287,7 +315,7 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     for (const path of paths) expect(path).not.toContain("{");
   });
 
-  it("193: `$0` is the artifact itself, so no interpreter was interposed", async () => {
+  it("193: no JavaScript interpreter was interposed ahead of the artifact", async () => {
     const fixture = project();
 
     const result = await run([NAME, "--probe", "a b", "--c"], options(fixture));
@@ -304,7 +332,13 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     );
 
     // §08.2 would make this `process.execPath` and demote the entry point to
-    // `argv[1]`; direct execution puts the artifact itself at `argv[0]`.
+    // `argv[1]`; direct execution reaches the artifact with nothing in front of
+    // it. What this reads is `$0`, and for a `#!/bin/sh` artifact that is the
+    // script path the kernel handed the interpreter — which is exactly the fact
+    // this row wants, and is *not* `argv[0]`, which a shell script never sees.
+    // §15.28's `argv[0]` rule (the invoked name, so `bunx` and `bun` can be one
+    // file) needs a real executable to observe and is asserted in
+    // `test/unit/exec.test.ts`.
     expect(lines.argv0).toBe(stored(fixture.home, ENTRIES.executable.path));
     // §08.7 is unchanged by §15.28: the child still sees COREPACK_ROOT, and a
     // spawned child sees it because it inherits the ambient environment.
@@ -460,6 +494,22 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     expect(setuid & 0o111).not.toBe(0);
     expect(setuid & 0o4000).toBe(0);
     expect(setuid & 0o2000).toBe(0);
+  });
+
+  it("219: a band that ships no artifact for this host says so before any request", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `tortoise@${VERSION}` });
+    registry.reset();
+
+    const result = await run(["tortoise", "--version"], options(fixture));
+
+    expect(result.exitCode).toBe(1);
+    // Not a 404, and not a URL still carrying `{target}`: the band declares the
+    // host set, so the miss is a real answer and the message names both halves.
+    expect(result.stderr).toContain(`tortoise@${VERSION} publishes no artifact for`);
+    expect(result.stderr).toContain("plan9-sparc");
+    // "Before any request" is the load-bearing half — an unsupported host must
+    // not cost a round trip, let alone a partial download.
+    expect(registry.requests).toHaveLength(0);
   });
 
   it("194: a second, cached run needs no network and still executes", async () => {

@@ -83,8 +83,9 @@ caller re-attaches to the locator as its build suffix (§07.6).
 ```
 if the locator is a supported (non-URL) package manager:
     url := spec.url with "{}" replaced by <version>
+                     and "{platform}"/"{arch}"/"{target}" resolved (§15.28)
     if COREPACK_NPM_REGISTRY is set:
-        registry := spec.npmRegistry ?? spec.registry
+        registry := spec.artifactRegistry ?? spec.npmRegistry ?? spec.registry
         if registry.type === "npm":
             {tarball, signatures, integrity} := GET {registry}/{package}/{version}
             url := tarball
@@ -98,6 +99,13 @@ else:                                    # URL reference
 ```
 
 The signature/integrity data fetched here is reused by §06.3 rather than re-fetched.
+
+§15.28 — a band declaring `artifactRegistry` uses it in place of `registry` for
+**everything on this path and in §06**: the tarball URL, the `dist.integrity`, and the
+signature over it. `registry` continues to answer §04's "which versions exist?". The
+two differ only when a package manager publishes a launcher package and its real
+binaries separately, which is how bun and deno ship (§02.5). An unsupported host fails
+in the first line, before any request.
 
 ## 7.4 Download and extraction
 
@@ -214,6 +222,11 @@ rethrowing on the last attempt.
 3. Rewrite the locator's reference to carry the *actual* hash:
    `<version without build>+<algo>.<actualHexDigest>`. This is what `use`/`up`
    write into `package.json` and what makes the written pin trustworthy.
+
+   §15.28 — **not** for a per-host band (§02.4), where the digest describes this
+   machine's artifact and no other. Committed to `packageManager`, it is a pin no
+   other platform can satisfy. The marker written in step 5 still records it, because
+   the store is host-local; §15.23's `.jup.lock` records it keyed by host.
 4. Auto-bump last-known-good if applicable (§04.7).
 
 ## 7.7 Resolving `bin`

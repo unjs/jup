@@ -15,6 +15,19 @@ Let `build[1]` be the hex digest from the reference's build suffix (§02.1), if 
 | no | `url` | — | — | **Nothing.** No signature, no hash. |
 | no | any | any | **yes** | **Nothing.** |
 
+"Registry type" here means the **artifact** registry: a band declaring
+`artifactRegistry` (§02.4, §15.28) is verified against *that* package's packument, not
+the one `registry` names. For bun and deno the difference is decisive — the launcher's
+`dist.integrity` describes a 15 kB `postinstall` stub, while the per-host package's
+describes the bytes about to be executed. A row-2 verification against the wrong one
+would be a signature check that proves nothing about what ran.
+
+That row is also the whole verification story for a per-host artifact: §15.28 forbids a
+compiled-in or committed digest for one (there is no portable answer), so nothing puts
+such an install on row 1 unless §15.23 recorded a digest for *this* host. This is
+stronger than a stale pin, not weaker — the signature is checked on every install and
+covers exactly the artifact this machine fetched.
+
 Two consequences a re-implementation MUST NOT accidentally "fix":
 
 * **A user-supplied hash overrides signature verification.** Pinning

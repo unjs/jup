@@ -28,6 +28,7 @@ import {
   parse,
   satisfiesWithPrereleases,
 } from "../version/semver.ts";
+import { hostTarget } from "../config/table.ts";
 import type { Descriptor, Locator } from "../types.ts";
 
 /**
@@ -42,8 +43,30 @@ export const LOCKFILE_VERSION = 1;
 /** §15.23 — one recorded resolution: the concrete version, and the hash of its artifact. */
 export interface Resolution {
   resolved: string;
-  /** SRI, as npm spells it (`sha512-<base64>`); absent in a hand-written file. */
-  integrity?: string;
+  /**
+   * SRI, as npm spells it (`sha512-<base64>`); absent in a hand-written file.
+   *
+   * §15.28 — for a package manager whose artifact is per-host (bun, deno) there
+   * is no single answer, so the field holds a **map** keyed by the normalised
+   * `<platform>-<arch>` instead:
+   *
+   * ```json
+   * {"resolved": "1.4.0",
+   *  "integrity": {"linux-x64": "sha512-…", "darwin-arm64": "sha512-…"}}
+   * ```
+   *
+   * The map fills in as hosts run, and each host reads only its own key — so a
+   * Linux CI job and a Mac laptop pin the same *version* by the same recorded
+   * decision, and each still checks the bytes it actually downloads. A host with
+   * no entry yet resolves the version from the lockfile without a network
+   * request and verifies through npm's signature (§06.3), which is the tier a
+   * native artifact always has; it then records its own key.
+   *
+   * A build that does not know about the map form reads `typeof integrity ===
+   * "string"`, finds it false, and treats the entry as version-only — which is
+   * exactly the right degradation, and is why this did not need a `version` bump.
+   */
+  integrity?: string | Record<string, string>;
 }
 
 interface LockfileData {
@@ -106,7 +129,8 @@ export function readLockfile(dir: string): LockfileData | null {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
     const { resolved, integrity } = value as { resolved?: unknown; integrity?: unknown };
     if (typeof resolved !== "string" || !isValidVersion(resolved)) continue;
-    kept[key] = typeof integrity === "string" ? { resolved, integrity } : { resolved };
+    const recorded = readIntegrityField(integrity);
+    kept[key] = recorded === undefined ? { resolved } : { resolved, integrity: recorded };
   }
 
   return { version: LOCKFILE_VERSION, resolutions: kept };
@@ -141,7 +165,8 @@ export function readResolution(dir: string, descriptor: Descriptor): Locator | n
   // The recorded digest becomes a build suffix, which is what makes it *used*
   // rather than merely stored: §06.1 row 1 treats a reference-borne hash as an
   // explicit pin and checks the downloaded bytes against it.
-  const hash = entry.integrity === undefined ? undefined : hashFromIntegrity(entry.integrity);
+  const integrity = integrityForHost(entry);
+  const hash = integrity === undefined ? undefined : hashFromIntegrity(integrity);
   return {
     name: descriptor.name,
     reference: hash === undefined ? entry.resolved : `${entry.resolved}+${hash}`,
@@ -159,6 +184,11 @@ export function readResolution(dir: string, descriptor: Descriptor): Locator | n
  * `hash` is the `<algo>.<hex>` the store already computed for these bytes
  * (§07.2); it is written as SRI, the spelling npm's own lockfiles use.
  *
+ * `perHost` is §15.28's answer for this locator, and it is passed in rather than
+ * asked for: the callers hold the table already, and importing it here to answer
+ * a question only the *write* path asks would put `resolveArtifactRegistry` and
+ * its caches into the chunk a warm read is measured on (§16.3).
+ *
  * A write failure is swallowed, per §07.8's rule for derived state: a read-only
  * checkout must still be able to *run*, and the cost of not recording is one
  * extra resolution next time. Frozen mode (§15.23) is the deliberate refusal and
@@ -169,6 +199,7 @@ export function writeResolution(
   descriptor: Descriptor,
   locator: Locator,
   hash: string | undefined,
+  perHost = false,
 ): void {
   const parsed = parse(locator.reference);
   // A reference we cannot reduce to a plain version is not recordable — and
@@ -176,10 +207,28 @@ export function writeResolution(
   if (parsed === null) return;
 
   const data = readLockfile(dir) ?? { version: LOCKFILE_VERSION, resolutions: {} };
+  const key = resolutionKey(descriptor);
   const resolution: Resolution = { resolved: parsed.version };
   const integrity = hash === undefined ? undefined : integrityFromHash(hash);
-  if (integrity !== undefined) resolution.integrity = integrity;
-  data.resolutions[resolutionKey(descriptor)] = resolution;
+
+  if (integrity !== undefined) {
+    if (perHost) {
+      // §15.28 — one key per host, and the other hosts' keys are carried over,
+      // but only while the *version* is unchanged: a resolution that moved to a
+      // new version has nothing to say about what the old one hashed to on a
+      // machine that is not this one.
+      const previous = data.resolutions[key];
+      const carried =
+        previous?.resolved === parsed.version && typeof previous.integrity === "object"
+          ? previous.integrity
+          : undefined;
+      resolution.integrity = { ...carried, [hostTarget()]: integrity };
+    } else {
+      resolution.integrity = integrity;
+    }
+  }
+
+  data.resolutions[key] = resolution;
 
   save(dir, data);
 }
@@ -215,7 +264,14 @@ export function removeResolution(dir: string, key: string): void {
 function serialise(data: LockfileData): string {
   const resolutions: Record<string, Resolution> = {};
   for (const key of Object.keys(data.resolutions).sort()) {
-    resolutions[key] = data.resolutions[key]!;
+    const entry = data.resolutions[key]!;
+    // §15.28's map is sorted for the same reason the keys above are: a host that
+    // records its own digest must produce a one-line diff, not a reordering of
+    // everybody else's.
+    resolutions[key] =
+      typeof entry.integrity === "object"
+        ? { ...entry, integrity: sorted(entry.integrity) }
+        : entry;
   }
   return `${JSON.stringify({ version: LOCKFILE_VERSION, resolutions }, undefined, 2)}\n`;
 }
@@ -260,6 +316,43 @@ function save(dir: string, data: LockfileData): void {
  * `install` already rejects an unsupported one with §12's message, and doing it
  * twice would only give the same input two different errors.
  */
+/** Sort an object's keys, so re-serialising an unchanged file round-trips. */
+function sorted(map: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const key of Object.keys(map).sort()) out[key] = map[key]!;
+  return out;
+}
+
+/**
+ * Validate the `integrity` field of one entry: a string, or §15.28's host map
+ * with every value a string. Anything else is dropped, per the entry-level rule
+ * above — a damaged field costs one extra resolution, never a broken checkout.
+ */
+function readIntegrityField(value: unknown): string | Record<string, string> | undefined {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+
+  const kept: Record<string, string> = {};
+  for (const [host, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry === "string") kept[host] = entry;
+  }
+  return Object.keys(kept).length > 0 ? kept : undefined;
+}
+
+/**
+ * The SRI this host should check its download against, if the file records one.
+ *
+ * A host map with no entry for *this* host answers `undefined`, which is the
+ * whole point of the shape: the version stands, and the bytes are verified
+ * through npm's signature rather than against a digest taken on somebody else's
+ * machine (§15.28).
+ */
+export function integrityForHost(entry: Resolution): string | undefined {
+  const { integrity } = entry;
+  if (integrity === undefined || typeof integrity === "string") return integrity;
+  return integrity[hostTarget()];
+}
+
 export function hashFromIntegrity(integrity: string): string | undefined {
   const entry = integrity.trim().split(/\s+/)[0] ?? "";
   const dash = entry.indexOf("-");

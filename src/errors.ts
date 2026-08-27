@@ -574,6 +574,19 @@ export const messages = {
     `${name}@${reference} ships per-platform artifacts, and there is none for architecture '${arch}' (supported: arm64, x64)`,
 
   /**
+   * §15.28 — a `{target}` this band does not ship for.
+   *
+   * Distinct from the two above, and more specific than either: `{platform}` and
+   * `{arch}` fail when the *host* is outside the tool's vocabulary, whereas this
+   * fails when the host is perfectly ordinary and the **version** has no build
+   * for it — bun published no Windows artifact before 1.1.0, and none for
+   * Windows on arm64 before 1.3.10. The version is therefore named alongside the
+   * host, because bumping it is usually the fix.
+   */
+  unsupportedTarget: (name: string, reference: string, host: string, supported: string[]) =>
+    `${name}@${reference} publishes no artifact for ${host} (this version ships: ${supported.join(", ")})`,
+
+  /**
    * §15.28 — a native `bin` target that could not be executed at all.
    *
    * Distinct from a package manager that ran and failed: this is `spawn`

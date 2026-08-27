@@ -240,15 +240,35 @@ Default targets: every supported package manager **except npm**. npm is excluded
 because it ships with Node through other means and shadowing it is more likely to
 break a machine than to help it. `enable npm` explicitly is supported.
 
+> §15.16 overturns the npm exclusion: it is inter-team policy jup is not party to,
+> and its consequence is that a yarn-pinned project correctly blocks `pnpm` while
+> `npm install` silently works anyway. `--exclude npm` restores it.
+
+An entry MAY opt out of the default set with `shimByDefault: false` (§02.3), and
+`bun` and `deno` do. Those names are runtimes people install deliberately and run
+outside any project, so a bare `enable` — which existing users run on upgrade, having
+asked for nothing — must not claim them on `PATH`. Naming the entry is the opt-in.
+
+`disable` with no names covers **every** entry, opt-outs included: removal has no
+such hazard, and a `disable` that declined to undo an `enable bun` would be the
+surprising one.
+
 Each name expands to every binary name it declares across all range entries, deduped:
 
-| Name | Binaries |
-|---|---|
-| `npm` | `npm`, `npx` |
-| `pnpm` | `pnpm`, `pnpx` |
-| `yarn` | `yarn`, `yarnpkg` |
+| Name | Binaries | In the default set |
+|---|---|---|
+| `npm` | `npm`, `npx` | yes (§15.16) |
+| `pnpm` | `pnpm`, `pnpx` | yes |
+| `yarn` | `yarn`, `yarnpkg` | yes |
+| `bun` | `bun`, `bunx` | no — `shimByDefault: false` |
+| `deno` | `deno` | no — `shimByDefault: false` |
 
 All binaries are processed concurrently.
+
+`info` (§15.30) reports **every** binary name regardless, including the opt-outs: what
+that report answers is "what does this name currently resolve to?", and for `bun` that
+is the interesting question precisely because the answer is usually someone else's
+install.
 
 ## 10.6 `disable`
 

@@ -11,8 +11,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { hostTarget } from "../../src/config/table.ts";
 import {
   hashFromIntegrity,
+  integrityForHost,
   integrityFromHash,
   LOCKFILE_NAME,
   readLockfile,
@@ -279,5 +281,123 @@ describe("the SRI codec — §15.23", () => {
     expect(hashFromIntegrity("sha512-4mgVEQ==?foo=bar sha256-abcd")).toBe(
       hashFromIntegrity("sha512-4mgVEQ=="),
     );
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * §15.28 — a per-host artifact has no single digest
+ * -------------------------------------------------------------------------- */
+
+describe("per-host resolutions — §15.28 within §15.23", () => {
+  const BUN = { name: "bun", range: "^1.4.0" };
+  const OTHER = "darwin-arm64" === hostTarget() ? "linux-x64" : "darwin-arm64";
+
+  it("records the digest under this host's key, not flat", () => {
+    writeResolution(dir, BUN, { name: "bun", reference: "1.4.0" }, HASH, true);
+
+    // The version is one decision, shared. The digest is not: it describes the
+    // bytes *this* machine downloaded, and a flat field would hand them to a
+    // colleague on another platform as a pin their download can never match.
+    expect(JSON.parse(read())).toEqual({
+      version: 1,
+      resolutions: {
+        "bun@^1.4.0": {
+          resolved: "1.4.0",
+          integrity: { [hostTarget()]: `sha512-${Buffer.from(HEX, "hex").toString("base64")}` },
+        },
+      },
+    });
+  });
+
+  it("carries other hosts' keys forward while the version stands", () => {
+    const theirs =
+      "sha512-Du44zebtPXJujvMLmtIxEQ6ykOhYt7L/Q+YIGVm+Yy+Pj/fpOnq60ggwIpKp/pGAFbYHNiTrA3JTjuZ9MTbZIg==";
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "bun@^1.4.0": { resolved: "1.4.0", integrity: { [OTHER]: theirs } } },
+      })}\n`,
+    );
+
+    writeResolution(dir, BUN, { name: "bun", reference: "1.4.0" }, HASH, true);
+
+    const entry = readLockfile(dir)!.resolutions["bun@^1.4.0"]!;
+    expect(entry.integrity).toHaveProperty(OTHER, theirs);
+    expect(entry.integrity).toHaveProperty(hostTarget());
+  });
+
+  it("drops other hosts' keys when the version moves", () => {
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "bun@^1.4.0": { resolved: "1.3.0", integrity: { [OTHER]: "sha512-old" } } },
+      })}\n`,
+    );
+
+    writeResolution(dir, BUN, { name: "bun", reference: "1.4.0" }, HASH, true);
+
+    // A digest taken for 1.3.0 says nothing about 1.4.0, on any host.
+    expect(Object.keys(readLockfile(dir)!.resolutions["bun@^1.4.0"]!.integrity as object)).toEqual([
+      hostTarget(),
+    ]);
+  });
+
+  it("pins the reference on a host the file records, and only the version elsewhere", () => {
+    writeResolution(dir, BUN, { name: "bun", reference: "1.4.0" }, HASH, true);
+
+    // This host has a recorded digest, so §06.1 row 1 gets to check it.
+    expect(readResolution(dir, BUN)).toEqual({ name: "bun", reference: `1.4.0+${HASH}` });
+
+    // A host with no entry yet still resolves without a network request; what
+    // verifies its download is npm's signature over its own artifact (§06.3),
+    // which is the tier a native artifact always has.
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "bun@^1.4.0": { resolved: "1.4.0", integrity: { [OTHER]: "sha512-x" } } },
+      })}\n`,
+    );
+    expect(readResolution(dir, BUN)).toEqual({ name: "bun", reference: "1.4.0" });
+  });
+
+  it("sorts the host keys, so a new host is a one-line diff", () => {
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: {
+          "bun@^1.4.0": {
+            resolved: "1.4.0",
+            integrity: { "win32-x64": "sha512-w", "darwin-x64": "sha512-d" },
+          },
+        },
+      })}\n`,
+    );
+    writeResolution(dir, BUN, { name: "bun", reference: "1.4.0" }, HASH, true);
+
+    const keys = Object.keys(
+      JSON.parse(read()).resolutions["bun@^1.4.0"].integrity as Record<string, string>,
+    );
+    expect(keys).toEqual([...keys].sort());
+  });
+
+  it("reads a hand-written map, and drops only the entries that are not strings", () => {
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: {
+          "bun@^1.4.0": { resolved: "1.4.0", integrity: { [hostTarget()]: "sha512-ok", junk: 5 } },
+        },
+      })}\n`,
+    );
+
+    const entry = readLockfile(dir)!.resolutions["bun@^1.4.0"]!;
+    expect(entry.integrity).toEqual({ [hostTarget()]: "sha512-ok" });
+    expect(integrityForHost(entry)).toBe("sha512-ok");
+  });
+
+  it("still writes a flat digest for a package manager that has one", () => {
+    // The default, and the shape every existing file and every other entry uses.
+    writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+    expect(typeof readLockfile(dir)!.resolutions[resolutionKey(RANGE)]!.integrity).toBe("string");
   });
 });

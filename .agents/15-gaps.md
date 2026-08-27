@@ -591,6 +591,33 @@ things.
 * An unknown name in `packageManager` remains an error, not a URL-fetch fallback
   (§03.4).
 
+### bun and deno are entries
+
+Both ship in §02.5. They are the first entries to use §15.28's per-host model, and
+adding them was a data-only change in the sense above — the machinery they use is
+§15.28's, declared per band, not per name.
+
+What that model has to accommodate, and what §02.4 and §15.28 now spell out, is that
+**one version is many artifacts**:
+
+* the version line and the dist-tags come from the launcher package (`registry`),
+  the bytes and npm's signature from the per-host one (`artifactRegistry`);
+* there is therefore no portable digest, so `packageManager` records a bare version
+  and §15.23 records a digest per host;
+* the compiled-in `default` is likewise bare (§02.3), and clears §15.11's tier
+  through the registry signature rather than through a literal.
+
+Both entries set `shimByDefault: false` (§02.3, §10.5). `bun` and `deno` name
+runtimes people install deliberately and run outside any project, so a bare
+`jup enable` — which existing users run on upgrade, having asked for nothing —
+must not claim those names on `PATH`. `jup enable bun` is the opt-in.
+
+> **On consent.** The requirement below is unchanged and is not satisfied by this
+> section. Bun's maintainers reportedly asked corepack not to add them (#295), and
+> pnpm's maintainer asked to be removed (§15.36). Shipping an entry is a maintainer
+> decision about someone else's project, and it is the one part of adding a package
+> manager that no amount of implementation work settles.
+
 ## 15.22 Publish through channels resistant to typosquatting — [advisory]
 
 > Driven by **#803**: a lookalike domain outranked the real repository in search
@@ -642,6 +669,28 @@ ranges. Both halves are obtainable:
   {"version": 1,
    "resolutions": {"pnpm@^11.0.0": {"resolved": "11.1.2", "integrity": "sha512-…"}}}
   ```
+* §15.28 — for a package manager whose artifact is per-host there is no single hash,
+  so `integrity` is instead an object keyed by the normalised `<platform>-<arch>`:
+  ```json
+  {"version": 1,
+   "resolutions": {"bun@^1.4.0": {"resolved": "1.4.0",
+                                  "integrity": {"linux-x64": "sha512-…",
+                                                "darwin-arm64": "sha512-…"}}}}
+  ```
+  The **version** is one shared decision and is recorded once; the digest is not, and
+  each host reads and writes only its own key. Rules:
+  * A host with no key yet still resolves the recorded version with **no network
+    request**, and verifies its download through §06.3's signature — the tier a
+    native artifact always has. It then records its own key.
+  * Adding a host's key is not a *re*-resolution and is not gated behind `up`: the
+    version is unchanged and nothing was requested for it. It is gated by
+    `COREPACK_FROZEN_LOCKFILE`, because it is still a write.
+  * Other hosts' keys are carried forward while the recorded version stands, and
+    dropped when it moves — a digest for 1.3.0 says nothing about 1.4.0 anywhere.
+  * Keys are serialised sorted, so a new host is a one-line diff.
+  * A build that does not know this shape reads `typeof integrity === "string"`, finds
+    it false, and treats the entry as version-only. That is the correct degradation,
+    and is why the file's `version` did not have to change.
 * On every subsequent run, a recorded resolution that still satisfies the range is used
   **without any network access** — the fast path (§01.3) is preserved for ranges too.
 * The resolution is refreshed only by an explicit `jup up`, or when the recorded
@@ -778,14 +827,75 @@ This assumption is load-bearing across corepack: one URL template per version
 * `url` MAY contain `{platform}` and `{arch}` placeholders alongside `{}`, resolved
   against a normalised platform/arch pair (`linux`/`darwin`/`win32` ×
   `x64`/`arm64`).
+* `url` and `artifactRegistry.package` MAY contain `{target}`, resolved through the
+  band's own `targets` map from that same normalised pair. A pair the band does not
+  declare MUST fail **before any request**, naming the host and what the band does
+  ship for — see §12's `unsupportedTarget`. Published artifact names are not the
+  product of two independent axes (bun spells Windows on arm64 `windows-aarch64`;
+  deno suffixes only its Linux builds `-glibc`), and a per-band table is also the
+  only way to say that a *version* has no build for an otherwise ordinary host.
+* `bin` **paths** MAY contain `{exe}` — `.exe` on Windows, empty elsewhere. Bin
+  *names* never do. This is needed because a per-host artifact package typically
+  declares no `bin` of its own, so §07.7 has nothing to read and the table is the
+  authority for a tarball.
 * A range entry MAY declare `"exec": "native"`, meaning its `bin` targets are executed
   **directly** rather than through a JavaScript runtime. §08.3.1's runtime lookup is
   skipped entirely for these — which also makes them faster than the JS path, not
   slower.
+* On the native path, `argv[0]` MUST be the **binary name the user invoked**, not the
+  path to the artifact. A direct invocation through `PATH` gives the shell's word, and
+  a package manager may dispatch on it: `bunx` and `bun` are one executable, and the
+  first behaves as the second's `x` subcommand for no other reason. §02.4 already
+  spells "two names, one file" as two `bin` entries with one path; this is what makes
+  that spelling mean the same thing for a native artifact as for a JavaScript one.
+  (§08.2's `[execPath, binPath, …]` rewrite exists only because the JS path runs an
+  interpreter.)
 * The extractor MUST preserve the executable bit for native `bin` targets (§07.4
   rule 6 already permits exactly this).
-* Everything else — resolution, integrity, the store, shims — is unchanged, because
-  none of it is actually JavaScript-specific.
+* A band MAY declare `artifactRegistry`, an npm registry spec naming the package the
+  **artifact** comes from when that differs from the one `registry` answers version
+  questions about (§02.4). §06 and §07 follow `artifactRegistry`; §04 follows
+  `registry`.
+
+### One version, many artifacts
+
+A per-host band breaks an assumption the rest of the spec was written under: that a
+`(name, version)` pair names one sequence of bytes. It does not, and a conforming
+implementation MUST NOT let a digest taken on one host escape onto another:
+
+* The digest MUST NOT be folded into the locator's reference (§07.6 step 3), because
+  that reference is what `use`/`up` write into `packageManager`. A committed
+  `bun@1.4.0+sha512.…` is a pin no other platform's artifact can satisfy, and it fails
+  as a hash mismatch — the one outcome a pin exists to prevent.
+* §15.23's `.jup.lock` records the digest **per host** (see there).
+* The compiled-in `default` is a bare version (§02.3).
+* §04.5's default-version lookup MUST return a bare version too, and MUST NOT read
+  the launcher's `dist` at all. This is the same mistake in its least visible place:
+  it is reached only when a project has *no* spec, so a build that gets it wrong
+  passes every pinned test and fails every bare `bun` / `deno`.
+* The recorded last-known-good (§04.5 step 1) MUST likewise hold a bare version for
+  such an entry, and a reference read back from it that carries a digest MUST be
+  **repaired on read** — the suffix dropped, the version kept, the file rewritten
+  best-effort. That file is derived state which outlives a release: step 1 returns it
+  with no network, ahead of every check downstream, so a bad entry written by an
+  earlier build is permanent unless the read heals it. This follows §04.4's rule that
+  a damaged `lastKnownGood.json` degrades rather than fails, with a more specific
+  idea of damaged — the version is still a good default; only the digest is untrue.
+
+> **One predicate, one choke point.** The four rules above are all the same fact —
+> a per-host digest is host-local and references travel — and an implementation
+> SHOULD enforce them where a reference *gains* a digest rather than at each writer.
+> Both places such a reference is stored, `packageManager` and `lastKnownGood.json`,
+> are copied between machines: the first is committed, the second is baked into
+> container images and warmed caches. §06.1 row 1 reads a reference-borne digest as
+> an explicit pin, so a digest that travels turns the *correct* artifact into a hash
+> mismatch on arrival.
+* What replaces the missing literal is not nothing: the per-host packages are ordinary
+  signed npm tarballs, so §06.3's signature over `dist.integrity` covers exactly the
+  bytes this host is about to run, and §15.11's tier is cleared on every install
+  rather than by a compiled-in claim. This is *stronger* than a stale pin, not weaker.
+* The store marker still records the hash it saw. The store is host-local, so there it
+  is exactly the right fact, and §07.2's fast path keeps working unchanged.
 
 > **On consent.** Bun's maintainers reportedly asked not to be added to corepack, and
 > the issue remains unresolved partly for that reason. Technical capability is not
@@ -1076,3 +1186,13 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 209 | A CA bundle is configured and the runtime's default trust store does not reflect it afterwards | fails naming the setting that was ignored, not a bare certificate error (§15.4) |
 | 210 | `--version` and `info` in a built package | the packed version, with no manifest read; never a plausible-looking placeholder (§09.9, §15.30f) |
 | 211 | A shim run under `node --preserve-symlinks-main`, or on a runtime that resolves from the link | runs; the stub resolves its entry against its own realpath (§14.25) |
+| 212 | `packageManager: "bun@<v>"` | the host's `@oven/bun-<target>` tarball is fetched and executed directly; the launcher package is never downloaded (§15.21, §15.28) |
+| 213 | The same, verified under `COREPACK_REQUIRE_SIGNATURES=1` | passes — the signature checked is the *artifact* package's, not the launcher's (§15.28) |
+| 214 | `bunx <args>` | reaches the same cached file as `bun`, under `argv[0]` = `bunx` (§15.28) |
+| 215 | `packageManager: "deno@<v>"` | runs; the marker's `bin` names the package-root executable, from the table, because the artifact package declares none (§07.7, §15.28) |
+| 216 | `jup use bun@<v>` | `packageManager` holds a **bare** version; no digest is written to a committed file (§15.28) |
+| 217 | `packageManager: "bun@^1.4.0"` with a `.jup.lock` recorded on another host | resolves offline; this host's digest is added and the other host's is left intact (§15.23, §15.28) |
+| 218 | `enable` with no names, then `enable bun`, then `disable` with no names | no bun/deno shim first; both after naming bun; none after the bare disable (§10.5, §15.21) |
+| 219 | A version whose band declares no artifact for this host (e.g. `bun@1.2.0` on Windows arm64) | fails before any request, naming the host and what that version ships for (§12, §15.28) |
+| 220 | `deno` in a directory with no project spec, `JUP_DEFAULT_TO_LATEST=1` | runs; no digest is pinned from the launcher package, and the recorded default is a bare version (§04.5, §15.28) |
+| 221 | A `lastKnownGood.json` whose per-host entry carries a digest, as an earlier build wrote | the suffix is dropped on read and the file rewritten; the run makes no network request, and a non-per-host entry's digest is untouched (§04.5, §15.28) |

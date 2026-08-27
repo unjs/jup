@@ -9,7 +9,7 @@
 
 jup runs the package manager version your project asks for.
 
-It reads the pin in `package.json`, downloads and verifies the requested version, saves it in a local cache, and runs it. This keeps npm, pnpm, and Yarn versions consistent across developer machines and CI.
+It reads the pin in `package.json`, downloads and verifies the requested version, saves it in a local cache, and runs it. This keeps npm, pnpm, Yarn, Bun, and Deno versions consistent across developer machines and CI.
 
 ```json
 {

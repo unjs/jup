@@ -7,7 +7,12 @@
  * mapping is a rename, not a translation.
  */
 
-import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../../src/config/table.ts";
+import {
+  DEFINITIONS,
+  getBinariesFor,
+  shimsByDefault,
+  SUPPORTED_NAMES,
+} from "../../src/config/table.ts";
 
 /**
  * Stands in for `import config from '../config.json'`.
@@ -27,14 +32,30 @@ export const config = { definitions: DEFINITIONS } as unknown as {
 /** Stands in for `new Engine()`; only `getBinariesFor` is ever called. */
 export const engine = { getBinariesFor };
 
-/** Upstream types this as a set of the literal names; the rows index `config` with it. */
-export type SupportedPackageManager = "npm" | "pnpm" | "yarn";
+/**
+ * Upstream types this as a set of the literal names; the rows index `config` with
+ * it. Corepack's three, plus §15.21's two — which upstream has no notion of, and
+ * which the rows that iterate this set therefore have to be read against: see
+ * the `deno --version` note in `main.test.ts`.
+ */
+export type SupportedPackageManager = "npm" | "pnpm" | "yarn" | "bun" | "deno";
 
 export const SupportedPackageManagerSet = new Set(
   SUPPORTED_NAMES as readonly SupportedPackageManager[],
 );
 
-/** `enable`/`disable` never touch npm's shims by default (§10.1). */
+/**
+ * The set the shim rows iterate: what a bare `enable`/`disable` acts on.
+ *
+ * Upstream's name says "without npm" (§10.1), and that is still the reason npm is
+ * absent here even though §15.16 put it back in jup's own default set — these rows
+ * assert corepack's behaviour and are skipped where the two diverge. §15.28's `bun`
+ * and `deno` are excluded for the *live* reason: they set `shimByDefault: false`,
+ * so a bare `enable` genuinely does not create them, and a row expecting otherwise
+ * would be asserting something jup does not do.
+ */
 export const SupportedPackageManagerSetWithoutNpm = new Set(
-  (SUPPORTED_NAMES as readonly SupportedPackageManager[]).filter((name) => name !== `npm`),
+  (SUPPORTED_NAMES as readonly SupportedPackageManager[]).filter(
+    (name) => name !== `npm` && shimsByDefault(name),
+  ),
 );

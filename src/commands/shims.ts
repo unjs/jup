@@ -53,7 +53,7 @@ import {
 import { basename, delimiter, dirname, join, relative, resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
-import { DEFINITIONS, getBinariesFor } from "../config/table.ts";
+import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors.ts";
 import { perUserShimDirectory as perUserDefault } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
@@ -206,20 +206,37 @@ function assertKnownName(name: string): void {
 }
 
 /**
- * §10.5 as amended by §15.16 — with no names, **every** supported package
- * manager, npm included; each name then expands to its full binary set, so
- * `disable yarn` takes `yarnpkg` with it.
+ * §10.5 as amended by §15.16 — with no names, every supported package manager
+ * that opts into the default set, npm included; each name then expands to its
+ * full binary set, so `disable yarn` takes `yarnpkg` with it.
  *
  * npm used to be excluded on the grounds that it ships with Node. §15.16 rejects
  * that: the exclusion is inter-team policy corepack is party to and we are not,
  * and its consequence is that a yarn-pinned project correctly blocks `pnpm`
  * while `npm install` silently works anyway. `--exclude npm` restores it.
+ *
+ * §15.28's native entries are the opposite case and opt *out*
+ * (`shimByDefault: false`). `bun` and `deno` name runtimes that users install
+ * deliberately and reach for outside any project; a bare `jup enable` claiming
+ * those names on `PATH` would be a takeover nobody asked for, and — unlike the
+ * npm question — it would land on people who upgraded rather than on people who
+ * chose. Naming the entry is the opt-in: `jup enable bun` installs its shims,
+ * and `jup disable` with no names still removes whatever is installed, because
+ * removal has no such hazard.
  */
-export function targetBinaries(names: string[], exclude: string[] = []): string[] {
+export function targetBinaries(
+  names: string[],
+  exclude: string[] = [],
+  options?: { includeOptOut?: boolean },
+): string[] {
   for (const name of exclude) assertKnownName(name);
   const excluded = new Set(exclude);
 
-  const selected = (names.length > 0 ? names : Object.keys(DEFINITIONS)).filter((name) => {
+  const defaults = Object.keys(DEFINITIONS).filter(
+    (name) => options?.includeOptOut === true || shimsByDefault(name),
+  );
+
+  const selected = (names.length > 0 ? names : defaults).filter((name) => {
     assertKnownName(name);
     return !excluded.has(name);
   });
@@ -1126,7 +1143,11 @@ export async function cmdEnable(
  */
 export async function cmdDisable(args: string[]): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);
-  const binaries = targetBinaries(names, exclude);
+  // `includeOptOut` — removal covers every name the tool can install, including
+  // the §15.28 entries a bare `enable` leaves alone. Otherwise `jup disable`
+  // would silently decline to undo a `jup enable bun`, which is the one thing a
+  // no-argument disable is for.
+  const binaries = targetBinaries(names, exclude, { includeOptOut: true });
   // §10.4 — no realpath here: removal needs no relative-path computation.
   const installDirectory = resolveInstallDirectory(options, false);
 

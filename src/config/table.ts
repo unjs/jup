@@ -14,12 +14,48 @@
 import { messages, UsageError } from "../errors.ts";
 import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {
+  BinList,
+  BinSpec,
   Locator,
   NpmRegistrySpec,
   PackageManagerDefinition,
   PackageManagerSpec,
   RegistrySpec,
 } from "../types.ts";
+
+/**
+ * §15.28, §15.21 — the parts every bun band shares.
+ *
+ * Bun and Deno are not JavaScript. Each publishes one small launcher package on
+ * npm (`bun`, `deno`) whose `postinstall` downloads a binary out of an
+ * `optionalDependencies` entry named after the host. jup runs no lifecycle
+ * scripts and resolves no dependency graph, so the launcher is not the thing to
+ * install — doing so would cache a 15 kB stub that fails on first run. The
+ * per-host binary packages are, and they are ordinary signed npm tarballs.
+ *
+ * That is why `registry` and `artifactRegistry` differ on these two entries and
+ * nowhere else: the version line and the dist-tags live on the launcher, the
+ * bytes and the npm signature covering them live on `@oven/bun-<target>`.
+ *
+ * `bun` and `bunx` are one file, distinguished by `argv[0]` — which is how bun's
+ * own installer sets them up, and what `run/native.ts` passes through.
+ */
+const BUN_BAND = {
+  url: "https://registry.npmjs.org/@oven/bun-{target}/-/bun-{target}-{}.tgz",
+  bin: { bun: "./bin/bun{exe}", bunx: "./bin/bun{exe}" },
+  registry: { type: "npm", package: "bun" },
+  artifactRegistry: { type: "npm", package: "@oven/bun-{target}" },
+  exec: "native",
+  commands: { use: ["bun", "install"] },
+} as const satisfies Omit<PackageManagerSpec, "targets">;
+
+/** The four hosts every published bun artifact covers. */
+const BUN_POSIX_TARGETS = {
+  "darwin-arm64": "darwin-aarch64",
+  "darwin-x64": "darwin-x64",
+  "linux-arm64": "linux-aarch64",
+  "linux-x64": "linux-x64",
+} as const;
 
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   npm: {
@@ -124,6 +160,79 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
       ],
     ],
   },
+
+  // §15.28, §15.21 — the two entries the table's per-host machinery exists for;
+  // `BUN_BAND` above explains the launcher-versus-artifact split they share.
+  bun: {
+    default: "1.4.0",
+    fetchLatestFrom: { type: "npm", package: "bun" },
+    transparent: {
+      commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
+    },
+    shimByDefault: false,
+    // Three bands, and they differ in exactly one field: the host set bun had
+    // published artifacts for at that point in its history. `@oven/bun-*`
+    // appeared in 0.5.0, Windows x64 in 1.1.0, Windows arm64 in 1.3.10.
+    // Reversed, the newest is tested first (§02.3), so a version gets the
+    // narrowest true answer — and a host outside it is named as unsupported
+    // *for that version*, rather than 404ing on a URL nobody typed.
+    ranges: [
+      ["*", { ...BUN_BAND, targets: BUN_POSIX_TARGETS }],
+      // Open-ended and matched in reverse, exactly as pnpm's bands are: this one
+      // is only reached for a version the band below it did not claim.
+      [">=1.1.0", { ...BUN_BAND, targets: { ...BUN_POSIX_TARGETS, "win32-x64": "windows-x64" } }],
+      [
+        ">=1.3.10",
+        {
+          ...BUN_BAND,
+          targets: {
+            ...BUN_POSIX_TARGETS,
+            "win32-arm64": "windows-aarch64",
+            "win32-x64": "windows-x64",
+          },
+        },
+      ],
+    ],
+  },
+
+  deno: {
+    default: "2.9.5",
+    fetchLatestFrom: { type: "npm", package: "deno" },
+    // `deno init` scaffolds into an empty directory, exactly as `npm init` and
+    // `pnpm init` do. Nothing else on the deno CLI is project-independent:
+    // `deno run`, `deno task` and `deno add` all act on the project they are
+    // standing in, so they stay subject to §03.5's enforcement.
+    transparent: {
+      commands: [["deno", "init"]],
+    },
+    shimByDefault: false,
+    // One band: `@deno/<target>` appeared with the 1.46.0 relaunch of the npm
+    // package and has kept one layout since — a single executable at the package
+    // root. (The `deno` name also carries a 0.0.0 placeholder from before that;
+    // it has no artifact, and resolves to a 404, which is what an unpublished
+    // version should do.)
+    ranges: [
+      [
+        "*",
+        {
+          url: "https://registry.npmjs.org/@deno/{target}/-/{target}-{}.tgz",
+          bin: { deno: "./deno{exe}" },
+          registry: { type: "npm", package: "deno" },
+          artifactRegistry: { type: "npm", package: "@deno/{target}" },
+          targets: {
+            "darwin-arm64": "darwin-arm64",
+            "darwin-x64": "darwin-x64",
+            "linux-arm64": "linux-arm64-glibc",
+            "linux-x64": "linux-x64-glibc",
+            "win32-arm64": "win32-arm64",
+            "win32-x64": "win32-x64",
+          },
+          exec: "native",
+          commands: { use: ["deno", "install"] },
+        },
+      ],
+    ],
+  },
 };
 
 export const SUPPORTED_NAMES: readonly string[] = Object.keys(DEFINITIONS);
@@ -220,12 +329,61 @@ const ARCHITECTURES: Record<string, string> = {
 };
 
 /**
+ * §15.28 — the normalised `<platform>-<arch>` pair naming this host.
+ *
+ * The key `targets` is indexed by, and the vocabulary `{platform}` and `{arch}`
+ * draw on, so a band that uses either spelling agrees with one that uses the
+ * other. An unrecognised half is passed through verbatim: the only consumer is
+ * a `targets` lookup, which will miss and report the host it could not place,
+ * and a made-up normalisation would only make that message wrong.
+ */
+export function hostTarget(): string {
+  const platform = PLATFORMS[process.platform] ?? process.platform;
+  const arch = ARCHITECTURES[process.arch] ?? process.arch;
+  return `${platform}-${arch}`;
+}
+
+/**
+ * `.exe` on Windows, empty everywhere else — what `{exe}` expands to in a band's
+ * `bin` paths.
+ *
+ * Read once. `process.platform` cannot change within a process, and §16.3 counts
+ * the work on the path `resolveSpecBin` sits on.
+ */
+const EXE = process.platform === "win32" ? ".exe" : "";
+
+/**
+ * §15.28 — what `{target}` expands to for this host, or an error naming the host.
+ *
+ * A band declaring `targets` is declaring the complete set of hosts that band
+ * ships for, so a miss is a real answer — "bun 1.2.0 has no Windows arm64
+ * build" — and it is worth more than the 404 the alternative produces. The set
+ * is listed in the message because it is short and because the user's next move
+ * depends on it.
+ */
+function targetFor(spec: PackageManagerSpec, locator: Locator): string {
+  const host = hostTarget();
+  const target = spec.targets?.[host];
+  if (target === undefined) {
+    throw new UsageError(
+      messages.unsupportedTarget(
+        locator.name,
+        locator.reference,
+        host,
+        Object.keys(spec.targets ?? {}).sort(),
+      ),
+    );
+  }
+  return target;
+}
+
+/**
  * §15.28 — substitute `{}`, `{platform}` and `{arch}` into a band's `url`.
  *
- * `{}` is §02.4's version placeholder and is always substituted. The other two
+ * `{}` is §02.4's version placeholder and is always substituted. The other three
  * are opt-in per band, and the cheap `includes` guard is what keeps the common
- * case — every entry in the table today — at exactly the one `replace` it used
- * to be, on a path §16.3 counts.
+ * case — npm, pnpm and yarn — at exactly the one `replace` it used to be, on a
+ * path §16.3 counts.
  *
  * An unrecognised platform or architecture is an error naming *which* half was
  * unrecognised. It is deliberately not a 404 later on: a URL that still contains
@@ -238,11 +396,16 @@ export function resolveSpecUrl(
 ): string {
   const url = spec.url.replace("{}", version);
 
+  const wantsTarget = url.includes("{target}");
   const wantsPlatform = url.includes("{platform}");
   const wantsArch = url.includes("{arch}");
-  if (!wantsPlatform && !wantsArch) return url;
+  if (!wantsTarget && !wantsPlatform && !wantsArch) return url;
 
   let resolved = url;
+
+  if (wantsTarget) {
+    resolved = resolved.replaceAll("{target}", targetFor(spec, locator));
+  }
 
   if (wantsPlatform) {
     const platform = PLATFORMS[process.platform];
@@ -331,9 +494,20 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
 const NAME_BY_REGISTRY = new Map<RegistrySpec, string>();
 const NPM_ALTERNATIVE_BY_REGISTRY = new Map<RegistrySpec, NpmRegistrySpec>();
 
+/**
+ * Band -> the package manager that declares it.
+ *
+ * Needed because {@link resolveArtifactRegistry} mints a registry spec at call
+ * time (the package name carries `{target}`) and has to enter it into
+ * `NAME_BY_REGISTRY` under the right name, or §15.2's `JUP_REGISTRY_<NAME>`
+ * would stop finding a native entry.
+ */
+const NAME_BY_SPEC = new Map<PackageManagerSpec, string>();
+
 for (const [name, definition] of Object.entries(DEFINITIONS)) {
   NAME_BY_REGISTRY.set(definition.fetchLatestFrom, name);
   for (const [, spec] of definition.ranges) {
+    NAME_BY_SPEC.set(spec, name);
     NAME_BY_REGISTRY.set(spec.registry, name);
     if (spec.npmRegistry !== undefined) {
       NAME_BY_REGISTRY.set(spec.npmRegistry, name);
@@ -368,4 +542,118 @@ export function getBinariesFor(name: string): string[] {
 /** Reverse lookup: which package manager answers to this binary name? */
 export function getPackageManagerFor(binName: string): string | undefined {
   return NAME_BY_BINARY.get(binName);
+}
+
+/* -------------------------------------------------------------------------- */
+/* §15.28 — per-host artifacts                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Does this band's artifact differ from host to host?
+ *
+ * Three consequences hang off the answer, and all three are about a **digest
+ * that is not portable**: `use` must not write one into `packageManager`
+ * (§15.28), `.jup.lock` must record one per host rather than one flat
+ * (§15.23), and the install must not fold one into the locator's reference.
+ *
+ * Derived rather than declared, so a band cannot say one thing and do another:
+ * anything that makes the URL or the artifact package host-dependent makes the
+ * bytes host-dependent too.
+ */
+export function isPerHostSpec(spec: PackageManagerSpec): boolean {
+  if (spec.targets !== undefined || spec.artifactRegistry !== undefined) return true;
+  return spec.url.includes("{platform}") || spec.url.includes("{arch}");
+}
+
+/** {@link isPerHostSpec} for a locator, `false` for a URL or an unknown name. */
+export function isPerHost(locator: Locator): boolean {
+  const spec = getTableSpec(locator);
+  return spec !== undefined && isPerHostSpec(spec);
+}
+
+/**
+ * §15.28 — a band's `bin` with `{exe}` substituted.
+ *
+ * Memoised on the band object: the table is static, the answer cannot change
+ * within a process, and this is read on the install path for every native
+ * entry. A `BinList` is a list of *names*, which never carry the placeholder,
+ * so it is returned untouched.
+ */
+const BIN_CACHE = new WeakMap<PackageManagerSpec, BinSpec | BinList>();
+
+export function resolveSpecBin(spec: PackageManagerSpec): BinSpec | BinList {
+  const cached = BIN_CACHE.get(spec);
+  if (cached !== undefined) return cached;
+
+  let resolved: BinSpec | BinList = spec.bin;
+  if (!Array.isArray(spec.bin)) {
+    const entries = Object.entries(spec.bin);
+    if (entries.some(([, path]) => path.includes("{exe}"))) {
+      resolved = Object.fromEntries(
+        entries.map(([binName, path]) => [binName, path.replaceAll("{exe}", EXE)]),
+      );
+    }
+  }
+
+  BIN_CACHE.set(spec, resolved);
+  return resolved;
+}
+
+/**
+ * §15.28 — the npm package this band's **artifact** is published as, with
+ * `{target}`, `{platform}` and `{arch}` substituted, or `undefined` when the
+ * band's own `registry` is already that package.
+ *
+ * Memoised for the same reason as `resolveSpecBin`, and additionally because the
+ * result has to keep its **identity**: `packageManagerForRegistry` is a `Map`
+ * lookup on the spec object, so minting a fresh one per call would lose §15.2's
+ * per-package-manager registry override on exactly the entries that need it.
+ */
+const ARTIFACT_REGISTRY_CACHE = new WeakMap<PackageManagerSpec, NpmRegistrySpec>();
+
+export function resolveArtifactRegistry(
+  spec: PackageManagerSpec,
+  locator: Locator,
+): NpmRegistrySpec | undefined {
+  const declared = spec.artifactRegistry;
+  if (declared === undefined) return undefined;
+
+  const cached = ARTIFACT_REGISTRY_CACHE.get(spec);
+  if (cached !== undefined) return cached;
+
+  let packageName = declared.package;
+  if (packageName.includes("{target}")) {
+    packageName = packageName.replaceAll("{target}", targetFor(spec, locator));
+  }
+  if (packageName.includes("{platform}") || packageName.includes("{arch}")) {
+    const platform = PLATFORMS[process.platform];
+    if (platform === undefined) {
+      throw new UsageError(
+        messages.unsupportedPlatform(locator.name, locator.reference, process.platform),
+      );
+    }
+    const arch = ARCHITECTURES[process.arch];
+    if (arch === undefined) {
+      throw new UsageError(messages.unsupportedArch(locator.name, locator.reference, process.arch));
+    }
+    packageName = packageName.replaceAll("{platform}", platform).replaceAll("{arch}", arch);
+  }
+
+  const resolved: NpmRegistrySpec = { ...declared, package: packageName };
+  ARTIFACT_REGISTRY_CACHE.set(spec, resolved);
+
+  // Enter it under the name that declares the band, so §15.2 keeps working.
+  const name = NAME_BY_SPEC.get(spec);
+  if (name !== undefined) NAME_BY_REGISTRY.set(resolved, name);
+
+  return resolved;
+}
+
+/**
+ * §10.5 — whether a bare `jup enable` / `disable` covers this package manager.
+ *
+ * Absent means yes, which is every entry corepack ever had.
+ */
+export function shimsByDefault(name: string): boolean {
+  return getDefinition(name)?.shimByDefault !== false;
 }

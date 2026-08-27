@@ -120,6 +120,73 @@ async function yarnDefault() {
   return `${version}+sha224.${digest(file, "sha224")}`;
 }
 
+/**
+ * §15.28 — a per-host package manager, whose `default` is a **bare version**.
+ *
+ * There is no one digest to pin: `bun@1.4.0` is six different artifacts, and a
+ * literal here would be whichever machine ran this script. So the chain above
+ * does not apply, and what replaces it is a different question — not "are these
+ * bytes the ones npm signed?" but "does this version actually have a build for
+ * every host the table claims?" A `default` naming a version some host cannot
+ * install is the same maintenance failure §15.33 is about, arriving one platform
+ * at a time.
+ *
+ * Metadata only, deliberately: the artifacts are 60–100 MB each and nothing is
+ * compiled in from them, so downloading six of them would buy a digest this
+ * table does not carry. The signature over each host's `dist.integrity` is
+ * checked because it is free — it comes in the packument — and because it is
+ * what the tool will check at install time (§06.3).
+ */
+async function nativeDefault(launcher, artifactFor) {
+  const { version } = await getJson(`${NPM_REGISTRY}/${launcher}/latest`);
+
+  await Promise.all(
+    Object.values(artifactFor).map(async (packageName) => {
+      const metadata = await getJson(`${NPM_REGISTRY}/${packageName}/${version}`);
+      const dist = metadata?.dist;
+      if (dist?.integrity === undefined) {
+        throw new Error(`${packageName}@${version} publishes no dist.integrity`);
+      }
+      verifySignature({
+        signatures: dist.signatures,
+        integrity: dist.integrity,
+        packageName,
+        version,
+        registryOrigin: NPM_REGISTRY,
+      });
+    }),
+  );
+
+  return version;
+}
+
+/**
+ * The host sets §02.5's newest bun and deno bands declare.
+ *
+ * Duplicated from the table rather than imported: `nativeDefault` is checking
+ * that the *newest* release covers what the newest band promises, and reading
+ * the promise from the same file it is about would make the check circular for
+ * the one edit — a target quietly dropped — it exists to catch.
+ */
+const NATIVE_TARGETS = {
+  bun: {
+    "darwin-arm64": "@oven/bun-darwin-aarch64",
+    "darwin-x64": "@oven/bun-darwin-x64",
+    "linux-arm64": "@oven/bun-linux-aarch64",
+    "linux-x64": "@oven/bun-linux-x64",
+    "win32-arm64": "@oven/bun-windows-aarch64",
+    "win32-x64": "@oven/bun-windows-x64",
+  },
+  deno: {
+    "darwin-arm64": "@deno/darwin-arm64",
+    "darwin-x64": "@deno/darwin-x64",
+    "linux-arm64": "@deno/linux-arm64-glibc",
+    "linux-x64": "@deno/linux-x64-glibc",
+    "win32-arm64": "@deno/win32-arm64",
+    "win32-x64": "@deno/win32-x64",
+  },
+};
+
 /** Replace one `default:` literal inside a named package manager's block. */
 function rewriteDefault(source, name, field, reference) {
   // The block runs from `<name>: {` to the next top-level entry, which is enough
@@ -190,7 +257,13 @@ async function refreshKeys(source) {
 }
 
 let table = readFileSync(TABLE, "utf8");
-const [npm, pnpm, yarn] = await Promise.all([npmDefault("npm"), npmDefault("pnpm"), yarnDefault()]);
+const [npm, pnpm, yarn, bun, deno] = await Promise.all([
+  npmDefault("npm"),
+  npmDefault("pnpm"),
+  yarnDefault(),
+  nativeDefault("bun", NATIVE_TARGETS.bun),
+  nativeDefault("deno", NATIVE_TARGETS.deno),
+]);
 
 table = rewriteDefault(table, "npm", "default", npm);
 table = rewriteDefault(table, "pnpm", "default", pnpm);
@@ -199,6 +272,8 @@ table = rewriteDefault(table, "pnpm", "default", pnpm);
 // recorded default, not because they may name different releases.
 table = rewriteDefault(table, "yarn", "default", yarn);
 table = rewriteDefault(table, "yarn", "transparent.default", yarn);
+table = rewriteDefault(table, "bun", "default", bun);
+table = rewriteDefault(table, "deno", "default", deno);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 

@@ -10,7 +10,9 @@ import {
   getPackageManagerFor,
   getSpecUrl,
   getTableSpec,
+  isPerHost,
   isSupportedPackageManager,
+  resolveSpecBin,
 } from "./config/table.ts";
 import { envDisabled, envFlag, isFrozenLockfile } from "./project/env.ts";
 import { explainFetchFailure, messages, UsageError } from "./errors.ts";
@@ -229,14 +231,27 @@ export async function runProxy(
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
+  const perHost = isPerHost(locator);
+
+  // §15.28 — a recorded resolution for a per-host package manager holds one
+  // digest per host (§15.23), and this host's may be missing because the record
+  // was written on somebody else's machine. Completing it is not a
+  // *re*-resolution: the version is unchanged, nothing is requested for it, and
+  // the only new fact is the one this host is uniquely able to contribute. So it
+  // is not what §15.23 gates behind `up` — but it is still a write, which is
+  // what frozen mode refuses. Without this the map would never grow past its
+  // first writer.
+  const completesRecord =
+    recorded !== null && perHost && parse(locator.reference)?.build.length === 0;
+
   // Step 6 — one `.jup` read on a hit; download, verify and promote on a miss.
   const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
   // §15.23 — record only what we had to go and resolve. The hash comes from the
   // artifact that is now on disk, whether it was downloaded here or already in
   // the store, so the recorded resolution pins the same bytes either way.
-  if (recorded === null && lockDir !== undefined) {
-    writeResolution(lockDir, descriptor, locator, installSpec.hash);
+  if (lockDir !== undefined && (recorded === null || (completesRecord && !isFrozenLockfile()))) {
+    writeResolution(lockDir, descriptor, locator, installSpec.hash, perHost);
   }
 
   // Step 7 — hand over. Nothing after this point may write to the store: the
@@ -255,7 +270,8 @@ export async function runProxy(
     installSpec,
     args,
     getSpecUrl(locator),
-    tableSpec?.bin,
+    // §15.28 — `{exe}`-substituted, so a Windows fallback names `bin\\bun.exe`.
+    tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,
   );
 }
@@ -481,7 +497,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // A download rewrites `locator.reference` itself; a cache hit does not, so the
   // marker's recorded hash supplies the same suffix. Both paths therefore pin
   // exactly the artifact that is on disk.
-  const reference = referenceWithHash(locator.reference, installSpec.hash);
+  const reference = referenceWithHash(locator.name, locator.reference, installSpec.hash);
 
   process.stderr.write(
     `${messages.autoPinNotice(locator.name, reference)}\n${messages.autoPinDocs()}\n\n`,

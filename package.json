@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "description": "A fast, small, zero-dependency package manager version manager.",
   "keywords": [
+    "bun",
     "corepack",
+    "deno",
     "npm",
     "package-manager",
     "pnpm",

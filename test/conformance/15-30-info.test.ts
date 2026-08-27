@@ -149,7 +149,7 @@ describe("§15.30 corepack info", () => {
     const cases: Array<[label: string, manifest: unknown, expected: RegExp]> = [
       ["a missing version", { packageManager: "pnpm" }, /No version specified/],
       ["a malformed field", { packageManager: "pnpm@" }, /No version specified/],
-      ["an unsupported name", { packageManager: "bun@1.0.0" }, /Unsupported package manager/],
+      ["an unsupported name", { packageManager: "vlt@1.0.0" }, /Unsupported package manager/],
       ["a wrong type", { packageManager: 42 }, /expected a string/],
       ["a null pin", { packageManager: null }, /expected a string/],
       ["unparseable JSON", "{ not json", /Invalid package\.json/],
@@ -171,7 +171,7 @@ describe("§15.30 corepack info", () => {
       ],
       [
         "an unsupported package manager in devEngines",
-        { devEngines: { packageManager: { name: "bun", version: "1.x" } } },
+        { devEngines: { packageManager: { name: "vlt", version: "1.x" } } },
         /Unsupported package manager/,
       ],
     ];
@@ -380,7 +380,17 @@ describe("§15.30 corepack info", () => {
       "pnpx",
       "yarn",
       "yarnpkg",
+      // §15.28 — reported, but not installed by a bare `enable`; the assertions
+      // below check exactly that asymmetry.
+      "bun",
+      "bunx",
+      "deno",
     ]);
+
+    // §15.28 / §10.5 — `enable` with no names left these alone, so the report
+    // shows no shim for them while still showing the name.
+    const bun = report.shims.entries.find((entry) => entry.binary === "bun")!;
+    expect(bun.shim).toBeNull();
 
     const yarn = report.shims.entries.find((entry) => entry.binary === "yarn")!;
     expect(yarn.shim).toBe(join(shimDirectory, "yarn"));

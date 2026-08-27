@@ -11,8 +11,8 @@ Locator     { name: string, reference: string } "the exact thing to install"
 InstallSpec { location, bin, hash }             "where it landed on disk"
 ```
 
-* **Descriptor** — `name` is a package-manager name (`npm` | `pnpm` | `yarn`) or, in
-  unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
+* **Descriptor** — `name` is a package-manager name (`npm` | `pnpm` | `yarn` | `bun` |
+  `deno`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
   version, a semver range, a dist-tag (`latest`, `next`, `canary`, `rc`, `stable`),
   `*`, or a URL. Descriptors are what §03 produces and §04 consumes.
 * **Locator** — `reference` is an exact semver version, optionally carrying a build
@@ -87,9 +87,23 @@ Each supported package manager has one definition:
   },
   ranges: {                     // semver range → how to fetch that version band
     [range: string]: PackageManagerSpec
-  }
+  },
+  shimByDefault?: boolean,      // §10.5; absent means true
 }
 ```
+
+`default` is hash-pinned, and a conforming table MUST NOT pin a digest that varies
+by host. For a per-host entry (§2.4) whose artifact differs per platform — which is
+every real one — that means `default` is a **bare version**, and what clears §15.11's
+verification tier for it is the registry signature over the host's own artifact
+(§06.3) rather than a compiled-in literal. The same rule is why §07.6 step 3 does not
+fold such a digest into the locator's reference.
+
+`shimByDefault: false` keeps an entry out of the set a bare `jup enable` installs
+(§10.5). It is for a name users routinely install deliberately and reach for outside
+any project — `bun` and `deno` are runtimes first — where claiming the name on `PATH`
+would be a takeover nobody asked for. Naming the entry (`jup enable bun`) still
+installs it, and `disable` with no names still removes it.
 
 `ranges` exists because a package manager's *download shape* changes across major
 versions (pnpm's bin moved `.js` → `.cjs` → `.mjs`; Yarn 2+ is a single JS file from
@@ -116,12 +130,66 @@ even though `yarn@1.22.22` would download from npm.
 {
   url: string,                  // download URL template; "{}" ← version
   bin: BinSpec | BinList,       // see below
-  registry: RegistrySpec,       // default version source
+  registry: RegistrySpec,       // version source: which versions exist
   npmRegistry?: NpmRegistrySpec,// used INSTEAD of `registry` when the user has set
                                 // a custom npm registry (§05.3)
-  commands?: { use?: string[] } // argv to run after `jup use`/`up`
+  commands?: { use?: string[] },// argv to run after `jup use`/`up`
+
+  // §15.28 — per-host artifacts. A band declaring any of these is a per-host band.
+  targets?: Record<string, string>, // "<platform>-<arch>" → what "{target}" becomes
+  artifactRegistry?: NpmRegistrySpec, // where the BYTES come from, when that is not
+                                      // the package `registry` answers about
+  exec?: "js" | "native",       // absent/"js" is §08.2's in-process handover
 }
 ```
+
+### Placeholders
+
+`url` always substitutes `{}` with the version. Three more are opt-in per band and
+described by §15.28:
+
+| Placeholder | Expands to | Valid in |
+|---|---|---|
+| `{platform}` | `linux` \| `darwin` \| `win32` | `url`, `artifactRegistry.package` |
+| `{arch}` | `x64` \| `arm64` | `url`, `artifactRegistry.package` |
+| `{target}` | `targets[<platform>-<arch>]` | `url`, `artifactRegistry.package` |
+| `{exe}` | `.exe` on Windows, empty elsewhere | `bin` **paths** (never bin names) |
+
+`{target}` exists because published per-host artifact names are not the product of
+two independent axes: bun renames both halves (`windows-aarch64` for what Node calls
+`win32`/`arm64`), while deno keeps Node's spelling and suffixes only its Linux builds
+(`linux-x64-glibc`). A table also makes the host set a band **declares**, so a host it
+does not cover fails with §12's `unsupportedTarget` — naming the host and the versions
+that do ship for it — instead of 404ing on a URL the user never typed.
+
+A host outside the `{platform}`/`{arch}` vocabulary is a different error
+(`unsupportedPlatform` / `unsupportedArch`), because the tool, not the release, is
+what does not cover it. Both are raised **before any request**.
+
+### `registry` vs `artifactRegistry`
+
+For every JavaScript entry these are the same package and `artifactRegistry` is
+absent. They separate when a package manager publishes a small **launcher** on npm
+and its real binaries as per-host packages — which is how both bun and deno ship:
+
+* `registry` answers §04's questions. Versions and dist-tags live on the launcher.
+* `artifactRegistry` answers §06's and §07's. The bytes, the signed `dist.integrity`,
+  and npm's signature over it live on `@oven/bun-<target>` / `@deno/<target>`, and
+  those are the bytes about to be executed.
+
+Pointing both at the launcher is the mistake this split exists to prevent: the
+launcher is a `postinstall` stub that downloads the binary itself, and jup runs no
+lifecycle scripts, so installing it would cache something that cannot run.
+
+Consequences a conforming implementation MUST follow, all of them following from
+"one version is many artifacts":
+
+* The digest MUST NOT be folded into the locator's reference (§07.6 step 3), because
+  that reference is what `use`/`up` write into `packageManager`. A per-host digest
+  committed there fails every colleague on another platform with a hash mismatch.
+* §15.23's `.jup.lock` records such a digest **per host** (see §15.23).
+* The store marker still records the hash: the store is host-local, so there it is
+  exactly the right fact.
 
 **`bin` has two shapes and they are not interchangeable:**
 
@@ -136,6 +204,15 @@ For a **tarball**, the table's `BinSpec` is a fallback rather than the authority
 §07.7 reads the package's own `bin` first (§15.17), so a band whose paths have gone
 stale cannot break an install. A `BinList` *is* authoritative, because a single-file
 download carries no manifest to read.
+
+A per-host artifact package is the third case, and it is why `{exe}` exists:
+`@oven/bun-<target>` and `@deno/<target>` declare **no `bin` of their own**, so §07.7
+finds nothing to read and the table is the authority for a tarball after all.
+
+Two names mapping to one path is already the `BinSpec` spelling for "one file, two
+names" (Yarn Classic's `yarn`/`yarnpkg`). For a **native** band it additionally
+requires §15.28's `argv[0]` rule: the invoked name reaches the artifact as `argv[0]`,
+which is how `bunx` and `bun` — literally the same executable — behave differently.
 
 The union of all `bin` names across all ranges of all package managers is the set of
 binary names the tool answers to (`Engine::getPackageManagerFor`,
@@ -225,6 +302,75 @@ and extracts only `bin/yarn.js` from its tarball (§05.3, §07.4).
 > This asymmetry is intentional and MUST be preserved: it keeps `yarn` in a bare
 > directory behaving like the classic global yarn, while `yarn dlx` — which classic
 > yarn does not have — gets a modern release.
+
+### bun
+
+> §15.21 — added under §15.28's per-host model. Bun is not JavaScript, and on npm it
+> ships as a ~15 kB launcher (`bun`) whose `postinstall` downloads a binary out of
+> `optionalDependencies`. jup runs no lifecycle scripts, so the launcher is the
+> *version source* only; the artifact is the per-host package.
+
+| Field | Value |
+|---|---|
+| `default` | `1.4.0` — bare, per §2.3 |
+| `fetchLatestFrom` | `{type: npm, package: bun}` |
+| `transparent.commands` | `[["bun","init"], ["bun","create"], ["bun","x"], ["bunx"]]` |
+| `transparent.default` | — |
+| `shimByDefault` | `false` |
+
+Every band shares:
+* `url` = `https://registry.npmjs.org/@oven/bun-{target}/-/bun-{target}-{}.tgz`
+* `bin` = `{"bun": "./bin/bun{exe}", "bunx": "./bin/bun{exe}"}` — one file, two names
+* `registry` = `{type: npm, package: bun}`
+* `artifactRegistry` = `{type: npm, package: "@oven/bun-{target}"}`
+* `exec` = `"native"`
+* `commands.use` = `["bun", "install"]`
+
+Ranges, **in declaration order** (matched in reverse), differing only in `targets` —
+the host set bun had actually published at that point in its history:
+
+| Range | `targets` adds |
+|---|---|
+| `*` | `darwin-arm64`→`darwin-aarch64`, `darwin-x64`→`darwin-x64`, `linux-arm64`→`linux-aarch64`, `linux-x64`→`linux-x64` |
+| `>=1.1.0` | …and `win32-x64`→`windows-x64` |
+| `>=1.3.10` | …and `win32-arm64`→`windows-aarch64` |
+
+> `@oven/bun-*` first appeared in 0.5.0, Windows in 1.1.0, Windows on arm64 in 1.3.10.
+> Reversed, the narrowest true answer wins, so `bun@1.2.0` on Windows arm64 reports
+> that *that version* has no build for this host rather than 404ing.
+
+### deno
+
+> §15.21, same model. The `deno` npm package is a launcher with the same
+> `postinstall` shape; `@deno/<target>` carries a single executable at the package
+> root, not under `bin/`.
+
+| Field | Value |
+|---|---|
+| `default` | `2.9.5` — bare, per §2.3 |
+| `fetchLatestFrom` | `{type: npm, package: deno}` |
+| `transparent.commands` | `[["deno","init"]]` |
+| `transparent.default` | — |
+| `shimByDefault` | `false` |
+
+Single range `*`:
+* `url` = `https://registry.npmjs.org/@deno/{target}/-/{target}-{}.tgz`
+* `bin` = `{"deno": "./deno{exe}"}`
+* `registry` = `{type: npm, package: deno}`
+* `artifactRegistry` = `{type: npm, package: "@deno/{target}"}`
+* `targets` = `darwin-arm64`→`darwin-arm64`, `darwin-x64`→`darwin-x64`,
+  `linux-arm64`→`linux-arm64-glibc`, `linux-x64`→`linux-x64-glibc`,
+  `win32-arm64`→`win32-arm64`, `win32-x64`→`win32-x64`
+* `exec` = `"native"`
+* `commands.use` = `["deno", "install"]`
+
+> One band: `@deno/<target>` arrived with the 1.46.0 relaunch of the npm package and
+> has kept one layout since. Only `deno init` is transparent — `deno run`, `deno task`
+> and `deno add` all act on the project they are standing in, so §03.5's enforcement
+> still applies to them.
+
+> **On `transparent.commands` for both.** `bun x` and `bunx` are the same operation
+> and both are listed, because §01.4 matches an argv *prefix* and a user types either.
 
 ## 2.6 Trust store
 

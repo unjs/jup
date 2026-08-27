@@ -4,7 +4,7 @@ icon: i-lucide-package-check
 
 # jup documentation
 
-jup reads the package manager declared in `package.json`, downloads and verifies that release, and runs it. It supports npm, pnpm, and Yarn.
+jup reads the package manager declared in `package.json`, downloads and verifies that release, and runs it. It supports npm, pnpm, Yarn, Bun, and Deno.
 
 ```json
 {

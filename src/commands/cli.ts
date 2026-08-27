@@ -22,7 +22,9 @@ import { ENV, writeEnv } from "../config/env-vars.ts";
 import {
   getSpecUrl,
   getTableSpec,
+  isPerHost,
   isSupportedPackageManager,
+  resolveSpecBin,
   SUPPORTED_NAMES,
 } from "../config/table.ts";
 import { isFrozenLockfile } from "../project/env.ts";
@@ -378,7 +380,8 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
     );
 
     const spec = await installOrExplain(locator, descriptor.range, { cacheOnly });
-    if (!cacheOnly) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
+    if (!cacheOnly)
+      setLastKnownGood(locator.name, referenceWithHash(locator.name, locator.reference, spec.hash));
   }
 
   return 0;
@@ -547,7 +550,7 @@ export async function cmdUp(args: string[]): Promise<number> {
     const refreshed = await resolveOrThrow(pin, { useCache: false });
     const dir = dirname(lookup.target);
     return applyToProject(refreshed, (reference, spec) => {
-      writeResolution(dir, pin, { name: pin.name, reference }, spec.hash);
+      writeResolution(dir, pin, { name: pin.name, reference }, spec.hash, isPerHost(refreshed));
       // §15.35l — the resolution file is what changed, so that is what is named.
       out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
       // The field is unchanged, so that is what the package manager migrates from.
@@ -626,7 +629,9 @@ async function applyToProject(
   out(`${messages.installingInProject(locator.name, locator.reference)}\n`);
 
   const spec = await installOrExplain(locator, locator.reference);
-  const reference = referenceWithHash(locator.reference, spec.hash);
+  // §15.28 — `referenceWithHash` declines to attach a per-host digest, so what
+  // goes into `packageManager` is a bare version for bun and deno.
+  const reference = referenceWithHash(locator.name, locator.reference, spec.hash);
 
   // §03.7 — may throw a `UsageError` through `warnOrThrow`; the banner above is
   // already on stdout, which is exactly what §09.5 describes.
@@ -654,7 +659,8 @@ async function applyToProject(
     useCommand.slice(1),
     getSpecUrl(pinned),
     // §08.1 — `installSpec.bin ?? spec.bin`; the marker may predate `bin`.
-    tableSpec?.bin,
+    // §15.28 — `{exe}`-substituted, per `resolveSpecBin`.
+    tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,
   );
 }
@@ -664,10 +670,19 @@ function pinToProject(
   locator: Locator,
   options?: { here?: boolean; pinStyle?: PinStyle },
 ): Promise<number> {
+  // §15.28 — a native package manager's artifact differs per host, so its digest
+  // is not a portable fact and must not be written into a file people commit: a
+  // Linux-pinned `bun@1.4.0+sha512.…` fails on a colleague's Mac with a hash
+  // mismatch, which is the one outcome a pin exists to prevent. The version is
+  // still pinned exactly; what stands in for the digest is npm's signature over
+  // the host's own artifact (§06.3, checked on every install), plus §15.23's
+  // per-host record in `.jup.lock` for the hosts that have actually run.
+  const perHost = isPerHost(locator);
+
   return applyToProject(locator, (reference, spec) => {
     const { previousPackageManager, target, written } = writePin(
       process.cwd(),
-      { name: locator.name, reference, hash: spec.hash },
+      { name: locator.name, reference, hash: perHost ? undefined : spec.hash },
       options,
     );
 
@@ -744,7 +759,7 @@ export async function cmdPack(args: string[]): Promise<number> {
 
     // §09.6 — `pack` updates last-known-good as a side effect, intentionally:
     // you pack what you intend to run.
-    setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
+    setLastKnownGood(locator.name, referenceWithHash(locator.name, locator.reference, spec.hash));
   }
 
   const output = resolvePath(
@@ -918,7 +933,8 @@ export async function cmdPrepare(args: string[]): Promise<number> {
 
     const spec = await installOrExplain(locator, descriptor.range, { cacheOnly: !activate });
     locations.push(spec.location);
-    if (activate) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
+    if (activate)
+      setLastKnownGood(locator.name, referenceWithHash(locator.name, locator.reference, spec.hash));
   }
 
   // §09.10 — `--output` tolerates a bare flag, defaulting to `jup.tgz`.

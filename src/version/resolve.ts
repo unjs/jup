@@ -5,7 +5,7 @@
  */
 
 import { ENV, readEnv } from "../config/env-vars.ts";
-import { getDefinition, isSupportedPackageManager } from "../config/table.ts";
+import { getDefinition, isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { messages, UsageError } from "../errors.ts";
 import {
@@ -13,6 +13,7 @@ import {
   isValidRange,
   isValidVersion,
   major,
+  parse,
   rangeNamesPrerelease,
   rcompare,
   satisfiesWithPrereleases,
@@ -210,6 +211,29 @@ export async function getDefaultVersion(name: string): Promise<string> {
   const lkg = readLastKnownGood();
   const recorded = lkg[name];
   if (recorded !== undefined) {
+    // §15.28 — a recorded per-host reference must not carry a digest, and this
+    // is the one place a bad one can arrive from *outside* the current build:
+    // this file is derived state that outlives a release, and a version of the
+    // tool that pinned the launcher's digest here left an entry that step 1
+    // returns before any of the guards downstream can run. §04.4 already treats
+    // a damaged `lastKnownGood.json` as something to degrade past rather than
+    // fail on, and this is the same rule with a more specific idea of damaged:
+    // the version is still a perfectly good recorded default, only the digest
+    // is untrue, so the suffix is dropped rather than the entry.
+    const parsed = parse(recorded);
+    if (parsed !== null && parsed.build.length > 0 && isPerHost({ name, reference: recorded })) {
+      const healed = parsed.version;
+      // Rewrite it, so the repair is paid once rather than on every run and so
+      // `info` stops reporting a digest that means nothing. Best-effort for the
+      // same reason the write below is (§07.8): an unwritable store must still
+      // be able to *run*.
+      try {
+        writeLastKnownGood({ ...lkg, [name]: healed });
+      } catch {
+        // Intentionally ignored — the in-memory repair is what this run needs.
+      }
+      return healed;
+    }
     return recorded;
   }
 

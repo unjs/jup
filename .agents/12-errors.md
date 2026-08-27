@@ -195,4 +195,15 @@ Refusing to extract '<entry>': path escapes the extraction directory            
 Refusing to download from <host>: it does not match the configured registry <registry>      §05.2
 The bin path '<path>' declared by <name>@<version> escapes its installation directory       §08.1
 Unsupported hash algorithm '<algo>' in the packageManager field                             §06.2
+<name>@<reference> ships per-platform artifacts, and there is none for platform '<platform>' (supported: darwin, linux, win32)   §15.28
+<name>@<reference> ships per-platform artifacts, and there is none for architecture '<arch>' (supported: arm64, x64)             §15.28
+<name>@<reference> publishes no artifact for <platform>-<arch> (this version ships: <targets>)                                   §15.28
+Unable to execute <binPath>: <reason>                                                       §15.28
 ```
+
+The three per-host messages are deliberately distinct. The first two say the **tool**
+does not cover this host — it is outside §15.28's normalised vocabulary — and the
+third says this **version** does not, which is a fact about the release and usually
+means the fix is to bump it. All three are raised before any network request, so an
+unsupported host never costs a round trip, and none of them may be replaced by a 404
+on a URL that still contains a literal placeholder.

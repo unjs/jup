@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -519,6 +519,51 @@ describe("§15.32 — PATH", () => {
       expect(lines[0]).toBe(`child:${join(location, "bin")}${delimiter}${decoy}`);
       // No leak: the tool's own PATH is exactly what it started with.
       expect(lines[1]).toBe(`parent:${decoy}`);
+    });
+
+    /**
+     * §15.28 — the invoked **name** reaches the child as `argv[0]`.
+     *
+     * This is what lets one artifact answer to two names, which is how bun
+     * ships: `bun` and `bunx` are the same file, and the second behaves like
+     * the first's `x` subcommand purely because of what `argv[0]` says. Bun's
+     * own installer arranges that with a link beside the binary; §02.4 already
+     * spells "two names, one file" as two `bin` entries with the same path, so
+     * passing the name through is what makes that spelling mean the same thing
+     * for a native artifact as it does for a JavaScript one.
+     *
+     * The fixture is a **symlink to the Node binary**, because a real
+     * executable is the only thing that can report its own `argv[0]`: a
+     * `#!/bin/sh` artifact never sees it — the kernel execs the interpreter,
+     * and `$0` is then the script's path.
+     */
+    it("hands the child the invoked name as argv[0] (§15.28)", () => {
+      const location = fixture("argv0-native", {});
+      mkdirSync(join(location, "bin"), { recursive: true });
+      symlinkSync(process.execPath, join(location, "bin", "bunny"));
+
+      const script = join(root, "argv0-driver.mjs");
+      writeFileSync(
+        script,
+        [
+          `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
+          `const [location, binName] = process.argv.slice(2);`,
+          `const bin = { bunny: "./bin/bunny", bunnyx: "./bin/bunny" };`,
+          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], ${JSON.stringify(TGZ_URL)}, undefined, "native");`,
+          ``,
+        ].join("\n"),
+      );
+
+      for (const binName of ["bunny", "bunnyx"]) {
+        const result = spawnSync(process.execPath, [script, location, binName], {
+          encoding: "utf8",
+        });
+        expect(result.stderr).toBe("");
+        expect(result.status).toBe(0);
+        // Not the path: both names resolve to `<location>/bin/bunny`, and a
+        // child told only the path could not tell the two invocations apart.
+        expect(result.stdout.trim()).toBe(binName);
+      }
     });
   });
 });

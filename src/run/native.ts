@@ -53,10 +53,19 @@ const FORWARDED_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGHUP", "SIGQUIT", "SI
  * a runtime that cannot re-raise — reached here only if the signal turns out to
  * be blocked or ignored, in which case exiting numerically beats hanging.
  *
- * `argv[0]` is the binary itself, which is what a direct invocation gives it —
- * §08.2's `[execPath, binPath, ...]` rewrite exists only because the JS path
- * runs an interpreter, and a native artifact that inspected `argv[0]` would be
- * misled by it.
+ * `argv[0]` is the **name the user invoked**, which is what a direct invocation
+ * gives it — §08.2's `[execPath, binPath, ...]` rewrite exists only because the
+ * JS path runs an interpreter, and a native artifact that inspected `argv[0]`
+ * would be misled by it.
+ *
+ * That the name and the path can differ is not a detail: bun ships one binary
+ * and decides between `bun` and `bunx` by looking at `argv[0]`, and its own
+ * installer creates `bunx` as a link beside `bun` precisely so that read works.
+ * Two `bin` entries pointing at one file is how §02.4 already spells that
+ * (Yarn Classic's `yarn`/`yarnpkg`), so passing the invoked name through is what
+ * makes the spelling mean the same thing for a native artifact as for a JS one.
+ * Absent a name — a `commands.use` handover, where nothing was invoked — the
+ * path stands in, which is Node's own default.
  *
  * The caller has already set `COREPACK_ROOT` on `process.env` (§08.7) and hands
  * `env` in as the child's environment: the ambient one wholesale, env-file
@@ -67,11 +76,12 @@ export function execNative(
   binPath: string,
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
+  argv0?: string,
 ): Promise<number> {
   // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
   // package manager's cwd (§08.3.2), and the child stays in our process group so
   // terminal job control keeps working.
-  const child = spawn(binPath, args, { stdio: "inherit", windowsHide: false, env });
+  const child = spawn(binPath, args, { stdio: "inherit", windowsHide: false, env, argv0 });
 
   const listeners = new Map<NodeJS.Signals, () => void>();
 

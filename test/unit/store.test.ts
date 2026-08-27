@@ -313,20 +313,42 @@ describe("resolveInstallTarget — §15.11's cache-hit check", () => {
 
 describe("referenceWithHash — §07.6 step 3", () => {
   it("attaches the installed artifact's hash to a bare version", () => {
-    expect(referenceWithHash("4.1.0", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
+    expect(referenceWithHash("yarn", "4.1.0", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
   });
 
   it("replaces an existing suffix rather than keeping it or appending a second", () => {
     // §07.6 — the hash of the bytes actually on disk always wins, so a stale
     // suffix carried in from `lastKnownGood.json` or the embedded table's
     // `default` is overwritten, never doubled up.
-    expect(referenceWithHash("4.1.0+sha1.stale", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
-    expect(referenceWithHash("1.22.22+sha512.same", "sha512.same")).toBe("1.22.22+sha512.same");
+    expect(referenceWithHash("yarn", "4.1.0+sha1.stale", "sha224.abcd")).toBe("4.1.0+sha224.abcd");
+    expect(referenceWithHash("yarn", "1.22.22+sha512.same", "sha512.same")).toBe(
+      "1.22.22+sha512.same",
+    );
   });
 
   it("leaves a URL reference alone — it carries its own `#algo.digest`", () => {
     const url = "https://example.com/yarn.js#sha224.abcd";
-    expect(referenceWithHash(url, "sha512.other")).toBe(url);
+    expect(referenceWithHash("yarn", url, "sha512.other")).toBe(url);
+  });
+
+  /**
+   * §15.28 — the choke point for "a per-host digest never travels".
+   *
+   * Every caller of this function writes the result somewhere that outlives the
+   * machine: `packageManager` is committed, and `lastKnownGood.json` is copied
+   * into container images and warmed caches (§03 of the CI guide). A digest
+   * taken here is true of one platform's artifact only, and §06.1 row 1 reads a
+   * reference-borne digest as an explicit pin — so carrying it turns the
+   * *correct* artifact into a hash mismatch everywhere else. This is the test
+   * that keeps the four sites in §15.28's list agreeing, because it is the one
+   * function all of them go through.
+   */
+  it("declines to attach a per-host digest, keeping the bare version", () => {
+    expect(referenceWithHash("bun", "1.4.0", "sha512.abcd")).toBe("1.4.0");
+    expect(referenceWithHash("deno", "2.9.5", "sha512.abcd")).toBe("2.9.5");
+    // And it strips one that arrived from somewhere else — which is how a
+    // `lastKnownGood.json` written by a build that got this wrong heals.
+    expect(referenceWithHash("deno", "2.9.5+sha512.wrong", "sha512.abcd")).toBe("2.9.5");
   });
 });
 

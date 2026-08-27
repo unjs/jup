@@ -204,7 +204,7 @@ describe("buildReport — an invalid spec is diagnosed, never thrown (§15.30)",
   const cases: Array<[label: string, manifest: unknown, expected: RegExp]> = [
     ["a missing version", { packageManager: "yarn" }, /No version specified/],
     ["a trailing @", { packageManager: "yarn@" }, /No version specified/],
-    ["an unsupported name", { packageManager: "bun@1.0.0" }, /Unsupported package manager/],
+    ["an unsupported name", { packageManager: "vlt@1.0.0" }, /Unsupported package manager/],
     ["a wrong type", { packageManager: 42 }, /expected a string/],
     ["a null pin", { packageManager: null }, /expected a string/],
     ["unparseable JSON", "{ not json", /Invalid package\.json/],
@@ -440,7 +440,7 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
 
   it("reports the registry for every supported package manager", () => {
     const names = report().packageManagers.map((entry) => entry.name);
-    expect(names).toEqual(["npm", "pnpm", "yarn"]);
+    expect(names).toEqual(["npm", "pnpm", "yarn", "bun", "deno"]);
 
     const yarn = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.binaries).toEqual(["yarn", "yarnpkg"]);
@@ -510,6 +510,10 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
   it("reports every binary name, and what PATH resolves it to", () => {
     const info = report().shims;
 
+    // §15.28's entries are here even though a bare `enable` does not install
+    // them: §15.30 asks what each binary name *currently resolves to*, and for
+    // `bun` that question is the interesting one precisely because the answer is
+    // usually somebody else's install.
     expect(info.entries.map((entry) => entry.binary)).toEqual([
       "npm",
       "npx",
@@ -517,9 +521,12 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
       "pnpx",
       "yarn",
       "yarnpkg",
+      "bun",
+      "bunx",
+      "deno",
     ]);
     for (const entry of info.entries) {
-      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn)$/);
+      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno)$/);
     }
   });
 
@@ -566,7 +573,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     expect(info.directory).not.toBeNull();
     expect(info.problem).toBeNull();
     // And the rest of the report is still there.
-    expect(info.entries).toHaveLength(6);
+    expect(info.entries).toHaveLength(9);
   });
 });
 

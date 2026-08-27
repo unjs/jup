@@ -14,7 +14,10 @@ import {
   getSpecFor,
   hasRangeBand,
   isEmbeddedReference,
+  isPerHostSpec,
   isSupportedPackageManager,
+  resolveArtifactRegistry,
+  resolveSpecBin,
   resolveSpecUrl,
 } from "../config/table.ts";
 import { envFlag, isCI } from "../project/env.ts";
@@ -226,7 +229,16 @@ export async function ensureInstalled(
     // is what `use`/`up` write into `package.json` and what makes that pin
     // trustworthy. URL references keep their own `#algo.digest` notation and are
     // never rewritten into a version.
-    if (isKnown) locator.reference = `${version!}+${hash}`;
+    //
+    // §15.28 — except for a per-host artifact, where the digest describes *this
+    // machine's* download and nothing else. Folding it in here would put it in
+    // the reference `use` writes to `package.json`, where a colleague on another
+    // platform meets it as a pin their own artifact can never match. The marker
+    // still records the hash below — the store is host-local, so there it is
+    // exactly the right fact — and §15.23 records it per host.
+    if (isKnown && !isPerHostSpec(getSpecFor(locator.name, version!))) {
+      locator.reference = `${version!}+${hash}`;
+    }
 
     writeMarker(tmp, { locator: { name: locator.name, reference: locator.reference }, bin, hash });
 
@@ -318,12 +330,22 @@ async function chooseSource(
 
   const spec = getSpecFor(locator.name, version);
 
+  // §15.28 — a native band answers version questions and artifact questions from
+  // two different npm packages, and it is the **artifact** one that governs
+  // everything below: the URL, the digest, and the signature over it. Resolving
+  // it here also means an unsupported host fails before any request, naming the
+  // host rather than 404ing on `@oven/bun-{target}`.
+  const artifactRegistry = resolveArtifactRegistry(spec, locator);
+
   // §05.2 rewrite 1, kept in one place (`registry.resolveRegistrySpec`): an
   // npm-protocol registry configured for the band's `npmRegistry` package
   // switches Yarn Berry onto `@yarnpkg/cli-dist`, while §15.2's
   // `COREPACK_REGISTRY_YARN` deliberately does not — it mirrors
   // `repo.yarnpkg.com` as it stands, which is exactly what #872 asked for.
-  const registry = resolveRegistrySpec(spec.registry);
+  // A band with an `artifactRegistry` has no `npmRegistry` alternative to swap
+  // to: its artifact is already an npm tarball, so a mirror needs no second
+  // shape, only a different origin.
+  const registry = artifactRegistry ?? resolveRegistrySpec(spec.registry);
   const packageName = registry.type === "npm" ? registry.package : undefined;
   const registryUrl = getRegistryUrl({ name, packageName });
 
@@ -425,7 +447,9 @@ export function resolveBin(
   const parsed = parse(locator.reference);
   const known = parsed !== null && isSupportedPackageManager(locator.name);
   const banded = known && hasRangeBand(locator.name, parsed.version);
-  const tableBin = known ? getSpecFor(locator.name, parsed.version).bin : undefined;
+  // §15.28 — `resolveSpecBin`, not `.bin`: a native band spells its entry points
+  // with `{exe}`, and what goes in the marker must be the path that exists.
+  const tableBin = known ? resolveSpecBin(getSpecFor(locator.name, parsed.version)) : undefined;
 
   if (isSingleFile) {
     // No manifest to consult. An unbanded version falls back to the locator's

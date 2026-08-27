@@ -93,13 +93,61 @@ export type RegistrySpec = NpmRegistrySpec | UrlRegistrySpec;
 
 /** §02.4 — how to download and run one version band of a package manager. */
 export interface PackageManagerSpec {
-  /** Download URL template; `{}` is replaced by the version. */
+  /**
+   * Download URL template.
+   *
+   * `{}` is replaced by the version, always. §15.28 adds three opt-in
+   * placeholders for a band whose artifact is per-host: `{platform}`, `{arch}`,
+   * and `{target}` — the last being whatever {@link PackageManagerSpec.targets}
+   * maps this host's `<platform>-<arch>` onto.
+   */
   url: string;
+  /**
+   * `bin` paths may carry `{exe}` — `.exe` on Windows, empty everywhere else.
+   *
+   * This is the only variation a native band's entry points show across hosts:
+   * `@oven/bun-windows-x64` ships `bin/bun.exe` where every other bun artifact
+   * ships `bin/bun`, and the platform packages declare no `bin` of their own for
+   * §07.7 to read instead. Bin *names* never carry it; only the paths do.
+   */
   bin: BinSpec | BinList;
-  /** Default version source. */
+  /**
+   * Default version source — where "which versions exist?" is answered.
+   *
+   * For a per-host band this is deliberately **not** where the artifact comes
+   * from: `bun` and `deno` publish one launcher package that carries the version
+   * line and the dist-tags, and one binary package per host. See
+   * {@link PackageManagerSpec.artifactRegistry}.
+   */
   registry: RegistrySpec;
   /** Used *instead of* `registry` when the user has set a custom npm registry (§05.3). */
   npmRegistry?: NpmRegistrySpec;
+  /**
+   * §15.28 — `<platform>-<arch>` → the string `{target}` expands to.
+   *
+   * A table rather than a pair of alias maps because the published names are not
+   * a product of two independent axes: bun spells the same two architectures
+   * `x64`/`aarch64` and calls Windows `windows`, while deno keeps Node's spelling
+   * but suffixes only its Linux artifacts with `-glibc`. Enumerating the hosts a
+   * band actually ships for also makes "this host is not supported" a table
+   * lookup that fails before any byte moves, rather than a 404 on a URL the user
+   * never typed.
+   *
+   * The keys are the normalised pair (`linux-x64`, `darwin-arm64`, `win32-x64`,
+   * …), so the vocabulary is the same one `{platform}` and `{arch}` draw on.
+   */
+  targets?: Record<string, string>;
+  /**
+   * §15.28 — the npm package the **artifact** is published as, when it differs
+   * from the one {@link PackageManagerSpec.registry} answers version questions
+   * about. `package` may carry `{target}`, `{platform}` and `{arch}`.
+   *
+   * Splitting the two is what lets a native band keep npm's signature chain: the
+   * signed `dist.integrity` for `@oven/bun-linux-x64@1.4.0` describes the bytes
+   * this host is about to run, whereas the one for `bun@1.4.0` describes a 15 kB
+   * launcher nobody downloads. §06 follows this spec, §04 follows `registry`.
+   */
+  artifactRegistry?: NpmRegistrySpec;
   /** argv to run after `jup use` / `up`. */
   commands?: { use?: string[] };
   /**
@@ -137,6 +185,17 @@ export interface PackageManagerDefinition {
     commands: string[][];
   };
   ranges: Array<readonly [range: string, spec: PackageManagerSpec]>;
+  /**
+   * §10.5 — whether a bare `jup enable` installs this entry's shims.
+   *
+   * Absent means yes, which is every entry corepack ever had. `false` is for an
+   * entry whose binary name is routinely a *system* install the user chose
+   * deliberately — bun and deno are runtimes first and package managers second —
+   * so silently taking the name over on upgrade would be a change nobody asked
+   * for. Naming the entry (`jup enable bun`) still installs it; `--all` in
+   * `install` is unaffected, because that is about the cache, not `PATH`.
+   */
+  shimByDefault?: boolean;
 }
 
 /* -------------------------------------------------------------------------- */

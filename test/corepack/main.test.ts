@@ -680,10 +680,19 @@ for (const name of SupportedPackageManagerSet) {
         // empty package.json file
       });
 
-      await expect(runCli(cwd, [name, `--version`])).resolves.toMatchObject({
-        stdout: `${config.definitions[name].default.split(`+`, 1)[0]}\n`,
-        exitCode: 0,
-      });
+      const version = config.definitions[name].default.split(`+`, 1)[0];
+      const result = await expect(runCli(cwd, [name, `--version`])).resolves;
+
+      // Upstream asserts the exact stdout, which assumes `--version` prints the
+      // version and nothing else. That holds for every manager corepack ships
+      // and for bun; `deno --version` prints a three-line banner naming V8 and
+      // TypeScript too. The claim being made is "the pinned version ran", so
+      // for that one the assertion is on the version appearing rather than on
+      // the whole of stdout — a weaker assertion only where the stronger one
+      // was never about this behaviour.
+      await (name === `deno`
+        ? result.toMatchObject({ stdout: expect.stringContaining(`${version} `), exitCode: 0 })
+        : result.toMatchObject({ stdout: `${version}\n`, exitCode: 0 }));
     });
   });
 }

@@ -45,11 +45,18 @@ import {
   type JupSpelling,
   SYSTEM_ENV,
 } from "../config/env-vars.ts";
-import { DEFINITIONS, getBinariesFor, SUPPORTED_NAMES } from "../config/table.ts";
+import { DEFINITIONS, getBinariesFor, hostTarget, SUPPORTED_NAMES } from "../config/table.ts";
 import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
 import { redactUserinfo, UsageError } from "../errors.ts";
 import { parseManifest } from "../utils/json.ts";
-import { LOCKFILE_NAME, readLockfile, resolutionKey, usesLockfile } from "../project/lockfile.ts";
+import {
+  integrityForHost,
+  LOCKFILE_NAME,
+  readLockfile,
+  type Resolution,
+  resolutionKey,
+  usesLockfile,
+} from "../project/lockfile.ts";
 import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "../project/manifest.ts";
 import {
   loadNpmrc,
@@ -140,7 +147,7 @@ export interface LockfileInfo {
   present: boolean;
   /** `<name>@<range as written>` — the key this project's spec would use. */
   key: string | null;
-  resolution: { resolved: string; integrity?: string } | null;
+  resolution: Resolution | null;
   /** §15.23 / §15.37 — whether the file may be written or refreshed. */
   frozen: boolean;
   frozenSource:
@@ -601,7 +608,11 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
   }
 
   if (lockfile.resolution !== null) {
-    const { resolved, integrity } = lockfile.resolution;
+    const { resolved } = lockfile.resolution;
+    // §15.28 — this host's key out of the recorded map, when the entry holds
+    // one. A map with nothing for this host is still a *locked* version; it just
+    // has no digest here yet, which `hash: null` says correctly.
+    const integrity = integrityForHost(lockfile.resolution);
     return {
       ...base,
       status: "locked",
@@ -1089,7 +1100,17 @@ export function formatReport(report: InfoReport): string {
   if (report.lockfile.key !== null) out.push(line(`key`, report.lockfile.key));
   if (report.lockfile.resolution !== null) {
     out.push(line(`resolved`, report.lockfile.resolution.resolved));
-    out.push(line(`integrity`, report.lockfile.resolution.integrity ?? `(none recorded)`));
+    // §15.28 — a per-host entry prints this host's digest and says how many
+    // other hosts the file records, which is the fact a reader wants: whether
+    // the colleague whose machine is failing has ever been recorded at all.
+    const recorded = report.lockfile.resolution.integrity;
+    if (typeof recorded === "object") {
+      const others = Object.keys(recorded).filter((host) => host !== hostTarget()).length;
+      const mine = integrityForHost(report.lockfile.resolution) ?? `(none for ${hostTarget()})`;
+      out.push(line(`integrity`, others === 0 ? mine : `${mine} (+${others} other hosts)`));
+    } else {
+      out.push(line(`integrity`, recorded ?? `(none recorded)`));
+    }
   }
   out.push(
     line(`frozen`, `${report.lockfile.frozen ? `yes` : `no`} (${report.lockfile.frozenSource})`),

@@ -18,7 +18,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
-import { isSupportedPackageManager } from "../config/table.ts";
+import { isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled } from "../project/env.ts";
 import { messages, UsageError } from "../errors.ts";
 import {
@@ -320,10 +320,21 @@ export function writeMarker(dir: string, marker: CorepackMarker): void {
  * `cli` commands that record a reference (§09) — already sit above `store`, and
  * `main` must not import `cli`.
  */
-export function referenceWithHash(reference: string, hash: string): string {
+export function referenceWithHash(name: string, reference: string, hash: string): string {
   const parsed = parse(reference);
   // A URL reference keeps its own `#algo.digest` notation and is never rewritten.
-  return parsed === null ? reference : `${parsed.version}+${hash}`;
+  if (parsed === null) return reference;
+
+  // §15.28 — a per-host artifact's digest is a fact about *this machine*, and a
+  // reference is the wrong place to keep it: references travel. They go into
+  // `packageManager`, which is committed, and into `lastKnownGood.json`, which
+  // is copied into container images and warmed caches. Either way the digest
+  // arrives somewhere it cannot match, and §06.1 row 1 then treats it as an
+  // explicit pin and refuses the correct artifact. The store's marker is where
+  // a host-local digest belongs, and it already holds one.
+  if (isPerHost({ name, reference })) return parsed.version;
+
+  return `${parsed.version}+${hash}`;
 }
 
 /**

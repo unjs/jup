@@ -1030,6 +1030,34 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * version constant makes the *built* warm path strictly smaller in work done —
    * a `readFileSync` and a `JSON.parse` fold away entirely. Held at 208,000
    * rather than the 207,479 this leaves, on the same terms as the raises above.
+   *
+   * And once more, 208,000 -> 226,000 — by far the largest raise so far, and the
+   * only one where the measured cost is code rather than prose. §15.28's two
+   * native entries, bun and deno, land in `config/table.ts` (+12,123) and
+   * `project/lockfile.ts` (+3,767), with +731 in `errors.ts` and a few hundred
+   * across `main.ts` and `run/exec.ts`. Source +16,904; measured, `warm.mjs`
+   * went 79,926 -> 85,931, **+6,005 bytes or +7.5%**.
+   *
+   * That is a real cost and it is worth stating what it buys and why none of it
+   * moved off:
+   *
+   * * ~2 kB is the table data itself — two entries, four bands, six host
+   *   targets each. Data in the compiled-in table is the one thing §15.21 says
+   *   adding a package manager is allowed to cost.
+   * * The rest is §15.28's per-host machinery, and the warm path reads it. The
+   *   handover resolves the band's `url` (`getSpecUrl`, for the artifact
+   *   extension) and its `bin` (the §08.1 fallback), and for a native entry both
+   *   now carry `{target}`/`{exe}`; a lockfile *read* needs `hostTarget` to pick
+   *   its own key out of §15.28's integrity map. None of those can be deferred
+   *   to the download path, because they run when there is no download.
+   * * `resolveArtifactRegistry` is the one piece that is genuinely cold — only
+   *   `cache/install.ts` calls it. It stays here anyway: it holds the identity
+   *   cache that `packageManagerForRegistry` does `Map` lookups against, and
+   *   splitting a registry spec's construction from the maps it registers into
+   *   would trade ~900 bytes for a seam that is easy to get subtly wrong.
+   *
+   * Held at 226,000 rather than the 224,383 this leaves, on the same terms as
+   * every raise above: the next addition is still a change worth arguing for.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1041,6 +1069,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(208_000);
+    ).toBeLessThanOrEqual(226_000);
   });
 });

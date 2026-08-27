@@ -74,6 +74,12 @@ specified precisely.
 
 ### 8.3.1 Choosing the interpreter
 
+> §15.28 — this whole step is **skipped** for a band declaring `"exec": "native"`.
+> Its `bin` targets are real executables and are run directly, which makes a native
+> package manager the *cheaper* handover, not the more expensive one. On that path
+> `argv[0]` is the binary name the user invoked rather than the artifact's path; see
+> §15.28 for why (`bunx` and `bun` are one file).
+
 The package manager entry points are JavaScript. The tool must locate a JavaScript
 runtime:
 

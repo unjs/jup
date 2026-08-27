@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -690,6 +698,57 @@ describe("getDefaultVersion (§04.5)", () => {
   it("rejects an unknown package manager", async () => {
     const error = await rejection(getDefaultVersion("cutlery"));
     expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
+  });
+
+  /**
+   * §15.28 — a recorded per-host reference must not carry a digest, and step 1
+   * is the one place a bad one can arrive from outside the current build.
+   *
+   * `lastKnownGood.json` is derived state that outlives a release. A version of
+   * the tool that pinned the *launcher* package's digest here left an entry that
+   * step 1 returns with no network, ahead of every guard downstream — so the
+   * repair has to happen on read or the machine stays broken forever. §04.4
+   * already says a damaged file degrades rather than fails; this is the same
+   * rule with a more specific idea of damaged. The version is still a good
+   * recorded default, so the suffix goes and the entry stays.
+   */
+  it("heals a per-host entry that carries a digest, and rewrites the file (§15.28)", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedLastKnownGood({
+      deno: "2.9.5+sha512.26dfc0709884aed516f64ac6c25c140ec9b572836d99fb61890e09b52085f8936",
+      // Untouched: pnpm's artifact is one tarball for every host, so its digest
+      // is true everywhere and the repair must not be a blanket suffix strip.
+      pnpm: "10.0.0+sha512.abcd",
+    });
+
+    await expect(getDefaultVersion("deno")).resolves.toBe("2.9.5");
+    // Still no network — healing must not turn the offline path into an online
+    // one, which is the whole point of step 1.
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+    expect(readLastKnownGoodFile()).toEqual({
+      deno: "2.9.5",
+      pnpm: "10.0.0+sha512.abcd",
+    });
+  });
+
+  it("heals in memory even when the file cannot be rewritten", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedLastKnownGood({ deno: "2.9.5+sha512.wrong" });
+
+    // §07.8 — an unwritable store must still be able to *run*. A read-only home
+    // lets the entry be read and makes the repair's write fail, which is the
+    // ordering that matters: the run must not depend on the rewrite landing.
+    chmodSync(home, 0o555);
+    try {
+      await expect(getDefaultVersion("deno")).resolves.toBe("2.9.5");
+      expect([...npm.requests, ...berry.requests]).toEqual([]);
+    } finally {
+      chmodSync(home, 0o755);
+    }
+
+    // The file kept the bad value, and the next run will heal it again — one
+    // wasted repair per run is the correct price for a read-only checkout.
+    expect(readLastKnownGoodFile()).toEqual({ deno: "2.9.5+sha512.wrong" });
   });
 });
 

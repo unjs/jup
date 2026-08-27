@@ -179,6 +179,8 @@ usable spec:
 ```
 1. lkg := readLastKnownGood()
    if lkg has an entry for this package manager → return it              [NO NETWORK]
+      (§15.28 — for a per-host entry, drop any build suffix first and
+       rewrite the file best-effort; still no network)
 
 2. if COREPACK_DEFAULT_TO_LATEST === "0" → return definition.default     [NO NETWORK]
       (the compiled-in, hash-pinned version)
@@ -198,6 +200,14 @@ without a project spec.
   a hash-bearing reference:
   * if `dist.integrity` is present → `` `${version}+sha512.${hex(base64decode(integrity.slice(7)))}` ``
   * else (legacy registries) → `` `${version}+sha1.${dist.shasum}` ``
+* **npm, per-host entry (§15.28)** — `GET` as above, but return the **bare
+  `version`**, attaching no hash and consulting no `dist`. A per-host entry's
+  `fetchLatestFrom` names its *launcher* package (§02.4), so everything in `dist`
+  here describes a tarball that is never downloaded; pinning it makes §06.1 row 1
+  compare a launcher's digest against the artifact's bytes, which cannot match. The
+  artifact's own signature is verified at download time instead (§06.3), which is a
+  check about the bytes that will run. This also means the recorded last-known-good
+  (step 3) is a bare version for such an entry.
 * **url** — `GET spec.url`, return `data[spec.fields.tags].stable`. Note **`stable`**,
   not `latest`. No hash is attached on this path.
 

@@ -6,20 +6,31 @@ import {
   getDefinition,
   getPackageManagerFor,
   getSpecFor,
+  getSpecUrl,
   hasRangeBand,
+  hostTarget,
+  isPerHost,
   isSupportedPackageManager,
+  packageManagerForRegistry,
+  resolveArtifactRegistry,
+  resolveSpecBin,
   resolveSpecUrl,
+  shimsByDefault,
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
 import type { BinSpec, PackageManagerSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
-  it("supports exactly npm, pnpm and yarn", () => {
-    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn"]);
+  it("supports exactly npm, pnpm, yarn, bun and deno", () => {
+    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn", "bun", "deno"]);
     expect(isSupportedPackageManager("yarn")).toBe(true);
-    expect(isSupportedPackageManager("bun")).toBe(false);
-    expect(getDefinition("bun")).toBeUndefined();
+    expect(isSupportedPackageManager("bun")).toBe(true);
+    // §01.7 / §15.21 — the table is closed and compiled in. `vlt` stands in for
+    // "a real package manager this build does not ship", which is what every
+    // negative assertion in this file needs and what `bun` used to be.
+    expect(isSupportedPackageManager("vlt")).toBe(false);
+    expect(getDefinition("vlt")).toBeUndefined();
   });
 
   it("pins hash-suffixed defaults", () => {
@@ -53,9 +64,17 @@ describe("registry table — shape (§02.5)", () => {
    */
   it("hash-pins every compiled-in default (§02.5)", () => {
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
+      // §15.28 — a per-host entry's artifact differs from machine to machine, so
+      // there is no one digest to compile in. What clears §15.11's tier for it is
+      // npm's signature over the host's own artifact, checked on every install;
+      // the default is therefore a bare version, and asserting that it *is* bare
+      // is what stops a well-meant edit from pinning one host's digest for all.
+      const perHost = definition.ranges.some(([, spec]) => spec.artifactRegistry !== undefined);
       for (const reference of [definition.default, definition.transparent.default]) {
         if (reference === undefined) continue;
-        expect(reference, name).toMatch(/^\d+\.\d+\.\d+\+sha\d+\.[\da-f]+$/);
+        expect(reference, name).toMatch(
+          perHost ? /^\d+\.\d+\.\d+$/ : /^\d+\.\d+\.\d+\+sha\d+\.[\da-f]+$/,
+        );
       }
     }
   });
@@ -71,6 +90,13 @@ describe("registry table — shape (§02.5)", () => {
       ["yarn", "init"],
       ["yarn", "dlx"],
     ]);
+    expect(DEFINITIONS.bun!.transparent.commands).toEqual([
+      ["bun", "init"],
+      ["bun", "create"],
+      ["bun", "x"],
+      ["bunx"],
+    ]);
+    expect(DEFINITIONS.deno!.transparent.commands).toEqual([["deno", "init"]]);
     expect(DEFINITIONS.npm!.transparent.default).toBeUndefined();
     expect(DEFINITIONS.pnpm!.transparent.default).toBeUndefined();
   });
@@ -153,7 +179,7 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
   });
 
   it("rejects an unknown package manager with a usage error", () => {
-    expect(() => getSpecFor("bun", "1.0.0")).toThrow(/isn't supported by this jup build/);
+    expect(() => getSpecFor("vlt", "1.0.0")).toThrow(/isn't supported by this jup build/);
   });
 });
 
@@ -182,7 +208,7 @@ describe("getSpecFor / hasRangeBand — no matching band (§15.17)", () => {
   it("reports honestly whether a declared band covers the version", () => {
     expect(hasRangeBand("pnpm", "11.1.2")).toBe(true);
     expect(hasRangeBand("pnpm", "5.9.0")).toBe(true);
-    expect(hasRangeBand("bun", "1.0.0")).toBe(false);
+    expect(hasRangeBand("vlt", "1.0.0")).toBe(false);
 
     closeTopBand();
     expect(hasRangeBand("pnpm", "12.0.0")).toBe(false);
@@ -210,7 +236,9 @@ describe("binary names (§02.4)", () => {
     expect(getBinariesFor("yarn")).toEqual(["yarn", "yarnpkg"]);
     expect(getBinariesFor("pnpm")).toEqual(["pnpm", "pnpx"]);
     expect(getBinariesFor("npm")).toEqual(["npm", "npx"]);
-    expect(getBinariesFor("bun")).toEqual([]);
+    expect(getBinariesFor("bun")).toEqual(["bun", "bunx"]);
+    expect(getBinariesFor("deno")).toEqual(["deno"]);
+    expect(getBinariesFor("vlt")).toEqual([]);
   });
 
   it("reverse-maps a binary name to its package manager", () => {
@@ -218,7 +246,9 @@ describe("binary names (§02.4)", () => {
     expect(getPackageManagerFor("yarn")).toBe("yarn");
     expect(getPackageManagerFor("pnpx")).toBe("pnpm");
     expect(getPackageManagerFor("npx")).toBe("npm");
-    expect(getPackageManagerFor("bunx")).toBeUndefined();
+    expect(getPackageManagerFor("bunx")).toBe("bun");
+    expect(getPackageManagerFor("deno")).toBe("deno");
+    expect(getPackageManagerFor("vlt")).toBeUndefined();
   });
 
   it("keeps every BinSpec path relative and inside the package", () => {
@@ -423,5 +453,168 @@ describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
     expect(() => resolveSpecUrl(url, locator, "1.0.0")).toThrow(
       messages.unsupportedArch("bunny", "1.0.0", "ppc64"),
     );
+  });
+});
+
+/* -------------------------------------------------------------------------- *
+ * §15.28 / §15.21 — the native entries
+ * -------------------------------------------------------------------------- */
+
+describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => {
+  afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
+
+  /**
+   * §15.21's central claim, checked rather than asserted in prose: adding a
+   * package manager is a **data-only** change. If it were not, some field below
+   * would have needed a name-shaped special case somewhere in the tool, and the
+   * generic accessors would not be able to answer for `bun` and `deno` the way
+   * they answer for `pnpm`.
+   */
+  it("answers every generic table question, with no name-shaped special case", () => {
+    for (const name of ["bun", "deno"]) {
+      const definition = getDefinition(name)!;
+      expect(isSupportedPackageManager(name)).toBe(true);
+      expect(definition.ranges.length).toBeGreaterThan(0);
+      for (const binName of getBinariesFor(name)) {
+        expect(getPackageManagerFor(binName)).toBe(name);
+      }
+      // §04.1's dist-tag rule reads the last band's registry; for a native entry
+      // that is the *launcher* package, which is where the tags live.
+      expect(definition.ranges.at(-1)![1].registry).toEqual({ type: "npm", package: name });
+      expect(definition.fetchLatestFrom).toEqual({ type: "npm", package: name });
+    }
+  });
+
+  it("splits the version source from the artifact source (§15.28)", () => {
+    const bun = getSpecFor("bun", "1.4.0");
+    // Versions and dist-tags: the small launcher package.
+    expect(bun.registry).toEqual({ type: "npm", package: "bun" });
+    // Bytes and the signature over them: the per-host binary package. Pointing
+    // both at `bun` is the mistake this field exists to prevent — the launcher
+    // is a 15 kB `postinstall` stub, and jup runs no lifecycle scripts.
+    expect(bun.artifactRegistry).toEqual({ type: "npm", package: "@oven/bun-{target}" });
+    expect(getSpecFor("deno", "2.9.5").artifactRegistry).toEqual({
+      type: "npm",
+      package: "@deno/{target}",
+    });
+  });
+
+  it("bands bun by the host set each version actually shipped", () => {
+    expect(DEFINITIONS.bun!.ranges.map(([range]) => range)).toEqual(["*", ">=1.1.0", ">=1.3.10"]);
+
+    // Reversed, first match wins (§02.3): Windows arrived in 1.1.0 and Windows
+    // on arm64 in 1.3.10, so an older version must not claim either.
+    expect(Object.keys(getSpecFor("bun", "1.0.0").targets!)).not.toContain("win32-x64");
+    expect(Object.keys(getSpecFor("bun", "1.2.0").targets!)).toContain("win32-x64");
+    expect(Object.keys(getSpecFor("bun", "1.2.0").targets!)).not.toContain("win32-arm64");
+    expect(Object.keys(getSpecFor("bun", "1.4.0").targets!)).toContain("win32-arm64");
+  });
+
+  it("resolves `{target}` to the published artifact name for each host", () => {
+    const cases: Array<[string, string, string, string]> = [
+      ["linux", "x64", "@oven/bun-linux-x64", "@deno/linux-x64-glibc"],
+      ["linux", "arm64", "@oven/bun-linux-aarch64", "@deno/linux-arm64-glibc"],
+      ["darwin", "arm64", "@oven/bun-darwin-aarch64", "@deno/darwin-arm64"],
+      ["win32", "x64", "@oven/bun-windows-x64", "@deno/win32-x64"],
+    ];
+
+    for (const [platform, arch, bunPackage, denoPackage] of cases) {
+      pretendHost(platform, arch);
+      // The two vendors spell the same host three different ways — bun renames
+      // both halves, deno suffixes only Linux — which is why this is a table and
+      // not a pair of alias maps.
+      expect(getSpecUrl({ name: "bun", reference: "1.4.0" })).toBe(
+        `https://registry.npmjs.org/${bunPackage}/-/${bunPackage.slice("@oven/".length)}-1.4.0.tgz`,
+      );
+      expect(getSpecUrl({ name: "deno", reference: "2.9.5" })).toBe(
+        `https://registry.npmjs.org/${denoPackage}/-/${denoPackage.slice("@deno/".length)}-2.9.5.tgz`,
+      );
+    }
+  });
+
+  it("names the host when the version ships no artifact for it", () => {
+    pretendHost("win32", "arm64");
+    const locator = { name: "bun", reference: "1.2.0" };
+
+    // Not a 404, and not a URL still carrying `{target}`: bun 1.2.0 genuinely
+    // has no Windows arm64 build, and bumping the version is the fix.
+    expect(() => getSpecUrl(locator)).toThrow(UsageError);
+    expect(() => getSpecUrl(locator)).toThrow(
+      messages.unsupportedTarget("bun", "1.2.0", "win32-arm64", [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-arm64",
+        "linux-x64",
+        "win32-x64",
+      ]),
+    );
+  });
+
+  it("substitutes `{exe}` in bin paths, and only on Windows", () => {
+    // The platform packages declare no `bin` of their own, so §07.7 has nothing
+    // to read and the table is the authority — which makes this the one place
+    // the `.exe` can come from.
+    pretendHost("linux", "x64");
+    expect(resolveSpecBin(getSpecFor("bun", "1.4.0"))).toEqual({
+      bun: "./bin/bun",
+      bunx: "./bin/bun",
+    });
+    expect(resolveSpecBin(getSpecFor("deno", "2.9.5"))).toEqual({ deno: "./deno" });
+  });
+
+  it("makes `bun` and `bunx` one file, which is what argv[0] dispatch needs", () => {
+    const bin = resolveSpecBin(getSpecFor("bun", "1.4.0")) as BinSpec;
+    expect(bin.bun).toBe(bin.bunx);
+    expect(getBinariesFor("bun")).toEqual(["bun", "bunx"]);
+  });
+
+  it("keeps the resolved artifact registry's identity, so §15.2 still finds it", () => {
+    pretendHost("linux", "x64");
+    const spec = getSpecFor("bun", "1.4.0");
+    const locator = { name: "bun", reference: "1.4.0" };
+
+    const first = resolveArtifactRegistry(spec, locator)!;
+    expect(first).toEqual({ type: "npm", package: "@oven/bun-linux-x64" });
+    // Identity, not equality: `packageManagerForRegistry` is a `Map` lookup on
+    // the object, so a freshly minted one per call would silently drop
+    // `JUP_REGISTRY_BUN` on exactly the entries that need it.
+    expect(resolveArtifactRegistry(spec, locator)).toBe(first);
+    expect(packageManagerForRegistry(first)).toBe("bun");
+  });
+
+  it("classifies which entries have a per-host artifact", () => {
+    expect(isPerHost({ name: "bun", reference: "1.4.0" })).toBe(true);
+    expect(isPerHost({ name: "deno", reference: "2.9.5" })).toBe(true);
+    expect(isPerHost({ name: "pnpm", reference: "11.1.2" })).toBe(false);
+    expect(isPerHost({ name: "yarn", reference: "4.14.1" })).toBe(false);
+    // A URL reference belongs to no band, so there is nothing host-dependent
+    // about it whatever it points at.
+    expect(isPerHost({ name: "yarn", reference: "https://example.com/yarn.js" })).toBe(false);
+  });
+
+  it("normalises the host pair the same way `{platform}` and `{arch}` do", () => {
+    pretendHost("linux", "aarch64");
+    expect(hostTarget()).toBe("linux-arm64");
+    pretendHost("win32", "amd64");
+    expect(hostTarget()).toBe("win32-x64");
+  });
+
+  it("keeps the native entries out of a bare `enable` (§10.5)", () => {
+    expect(shimsByDefault("npm")).toBe(true);
+    expect(shimsByDefault("pnpm")).toBe(true);
+    expect(shimsByDefault("yarn")).toBe(true);
+    expect(shimsByDefault("bun")).toBe(false);
+    expect(shimsByDefault("deno")).toBe(false);
+  });
+
+  it("runs the artifact directly, with no JavaScript runtime lookup (§08.3.1)", () => {
+    expect(getSpecFor("bun", "1.4.0").exec).toBe("native");
+    expect(getSpecFor("deno", "2.9.5").exec).toBe("native");
+    expect(getSpecFor("pnpm", "11.1.2").exec).toBeUndefined();
+  });
+
+  it("declares what `use` runs afterwards", () => {
+    expect(getSpecFor("bun", "1.4.0").commands).toEqual({ use: ["bun", "install"] });
+    expect(getSpecFor("deno", "2.9.5").commands).toEqual({ use: ["deno", "install"] });
   });
 });

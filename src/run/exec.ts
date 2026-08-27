@@ -253,7 +253,9 @@ export function execPackageManager(
 
     // Imported here and nowhere else: `node:child_process` must not enter the
     // module graph of a JavaScript cache hit (§01.3, §16.3).
-    return import("./native.ts").then((native) => native.execNative(binPath, args, env));
+    // `binName`, not `binPath`: §15.28's artifacts dispatch on `argv[0]`, and
+    // `bunx` and `bun` are the same file.
+    return import("./native.ts").then((native) => native.execNative(binPath, args, env, binName));
   }
 
   // §15.32 — the JavaScript path hands over **in process**, so there is no child

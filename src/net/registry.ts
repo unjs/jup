@@ -8,7 +8,7 @@
 
 import { ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
-import { npmAlternativeFor, packageManagerForRegistry } from "../config/table.ts";
+import { isPerHost, npmAlternativeFor, packageManagerForRegistry } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { advisory, messages, networkError, redactUserinfo, UsageError } from "../errors.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
@@ -413,6 +413,24 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
       throw new Error(
         `${spec.package} metadata from ${redactUserinfo(registryUrl)} has no "version" field; this registry may not be npm-compatible`,
       );
+    }
+
+    // §15.28 — a per-host package manager's `fetchLatestFrom` names its
+    // **launcher** package, and everything in `dist` below describes that
+    // launcher's tarball rather than the artifact this host is going to
+    // download. Attaching it as a build suffix pins the wrong bytes outright:
+    // §06.1 row 1 then checks a ~15 kB stub's digest against a 40–90 MB binary
+    // and fails every time, with a hash mismatch naming neither package.
+    //
+    // The version is the only fact the launcher has that is true for every host,
+    // so it is the only one taken. Nothing is lost by not signing it here:
+    // §06.3 verifies the *artifact's* own signature at download time, which is
+    // the tier §15.11 asks for and is a check about the bytes that will actually
+    // run. Returning before `requireDist` is deliberate for the same reason — a
+    // launcher with no `dist` says nothing about whether this host can install.
+    const perHostName = packageManagerForRegistry(spec);
+    if (perHostName !== undefined && isPerHost({ name: perHostName, reference: version })) {
+      return version;
     }
 
     // §15.7 tier 1 — corepack destructures `dist` here and throws a raw

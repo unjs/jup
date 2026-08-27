@@ -572,15 +572,15 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
   it("refuses an archive naming a package manager this build doesn't support", async () => {
     const source = await mkdtemp(join(tmpdir(), "jup-cli-bogus-"));
-    await mkdir(join(source, "bun", "1.0.0"), { recursive: true });
-    await writeFile(join(source, "bun", "1.0.0", ".jup"), "{}");
+    await mkdir(join(source, "vlt", "1.0.0"), { recursive: true });
+    await writeFile(join(source, "vlt", "1.0.0", ".jup"), "{}");
     const archive = join(project, "bogus.tgz");
-    await create(source, ["bun"], archive);
+    await create(source, ["vlt"], archive);
 
     await expect(cmdInstallGlobal(["-g", archive])).rejects.toThrow(
-      `Unsupported package manager 'bun'`,
+      `Unsupported package manager 'vlt'`,
     );
-    expect(existsSync(join(home, "v1", "bun"))).toBe(false);
+    expect(existsSync(join(home, "v1", "vlt"))).toBe(false);
 
     await rm(source, { recursive: true, force: true });
   });
