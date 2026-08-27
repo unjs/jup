@@ -26,6 +26,7 @@ import {
 } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
+import { PROXY_STUB_NAME } from "../../src/commands/shims.ts";
 import {
   cleanupFixtures,
   copyTool,
@@ -183,7 +184,9 @@ describe("§13.11 enable / disable", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(readlinkSync(join(shimDir, "yarn"))).not.toBe(stray);
-    expect(readlinkSync(join(shimDir, "yarn"))).toContain("yarn.js");
+    // §14.15 — one stub for every name, so the link names the stub and not the
+    // binary. What row 123 is about is that a wrong link is corrected at all.
+    expect(readlinkSync(join(shimDir, "yarn"))).toContain(PROXY_STUB_NAME);
   });
 
   it.skipIf(IS_WINDOWS)("124: enable skips a Yarn Switch install and says so", async () => {

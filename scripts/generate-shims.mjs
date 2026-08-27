@@ -15,7 +15,7 @@ import { chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFINITIONS, getBinariesFor } from "../src/config/table.ts";
 import { ENTRY_CANDIDATES } from "../src/utils/self.ts";
-import { shimSource } from "../src/commands/shims.ts";
+import { PROXY_STUB_NAME, shimSource } from "../src/commands/shims.ts";
 
 const dist = join(import.meta.dirname, "..", "dist");
 
@@ -28,12 +28,19 @@ if (entry === undefined) {
 
 const binNames = Object.keys(DEFINITIONS).flatMap((name) => getBinariesFor(name));
 
-await Promise.all(
-  binNames.map(async (binName) => {
-    const file = join(dist, `${binName}.js`);
-    await writeFile(file, shimSource(entry, binName));
-    await chmod(file, 0o755);
-  }),
-);
+async function write(file, source) {
+  await writeFile(file, source);
+  await chmod(file, 0o755);
+}
 
-console.log(`Generated ${binNames.length} shim stubs for ${entry}: ${binNames.join(", ")}`);
+// The POSIX stub, once: §14.15 has it read its own name from `argv[1]`, so one
+// file serves every binary. The per-name stubs are §10.3's, and Windows is the
+// only thing that reads them.
+await Promise.all([
+  write(join(dist, PROXY_STUB_NAME), shimSource(entry)),
+  ...binNames.map((binName) => write(join(dist, `${binName}.js`), shimSource(entry, binName))),
+]);
+
+console.log(
+  `Generated ${PROXY_STUB_NAME} and ${binNames.length} win32 stubs for ${entry}: ${binNames.join(", ")}`,
+);

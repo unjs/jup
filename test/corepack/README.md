@@ -67,9 +67,9 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-**141 rows: 96 pass, 44 skipped, 1 expected fail, 0 failing.**
+**141 rows: 95 pass, 45 skipped, 1 expected fail, 0 failing.**
 
-> Measured 2026-08-27. The per-cause table below still adds up to 40 of those
+> Measured 2026-08-27. The per-cause table below still adds up to 41 of those
 > skips and wants a recount; the headline is what a run reports.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
@@ -90,6 +90,7 @@ red row is a regression, which is the whole point of keeping the port.
 | 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe env-file discovery. |
 | 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
 | 1 | **§15, #138** — `enable`'s default target set includes npm. |
+| 1 | **§14.15** — a POSIX shim points at one name-agnostic stub, so the corrected link reads `…/shim-proxy.js` rather than `…/yarn.js`. The row's subject, correcting a wrong symlink, is covered by jup's row 123. |
 | 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |
 
 ## Compat mode

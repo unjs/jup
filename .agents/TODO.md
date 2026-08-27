@@ -11,12 +11,7 @@
    but `test/conformance/15-21-native-entries.test.ts` jumps 220 -> 222. Rows 216, 217 and
    220 cover the other §15.28 digest sites; this is the one hole in that set, and §15.28's
    two shipped bugs were both in a place the suite did not reach.
-3. **§14.15 on POSIX** — `process.argv[1]` is *not* realpathed (verified), so
-   `basename(argv[1])` dispatch works from a JS distribution today: one `dist/shim.mjs` and
-   one symlink per binary, no generated stubs, closing #751 at the root. It changes the shim
-   contract, not enablement, and does nothing for Windows, where the `.cmd`/`.ps1` wrappers
-   lose the invocation name.
-4. **`src/errors.ts` on the warm path** — 36.8 kB of message table, all of it parsed to
+3. **`src/errors.ts` on the warm path** — 36.8 kB of message table, all of it parsed to
    print one line. The largest remaining warm-path win, and the reason the byte ceiling
    keeps moving.
 

@@ -435,7 +435,9 @@ that hardcodes a path and needs a JavaScript runtime on `PATH` to start.
   it is time to execute a package manager, with a clear error if none is found
   (§08.3.1) (**#486**).
 * A symlink or hardlink to the tool itself carries no baked-in path to relocatable
-  build output (**#751**).
+  build output (**#751**). §14.15's POSIX form realises this half without a native
+  binary: the link's target is one name-agnostic stub, so no file in `dist/` is
+  named after a binary and there is nothing per-name left to go stale.
 
 Additionally, to close **#751** fully: `enable` MUST detect and replace a shim that
 points at a nonexistent target, and `disable` MUST remove such a dangling shim rather
@@ -1284,6 +1286,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 241 | `.nvmrc` carrying two versions, only comments, or nothing | `Invalid <path>`; no request, and no fall back to the compiled-in default (§15.40) |
 | 242 | `.nvmrc` in a directory with no `package.json` anywhere above it | it still speaks; no manifest is created and auto-pin does not fire (§15.40) |
 | 243 | `.nvmrc` present with `JUP_ENABLE_PROJECT_SPEC=0`, then `jup use node@22` in that same directory | not read in either case; `use` writes `devEngines.runtime` and leaves the file untouched (§15.40, §11.1, §15.27) |
+| 244 | `enable yarn pnpm`, then run each shim | both links point at the **same** stub, and each still reaches its own package manager; no file in the dist folder is named after a binary (§14.15, §10.2) |
 
 ## 15.39 Tools, not only package managers — [required]
 

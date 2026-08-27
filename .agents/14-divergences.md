@@ -248,20 +248,41 @@ with two test-asserted strings; a conforming implementation that prioritises exa
 compatibility may keep them, but this spec recommends the fix and marks §12.9's
 wording as advisory rather than normative.
 
-## 14.15 Self-dispatching shims — [native/perf/small]
+## 14.15 Self-dispatching shims — [perf/small]
 
 **Corepack:** generates one JS file per binary name at build time, each hard-coding
 its own name, plus three Windows script variants per name via a shim generator. It
 avoids `argv[0]` sniffing because Node `realpath`s the executed module and loses the
 invocation name.
 
-**Required for a native implementation:** a shim is a symlink (POSIX) or a hardlink /
-copy of the binary (Windows) pointing at the tool itself; the tool dispatches on
-`basename(argv[0])`. This removes every generated file, the `PATHEXT` workaround, the
-PowerShell pipeline special-casing, and the requirement that a JS runtime be locatable
-at `enable` time. The explicit `<tool> <binary>` form remains available.
+**Required:** the shim does not carry a name. It reads the one it was invoked under
+and dispatches on it, so **one** stub serves every binary. The explicit
+`<tool> <binary>` form remains available.
 
-The download-prompt default (§05.5) then keys off the same dispatch: `1` when invoked
+The premise corepack declined this on is half true. A runtime does `realpath` the
+module it executes — `import.meta.filename` inside the stub is the stub's real path,
+which is why §14.25 has to resolve the entry through it. But `process.argv[1]` is
+**not** `realpath`'d, and it holds the path as invoked: `/home/u/.jup/bin/yarn`, not
+`…/dist/shim-proxy.js`. Verified on Node 24 under all three ways a shim is reached —
+a direct `PATH` execution, `node <shim>`, and `node --preserve-symlinks-main <shim>`,
+which is the one case that resolves the *module* from the link too. So a hosted
+implementation gets the same dispatch a native single binary gets from `argv[0]`.
+
+What this buys is not mainly size. It is that **no file in `dist/` is named after a
+binary**, which is #751 at the root: a shim whose per-name stub was removed by an
+upgrade is a dangling link that must be recognised as ours from its target's *name*
+(§15.14). One target name is one thing to recognise, and it does not multiply with
+the table.
+
+**Windows is excluded and stays on §10.3.** Its `.cmd` / `.ps1` wrappers invoke
+`node <stub>`, so the invocation name really is gone by the time the tool runs — the
+per-name stubs, and the machinery that writes them, exist for that platform alone.
+A native single-binary implementation can go further than this and hardlink or copy
+the binary itself on both platforms, which additionally removes the `PATHEXT`
+workaround, the PowerShell pipeline special-casing, and the requirement that a JS
+runtime be locatable at `enable` time.
+
+The download-prompt default (§05.5) keys off the same dispatch: `1` when invoked
 under a package-manager name, `0` when invoked under the tool's own name.
 
 ## 14.16 Don't clobber foreign binaries — [correct]
@@ -490,6 +511,9 @@ about to `stat` regardless. Measured against a warm run that loads `node:fs`,
 `node:path`, `node:url` and `node:os` anyway (§16.3): best of 40, **23.14 ms with
 the resolution, 23.35 ms without**. §16.3's budget is unaffected.
 
-§14.15's native form does not have this problem and does not need this: a
-single-binary implementation dispatches on `basename(argv[0])` and imports
-nothing.
+§14.15's POSIX form does not remove this requirement — it makes it matter more.
+One stub now serves every name, so this is the only place an entry is resolved,
+and `--preserve-symlinks-main` is the case where the *module* is loaded from the
+link as well: the name still arrives (through `argv[1]`), and the entry still has
+to be found through the realpath. Only the native single-binary form is exempt,
+because it dispatches on `basename(argv[0])` and imports nothing.

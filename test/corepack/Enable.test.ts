@@ -161,7 +161,12 @@ describe(`EnableCommand`, () => {
     });
   });
 
-  test.skipIf(process.platform === `win32`)(`should overwrite existing symlinks if they are incorrect`, async () => {
+  // SKIP (jup §14.15): the row's subject — a wrong symlink is corrected — still
+  // holds and is covered by jup's own row 123. Its last assertion is the one
+  // that cannot: jup's POSIX shims all point at one name-agnostic stub, so the
+  // link reads `…/shim-proxy.js` and no file in `dist/` is named after a binary.
+  // (Was `test.skipIf(win32)`; now skipped everywhere.)
+  test.skip(`should overwrite existing symlinks if they are incorrect`, async () => {
     await xfs.mktempPromise(async cwd => {
       await makeBin(cwd, `corepack` as Filename);
 

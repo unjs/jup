@@ -50,9 +50,8 @@ Both `chmod 0o755`.
 > `<entry>` is the bare file name from §10.4's candidate list. See §14.25 for the
 > failure this avoids and its measured cost.
 
-> **Divergence (§14.15).** For a single-binary native implementation there is nothing
-> to generate: the shim can be a **hardlink or symlink to the tool itself**, and the
-> tool dispatches on `basename(argv[0])`.
+> **Divergence (§14.15).** The shim MUST NOT bake the binary name into a per-name
+> file **on POSIX**. It reads the name it was invoked under instead:
 >
 > ```
 > name := basename(argv[0]), with a trailing ".exe" removed on Windows
@@ -64,18 +63,26 @@ Both `chmod 0o755`.
 >     normal dispatch on argv[1..]
 > ```
 >
-> This is smaller (no generated files), faster (no extra `require`), and is the
-> standard busybox/coreutils pattern. It MUST NOT be used to *replace* the explicit
-> `<tool> <binary>` form, which stays available. Note the reference implementation
-> deliberately avoided `argv[0]` sniffing because Node `realpath`s the executed
-> module and loses the invocation name — a native binary does not have that problem.
+> The reference implementation avoided this because a runtime `realpath`s the module
+> it executes and so loses the invocation name. It does — but the *invocation path*
+> survives in `argv[1]`, which is not `realpath`'d, under a direct `PATH` execution,
+> under `<runtime> <shim>`, and under `--preserve-symlinks-main`. A hosted
+> implementation therefore gets the same dispatch a native one gets from `argv[0]`,
+> and §10.2's target becomes one stub rather than one per name.
+>
+> It MUST NOT be used to *replace* the explicit `<tool> <binary>` form, which stays
+> available.
+>
+> **Windows is excluded**, and the exclusion is not a limitation of this rule but of
+> §10.3: a `.cmd` or `.ps1` wrapper invokes `<runtime> <stub>`, so by the time the
+> tool runs the invocation name is genuinely gone. Windows keeps one stub per name.
 
 ## 10.2 POSIX shim creation
 
 ```
 generatePosixLink(installDirectory, distFolder, binName):
     file    := installDirectory/binName
-    target  := RELATIVE path from installDirectory to distFolder/<binName>.js
+    target  := RELATIVE path from installDirectory to distFolder/<proxy stub>
     st      := lstat(file)                     # lstat, NOT stat — must not follow
 
     if st exists:
@@ -91,7 +98,12 @@ generatePosixLink(installDirectory, distFolder, binName):
     symlink(target, file)
 ```
 
-Three properties this MUST have:
+`<proxy stub>` is **one file for every binary name** (§14.15): it carries no name of
+its own and reads the one it was invoked under from `argv[1]`. An implementation MUST
+NOT make the target depend on `binName` — that is what leaves a per-name file behind
+to go stale when the tool is upgraded or removed (§15.14, #751).
+
+Four properties this MUST have:
 
 1. **`lstat`, not `stat`.** A dangling symlink must be detected as a symlink, not as
    a missing file. (Corepack fixed exactly this bug in 0.34.4.)
@@ -100,6 +112,9 @@ Three properties this MUST have:
    computed from a symlinked directory would be wrong.
 3. **Idempotent.** An already-correct symlink is not rewritten; its mtime is
    unchanged across repeated `enable` runs. The conformance suite asserts this.
+4. **The stub is written at most once per `enable`**, whatever the number of names,
+   and not at all when it is already current — so `enable` still succeeds against a
+   read-only `distFolder` that shipped it (§10.7, §14.18).
 
 Anything else occupying the name — a plain file, a wrong symlink, a real binary — is
 **unlinked and replaced without warning**. The only exception is the Yarn Switch

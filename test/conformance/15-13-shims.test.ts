@@ -25,11 +25,12 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  readlinkSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { chmod } from "node:fs/promises";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
@@ -377,5 +378,35 @@ describe("§14.25 — the stub resolves its own entry", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
+  });
+});
+
+describe("§14.15 — one stub, dispatching on the name it was invoked under", () => {
+  it.skipIf(IS_WINDOWS)("244: two shims share a target and still reach their own", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    expect((await run(["enable", "yarn", "pnpm"], options)).exitCode).toBe(0);
+
+    // One target for both names. This is the property: nothing in the dist
+    // folder is named after a binary, so there is no per-name file to go stale
+    // when the tool is upgraded or removed (§15.14, #751).
+    const yarnLink = readlinkSync(join(shimDir, "yarn"));
+    expect(readlinkSync(join(shimDir, "pnpm"))).toBe(yarnLink);
+    expect(basename(yarnLink)).not.toBe("yarn.js");
+    expect(basename(yarnLink)).not.toBe("pnpm.js");
+
+    // And the shared stub still tells them apart, because the name comes from
+    // `argv[1]` rather than from the file. The yarn shim runs the pinned yarn…
+    const asYarn = await run(["--version"], { ...options, bin: join(shimDir, "yarn") });
+    expect(asYarn.exitCode).toBe(0);
+    expect(asYarn.stdout).toBe("1.22.4\n");
+
+    // …and the pnpm shim is refused by this project, which is what proves the
+    // dispatch: a stub that had baked in `yarn` would have answered 1.22.4 here.
+    const asPnpm = await run(["--version"], { ...options, bin: join(shimDir, "pnpm") });
+    expect(asPnpm.exitCode).toBe(1);
+    expect(asPnpm.stderr).toContain("This project is configured to use yarn");
   });
 });

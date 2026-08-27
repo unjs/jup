@@ -26,6 +26,7 @@ import {
   generateWin32Link,
   pathExportLine,
   perUserShimDirectory,
+  PROXY_STUB_NAME,
   readDisplacedRecord,
   rehashNotice,
   removePosixLink,
@@ -67,7 +68,17 @@ const ENTRY_SOURCE = `export async function runMain(argv) {
 `;
 
 /** The relative symlink target `enable` must install for a binary name. */
-function expectedTarget(binName: string, from = binDir): string {
+/**
+ * §14.15 — every POSIX shim points at the same stub, whatever name it wears, so
+ * this takes no binary name any more. The Windows wrappers still name their own
+ * (`expectedWin32Stub`).
+ */
+function expectedTarget(from = binDir): string {
+  return relative(from, join(dist, PROXY_STUB_NAME));
+}
+
+/** §10.3 — Windows keeps one stub per name; this is the path its wrappers cite. */
+function expectedWin32Stub(binName: string, from = binDir): string {
   return relative(from, join(dist, `${binName}.js`));
 }
 
@@ -216,7 +227,7 @@ describe("enable (§10.2)", () => {
     for (const binName of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
       const file = join(xdgBin, binName);
       expect(lstatSync(file).isSymbolicLink()).toBe(true);
-      expect(readlinkSync(file)).toBe(expectedTarget(binName, xdgBin));
+      expect(readlinkSync(file)).toBe(expectedTarget(xdgBin));
     }
   });
 
@@ -238,7 +249,7 @@ describe("enable (§10.2)", () => {
 
   it("118: honours --install-directory", async () => {
     expect(await cmdEnable(["--install-directory", binDir], dist)).toBe(0);
-    expect(readlinkSync(join(binDir, "yarn"))).toBe(expectedTarget("yarn"));
+    expect(readlinkSync(join(binDir, "yarn"))).toBe(expectedTarget());
   });
 
   it("119: a single named package manager expands to its binaries only", async () => {
@@ -261,7 +272,7 @@ describe("enable (§10.2)", () => {
     await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist);
 
     const file = join(binDir, "yarn");
-    const stub = join(dist, "yarn.js");
+    const stub = join(dist, PROXY_STUB_NAME);
     const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
     lutimesSync(file, past, past);
     lutimesSync(stub, past, past);
@@ -283,7 +294,7 @@ describe("enable (§10.2)", () => {
 
     await generatePosixLink(binDir, dist, "yarn");
 
-    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
+    expect(readlinkSync(file)).toBe(expectedTarget());
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -297,7 +308,7 @@ describe("enable (§10.2)", () => {
 
     await expect(generatePosixLink(binDir, dist, "yarn")).resolves.toBe(file);
 
-    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
+    expect(readlinkSync(file)).toBe(expectedTarget());
   });
 
   it("173: replaces a shim whose target no longer exists (§15.14, #751)", async () => {
@@ -312,7 +323,7 @@ describe("enable (§10.2)", () => {
     expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
     expect(warn).not.toHaveBeenCalled();
-    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
+    expect(readlinkSync(file)).toBe(expectedTarget());
     // Nothing was recorded as displaced: a stale shim of ours is not a foreign
     // binary (§15.15).
     expect(readDisplacedRecord()).toEqual([]);
@@ -329,7 +340,7 @@ describe("enable (§10.2)", () => {
     expect(readFileSync(file, "utf8")).toBe(foreign);
     expect(lstatSync(file).isSymbolicLink()).toBe(false);
     // The other binary of the same package manager is still installed.
-    expect(readlinkSync(join(binDir, "pnpx"))).toBe(expectedTarget("pnpx"));
+    expect(readlinkSync(join(binDir, "pnpx"))).toBe(expectedTarget());
     // Nothing was displaced, so nothing was recorded.
     expect(readDisplacedRecord()).toEqual([]);
   });
@@ -341,7 +352,7 @@ describe("enable (§10.2)", () => {
     expect(await cmdEnable([`--install-directory=${binDir}`, "--force", "pnpm"], dist)).toBe(0);
 
     expect(warn).not.toHaveBeenCalled();
-    expect(readlinkSync(file)).toBe(expectedTarget("pnpm"));
+    expect(readlinkSync(file)).toBe(expectedTarget());
   });
 
   it("replaces one of our own stubs left as a regular file, without --force", async () => {
@@ -351,7 +362,7 @@ describe("enable (§10.2)", () => {
     await generatePosixLink(binDir, dist, "yarn");
 
     expect(warn).not.toHaveBeenCalled();
-    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
+    expect(readlinkSync(file)).toBe(expectedTarget());
   });
 
   it("124: leaves a Yarn Switch install alone, warns, and exits 0", async () => {
@@ -371,7 +382,7 @@ describe("enable (§10.2)", () => {
     );
     expect(readlinkSync(file)).toBe(join(switchBin, "yarn"));
     // `yarnpkg` is a different entry and is installed normally.
-    expect(readlinkSync(join(binDir, "yarnpkg"))).toBe(expectedTarget("yarnpkg"));
+    expect(readlinkSync(join(binDir, "yarnpkg"))).toBe(expectedTarget());
   });
 
   it("130: rejects an invalid package manager name before touching the filesystem", async () => {
@@ -410,7 +421,7 @@ describe("enable (§10.2)", () => {
       prompt: "1",
     });
     // The stub is executable in its own right, for the `#!/usr/bin/env node` path.
-    expect(lstatSync(join(dist, "yarn.js")).mode & 0o777).toBe(0o755);
+    expect(lstatSync(join(dist, PROXY_STUB_NAME)).mode & 0o777).toBe(0o755);
   });
 
   /**
@@ -820,7 +831,7 @@ exit $ret
   it("131: writes <B>, <B>.cmd and <B>.ps1, byte for byte", async () => {
     await generateWin32Link(binDir, dist, "yarn");
 
-    const rel = expectedTarget("yarn");
+    const rel = expectedWin32Stub("yarn");
     const file = join(binDir, "yarn");
 
     expect(readFileSync(file, "utf8")).toBe(expectedSh(rel.replaceAll("\\", "/")));
