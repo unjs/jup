@@ -5,7 +5,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages, networkError, redactUserinfoAnywhere, UsageError } from "../../src/errors.ts";
+import {
+  messages,
+  networkError,
+  redactUserinfoAnywhere,
+  UsageError,
+} from "../../src/errors-cold.ts";
 import { loadNpmrc, npmrcAuthorizationFor, resetNpmrcCache } from "../../src/net/npmrc.ts";
 import {
   assertSafeArtifactUrl,

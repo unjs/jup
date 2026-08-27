@@ -20,7 +20,7 @@ import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } 
 import { createReadStream } from "node:fs";
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "../config/keys.ts";
-import { advisory, messages, UsageError } from "../errors.ts";
+import { advisory, messages, UsageError } from "../errors-cold.ts";
 import type { RegistrySignature, TrustedKey, TrustStore } from "../types.ts";
 
 /** §14.11 — explicit allowlist; anything else is a clear error, not a crash. */

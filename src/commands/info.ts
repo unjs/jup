@@ -47,7 +47,7 @@ import {
 } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, hostTarget, SUPPORTED_NAMES } from "../config/table.ts";
 import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
-import { redactUserinfo, UsageError } from "../errors.ts";
+import { redactUserinfo, UsageError } from "../errors-cold.ts";
 import { parseManifest } from "../utils/json.ts";
 import {
   integrityForHost,

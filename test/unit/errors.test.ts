@@ -14,7 +14,7 @@ import {
   messages,
   parseBadStatus,
   UsageError,
-} from "../../src/errors.ts";
+} from "../../src/errors-cold.ts";
 
 describe("parseBadStatus", () => {
   it("round-trips every status and URL shape messages.badStatus can render", () => {

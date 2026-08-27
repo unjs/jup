@@ -25,7 +25,7 @@
 
 import { readFileSync } from "node:fs";
 import { ENV, envEntry, readEnv } from "../config/env-vars.ts";
-import { advisory, messages } from "../errors.ts";
+import { advisory, messages } from "../errors-cold.ts";
 import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";
 
 /** What the environment (and, later, `.npmrc`) says about TLS. */

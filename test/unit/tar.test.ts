@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { messages } from "../../src/errors.ts";
+import { messages } from "../../src/errors-cold.ts";
 import { create, extract, listEntries } from "../../src/cache/tar.ts";
 
 /* -------------------------------------------------------------------------- */

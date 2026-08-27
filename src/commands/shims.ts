@@ -59,7 +59,7 @@ import { basename, delimiter, dirname, join, relative, resolve as resolvePath } 
 import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
-import { advisory, messages, UsageError } from "../errors.ts";
+import { advisory, messages, UsageError } from "../errors-cold.ts";
 import { perUserShimDirectory as perUserDefault } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder } from "../cache/store.ts";

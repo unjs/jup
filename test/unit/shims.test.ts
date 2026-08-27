@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages, UsageError } from "../../src/errors.ts";
+import { messages, UsageError } from "../../src/errors-cold.ts";
 import {
   cmdDisable,
   cmdEnable,

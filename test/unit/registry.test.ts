@@ -6,7 +6,7 @@ import { createHash, generateKeyPairSync, type KeyObject, sign } from "node:cryp
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages, UsageError } from "../../src/errors.ts";
+import { messages, UsageError } from "../../src/errors-cold.ts";
 import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import {
   applyRegistryOverride,

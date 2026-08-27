@@ -40,7 +40,7 @@ import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { Readable } from "node:stream";
 import { PROXY_ENV } from "../config/env-vars.ts";
-import { NetworkError, networkError } from "../errors.ts";
+import { NetworkError, networkError } from "../errors-cold.ts";
 import { classifyTlsFailure, tlsConnectOptions, tlsTransportRequired } from "./tls.ts";
 
 /** §05.1 — "MUST cap the chain (≤ 10 recommended)". */

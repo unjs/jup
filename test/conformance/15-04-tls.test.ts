@@ -19,8 +19,15 @@ import type { AddressInfo, Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { messages } from "../../src/errors.ts";
-import { CERT, KEY } from "../_fixtures/tls.ts";
+import { messages } from "../../src/errors-cold.ts";
+import {
+  CERT,
+  EXPIRED_CERT,
+  EXPIRED_KEY,
+  KEY,
+  NOT_YET_VALID_CERT,
+  NOT_YET_VALID_KEY,
+} from "../_fixtures/tls.ts";
 import {
   cleanupFixtures,
   createFixture,
@@ -48,7 +55,10 @@ interface TlsFront {
  * and §14.9's check is satisfied, exactly as `intercept.ts` arranges for the
  * unencrypted rows.
  */
-async function startTlsFront(target: () => string): Promise<TlsFront> {
+async function startTlsFront(
+  target: () => string,
+  identity: { key: string; cert: string } = { key: KEY, cert: CERT },
+): Promise<TlsFront> {
   const sockets = new Set<Socket>();
 
   const handler = (request: IncomingMessage, response: ServerResponse) => {
@@ -74,7 +84,7 @@ async function startTlsFront(target: () => string): Promise<TlsFront> {
     upstream.end();
   };
 
-  const server: Server = createHttpsServer({ key: KEY, cert: CERT }, handler);
+  const server: Server = createHttpsServer(identity, handler);
   server.on("connection", (socket: Socket) => {
     sockets.add(socket);
     socket.once("close", () => sockets.delete(socket));
@@ -158,6 +168,60 @@ describe("§15.38 TLS (§15.4)", () => {
       await front.stop();
     }
   });
+
+  /**
+   * §15.38 row 245 — a certificate outside its validity window (§15.4).
+   *
+   * The row above and this one are the two halves of "name the cause". An
+   * unknown authority and a stale clock produce the same bare transport error
+   * from corepack and want opposite remedies — a CA bundle for one, `date` for
+   * the other — so telling them apart is the whole value of the classification.
+   *
+   * What makes this row worth its fixtures is that the mapping is from *codes*,
+   * and a unit test that hands `classifyTlsFailure` a `CERT_HAS_EXPIRED` proves
+   * the table is wired up without proving that the code Node raises here is one
+   * the table knows. Only a real socket does that, so the server presents a
+   * genuinely expired certificate and a genuinely premature one.
+   *
+   * Both fronts are trusted through `COREPACK_CAFILE`, which is what isolates
+   * the date: an untrusted expired certificate fails as *untrusted*, and would
+   * report the sentence from the row above.
+   */
+  it.for([
+    ["expired", { key: EXPIRED_KEY, cert: EXPIRED_CERT }],
+    ["not yet valid", { key: NOT_YET_VALID_KEY, cert: NOT_YET_VALID_CERT }],
+  ] as const)(
+    "245: a certificate that is %s is named as such, not as untrusted",
+    async ([, identity]) => {
+      const front = await startTlsFront(() => registry.origin, identity);
+      const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
+      const bundle = join(mkdtempSync(join(tmpdir(), "jup-conf-ca-")), "bundle.pem");
+      writeFileSync(bundle, `${identity.cert}\n`);
+
+      try {
+        const result = await run(["pnpm", "--version"], {
+          ...fixture,
+          env: trusted({ COREPACK_NPM_REGISTRY: front.origin, COREPACK_CAFILE: bundle }),
+        });
+
+        expect(result.exitCode).toBe(1);
+        const host = new URL(front.origin).host;
+        expect(result.stderr).toContain(messages.tlsBadValidity(host));
+        expect(result.stderr).toContain(
+          `TLS certificate for ${host} is expired or not yet valid (check the system clock).`,
+        );
+        // The distinction this row exists for: the chain verified, so the CA
+        // remedy would be wrong advice and must not be what the user is given.
+        expect(result.stderr).not.toContain(messages.tlsUnknownAuthority(host));
+        expect(result.stderr).not.toContain("Error when performing the request");
+        // §15.5 — the runtime's own code survives alongside the sentence.
+        expect(result.stderr).toContain("Caused by:");
+        expect(result.stdout).toBe("");
+      } finally {
+        await front.stop();
+      }
+    },
+  );
 
   it("COREPACK_STRICT_SSL=0 connects anyway, and says so verbatim", async () => {
     const front = await startTlsFront(() => registry.origin);

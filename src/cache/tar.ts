@@ -26,7 +26,7 @@ import { basename, join, resolve, sep } from "node:path";
 import type { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
-import { messages } from "../errors.ts";
+import { messages } from "../errors-cold.ts";
 
 export interface ExtractOptions {
   /** npm tarballs wrap everything in `package/`; exactly one component is removed. */

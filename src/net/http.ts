@@ -21,7 +21,13 @@
 import { Buffer } from "node:buffer";
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
-import { messages, NetworkError, networkError, redactUserinfo, UsageError } from "../errors.ts";
+import {
+  messages,
+  NetworkError,
+  networkError,
+  redactUserinfo,
+  UsageError,
+} from "../errors-cold.ts";
 import { npmrcAuthorizationFor } from "./npmrc.ts";
 import { nodeFetch, proxyForUrl } from "./proxy.ts";
 import {

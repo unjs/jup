@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getCACertificates, setDefaultCACertificates } from "node:tls";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages } from "../../src/errors.ts";
+import { messages } from "../../src/errors-cold.ts";
 import { httpGet, httpGetJson } from "../../src/net/http.ts";
 import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import {

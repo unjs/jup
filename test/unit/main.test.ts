@@ -756,6 +756,12 @@ const COLD_PATH_MODULES = [
   // §09's synopsis and §12.1's usage lines. Both are error/`--help` output; a
   // proxy run that succeeds has no business parsing either.
   "commands/usage.ts",
+  // §12's download, verification, network and management vocabulary, plus the
+  // three helpers that only ever run with a URL in hand. A warm run can print
+  // none of it, and at ~7 kB of the emitted chunk it was the largest thing the
+  // warm path parsed and discarded. `main.ts` reaches it from two `catch`
+  // blocks, both already behind the dynamic import whose failure they explain.
+  "errors-cold.ts",
   // §03.7's pin writer and, under it, §16.4's format-preserving JSON editor —
   // which reaches `node:os` for the platform line ending. Only `use`, `up` and
   // §03.6's auto-pin write a manifest; every other invocation on the machine
@@ -1139,6 +1145,36 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * cheaper than a seam and is not visible here — the whole path is skipped
    * unless the requested tool's table entry declares a `versionFile`, which
    * only `node` does, so the bytes are parsed and never executed.
+   *
+   * And then **down**, 258,000 -> 238,000: the first lowering, and the answer to
+   * the sentence every raise above ends with. `errors.ts` was 36.8 kB of source
+   * and the largest single resident of the emitted chunk, nearly all of it text
+   * a warm run cannot print — §12.6's transport failures, §15.4's TLS
+   * sentences, §12.7's integrity refusals, §12.9's and §12.10's command output.
+   * The 62 builders no warm module can name moved to `errors-cold.ts`, along
+   * with `redactUserinfo`, `networkError` and `explainFetchFailure`, which only
+   * ever run with a URL in hand; that file re-exports `errors.ts` and merges the
+   * two tables, so no cold call site changed at all — only the specifier it
+   * imports.
+   *
+   * Source: `errors.ts` 36,791 -> 14,889, total 257,122 -> 235,651. Measured,
+   * `_warm.mjs` went 92,966 -> 82,328, **-10,638 bytes or -11.4%** — the one
+   * entry here where the emitted delta *exceeds* the raises it undoes, because
+   * what left was string literals rather than prose. `aube`, `nub`, `node` and
+   * the version file together cost 5,165 emitted bytes; this hands back twice
+   * that.
+   *
+   * The seam holds because the compiler enforces it: a warm module importing
+   * `errors.ts` cannot name a cold message, since the type does not have one,
+   * and `errors-cold.ts` is in `COLD_PATH_MODULES` above, so a warm module that
+   * reaches for it fails the two tests before this one. Note what the lowering
+   * gives up: growth in the cold half is now unmeasured, which is correct —
+   * nothing there is parsed by a `yarn --version` — but it means this number no
+   * longer moves when §12 gains a message. It moves when the *warm path* gains
+   * one, which is the thing worth arguing about.
+   *
+   * Held at 238,000 rather than the 235,651 this leaves, on the same terms as
+   * every raise above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1150,6 +1186,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(258_000);
+    ).toBeLessThanOrEqual(238_000);
   });
 });

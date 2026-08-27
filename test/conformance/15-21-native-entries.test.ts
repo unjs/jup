@@ -1,6 +1,6 @@
 /**
  * §15.21 / §15.28 — bun, deno, aube and nub as built-in entries (rows 212–218,
- * 220 and 222–229).
+ * 220, 221 and 222–229).
  *
  * §15.28 required the *architecture* to admit a native package manager;
  * `15-28-native.test.ts` proves that with a fixture manager and adds nothing to
@@ -36,7 +36,7 @@
  * nothing on Windows, and a committed `.exe` is not worth carrying.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hostTarget } from "../../src/config/table.ts";
@@ -349,6 +349,59 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
       readFileSync(join(fixture.home, "lastKnownGood.json"), "utf8"),
     ) as Record<string, string>;
     expect(recorded.deno).toBe(DENO_VERSION);
+  });
+
+  it("221: a recorded default carrying a digest heals on read, offline", async () => {
+    // The other end of row 220. That row proves a *fresh* record never gains a
+    // digest; this one is about the records an earlier build already wrote —
+    // `lastKnownGood.json` is derived state that outlives a release, and the
+    // entry it left is returned by §04.5 step 1 with no network, ahead of every
+    // guard downstream. So a machine that ran the broken build stays broken
+    // forever unless the read itself repairs it.
+    const fixture = createFixture();
+
+    // Warm the store first, so what follows is about resolution rather than
+    // download: step 1 is the offline path, and the row's claim is that it
+    // stays offline.
+    expect(
+      (await run(["deno", "task", "warm"], options(fixture, { COREPACK_DEFAULT_TO_LATEST: "1" })))
+        .exitCode,
+    ).toBe(0);
+
+    // Now the file the broken build would have left: the launcher package's
+    // digest, pinned onto a per-host reference it does not describe.
+    writeFileSync(
+      join(fixture.home, "lastKnownGood.json"),
+      `${JSON.stringify(
+        {
+          deno: `${DENO_VERSION}+sha512.26dfc0709884aed516f64ac6c25c140ec9b572836d99fb61890e09b52085f893`,
+          // Untouched: pnpm ships one tarball for every host, so its digest is
+          // true everywhere. The repair is per-host or it is a blanket suffix
+          // strip that breaks the entries that were right.
+          pnpm: "10.0.0+sha512.abcd",
+        },
+        undefined,
+        2,
+      )}\n`,
+    );
+    registry.reset();
+
+    // No `COREPACK_DEFAULT_TO_LATEST` this time: the record is what answers.
+    const result = await run(["deno", "task", "build"], options(fixture));
+
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("ran=deno args=task build");
+    // Healing must not turn the offline path into an online one, which is the
+    // whole point of step 1.
+    expect(registry.requests).toEqual([]);
+
+    // Paid once, not on every run — and `info` stops reporting a digest that
+    // means nothing.
+    expect(JSON.parse(readFileSync(join(fixture.home, "lastKnownGood.json"), "utf8"))).toEqual({
+      deno: DENO_VERSION,
+      pnpm: "10.0.0+sha512.abcd",
+    });
   });
 
   it("218: a bare `enable` leaves the bun and deno names alone; naming them takes them", async () => {

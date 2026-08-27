@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { messages, UsageError } from "../src/errors.ts";
+import { messages, UsageError } from "../src/errors-cold.ts";
 
 describe("errors", () => {
   it("distinguishes UsageError from Error", () => {

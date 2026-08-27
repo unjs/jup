@@ -25,7 +25,7 @@
 
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
-import { messages } from "../errors.ts";
+import { messages } from "../errors-cold.ts";
 
 /**
  * §08.5 — the signals forwarded to the child when *we* receive them directly.

@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../../src/errors.ts";
+import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../../src/errors-cold.ts";
 import {
   discoverProjectSpec,
   NODE_MODULES_RE,

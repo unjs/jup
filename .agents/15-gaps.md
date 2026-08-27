@@ -1287,6 +1287,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 242 | `.nvmrc` in a directory with no `package.json` anywhere above it | it still speaks; no manifest is created and auto-pin does not fire (§15.40) |
 | 243 | `.nvmrc` present with `JUP_ENABLE_PROJECT_SPEC=0`, then `jup use node@22` in that same directory | not read in either case; `use` writes `devEngines.runtime` and leaves the file untouched (§15.40, §11.1, §15.27) |
 | 244 | `enable yarn pnpm`, then run each shim | both links point at the **same** stub, and each still reaches its own package manager; no file in the dist folder is named after a binary (§14.15, §10.2) |
+| 245 | Registry presents a certificate that is expired, and one that is not yet valid, each trusted through `JUP_CAFILE` | the validity message naming the clock, not the unknown-authority one; the runtime's own code survives beside it (§15.4) |
 
 ## 15.39 Tools, not only package managers — [required]
 

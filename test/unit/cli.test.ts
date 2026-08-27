@@ -29,7 +29,7 @@ import {
   resolvePatternsToDescriptors,
   runManagementCommand,
 } from "../../src/commands/cli.ts";
-import { messages, UsageError } from "../../src/errors.ts";
+import { messages, UsageError } from "../../src/errors-cold.ts";
 import { execPackageManager } from "../../src/run/exec.ts";
 import { create } from "../../src/cache/tar.ts";
 import type { CorepackMarker } from "../../src/types.ts";

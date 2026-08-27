@@ -15,7 +15,7 @@ import {
   resolveSpecBin,
 } from "./config/table.ts";
 import { envDisabled, envFlag, isFrozenLockfile } from "./project/env.ts";
-import { explainFetchFailure, messages, UsageError } from "./errors.ts";
+import { messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./run/exec.ts";
 import { readResolution, usesLockfile, writeResolution } from "./project/lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./project/manifest.ts";
@@ -363,6 +363,11 @@ async function ensureInstalledLazily(locator: Locator, range: string): Promise<I
     // costs nothing on the path that does not throw.
     const version = parse(locator.reference)?.version;
     const what = { name: locator.name, range, ...(version === undefined ? {} : { version }) };
+    // `errors-cold.ts` rather than `errors.ts`: §12's download and network
+    // vocabulary is the largest thing the warm chunk was carrying and could
+    // never print (§16.3). The import is free here — `install.ts` above already
+    // pulled the cold stack in, and this branch only runs when it threw.
+    const { explainFetchFailure } = await import("./errors-cold.ts");
     throw explainFetchFailure(error, what) ?? error;
   }
 }
@@ -404,6 +409,7 @@ async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null>
   try {
     return await resolveDescriptor(descriptor, { allowTags: true });
   } catch (error) {
+    const { explainFetchFailure } = await import("./errors-cold.ts");
     throw explainFetchFailure(error, descriptor) ?? error;
   }
 }

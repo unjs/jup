@@ -14,7 +14,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { messages } from "../errors.ts";
+import { messages } from "../errors-cold.ts";
 import {
   detectFormat,
   scanTopLevelKey,

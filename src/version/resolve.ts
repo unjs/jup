@@ -7,7 +7,7 @@
 import { ENV } from "../config/env-vars.ts";
 import { getDefinition, isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
-import { messages, UsageError } from "../errors.ts";
+import { messages, UsageError } from "../errors-cold.ts";
 import {
   isPrerelease,
   isValidRange,

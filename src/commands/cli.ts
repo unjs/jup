@@ -28,7 +28,7 @@ import {
   SUPPORTED_NAMES,
 } from "../config/table.ts";
 import { isFrozenLockfile } from "../project/env.ts";
-import { explainFetchFailure, messages, UsageError } from "../errors.ts";
+import { explainFetchFailure, messages, UsageError } from "../errors-cold.ts";
 import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
 import {

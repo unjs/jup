@@ -21,7 +21,7 @@ import {
   resolveSpecUrl,
 } from "../config/table.ts";
 import { envFlag, isCI } from "../project/env.ts";
-import { advisory, messages, UsageError } from "../errors.ts";
+import { advisory, messages, UsageError } from "../errors-cold.ts";
 import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
