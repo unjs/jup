@@ -298,7 +298,10 @@ export function writeKeysCache(keys: TrustedKey[]): void {
 export async function fetchNpmKeys(): Promise<TrustedKey[] | undefined> {
   let body: unknown;
   try {
-    body = await httpGetJson(KEYS_ENDPOINT, { attempts: 1 });
+    // `anonymous`, not merely "no `registryOrigin`": the document is public, and
+    // a `.npmrc` line scoped to registry.npmjs.org would otherwise attach the
+    // user's npm token to a request that has no use for it.
+    body = await httpGetJson(KEYS_ENDPOINT, { attempts: 1, anonymous: true });
   } catch {
     return undefined;
   }

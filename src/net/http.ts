@@ -200,6 +200,16 @@ export interface HttpOptions {
    */
   sleep?: (milliseconds: number) => Promise<void>;
   /**
+   * Send no credentials at all, whatever the environment and `.npmrc` hold.
+   *
+   * Omitting `registryOrigin` already withholds the `COREPACK_*` tier, but not
+   * §15.1's: an `.npmrc` entry names its own scope, so a request to a URL inside
+   * that scope is authenticated on the file's authority alone. That is right for
+   * a registry request and wrong for npm's public key document (§15.9), which
+   * needs no credential and must not carry one.
+   */
+  anonymous?: boolean;
+  /**
    * The transport seam.
    *
    * Left undefined — which every caller does — the transport is chosen per
@@ -364,7 +374,11 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
     throw networkError(new Error(messages.requestFailed(redactUserinfo(url))), error);
   }
 
-  const { url: target, authorization } = credentialsFor(parsed, options.registryOrigin);
+  const credentials = credentialsFor(parsed, options.registryOrigin);
+  const target = credentials.url;
+  // The URL is still the stripped one: `anonymous` withholds the header, it does
+  // not put userinfo back on the wire or into an error message.
+  const authorization = options.anonymous === true ? undefined : credentials.authorization;
   // Userinfo-free by construction, so it is safe in an error message.
   const href = target.href;
 

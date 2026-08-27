@@ -28,11 +28,19 @@ import {
 } from "../../src/commands/info.ts";
 import { discoverProjectSpec } from "../../src/project/manifest.ts";
 import { getRegistryUrl } from "../../src/net/registry.ts";
+import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import { SHIM_MARKER } from "../../src/commands/shims.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 
 const ENV_KEYS = [
   "COREPACK_HOME",
+  // §15.1 — the report reads the user and global `.npmrc`, so both tiers are
+  // pointed at the fixture. Left alone, every assertion about them would be an
+  // assertion about whoever happens to be running the suite.
+  "HOME",
+  "USERPROFILE",
+  "npm_config_prefix",
+  "PREFIX",
   // §15.13 — the shim directory is now configurable, so it has to be scrubbed
   // like every other input.
   "COREPACK_SHIM_DIRECTORY",
@@ -63,6 +71,12 @@ beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "jup-info-home-"));
   project = await mkdtemp(join(tmpdir(), "jup-info-proj-"));
   process.env.COREPACK_HOME = home;
+  process.env.HOME = home;
+  process.env.USERPROFILE = home;
+  process.env.npm_config_prefix = home;
+  // The `.npmrc` load is memoised, and its key is the working directory alone —
+  // a redirected home does not invalidate it (§15.1).
+  resetNpmrcCache();
 
   stdout = "";
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
@@ -82,6 +96,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  resetNpmrcCache();
   // `applyEnvFile` replaces `process.env` wholesale (§11.6).
   process.env = savedEnv;
   for (const key of ENV_KEYS) {

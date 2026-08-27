@@ -29,6 +29,7 @@ import {
   verifySignatureWithRefresh,
   writeKeysCache,
 } from "../../src/verify/trust.ts";
+import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import type { RegistrySignature, TrustedKey } from "../../src/types.ts";
 
 /* -------------------------------------------------------------------------- */
@@ -496,4 +497,39 @@ describe("sanitiseKeys / mergeKeys / fetchNpmKeys", () => {
       delete process.env.COREPACK_NPM_TOKEN;
     }
   });
+
+  it("sends no credentials from an .npmrc scoped to npm's own registry either", async () => {
+    // The environment tier is withheld by omitting `registryOrigin`; §15.1's is
+    // not, because an `//registry.npmjs.org/:_authToken` line names a scope this
+    // very URL falls inside. Only an explicitly anonymous request keeps the
+    // user's npm token off a document that never needed it.
+    const savedHome = process.env.HOME;
+    const savedProfile = process.env.USERPROFILE;
+    const savedPrefix = process.env.PREFIX;
+    try {
+      process.env.HOME = home;
+      process.env.USERPROFILE = home;
+      process.env.PREFIX = join(home, "prefix");
+      writeFileSync(join(home, ".npmrc"), "//registry.npmjs.org/:_authToken=npm_secret\n");
+      resetNpmrcCache();
+
+      serveKeys([trustedKey(makeKeypair("SHA256:k"))]);
+      await fetchNpmKeys();
+
+      const headers = new Headers(
+        (fetchMock.mock.calls[0]![1] as RequestInit | undefined)?.headers as HeadersInit,
+      );
+      expect(headers.get("authorization")).toBeNull();
+    } finally {
+      restore("HOME", savedHome);
+      restore("USERPROFILE", savedProfile);
+      restore("PREFIX", savedPrefix);
+      resetNpmrcCache();
+    }
+  });
 });
+
+function restore(name: string, value: string | undefined): void {
+  if (value === undefined) delete process.env[name];
+  else process.env[name] = value;
+}
