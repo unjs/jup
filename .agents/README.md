@@ -1,6 +1,6 @@
 # jup implementation specification
 
-This directory defines how jup discovers, downloads, verifies, caches, and runs developer tools — package managers, and the runtimes they run on. The specification is independent of any programming language or runtime so that the same behavior can be implemented in JavaScript, Rust, Zig, Go, C, or another suitable language.
+jup (pronounced “yup”) discovers, downloads, verifies, caches, and runs developer tools — package managers, and the runtimes they run on. This directory defines its implementation specification. The specification is independent of any programming language or runtime so that the same behavior can be implemented in JavaScript, Rust, Zig, Go, C, or another suitable language.
 
 "Tool" is the general term and "package manager" is one **kind** of tool (§02.3). The distinction reaches exactly four places, all of them in §03 and §10; everything from resolution through execution is one pipeline over both kinds. §15.39 states the model and what it deliberately does not open.
 

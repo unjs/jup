@@ -7,40 +7,77 @@
 
 <!-- /automd -->
 
-jup runs the tool version your project asks for.
+**jup runs the right tool version for every project.**
 
-It reads the pin in `package.json`, downloads and verifies the requested version, saves it in a local cache, and runs it. This keeps npm, pnpm, Yarn, Bun, Deno, aube, and nub versions consistent across developer machines and CI — and Node.js itself, pinned in `devEngines.runtime`.
+Pin a package manager in `package.json`, then use its normal command:
 
 ```json
 {
-  "packageManager": "pnpm@11.1.2+sha512.abc123..."
+  "packageManager": "pnpm@11.22.0+sha512.abc123..."
 }
 ```
 
 ```sh
-pnpm install # jup runs the pinned pnpm version
+pnpm install
 ```
+
+jup reads the pin, downloads and verifies that pnpm release, caches it, and runs it. Everyone on the project gets the same version—on developer machines, in CI, and while working offline with a prepared cache.
+
+jup supports npm, pnpm, Yarn, Bun, Deno, aube, and nub. It can also run a project-pinned Node.js version from `devEngines.runtime`:
 
 ```sh
-jup node@22 script.js # or a pinned runtime, without claiming the name on PATH
+jup node@22 script.js
 ```
 
-jup is designed as a fast, small, zero-dependency replacement for [Corepack](https://github.com/nodejs/corepack), widened from package managers to the tools around them.
+It is designed as a fast, small, zero-runtime-dependency replacement for [Corepack](https://github.com/nodejs/corepack), with support for more than package managers.
+
+## Quick start
+
+Install jup by following the [getting started guide](./docs/1.getting-started.md), then enable its command shims:
+
+```sh
+jup enable
+```
+
+Pin a package manager in your project:
+
+```sh
+jup use pnpm@11
+```
+
+Now run `pnpm`, `npm`, or `yarn` as usual. jup selects the version pinned by the project.
+
+To run a manager without installing shims, put `jup` before the command:
+
+```sh
+jup pnpm install
+```
+
+Check which project, version, cache, and shims jup is using:
+
+```sh
+jup info
+```
 
 ## Documentation
 
-Start with the [documentation home page](./docs/0.intro.md), or go directly to:
-
+- [Introduction](./docs/0.intro.md)
 - [Getting started](./docs/1.getting-started.md)
 - [Projects and workspaces](./docs/2.projects-and-workspaces.md)
-- [CI and offline use](./docs/3.ci-and-offline.md)
+- [CI and offline](./docs/3.ci-and-offline.md)
 - [Registries and networking](./docs/4.registries-and-networking.md)
-- [Command reference](./docs/5.commands.md)
-- [Download verification](./docs/6.security.md)
-- [Environment variables](./docs/7.settings-reference.md)
+- [Commands](./docs/5.commands.md)
+- [Security](./docs/6.security.md)
+- [Environment](./docs/7.settings-reference.md)
 - [Moving from Corepack](./docs/8.corepack.md)
 - [Troubleshooting](./docs/9.troubleshooting.md)
 
+## Credits
+
+jup builds on the work of [Corepack](https://github.com/nodejs/corepack) and its contributors. Its behavior is modeled on Corepack v0.35.0, so existing `packageManager` pins, commands, and messages keep working. Thanks to the Corepack contributors for the design jup started from.
+
 ## License
 
-[MIT](./LICENSE)
+Published under the [MIT](./LICENSE) license.
+
+Portions derived from [Corepack](https://github.com/nodejs/corepack), Copyright © Corepack contributors, also MIT licensed. See [LICENSE](./LICENSE) for the full notice.
