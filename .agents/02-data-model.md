@@ -11,8 +11,8 @@ Locator     { name: string, reference: string } "the exact thing to install"
 InstallSpec { location, bin, hash }             "where it landed on disk"
 ```
 
-* **Descriptor** — `name` is a package-manager name (`npm` | `pnpm` | `yarn` | `bun` |
-  `deno` | `aube` | `nub`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
+* **Descriptor** — `name` is a tool name (`npm` | `pnpm` | `yarn` | `bun` | `deno` |
+  `aube` | `nub` | `node`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
   version, a semver range, a dist-tag (`latest`, `next`, `canary`, `rc`, `stable`),
   `*`, or a URL. Descriptors are what §03 produces and §04 consumes.
 * **Locator** — `reference` is an exact semver version, optionally carrying a build
@@ -73,12 +73,13 @@ For `type: "url"`:
 present, the downloader extracts only that one file (§07.4) rather than the whole
 package — this is how `@yarnpkg/cli-dist` is reduced to a single `yarn.js`.
 
-## 2.3 Package manager definition
+## 2.3 Tool definition
 
-Each supported package manager has one definition:
+Each supported tool has one definition:
 
 ```ts
 {
+  kind?: "package-manager" | "runtime", // §15.39; absent means "package-manager"
   default: string,              // built-in fallback version, hash-pinned
   fetchLatestFrom: RegistrySpec,// where "what's the newest stable?" is answered
   transparent: {
@@ -91,6 +92,33 @@ Each supported package manager has one definition:
   shimByDefault?: boolean,      // §10.5; absent means true
 }
 ```
+
+### `kind`
+
+`kind` is what makes jup a **tool** manager rather than strictly a package-manager
+manager, and it is the only field that decides which of §03's rules an entry is
+subject to. Absent means `"package-manager"` — which is every entry corepack ever
+had, and every entry above.
+
+| | `"package-manager"` | `"runtime"` |
+|---|---|---|
+| Project pin is read from | `packageManager`, else `devEngines.packageManager` (§03.3) | `devEngines.runtime` (§03.3) |
+| May be named in `packageManager` | yes | **no** (§03.4, §12.12) |
+| §03.5's name mismatch | enforced | never applies |
+| `transparent.commands` | consulted (§01.4) | unused: nothing needs to bypass an enforcement that never runs |
+| `commands.use` | run by `use` / `up` (§09.5) | absent — a runtime installs nothing |
+| Default shim set | `shimByDefault` decides (§10.5) | same rule, and the answer MUST be `false` |
+
+The split is deliberately narrow. A runtime resolves, downloads, verifies, caches and
+executes through the *same* pipeline (§04–§08) — §15.28's per-host model in
+particular is the whole of what a runtime needs. What differs is only which field of
+the manifest speaks for it, and whether standing in someone else's project is an
+error.
+
+The last row is a requirement, not an observation: §10.5's test is whether the name
+means anything outside a project, and a runtime's name means something outside a
+project by definition. An entry with `kind: "runtime"` and no `shimByDefault: false`
+is a malformed table.
 
 `default` is hash-pinned, and a conforming table MUST NOT pin a digest that varies
 by host. For a per-host entry (§2.4) whose artifact differs per platform — which is
@@ -125,6 +153,12 @@ against `ranges[last key]` — the newest band (`Engine::resolveDescriptor`). So
 even though `yarn@1.22.22` would download from npm.
 
 ## 2.4 PackageManagerSpec
+
+> Spelled `ToolSpec` in the implementation since §15.39, along with
+> `PackageManagerDefinition` → `ToolDefinition`. The section keeps its number and
+> its old title so the several hundred cross-references to "§02.4's `bin`" and
+> "a `PackageManagerSpec`" elsewhere in these files stay accurate; the type
+> describes a band of any tool, of either `kind`.
 
 ```ts
 {
@@ -483,6 +517,60 @@ Single range `*`:
 > Like bun's and deno's — and unlike aube's — nub's per-host packages declare **no
 > `bin`**, so §07.7 finds nothing to read and the table is the authority.
 
+### node
+
+> §15.39 — the entry that makes jup a tool manager rather than a package-manager
+> manager. Node is a runtime and nothing else, so it is the first entry carrying
+> `kind: "runtime"`, and it needs no machinery §15.28 had not already built.
+>
+> The `node` npm package is the launcher shape, in its oldest instance: ~1.8 kB, a
+> `preinstall` that runs `node-bin-setup`, which `npm install`s one per-host package
+> and hardlinks the binary out of it. jup runs no lifecycle scripts, so it asks for
+> that package directly.
+
+| Field | Value |
+|---|---|
+| `kind` | `runtime` |
+| `default` | `24.20.0` — bare, per §2.3 |
+| `fetchLatestFrom` | `{type: npm, package: node}` |
+| `transparent.commands` | `[]` — a runtime is never enforced against (§2.3) |
+| `transparent.default` | — |
+| `shimByDefault` | `false` — required of a runtime (§2.3, §10.5) |
+
+Single range `*`:
+* `url` = `https://registry.npmjs.org/node-{target}/-/node-{target}-{}.tgz`
+* `bin` = `{"node": "./bin/node{exe}"}`
+* `registry` = `{type: npm, package: node}`
+* `artifactRegistry` = `{type: npm, package: "node-{target}"}`
+* `targets` = `darwin-arm64`→`bin-darwin-arm64`, `darwin-x64`→`darwin-x64`,
+  `linux-arm64`→`linux-arm64`, `linux-x64`→`linux-x64`,
+  `win32-arm64`→`win-arm64`, `win32-x64`→`win-x64`
+* `exec` = `"native"`
+* `commands.use` = — (§2.3: a runtime installs nothing)
+
+> **Why `{target}` renames three of the six.** The per-host packages are
+> `node-<platform>-<arch>` with `win32` spelled `win` — and on Apple Silicon the
+> prefix is `node-bin-`, because `node-darwin-arm64` belongs to an unrelated
+> publisher and stops at 18.9.0. `node-bin-setup` makes exactly that substitution,
+> unconditionally, so folding it into `{target}` is the launcher's own rule rather
+> than an invention of this table. It is also why one band is enough: the mapping
+> has not moved.
+
+> **These packages declare their own `bin`** — `bin/node`, and `bin/node.exe` on the
+> two Windows targets — so §07.7 reads it and the table's copy is the ordinary
+> fallback, as with aube. The two agree.
+
+> **No musl build.** Node publishes none officially, so an Alpine host is outside the
+> declared set and gets `unsupportedTarget` naming `linux-x64-musl` before any
+> request, exactly as deno's absence does (§15.28). `linux-armv7l` — which node
+> *does* publish — is outside §15.28's `{arch}` vocabulary altogether and is the
+> other error, `unsupportedArch`.
+
+> **On consent.** §15.21's requirement covers this entry too, and it is the one where
+> the launcher package is not published by the project whose name it carries: `node`
+> on npm is a community package, maintained separately from Node.js itself. §15.39
+> records what that changes and what it does not.
+
 ## 2.6 Trust store
 
 ```jsonc
@@ -517,15 +605,28 @@ for another registry may use any curve. See §06.3 for the verification algorith
 ```ts
 // package.json, the only project file that is read
 {
-  packageManager?: string,               // "yarn@4.1.0+sha224.…"
+  packageManager?: string,               // "yarn@4.1.0+sha224.…"; never a runtime
   devEngines?: {
     packageManager?: {
       name: string,                      // must not contain "@"
       version?: string,                  // a semver RANGE
+      onFail?: "ignore" | "warn" | "error"
+    },
+    // §15.39 — the same shape, and the only place a `kind: "runtime"` entry
+    // (§2.3) can be pinned. There is no top-level field for a runtime.
+    runtime?: {
+      name: string,
+      version?: string,
       onFail?: "ignore" | "warn" | "error"
     }
   }
 }
 ```
 
-Precedence and validation are specified in §03.3.
+Precedence and validation are specified in §03.3. The two `devEngines` members are
+validated by one rule with the member name substituted into its messages, and they
+are read independently: which one speaks is decided by the `kind` of the tool being
+requested, so a project may pin both and neither constrains the other.
+
+`devEngines` also standardises `os`, `cpu` and `libc`. jup reads neither, and adding
+them would be a scope change (§01.7), not a completion.

@@ -9,7 +9,27 @@
  *     InstallSpec  "where it landed on disk"         §07 produces, §08 consumes
  */
 
-/** §02.1 — a package manager name plus anything range-ish: version, range, tag, URL. */
+/**
+ * §02.3, §15.39 — which of §03's rules an entry is subject to.
+ *
+ * The *only* discriminator between a package manager and a runtime, and it
+ * decides exactly four things: which manifest field is the project spec (§03.3),
+ * whether the name is legal in `packageManager` (§03.4), whether §03.5's name
+ * mismatch is enforced, and that a runtime must stay out of the default shim set
+ * (§10.5). Nothing in §04–§08 may branch on it: resolution, registry access,
+ * integrity, the store and execution are one path over both kinds.
+ */
+export type ToolKind = "package-manager" | "runtime";
+
+/**
+ * §02.7, §15.39 — the `devEngines` member that carries a tool's pin.
+ *
+ * Chosen by the requested tool's {@link ToolKind}, not by what the manifest
+ * happens to declare: a project may carry both, and neither constrains the other.
+ */
+export type DevEnginesField = "packageManager" | "runtime";
+
+/** §02.1 — a tool name plus anything range-ish: version, range, tag, URL. */
 export interface Descriptor {
   name: string;
   range: string;
@@ -88,17 +108,17 @@ export interface UrlRegistrySpec {
 export type RegistrySpec = NpmRegistrySpec | UrlRegistrySpec;
 
 /* -------------------------------------------------------------------------- */
-/* Package manager definitions — §02.3, §02.4                                 */
+/* Tool definitions — §02.3, §02.4                                            */
 /* -------------------------------------------------------------------------- */
 
-/** §02.4 — how to download and run one version band of a package manager. */
-export interface PackageManagerSpec {
+/** §02.4 — how to download and run one version band of a tool. */
+export interface ToolSpec {
   /**
    * Download URL template.
    *
    * `{}` is replaced by the version, always. §15.28 adds three opt-in
    * placeholders for a band whose artifact is per-host: `{platform}`, `{arch}`,
-   * and `{target}` — the last being whatever {@link PackageManagerSpec.targets}
+   * and `{target}` — the last being whatever {@link ToolSpec.targets}
    * maps this host's `<platform>-<arch>` onto.
    */
   url: string;
@@ -117,7 +137,7 @@ export interface PackageManagerSpec {
    * For a per-host band this is deliberately **not** where the artifact comes
    * from: `bun` and `deno` publish one launcher package that carries the version
    * line and the dist-tags, and one binary package per host. See
-   * {@link PackageManagerSpec.artifactRegistry}.
+   * {@link ToolSpec.artifactRegistry}.
    */
   registry: RegistrySpec;
   /** Used *instead of* `registry` when the user has set a custom npm registry (§05.3). */
@@ -139,7 +159,7 @@ export interface PackageManagerSpec {
   targets?: Record<string, string>;
   /**
    * §15.28 — the npm package the **artifact** is published as, when it differs
-   * from the one {@link PackageManagerSpec.registry} answers version questions
+   * from the one {@link ToolSpec.registry} answers version questions
    * about. `package` may carry `{target}`, `{platform}` and `{arch}`.
    *
    * Splitting the two is what lets a native band keep npm's signature chain: the
@@ -167,13 +187,23 @@ export interface PackageManagerSpec {
 }
 
 /**
- * §02.3 — one supported package manager.
+ * §02.3 — one supported tool.
  *
  * `ranges` is an **ordered list**, not a map: lookup reverses it and takes the
  * first entry whose range is satisfied, so **last declared wins**. Dist-tags are
  * always resolved against the **last** entry's registry.
  */
-export interface PackageManagerDefinition {
+export interface ToolDefinition {
+  /**
+   * §02.3, §15.39 — what sort of tool this is. Absent means
+   * `"package-manager"`, which is every entry corepack ever had.
+   *
+   * Consult it in §03 and §10 only, and only for the four questions
+   * {@link ToolKind} lists. A `"runtime"` entry MUST also set
+   * `shimByDefault: false`: §10.5's test is whether the name means anything
+   * outside a project, and a runtime's does by definition.
+   */
+  kind?: ToolKind;
   /** Compiled-in fallback version, hash-pinned. */
   default: string;
   /** Where "what's the newest stable?" is answered. */
@@ -184,7 +214,7 @@ export interface PackageManagerDefinition {
     /** Command prefixes that bypass the project check. */
     commands: string[][];
   };
-  ranges: Array<readonly [range: string, spec: PackageManagerSpec]>;
+  ranges: Array<readonly [range: string, spec: ToolSpec]>;
   /**
    * §10.5 — whether a bare `jup enable` installs this entry's shims.
    *
@@ -194,9 +224,20 @@ export interface PackageManagerDefinition {
    * so silently taking the name over on upgrade would be a change nobody asked
    * for. Naming the entry (`jup enable bun`) still installs it; `--all` in
    * `install` is unaffected, because that is about the cache, not `PATH`.
+   *
+   * Required to be `false` when {@link ToolDefinition.kind} is `"runtime"`.
    */
   shimByDefault?: boolean;
 }
+
+/**
+ * @deprecated §15.39 renamed these to {@link ToolSpec} / {@link ToolDefinition}
+ * when the table stopped holding only package managers. Kept as aliases so the
+ * rename costs no call sites; new code should use the `Tool` spellings.
+ */
+export type PackageManagerSpec = ToolSpec;
+/** @deprecated See {@link PackageManagerSpec}. */
+export type PackageManagerDefinition = ToolDefinition;
 
 /* -------------------------------------------------------------------------- */
 /* Trust store — §02.6                                                        */
@@ -236,23 +277,45 @@ export interface RegistrySignature {
 /* Project manifest — §02.7, §03                                              */
 /* -------------------------------------------------------------------------- */
 
-export interface DevEnginesPackageManager {
+/** The raw, unvalidated shape of one `devEngines` member (§02.7). */
+export interface DevEnginesEntry {
   name?: unknown;
   version?: unknown;
   onFail?: unknown;
 }
 
+/** @deprecated §15.39 — the shape is the same for both members; use {@link DevEnginesEntry}. */
+export type DevEnginesPackageManager = DevEnginesEntry;
+
 export interface Manifest {
+  /**
+   * §03.4, §15.39 — never a `kind: "runtime"` name. A manifest that says
+   * otherwise is the §12.12 error, not a pin.
+   */
   packageManager?: unknown;
-  devEngines?: { packageManager?: unknown };
+  devEngines?: {
+    packageManager?: unknown;
+    /** §15.39 — the only field a runtime's pin can live in. */
+    runtime?: unknown;
+  };
   [key: string]: unknown;
 }
 
-/** §03.1 — the `devEngines.packageManager.version` range, when one is declared. */
+/**
+ * §03.1 — the declared `version` range of the `devEngines` member that speaks
+ * for the requested tool, when one is declared.
+ *
+ * Which member that is comes from the tool's {@link ToolKind}: `packageManager`
+ * for a package manager, `runtime` for a runtime (§03.3). {@link
+ * DevEnginesRange.field} carries it so a message or a write can name the member
+ * it came from without re-deriving the kind.
+ */
 export interface DevEnginesRange {
   name: string;
   range: string;
   onFail?: string;
+  /** Absent means `"packageManager"`, the only member that existed before §15.39. */
+  field?: DevEnginesField;
 }
 
 /**
@@ -270,6 +333,8 @@ export interface DevEnginesDeclaration {
   name: string;
   version?: string;
   onFail?: string;
+  /** §15.39 — which member this was read from. Absent means `"packageManager"`. */
+  field?: DevEnginesField;
 }
 
 /**
@@ -284,6 +349,17 @@ export interface DevEnginesDeclaration {
  */
 export interface ParseSpecOptions {
   requireVersion: boolean;
+  /**
+   * §03.4, §15.39 — is this string a manifest's `packageManager` field?
+   *
+   * The one place a `kind: "runtime"` name is rejected. It is a property of the
+   * *field*, not of `parseSpec`: `jup node@22`, `jup use node@22` and
+   * `jup install -g node@24` all put a runtime name through this same function
+   * from `CLI arguments`, and all three are ordinary. Only the committed pin must
+   * not claim a runtime is the project's package manager, because that is the
+   * field §03.5 enforces `pnpm` and `yarn` with.
+   */
+  packageManagerField?: boolean;
 }
 
 /** §03.1 — the three outcomes of the upward walk. */
@@ -296,7 +372,11 @@ export type SpecResult =
       /** Lazy: parses and validates only when called, so `use` can overwrite a malformed field. */
       getSpec: (opts: ParseSpecOptions) => Descriptor;
       range?: DevEnginesRange;
-      /** §15.26 — the declared `devEngines.packageManager`, version or not. */
+      /**
+       * §15.26 — the declared `devEngines` member for the requested tool,
+       * version or not. §15.39: `devEngines.packageManager` for a package
+       * manager, `devEngines.runtime` for a runtime.
+       */
       devEngines?: DevEnginesDeclaration;
       /**
        * Whether the manifest itself declares `packageManager`, as opposed to the
@@ -316,6 +396,7 @@ export type SpecResult =
 export type Invocation =
   | {
       mode: "proxy";
+      /** Any binary name the table declares (§02.4) — of either {@link ToolKind}. */
       binaryName: string;
       /** Present when the CLI argument was `<binary>@<version>` (§04.6). */
       binaryVersion?: string;

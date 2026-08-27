@@ -236,7 +236,8 @@ a correct relative-path computation.
 
 ## 10.5 Target set
 
-Default targets: every supported package manager **except npm**. npm is excluded
+Default targets: every supported tool **except npm** and the `shimByDefault: false`
+opt-outs (§02.3). npm is excluded
 because it ships with Node through other means and shadowing it is more likely to
 break a machine than to help it. `enable npm` explicitly is supported.
 
@@ -245,7 +246,7 @@ break a machine than to help it. `enable npm` explicitly is supported.
 > `npm install` silently works anyway. `--exclude npm` restores it.
 
 An entry MAY opt out of the default set with `shimByDefault: false` (§02.3), and
-`bun`, `deno` and `nub` do. Those names are ones people install deliberately and run
+`bun`, `deno`, `nub` and `node` do — the last **MUST**, being a runtime (§02.3). Those names are ones people install deliberately and run
 outside any project, so a bare `enable` — which existing users run on upgrade, having
 asked for nothing — must not claim them on `PATH`. Naming the entry is the opt-in.
 
@@ -276,6 +277,7 @@ Each name expands to every binary name it declares across all range entries, ded
 | `deno` | `deno` | no — `shimByDefault: false` |
 | `aube` | `aube`, `aubr`, `aubx` | yes |
 | `nub` | `nub`, `nubx` | no — `shimByDefault: false` |
+| `node` | `node` | no — required of a runtime (§02.3, §15.39) |
 
 All binaries are processed concurrently.
 

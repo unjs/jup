@@ -143,7 +143,8 @@ run the package manager: argv = commands.use        # e.g. ["yarn", "install"]
 
 So `jup use yarn@4` prints the banner, a blank line, then everything `yarn
 install` prints. If `commands.use` is absent the command returns 0 immediately after
-writing the pin.
+writing the pin — which is every `use` of a runtime (§02.3), so `jup use node@22`
+writes `devEngines.runtime` (§03.7) and stops there.
 
 Notable behaviours, all test-asserted:
 
@@ -207,9 +208,11 @@ enable  [--install-directory <path>] [...name]
 disable [--install-directory <path>] [...name]
 ```
 
-* With no names, the target set is **every supported package manager except `npm`**.
+* With no names, the target set is **every supported tool except `npm`**, minus the
+  `shimByDefault: false` opt-outs — which is every runtime (§02.3, §10.5).
 * Each name is validated: `Invalid package manager name '<name>'` for anything not in
-  the supported set.
+  the supported set. The message keeps its wording for byte compatibility (§14.24);
+  the set it validates against is the whole table.
 * Each name expands to all of its binary names across all range entries
   (`yarn` → `yarn`, `yarnpkg`).
 * Both commands are idempotent and both exit 0 with empty stdout/stderr on success.

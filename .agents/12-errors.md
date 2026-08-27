@@ -42,6 +42,13 @@ $ jup use [--here] [--pin-style=suffix|sidecar] <pattern>
 
 `<source>` is `CLI arguments` or the manifest path relative to the initial cwd.
 
+§15.39's message is the only one keyed to a tool's `kind`, and it is raised only for
+a manifest's `packageManager` field. Every other message in this file is written once
+and applies to both kinds; the `devEngines` bodies in §12.3 are emitted with
+`runtime` substituted for `packageManager` when the member being validated is
+`devEngines.runtime` (§03.3), which is new text and so not bound by the verbatim
+rule.
+
 ## 12.3 `devEngines` validation (§03.3)
 
 Warnings (always stderr, always prefixed `! `):
@@ -199,6 +206,7 @@ Unsupported hash algorithm '<algo>' in the packageManager field                 
 <name>@<reference> ships per-platform artifacts, and there is none for architecture '<arch>' (supported: arm64, x64)             §15.28
 <name>@<reference> publishes no artifact for <platform>-<arch> (this version ships: <targets>)                                   §15.28
 Unable to execute <binPath>: <reason>                                                       §15.28
+"packageManager" cannot name <name>: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead   §15.39
 ```
 
 The three per-host messages are deliberately distinct. The first two say the **tool**

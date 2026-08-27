@@ -2,16 +2,31 @@
 
 ## 1.1 What the tool is
 
-A PMVM is a **trampoline**. It occupies the names `npm`, `npx`, `pnpm`, `pnpx`,
-`yarn`, `yarnpkg` on `PATH`. When invoked under one of those names it:
+jup is a **trampoline**. It occupies the name of every binary the table declares
+(§02.4) — `npm`, `npx`, `pnpm`, `pnpx`, `yarn`, `yarnpkg` and the rest — on `PATH`.
+When invoked under one of those names it:
 
-1. determines *which version* of that package manager this project wants,
+1. determines *which version* of that tool this project wants,
 2. makes sure that exact version is present locally and verified,
 3. transfers control to it, transparently.
 
-The user must not be able to tell the difference between running `yarn` under the
-PMVM and running a directly-installed `yarn`, except that the version is now
+The user must not be able to tell the difference between running `yarn` under jup
+and running a directly-installed `yarn`, except that the version is now
 project-pinned.
+
+### Tools, not only package managers
+
+Every entry in the table is a **tool**, and §02.3's `kind` says which sort:
+
+* a **package manager** — `npm`, `pnpm`, `yarn`, `bun`, `deno`, `aube`, `nub` — is
+  what a project declares in `packageManager` or `devEngines.packageManager`, and is
+  what §03.5 enforces when you stand in someone else's project;
+* a **runtime** — `node` — is declared in `devEngines.runtime`, is never enforced
+  against, and is never a legal `packageManager` value.
+
+§15.39 states the model and what it deliberately does not extend to. Everything from
+§04 through §08 is one pipeline over both kinds: `jup node@22 --version` resolves,
+downloads, verifies, caches and executes by the same rules as `jup yarn@4`.
 
 ## 1.2 The two entry modes
 
@@ -41,9 +56,11 @@ Normative rule (from corepack `main.ts::getPackageManagerRequestFromCli`):
 Let `arg0` be the first CLI argument. Match it against `/^([^@]*)(?:@(.*))?$/`,
 yielding `binaryName` and optional `binaryVersion`.
 
-* If `binaryName` maps to a known package manager (§02.4) → **proxy mode**.
+* If `binaryName` maps to a known tool (§02.4) → **proxy mode**. This is the whole
+  of what makes `jup node@22 --version` work: `node` is a table entry, so it names a
+  binary, and §04.6's version override does the rest.
 * Else if `binaryVersion` is present (i.e. the argument contained `@`) → **proxy
-  mode** with an unknown package manager (this is how `jup foo@1.2.3` reaches
+  mode** with an unknown tool (this is how `jup foo@1.2.3` reaches
   the "unsupported package manager" error rather than the CLI's "unknown command").
 * Else → **management mode**.
 
@@ -163,7 +180,7 @@ The tool owns exactly one directory (`COREPACK_HOME`, §07.1) containing:
 
 ```
 <home>/
-├── lastKnownGood.json     # {"<pm name>": "<version>"} — the global default per PM
+├── lastKnownGood.json     # {"<tool name>": "<version>"} — the global default per tool
 └── v1/                    # store, versioned by layout revision
     ├── npm/<version>/…
     ├── pnpm/<version>/…
@@ -171,8 +188,10 @@ The tool owns exactly one directory (`COREPACK_HOME`, §07.1) containing:
 ```
 
 It writes to the project only when explicitly asked (`use`, `up`, or
-`COREPACK_ENABLE_AUTO_PIN=1`), and then only to `package.json`'s `packageManager`
-field.
+`COREPACK_ENABLE_AUTO_PIN=1`), and then only to the `package.json` field that encodes
+the pin for the tool in question (§03.7): `packageManager` and
+`devEngines.packageManager` for a package manager, `devEngines.runtime` for a
+runtime.
 
 It writes to a bin directory only during `enable` / `disable` (§10).
 
@@ -181,7 +200,14 @@ It writes to a bin directory only during `enable` / `disable` (§10).
 A conforming implementation MUST NOT:
 
 * install project dependencies itself,
-* manage Node.js versions,
+* manage anything not named by the compiled-in table (§02.5) — no user-extensible
+  registry, no plugin API, no build-from-source, no arbitrary version manager,
 * provide a plugin/hook system,
 * phone home, collect telemetry, or auto-update itself,
-* rewrite any project file other than the `packageManager` field of `package.json`.
+* rewrite any project file other than the pin fields listed in §1.6.
+
+> **Superseded (§15.39).** This list previously read *"manage Node.js versions"*. The
+> boundary that ruling was protecting is the one above it — a closed, compiled-in
+> table, changed only by a release — and `node` is now an entry in that table like
+> any other. What stays out of scope is unchanged: jup manages the tools it ships,
+> and there is no mechanism to add one at runtime.

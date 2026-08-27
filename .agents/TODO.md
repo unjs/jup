@@ -96,9 +96,10 @@
 
 ## Not an engineering decision
 
-**Bun's, Deno's, aube's and nub's maintainers have not been asked.** §15.21 and §15.28
-both require a package manager's maintainers to agree before an entry ships, and all
-four entries are in the table now. Bun's reportedly declined the same request from
+**Bun's, Deno's, aube's, nub's and `node`'s maintainers have not been asked.** §15.21
+and §15.28 both require a tool's maintainers to agree before an entry ships, and four
+of the five are in the table now (§15.39's `node` is specified but not yet
+implemented — see the item below). Bun's reportedly declined the same request from
 corepack (#295). This is not a technical loose end and no further implementation work
 resolves it; it is a conversation someone has to have before a release carries these
 entries. Until then it is one more reason the item below stands.
@@ -114,6 +115,16 @@ trampoline. jup never installs that launcher, so the two do not collide today �
 that is a fact about nub's current implementation, not an agreement, and it is exactly
 the kind of thing the maintainers should get to say something about.
 
+
+`node` (§15.39) is the entry the spec now requires and the code does not have. What is
+outstanding is the §02.5 row, `kind` on the definition, the four places §15.39 says
+`kind` may be read (§03.3's `devEngines.runtime`, §03.4's refusal, §03.5's skipped
+mismatch, §10.5's forced opt-out), §03.7's runtime write path, §12.12's message, and
+rows 230–236. It needs no new host machinery: §15.28's launcher/artifact split,
+`{target}`, `{exe}` and `exec: "native"` all carry over unchanged, so on the aube→nub
+trend the warm-byte cost should be table data plus the `kind` branches, not a new
+subsystem. `node`'s per-host packages are also the one launcher family published by
+someone other than the project whose name it carries, which is the consent item above.
 
 `package.json` is still `0.0.0` and nothing has been published. Shipping is not neutral: the
 package installs a `corepack` bin alias, §15.33 moved yarn's compiled-in default from

@@ -572,6 +572,11 @@ an unset `CI` (§05.5). Three interacting conditions, none of them documented to
 
 ## 15.21 Package managers beyond npm/pnpm/yarn — [bounded]
 
+> **Widened by §15.39.** Everything below holds for *tools*, not only package
+> managers: the closed compiled-in table, the data-only rule for adding an entry, the
+> ban on hardcoding names outside it, and the consent requirement all apply
+> unchanged to a `kind: "runtime"` entry.
+
 > Bun, Deno, and others recur in the tracker. The table (§02.5) is closed, and adding
 > an entry requires a release.
 
@@ -1265,3 +1270,66 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 227 | `packageManager: "nub@<v>"`, then `nubx <args>` | the host's `@nubjs/nub-<host>` tarball is fetched and run; the launcher is never downloaded, and both names resolve to the single executable the artifact ships, from the table, because that package declares no `bin` (§07.7, §15.21) |
 | 228 | `enable` with no names, then `enable nub`, then `disable` with no names | no `nub`/`nubx` shim first, both after naming nub, none after the bare disable — a package manager stays out of the default set because its name also means something outside a project (§10.5, §15.21) |
 | 229 | A native artifact whose tarball ships its entry point at mode 0644 (as `@nubjs/nub-<host>` does) | the cached entry point is executable and the run succeeds; nothing else in the archive gains the bit, and a `bin` path naming a non-program keeps its mode and still reports `cannotExecute` (§07.4 rule 6, §15.28) |
+| 230 | `jup node@22 --version` in a directory with no project | the host's `node-<target>` tarball is fetched and executed directly; the `node` launcher package is never downloaded (§15.39, §15.28) |
+| 231 | `jup node --version` in a project pinning `packageManager: "pnpm@…"` | runs node; the project's package-manager pin is neither consulted nor an error, and `jup pnpm --version` in the same directory is unaffected (§03.5, §15.39) |
+| 232 | `devEngines.runtime: {name: "node", version: "22.x"}` and `packageManager: "pnpm@…"` in one manifest | `node` resolves within `22.x`, `pnpm` resolves from the pin; neither field constrains the other (§03.3, §15.39) |
+| 233 | `packageManager: "node@22.23.2"` | refused with §12.12's runtime-in-`packageManager` message, naming `devEngines.runtime`; no network request (§03.4, §15.39) |
+| 234 | `jup use node@22` | `devEngines.runtime.version` is written and its path printed; no top-level `packageManager` is created, and no install command runs (§03.7, §09.5, §15.39) |
+| 235 | `jup enable` with no names, then `jup enable node` | no `node` shim first, one after — a runtime is never in the default set (§10.5, §15.39) |
+| 236 | `jup node@22` on a musl Linux host, and on `linux-armv7l` | `unsupportedTarget` naming `linux-x64-musl` in the first, `unsupportedArch` in the second; both before any request (§02.5, §15.28) |
+
+## 15.39 Tools, not only package managers — [required]
+
+> Driven by the same thread as §15.28 and §15.21. Every request for bun, deno or a
+> runtime arrives as "can it manage X too?", and the answers so far have been decided
+> one entry at a time. §15.28 built the machinery that makes a non-JavaScript,
+> per-host tool an ordinary entry; once that exists, "package manager" stops being a
+> property of the *pipeline* and is only a property of the *manifest field* an entry
+> is declared in.
+
+**Required:**
+
+* §02.3 gains `kind: "package-manager" | "runtime"`, absent meaning
+  `"package-manager"`. It is the **only** discriminator, and it decides exactly four
+  things, all of them in §03 and §10:
+  1. which manifest field is the project spec — `packageManager` /
+     `devEngines.packageManager`, or `devEngines.runtime` (§03.3);
+  2. whether the name is legal in `packageManager` (§03.4) — it is not, for a
+     runtime, and the message is in §12.12;
+  3. whether §03.5's name mismatch is enforced — it is not, for a runtime;
+  4. that a runtime MUST set `shimByDefault: false` (§10.5).
+* Nothing else may branch on `kind`. §04 resolution, §05 registry access, §06
+  integrity, §07 the store, and §08 execution are one path over both kinds. A
+  requirement that reads "the package manager" in those files reads "the tool".
+* `node` ships as the first `kind: "runtime"` entry (§02.5). Adding it is a data-only
+  change in §15.21's sense: it uses §15.28's launcher/artifact split, `{target}` map,
+  `{exe}` placeholder and `exec: "native"` unchanged.
+* §01.7's *"MUST NOT manage Node.js versions"* is **superseded**. The line that ruling
+  protected — a closed, compiled-in table changed only by a release, with no plugin
+  API and no runtime extensibility — is unchanged and restated there.
+
+### What this does not open
+
+`kind` is a two-value enum on purpose, and the pressure will be to grow it.
+
+* It is **not** a general version manager. `jup node@22` runs the `node` table entry;
+  there is no mechanism to manage a tool the table does not ship, and §15.21's
+  data-only rule is what keeps adding one a release rather than a config file.
+* `devEngines` also standardises `os`, `cpu` and `libc`. jup reads none of them.
+  Reading `libc` in particular would *look* like a fit — §15.28 already computes the
+  host's libc — but that computation answers "which artifact do I fetch", not "may
+  this project be built here", and the second question belongs to the package manager
+  running the install.
+* A runtime does not become a place to hang §15.34's declined requests. `jup run`
+  is still out of scope, and `node --run` is still the mechanism.
+* The tool still installs no project dependencies and executes no lifecycle scripts.
+  A runtime entry is one more artifact in the store, not a bootstrap environment.
+
+### On consent, again
+
+§15.21's requirement is unchanged and this section does not satisfy it. `node` is the
+case where it reads oddly, because the launcher package `node` on npm is a community
+package rather than a Node.js project artifact — so the maintainer to ask is that
+package's, and what they would be agreeing to is jup fetching the same per-host
+packages their own `preinstall` fetches, without running it. That is a smaller ask
+than bun's and a real one all the same.

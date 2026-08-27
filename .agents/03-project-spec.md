@@ -1,7 +1,12 @@
 # 03 — Project Spec Discovery & Parsing
 
-This stage answers: *"which package manager, at which version range, does this
-directory want?"* It touches the filesystem only, never the network.
+This stage answers: *"which version range of the requested tool does this directory
+want?"* It touches the filesystem only, never the network.
+
+Which manifest field carries the answer depends on the tool's `kind` (§02.3):
+`packageManager` and `devEngines.packageManager` for a package manager,
+`devEngines.runtime` for a runtime. Everything else in this file — the walk, the env
+file, the parse, the reconciliation — is one code path over both.
 
 ## 3.1 The upward walk
 
@@ -184,6 +189,30 @@ anything else (incl. "warn")   → console.warn(`! jup validation warning: ${mes
 
 `<JSON x>` denotes `JSON.stringify(x)` — so strings appear quoted in the message.
 
+### Runtimes read `devEngines.runtime` (§15.39)
+
+Everything above describes a **package manager** — the `kind` §02.3 gives an entry by
+default, and the only kind that existed before jup managed anything else. When the
+requested tool is a `kind: "runtime"` entry, the manifest speaks through exactly one
+field, and the rules collapse accordingly:
+
+* the spec is `devEngines.runtime`. There is no top-level equivalent, `pm` is not
+  consulted, and none of the cross-checks against it run — the two members describe
+  different tools and cannot disagree.
+* validation is the table above with `packageManager` replaced by `runtime`
+  throughout, in the checks and in the messages: `de.name` must be a string not
+  containing `@`; `de.version`, when present, must be a valid semver **range**;
+  failures route through the same `warnOrThrow`.
+* the result is `` `${de.name}@${de.version ?? "*"}` `` — the `pm`-absent branch,
+  which is the only branch a runtime has.
+* `devEngines.runtime` absent, or naming a different tool, yields `NoSpec` for this
+  request. §03.5 then falls back exactly as it does for a package manager in an
+  unpinned project.
+
+A manifest may declare both members. They are read independently and neither
+constrains the other, so a pnpm project that also pins `node` is one manifest with
+two answers rather than a conflict.
+
 ## 3.4 Parsing a spec string
 
 `parseSpec(raw, source, {enforceExactVersion})` → `Descriptor`.
@@ -225,6 +254,19 @@ anything else (incl. "warn")   → console.warn(`! jup validation warning: ${mes
 Note that `name` is the substring before the **first** `@`. `@scope/pkg@1.0.0` yields
 `name = ""`, which fails the supported-package-manager check.
 
+### §15.39 — a runtime is never a `packageManager` value
+
+When the string being parsed came from a manifest's `packageManager` field, a `name`
+whose table entry declares `kind: "runtime"` (§02.3) is a UsageError:
+
+> `"packageManager" cannot name <name>: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead`
+
+The check is on the **field**, not on `parseSpec` in general. `jup node@22`,
+`jup use node@22` and `jup install -g node@24` all put a runtime name through this
+same function with `source = CLI arguments`, and all three are ordinary. It is only
+the committed pin that must not claim a runtime is the project's package manager,
+because that is the field §03.5 enforces `pnpm` and `yarn` with.
+
 `enforceExactVersion` is:
 * **`true`** when reading `packageManager` from a manifest in proxy mode with no CLI
   version override — the field is a *pin* and must be exact.
@@ -254,6 +296,17 @@ switch (specResult.type):
               else → spec
 ```
 
+**§15.39 — the spec being reconciled is the one for the requested tool.**
+`specResult` is what §03.1 and §03.3 produced *for this request*: the
+`packageManager` / `devEngines.packageManager` pair when the requested name is a
+package manager, `devEngines.runtime` when it is a runtime. A project's
+package-manager pin is therefore never a reason to refuse a runtime, and the `Found`
+branch's name mismatch cannot arise across kinds: `jup node` in a pnpm-pinned project
+resolves node, and `jup pnpm` in that project is unaffected by a `devEngines.runtime`
+declared beside the pin. Within a kind the rule is unchanged — `jup deno` in a
+pnpm-pinned project is still the mismatch it always was, because both are package
+managers.
+
 Then, unconditionally: **if `binaryVersion` was given on the CLI, it overwrites
 `descriptor.range`.** This is why `jup yarn@1.22.4 --version` works inside a
 project pinned to Yarn 4 — but note that the *name* still has to match, so
@@ -266,7 +319,10 @@ project pinned to Yarn 4 — but note that the *name* still has to match, so
 
 ## 3.6 Auto-pin (`COREPACK_ENABLE_AUTO_PIN=1`)
 
-Only in the `NoSpec` case, and only in proxy mode:
+Only in the `NoSpec` case, only in proxy mode, and — per §15.39 — only for a package
+manager. Its notice is verbatim about the `packageManager` field, and writing a
+runtime into a project nobody asked to pin a runtime in is a larger claim than
+recording which package manager a project already uses.
 
 1. Resolve the fallback descriptor to a locator (tags allowed).
    * `null` → `Failed to successfully resolve '<range>' to a valid <name> release`
@@ -281,6 +337,13 @@ Only in the `NoSpec` case, and only in proxy mode:
 ## 3.7 Writing the pin
 
 `setLocalPackageManager(cwd, info)`:
+
+For a `kind: "runtime"` locator (§15.39) the steps below read `devEngines.runtime` in
+place of the `packageManager` field: step 2's check and step 6's `previousPackageManager`
+come from that member, and step 7 sets `devEngines.runtime.version` to the resolved
+`reference` — creating the member if absent — instead of a top-level field. Nothing
+else changes; in particular §15.26's "update every field that encodes the pin" has
+only ever one field to update for a runtime.
 
 1. Re-run the discovery walk from `cwd`.
 2. If a `devEngines.packageManager.version` range was found, check the version being
