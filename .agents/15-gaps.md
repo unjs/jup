@@ -613,7 +613,7 @@ ranges. Both halves are obtainable:
 * `packageManager` and `devEngines.packageManager.version` MUST accept a semver range
   or a dist-tag as well as an exact version.
 * When the spec is not an exact version, the resolved concrete version **and its hash**
-  are recorded in a resolution file at the project root, `.corepack.lock`:
+  are recorded in a resolution file at the project root, `.jup.lock`:
   ```json
   {"version": 1,
    "resolutions": {"pnpm@^11.0.0": {"resolved": "11.1.2", "integrity": "sha512-…"}}}
@@ -625,9 +625,16 @@ ranges. Both halves are obtainable:
 * When the file is absent and the spec is a range, resolution hits the registry and
   writes the file. `COREPACK_FROZEN_LOCKFILE=1` (and CI defaults, matching package
   manager convention) makes that a hard error instead:
-  `<name>@<range> is not resolved in .corepack.lock and lockfile updates are disabled.`
+  `<name>@<range> is not resolved in .jup.lock and lockfile updates are disabled.`
 * An exact-version spec continues to work with no lockfile involvement whatsoever.
   Projects that want corepack's current guarantees change nothing.
+
+The file is jup's own, and is named for the tool that writes it. Corepack has no
+resolution file — no lockfile of any kind, and no `COREPACK_FROZEN_LOCKFILE`; it rejects
+ranges outright (§03.4), so it has nothing to record. There is therefore no
+Corepack-era spelling to stay compatible with, and an implementation MUST NOT read a
+`.corepack.lock`: no released tool has ever written a file by that name, so accepting it
+would be compatibility with nothing.
 
 This is the reconciliation the #300 discussion circled for three years without
 landing: ranges for humans, a recorded hash for reproducibility and integrity.
@@ -888,7 +895,7 @@ const fallbackReference = isTransparentCommand
 |---|---|---|
 | **#57** `corepack run <script>` (26 comments, 9👍) | Out of scope — *"each package manager has different implementations of run… which Corepack couldn't replicate without becoming a package manager"* | **Adopted.** The semantic divergence is real (Yarn resolves scripts workspace-wide, npm does not). `node --run` and `$npm_execpath` are the right mechanisms. |
 | **#352** `corepack manager <verb>` passthrough (14 comments) | Out of scope — *"its only purpose is to change how they are installed"* | **Adopted.** Userland wrappers are the right home. |
-| **#465** pin duplicated into the package manager's lockfile | Belongs in the package manager | **Adopted**, and §15.23's `.corepack.lock` serves the underlying Docker-layer-caching need without touching another tool's file format. |
+| **#465** pin duplicated into the package manager's lockfile | Belongs in the package manager | **Adopted**, and §15.23's `.jup.lock` serves the underlying Docker-layer-caching need without touching another tool's file format. |
 | **#683** extend pinning to monorepo task runners | Same boundary | **Adopted.** |
 
 One narrower request is accepted:
@@ -970,7 +977,7 @@ Introduced by this section. All follow §11.6's precedence.
 | `COREPACK_REQUIRE_SIGNATURES` | `1` | Turn §15.7's soft-fail into a hard failure | yes |
 | `COREPACK_ALLOW_UNVERIFIED` | `1` | Permit an artifact with no verification tier (§15.11) | **no** |
 | `COREPACK_SHIM_DIRECTORY` | path | Default shim install directory (§15.13) | yes |
-| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write/refresh `.corepack.lock` (§15.23) | yes |
+| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write/refresh `.jup.lock` (§15.23) | yes |
 | `COREPACK_ENABLE_PRERELEASES` | `1` | Allow implicit resolution to select a prerelease (§15.24) | yes |
 | `COREPACK_SPEC_FILE` | path | External file supplying the project spec (§15.35d) | **no** |
 | `COREPACK_MINIMUM_RELEASE_AGE` | hours | Minimum publish age for implicit resolution (§15.35e) | yes |
@@ -1014,7 +1021,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 178 | Uncached version with `COREPACK_ENABLE_NETWORK=0` | the error names the seeding command (§15.19) |
 | 179 | `cache list --json` | installed pairs and recorded defaults (§15.19) |
 | 180 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` via a shim entry point | fully silent (§15.20) |
-| 181 | `packageManager: "pnpm@^11.0.0"` | resolves; `.corepack.lock` records version + integrity (§15.23) |
+| 181 | `packageManager: "pnpm@^11.0.0"` | resolves; `.jup.lock` records version + integrity (§15.23) |
 | 182 | Second run with that lockfile present | **no** network request (§15.23, §01.3) |
 | 183 | Range with no lockfile and `COREPACK_FROZEN_LOCKFILE=1` | refused (§15.23) |
 | 184 | Registry publishes `11.0.0-dev.1005` above stable `10.x`; `corepack use pnpm` | resolves to the **stable** release (§15.24) |

@@ -431,7 +431,7 @@ export function isCI(): boolean {
 }
 
 /**
- * §15.23 / §15.37 — whether `.corepack.lock` may be written or refreshed.
+ * §15.23 / §15.37 — whether `.jup.lock` may be written or refreshed.
  *
  * `COREPACK_FROZEN_LOCKFILE` wins in **both** directions when it is set: `1`
  * freezes, anything else thaws, including inside CI. With it unset, CI defaults

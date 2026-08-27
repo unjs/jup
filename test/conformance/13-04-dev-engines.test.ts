@@ -67,7 +67,7 @@ describe("§13.4 devEngines", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
     expect(result.stderr).toBe("");
-    expect((fixture.json(".corepack.lock") as { resolutions: unknown }).resolutions).toEqual({
+    expect((fixture.json(".jup.lock") as { resolutions: unknown }).resolutions).toEqual({
       // Seeded, not downloaded: its placeholder hash is not a usable digest, so
       // none is recorded. Row 181 asserts the recorded digest of real bytes.
       "yarn@*": { resolved: "1.22.4" },
@@ -85,7 +85,7 @@ describe("§13.4 devEngines", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
     expect(result.stderr).toBe("");
-    expect((fixture.json(".corepack.lock") as { resolutions: unknown }).resolutions).toEqual({
+    expect((fixture.json(".jup.lock") as { resolutions: unknown }).resolutions).toEqual({
       "pnpm@6.x": { resolved: "6.6.2" },
     });
   });

@@ -287,7 +287,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
     await manifest({ packageManager: "pnpm@^11.0.0" });
     seed("pnpm", "11.1.2");
     await writeFile(
-      join(project, ".corepack.lock"),
+      join(project, ".jup.lock"),
       `${JSON.stringify({
         version: 1,
         // `sha512-AQI=` is the SRI spelling of the bytes `01 02`.
@@ -298,7 +298,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
     const info = report();
 
     expect(info.lockfile).toMatchObject({
-      path: join(project, ".corepack.lock"),
+      path: join(project, ".jup.lock"),
       present: true,
       key: "pnpm@^11.0.0",
       resolution: { resolved: "11.1.2", integrity: "sha512-AQI=" },
@@ -307,7 +307,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
       status: "locked",
       version: "11.1.2",
       hash: "sha512.0102",
-      source: join(project, ".corepack.lock"),
+      source: join(project, ".jup.lock"),
       installed: true,
     });
   });

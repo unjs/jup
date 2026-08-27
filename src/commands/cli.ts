@@ -269,7 +269,7 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
  * The project's own spec, plus the lookup that produced it.
  *
  * `up` needs both halves: the descriptor to resolve, and the lookup to tell a
- * declared `packageManager` range (which §15.23 refreshes in `.corepack.lock`)
+ * declared `packageManager` range (which §15.23 refreshes in `.jup.lock`)
  * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
  */
 function resolveProjectSpec(
@@ -319,7 +319,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
 
   // §15.23 — warm the cache with the version the project will actually run.
   // `install` exists to fill a Docker layer, and resolving a range afresh here
-  // can legitimately answer something newer than `.corepack.lock` records — which
+  // can legitimately answer something newer than `.jup.lock` records — which
   // would cache one version and then run another, offline, in the layer that has
   // no network to fix it with. The recorded resolution is consulted under the
   // same key the proxy path uses: the pin itself, not the `devEngines` range that
@@ -710,7 +710,7 @@ function readPinStyle(parsed: ParsedArgs): PinStyle | undefined {
 }
 
 /**
- * The `.corepack.lock` key a replaced `packageManager` value used to own, or
+ * The `.jup.lock` key a replaced `packageManager` value used to own, or
  * `undefined` when it owned none (the literal `unknown`, or an exact pin).
  */
 function staleResolutionKey(previous: string): string | undefined {

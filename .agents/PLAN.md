@@ -552,7 +552,7 @@ than T14 but neither depends on the other). Wave 4 is three.
 `.npmrc` reading, per-package-manager registries, origin-rewriting, TLS CA/diagnostics,
 retries, key refresh and origin-keyed trust, the single verification tier, per-user shim
 directories, `shims.json` restore, npm shimming by default, `cache list`/`cache clean
---all`, `.corepack.lock` ranges, prerelease exclusion, symmetric walk stop conditions,
+--all`, `.jup.lock` ranges, prerelease exclusion, symmetric walk stop conditions,
 atomic multi-field pin writes, workspace-boundary write targets, native artifacts,
 `corepack info`, global-flag transparency, `PATH` prepending, and §15.35's sundries.
 Tests 148–207.
@@ -691,7 +691,7 @@ redirecting npm and pnpm. Phase 1 already rewrites by origin rather than substri
 
 ## Wave C — core semantics
 
-### P6 — Ranges in the pin, and `.corepack.lock` §15.23 — **done** (`4392842`)
+### P6 — Ranges in the pin, and `.jup.lock` §15.23 — **done** (`4392842`)
 #95: **121👍, open since 2022**, second-highest in the tracker, and the reason pnpm removed
 corepack from its own documentation. The reconciliation §15.23 describes — ranges for
 humans, a recorded resolution for reproducibility — is the substantive design work in
@@ -777,7 +777,7 @@ written out in the P12 handoff note.
   handoff note.
 * Yarn Berry now needs a pinned hash, `COREPACK_NPM_REGISTRY`, or one
   `COREPACK_ALLOW_UNVERIFIED=1` bootstrap run. The lockfile story works end to end on the
-  built binary: one opt-out run records `integrity` in `.corepack.lock`, and every later
+  built binary: one opt-out run records `integrity` in `.jup.lock`, and every later
   run — including from a cold store — verifies against it with no opt-out.
 * **Bare `yarn` with `COREPACK_DEFAULT_TO_LATEST=1` fails online**, and not because of
   §15.11: npm signs the `yarn` packument's `latest` with keyid `SHA256:jl3bws…`, which
@@ -1022,6 +1022,11 @@ the only remaining skips are platform-conditional (`skipIf` on Windows, root, or
   relying on a *fallback* version can pass over the wire; seed the store and set
   `COREPACK_ENABLE_NETWORK=0` wherever the answer must come from the fixture. One draft
   during phase 3 silently downloaded real Yarn 4.14.1 and passed.
+* **`.jup.lock` has no legacy spelling, and must not grow one.** §15.23's resolution
+  file is jup's own invention — Corepack rejects ranges outright, so it has never
+  written a lockfile of any name. A `.corepack.lock` read-compat path would be
+  compatibility with a file that has never existed, and would cost a second `stat` on
+  the range fast path.
 * **A plan organised by value will miss requirements.** Phase 2 shipped twelve items and
   left eight §15 sections unassigned. Walk the spec first, then rank.
 

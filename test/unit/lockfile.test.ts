@@ -1,5 +1,5 @@
 /**
- * §15.23 — `.corepack.lock`.
+ * §15.23 — `.jup.lock`.
  *
  * The conformance rows prove the pipeline end to end; these prove the rules the
  * pipeline leans on, in particular the two that are invisible from outside: an

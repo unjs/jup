@@ -213,11 +213,11 @@ export async function runProxy(
   }
 
   // §15.23 — a project spec that is a range or a tag resolves through
-  // `.corepack.lock`; an exact pin never touches it at all.
+  // `.jup.lock`; an exact pin never touches it at all.
   const lockDir = lockfileDirFor(specResult, reconciled, descriptor, binaryVersion);
 
   // Step 5 — resolution. For an exact pin this is answered inline by
-  // {@link resolveExactPin}; for a recorded range it is one `.corepack.lock`
+  // {@link resolveExactPin}; for a recorded range it is one `.jup.lock`
   // read and nothing else.
   const recorded = lockDir === undefined ? null : readResolution(lockDir, descriptor);
   if (recorded === null && lockDir !== undefined && isFrozenLockfile()) {
@@ -416,7 +416,7 @@ async function usageLineFor(command: string | undefined): Promise<string> {
 }
 
 /**
- * §15.23 — the directory whose `.corepack.lock` governs this run, or `undefined`
+ * §15.23 — the directory whose `.jup.lock` governs this run, or `undefined`
  * when no lockfile is involved.
  *
  * Three conditions, all necessary:

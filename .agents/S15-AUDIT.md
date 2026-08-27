@@ -358,7 +358,7 @@ refuse. It refuses, and the reasoning is in `undatedSourceError` in `src/registr
 
 ## Stated limitation
 
-The gate applies to **resolution**, not to the store or to `.corepack.lock`. Enforcing it
+The gate applies to **resolution**, not to the store or to `.jup.lock`. Enforcing it
 on §04.1 step 4's cache probe would mean a registry request on every warm run, which §01.3
 forbids, and the store records no publish times. `use` and `up` pass `useCache: false`, so
 they always re-resolve. A row asserts this, with `COREPACK_ENABLE_NETWORK=0` so the answer

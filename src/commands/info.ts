@@ -115,7 +115,7 @@ export interface ProjectInfo {
 
 export interface ResolutionInfo {
   /**
-   * `pinned` — the field names the version outright; `locked` — `.corepack.lock`
+   * `pinned` — the field names the version outright; `locked` — `.jup.lock`
    * answers it; `cache` — nothing is recorded, but an installed version
    * satisfies the range; `network` — resolving needs a request, which `info`
    * does not make; `frozen` — a request is needed and is refused; `fallback` —

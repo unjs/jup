@@ -259,7 +259,7 @@ export const messages = {
    * of the imports that would make it a cycle.
    */
   lockfileUnresolved: (name: string, range: string) =>
-    `${name}@${range} is not resolved in .corepack.lock and lockfile updates are disabled.`,
+    `${name}@${range} is not resolved in .jup.lock and lockfile updates are disabled.`,
 
   /**
    * §15.35j — a version that was never published.

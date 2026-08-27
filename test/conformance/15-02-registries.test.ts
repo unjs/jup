@@ -135,7 +135,7 @@ describe("§15.2 — one mirror mechanism for every source", () => {
         COREPACK_INTEGRITY_KEYS: trustAll(),
         // §15.11 redirected this row: a *range* cannot carry a pin, and Berry's
         // own origin publishes nothing to verify against, so the first resolve
-        // of `yarn@4.x` clears no tier. (§15.23's `.corepack.lock` records the
+        // of `yarn@4.x` clears no tier. (§15.23's `.jup.lock` records the
         // digest once an install succeeds, so this is only the bootstrap run.)
         // The row is about which origin the version list came from.
         COREPACK_ALLOW_UNVERIFIED: "1",

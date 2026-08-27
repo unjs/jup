@@ -371,7 +371,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
   } else {
     // §15.23 — an exact version, a semver range, and a dist-tag are all valid
     // here; §04.1 classifies which is which, and a range or a tag additionally
-    // has its resolution recorded in `.corepack.lock`. Corepack's
+    // has its resolution recorded in `.jup.lock`. Corepack's
     // exact-version-only rule lived at exactly this line, and is the whole of
     // #95 (121👍), #402 and #729 — the rule that broke Dependabot, Renovate and
     // Netlify, and that pnpm 11.21's generated `devEngines` ranges trip over.
@@ -507,7 +507,7 @@ export function readSpecFromManifest(
  *   silently discarded, because two digests for one artifact means at most one
  *   of them describes what will run;
  * * a range or a dist-tag, which no single digest can describe. §15.23's
- *   `.corepack.lock` is where a range's resolved digest lives, and it records
+ *   `.jup.lock` is where a range's resolved digest lives, and it records
  *   one on the first resolve;
  * * a URL reference, which carries its hash in the fragment (§02.1).
  */

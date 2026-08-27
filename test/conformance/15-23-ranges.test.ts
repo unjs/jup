@@ -1,5 +1,5 @@
 /**
- * §15.23 — ranges in the pin, and `.corepack.lock` (rows 181–183).
+ * §15.23 — ranges in the pin, and `.jup.lock` (rows 181–183).
  *
  * The reconciliation the corepack tracker circled for four years: a range is
  * what a human writes, and a recorded resolution is what makes it reproducible.
@@ -35,7 +35,7 @@ function lockOf(fixture: { json(relative: string): unknown }): {
   version: number;
   resolutions: Record<string, { resolved: string; integrity?: string }>;
 } {
-  return fixture.json(".corepack.lock") as {
+  return fixture.json(".jup.lock") as {
     version: number;
     resolutions: Record<string, { resolved: string; integrity?: string }>;
   };
@@ -56,7 +56,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.23 ranges and .corepack.lock", () => {
+describe("§15.23 ranges and .jup.lock", () => {
   it("181: a range pin resolves, and records the version and its integrity", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
@@ -80,9 +80,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
 
     // Human-diffable, and stable: two-space indent, one key per line, trailing
     // newline. Re-recording an unchanged resolution must not churn the file.
-    expect(fixture.read(".corepack.lock")).toBe(
-      `${JSON.stringify(lockOf(fixture), undefined, 2)}\n`,
-    );
+    expect(fixture.read(".jup.lock")).toBe(`${JSON.stringify(lockOf(fixture), undefined, 2)}\n`);
   });
 
   it("182: a second run with that lockfile present makes no network request", async () => {
@@ -92,7 +90,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
     expect(first.exitCode).toBe(0);
     expect(registry.requests.length).toBeGreaterThan(0);
 
-    const before = fixture.read(".corepack.lock");
+    const before = fixture.read(".jup.lock");
     registry.reset();
 
     const second = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
@@ -103,7 +101,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
     // §01.3's fast-path budget, extended to ranges: not one request, of any kind.
     expect(registry.requests).toEqual([]);
     // And nothing was rewritten, so the file stays out of `git status`.
-    expect(fixture.read(".corepack.lock")).toBe(before);
+    expect(fixture.read(".jup.lock")).toBe(before);
   });
 
   it("183: a range with no lockfile and COREPACK_FROZEN_LOCKFILE=1 is refused", async () => {
@@ -117,13 +115,13 @@ describe("§15.23 ranges and .corepack.lock", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
-      `pnpm@^11.0.0 is not resolved in .corepack.lock and lockfile updates are disabled.\n`,
+      `pnpm@^11.0.0 is not resolved in .jup.lock and lockfile updates are disabled.\n`,
     );
     expect(result.stdout).toBe("");
     // Refused *before* the registry was consulted: a frozen lockfile is a
     // statement about the network as much as about the file.
     expect(registry.requests).toEqual([]);
-    expect(fixture.exists(".corepack.lock")).toBe(false);
+    expect(fixture.exists(".jup.lock")).toBe(false);
   });
 
   it("183: CI defaults to frozen, and an explicit value wins in both directions", async () => {
@@ -136,7 +134,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
 
     expect(refused.exitCode).toBe(1);
     expect(refused.stderr).toBe(
-      `pnpm@^11.0.0 is not resolved in .corepack.lock and lockfile updates are disabled.\n`,
+      `pnpm@^11.0.0 is not resolved in .jup.lock and lockfile updates are disabled.\n`,
     );
 
     // `COREPACK_FROZEN_LOCKFILE=0` thaws it again, inside CI and out.
@@ -173,7 +171,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
   it("re-resolves when the recorded version no longer satisfies the range", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "10.5.0" } } })}\n`,
     );
 
@@ -188,7 +186,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     const wrong = sriOf(registry.tarballOf("pnpm", "11.0.0"));
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({
         version: 1,
         resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", integrity: wrong } },
@@ -212,14 +210,14 @@ describe("§15.23 ranges and .corepack.lock", () => {
       version: 1,
       resolutions: { "pnpm@11.1.2": { resolved: "10.5.0" } },
     })}\n`;
-    fixture.write(".corepack.lock", planted);
+    fixture.write(".jup.lock", planted);
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
     expect(registry.requests).toEqual([]);
-    expect(fixture.read(".corepack.lock")).toBe(planted);
+    expect(fixture.read(".jup.lock")).toBe(planted);
   });
 
   it("writes no lockfile for a project that pins exactly", async () => {
@@ -229,7 +227,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
     expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
       0,
     );
-    expect(fixture.exists(".corepack.lock")).toBe(false);
+    expect(fixture.exists(".jup.lock")).toBe(false);
   });
 
   it("degrades to a normal resolution when the lockfile is unreadable or unknown", async () => {
@@ -240,7 +238,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
       `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":42}}}`,
     ]) {
       const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
-      fixture.write(".corepack.lock", content);
+      fixture.write(".jup.lock", content);
 
       const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
@@ -260,7 +258,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
     expect(result.stdout).toBe("10.5.0\n");
     // `pnpm@^10.0.0 …` is one invocation (§04.6), not a statement about the
     // project, and the project's own range is not what it resolved either.
-    expect(fixture.exists(".corepack.lock")).toBe(false);
+    expect(fixture.exists(".jup.lock")).toBe(false);
   });
 
   it("does not record a fallback version in the project that fell back", async () => {
@@ -280,7 +278,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
-    expect(fixture.exists(".corepack.lock")).toBe(false);
+    expect(fixture.exists(".jup.lock")).toBe(false);
   });
 
   it("leaves a recorded resolution exactly as the project wrote it", async () => {
@@ -289,13 +287,13 @@ describe("§15.23 ranges and .corepack.lock", () => {
     // resolution only on `corepack up`, so a run that merely *uses* one must not
     // rewrite the file — not to reformat it, and not to add what it now knows.
     const planted = `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.1.2"}}}\n`;
-    fixture.write(".corepack.lock", planted);
+    fixture.write(".jup.lock", planted);
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
-    expect(fixture.read(".corepack.lock")).toBe(planted);
+    expect(fixture.read(".jup.lock")).toBe(planted);
   });
 
   it("records the resolution beside the manifest that declared it, not beside the cwd", async () => {
@@ -310,7 +308,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(fixture.exists("packages/app/.corepack.lock")).toBe(false);
+    expect(fixture.exists("packages/app/.jup.lock")).toBe(false);
     expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
   });
 
@@ -331,7 +329,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
   it("install warms the cache with the recorded version, not the newest match", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
@@ -351,7 +349,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
       devEngines: { packageManager: { name: "pnpm", version: ">=10", onFail: "error" } },
     });
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
@@ -368,7 +366,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
   it("up refreshes the recorded resolution and keeps the range in the manifest", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write(
-      ".corepack.lock",
+      ".jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
@@ -398,7 +396,7 @@ describe("§15.23 ranges and .corepack.lock", () => {
 
     expect(frozen.exitCode).toBe(1);
     expect(frozen.stdout).toContain(
-      `Usage Error: pnpm@^11.0.0 is not resolved in .corepack.lock and lockfile updates are disabled.`,
+      `Usage Error: pnpm@^11.0.0 is not resolved in .jup.lock and lockfile updates are disabled.`,
     );
 
     // But CI on its own does not block a command the user ran *to* refresh it.
@@ -422,6 +420,6 @@ describe("§15.23 ranges and .corepack.lock", () => {
     );
     // The last resolution went with the range it belonged to, and an empty
     // resolution map is no file at all.
-    expect(fixture.exists(".corepack.lock")).toBe(false);
+    expect(fixture.exists(".jup.lock")).toBe(false);
   });
 });

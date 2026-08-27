@@ -188,7 +188,7 @@ export function writePin(
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
   writeFileSync(target, updated);
 
-  // `target` goes back to the caller because §15.23's `.corepack.lock` lives
+  // `target` goes back to the caller because §15.23's `.jup.lock` lives
   // beside *this* file, not beside the cwd — in a monorepo those differ, and a
   // resolution recorded next to the wrong manifest would never be found again.
   // §15.27 also requires it to be *printed*, and printing is the caller's job.

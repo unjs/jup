@@ -1,5 +1,5 @@
 /**
- * `.corepack.lock` — the resolution file for non-exact project specs (§15.23).
+ * `.jup.lock` — the resolution file for non-exact project specs (§15.23).
  *
  * Corepack's four-year objection to ranges in `packageManager` is that they
  * "prevent using hashes" and "give a false sense of confidence". That is an
@@ -30,8 +30,11 @@ import {
 } from "../version/semver.ts";
 import type { Descriptor, Locator } from "../types.ts";
 
-/** §15.23 — the file lives at the project root, next to the manifest that declared the spec. */
-export const LOCKFILE_NAME = ".corepack.lock";
+/**
+ * §15.23 — at the project root, next to the manifest that declared the spec.
+ * The name is jup's own: corepack has no lockfile of any name.
+ */
+export const LOCKFILE_NAME = ".jup.lock";
 
 /** The only `version` this build understands; anything else reads as "no resolutions". */
 export const LOCKFILE_VERSION = 1;
