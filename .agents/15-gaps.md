@@ -1277,6 +1277,13 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 234 | `jup use node@22`, on a manifest with no `devEngines`, with one that has only `packageManager`, and with a `runtime` member naming another tool under `onFail: "warn"` | `devEngines.runtime` is written — created at the surrounding nesting where absent, name corrected where it disagreed — and its path printed; no top-level `packageManager` is created, an existing `devEngines.packageManager` is untouched, and no install command runs (§03.7, §09.5, §15.39) |
 | 235 | `jup enable` with no names, then `jup enable node` | no `node` shim first, one after — a runtime is never in the default set (§10.5, §15.39) |
 | 236 | `jup node@22` on a musl Linux host, and on `linux-armv7l` | `unsupportedTarget` naming `linux-x64-musl` in the first, `unsupportedArch` in the second; both before any request (§02.5, §15.28) |
+| 237 | `.nvmrc` reading `v22.23.2` beside a manifest pinning `packageManager: "pnpm@…"` and no `devEngines.runtime` | `node` resolves within it and installs per-host as usual; `pnpm` in the same directory is unaffected; neither file is written (§15.40) |
+| 238 | `.nvmrc` in a parent and another in `packages/app` reading `22.x`, with comments, blank lines and a `key=value` line | the nearer file speaks, read through the comments and the setting; its `.jup.lock` is written beside it, not at the root (§15.40, §15.23) |
+| 239 | `.nvmrc` and `devEngines.runtime` naming different versions | `devEngines.runtime` wins, with no warning and no comparison between them (§15.40) |
+| 240 | `.nvmrc` reading `lts/*`, `lts/<codename>`, `system`, `iojs` or `default`; then one reading `node` or `stable` | the first five are refused, naming the word and `devEngines.runtime`, before any request; the last two resolve to the `latest` dist-tag (§15.40) |
+| 241 | `.nvmrc` carrying two versions, only comments, or nothing | `Invalid <path>`; no request, and no fall back to the compiled-in default (§15.40) |
+| 242 | `.nvmrc` in a directory with no `package.json` anywhere above it | it still speaks; no manifest is created and auto-pin does not fire (§15.40) |
+| 243 | `.nvmrc` present with `JUP_ENABLE_PROJECT_SPEC=0`, then `jup use node@22` in that same directory | not read in either case; `use` writes `devEngines.runtime` and leaves the file untouched (§15.40, §11.1, §15.27) |
 
 ## 15.39 Tools, not only package managers — [required]
 
@@ -1335,3 +1342,83 @@ package rather than a Node.js project artifact — so the maintainer to ask is t
 package's, and what they would be agreeing to is jup fetching the same per-host
 packages their own `preinstall` fetches, without running it. That is a smaller ask
 than bun's and a real one all the same.
+
+## 15.40 Read the version file the ecosystem already writes — [required]
+
+> The other half of §15.39. A runtime got a field of its own, `devEngines.runtime`,
+> and the number of repositories that have written one is close to zero. The number
+> that carry an `.nvmrc` is very large, it says exactly the same thing, and it is
+> already obeyed by a program most of those repositories have installed. A tool that
+> can run node and refuses to read the file the project wrote to say which node has
+> chosen purity over being useful.
+
+`.nvmrc` is nvm's, and the interoperation is deliberately one-directional and small:
+jup **reads** it, never writes it, and does not otherwise touch a machine's version
+manager (§10.5).
+
+**Required:**
+
+* §02.3 gains an optional per-entry `versionFile: {path, format}`. `node` declares
+  `{path: ".nvmrc", format: "nvm"}` and no other entry declares anything. It is
+  **not** a property of `kind`: a runtime whose ecosystem has no such convention
+  declares none, and a package manager whose ecosystem grows one may declare it.
+* Adding a second one MUST be a data-only change in §15.21's sense. The file name
+  lives in the table and nowhere else; §03's walk MUST NOT know what it is looking
+  for.
+* §03.1 reads it in the directories it walks anyway, keeps the **nearest**, and does
+  not let it stop the walk. It MUST NOT be looked for on a mutating walk (§15.27),
+  nor wherever the manifest itself would not be read (§11.1).
+* It is consulted **only** on `NoSpec` and `NoProject` for the requested tool, so the
+  precedence is: the `devEngines` member, then the version file, then §03.5's
+  fallback. A `Found` is never displaced.
+* When it speaks, the result is a `Found` targeting the version file, carrying no
+  `devEngines` declaration and no pin — so §03.6's auto-pin does not fire, and
+  §15.23's `up` treats it as it treats a synthesised spec. A range declared in it resolves through
+  `.jup.lock` as any range does, written beside the version file.
+* Parsing is lazy, and both failure modes — a file carrying no single version, and
+  one carrying a word that is not a version — are errors (§12.12). Neither may fall
+  back to the compiled-in default.
+* The `"nvm"` grammar and the range it yields are specified in §03.1. Two facts are
+  requirements rather than incidental: the numeric forms pass through **unchanged**
+  (§04.2's partial-version grammar already accepts them, `v` prefix included), and
+  `node` / `stable` become the `latest` dist-tag.
+* Nothing past §03 may learn that a range came from a version file. §04–§08 see a
+  descriptor, as they do for a manifest range.
+
+### Why the LTS aliases are refused
+
+They are the ones people will miss, and they are refused on the data rather than on
+principle. The `node` launcher package publishes the dist-tags `latest` and
+`v4-lts` … `v20-lts`; the LTS series tags **stop there**, with no `v22-lts` and no
+`v24-lts`. So:
+
+* `lts/*` — "the newest LTS" — has nothing on the npm side to resolve against at all;
+* `lts/<codename>` would need a compiled-in codename-to-major table (`iron` → 20,
+  `jod` → 22, …) that grows by an entry every LTS line and is wrong until the next
+  release ships. That is precisely the shape §15.21 exists to refuse, and a table jup
+  cannot keep correct is worse than an error that says so.
+
+Half-supporting them — answering `lts/argon` and erroring on `lts/*` — would be the
+worst of both, so all the LTS forms take the same message, which names the word and
+points at `devEngines.runtime`. That field can express what the alias meant.
+
+### What this does not open
+
+* **jup does not adopt another manager's installs.** `$NVM_DIR/versions/node/<v>/bin/node`
+  stays untouched. Everything jup executes arrives through §06's digest and registry
+  signature and §07's atomic install; an nvm version directory came from nodejs.org
+  by nvm's own path, or from a source compile, and running those bytes would silently
+  bypass the one thing §06 exists to do. They are not even interchangeable — nvm
+  installs the nodejs.org tarball, and the `node` entry installs the per-host npm
+  package (§02.5) — and §07's single-`stat` fast path would have to grow a second
+  lookup root to find them.
+* **It is not a version-manager compatibility layer.** No `nvm use`, no shell hook, no
+  profile edit, no `$NVM_DIR/alias` resolution, no `.nvmrc` **writing**. The one
+  behaviour required here is reading a file.
+* **It is not a general "read every version file" mechanism.** `versionFile` is one
+  optional table field with one declared instance. A second one — `.node-version`,
+  `.tool-versions` — is a release, and is a judgement about that file's grammar, not
+  a config option.
+* **It does not give the version file a say over the manifest.** A project that
+  disagrees with its own `.nvmrc` is answered by `devEngines.runtime`, which is the
+  field jup writes and the only one it writes.

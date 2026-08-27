@@ -9,8 +9,14 @@ import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { ENV, readEnv } from "../config/env-vars.ts";
-import { devEnginesFieldFor, isRuntime, isSupportedPackageManager } from "../config/table.ts";
+import {
+  devEnginesFieldFor,
+  isRuntime,
+  isSupportedPackageManager,
+  versionFileFor,
+} from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
+import { loadVersionFile, type VersionFile, versionFileRange } from "./version-file.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
@@ -126,6 +132,12 @@ function isWorkspaceRoot(dir: string, data: Manifest): boolean {
  * before. Absent means the package-manager field pair, which is what every
  * caller predating the `node` entry wants and what keeps this a no-op for them.
  *
+ * §15.40 — a tool whose table entry declares a {@link VersionFileSpec} also has
+ * the nearest such file recorded on the way up, and it speaks only where the
+ * manifest did not. It is not looked for on a `mutating` walk: §03.7 writes
+ * `devEngines.runtime` and nothing else, so the file a command is about to edit
+ * is always the manifest.
+ *
  * `projectSpecFlag` lets the caller honour `COREPACK_ENABLE_PROJECT_SPEC=0`
  * (§03.5, §11.1: "never look at the project at all"). It degrades the walk to
  * `envOnly` the moment the flag is seen, so a broken manifest cannot defeat the
@@ -156,13 +168,18 @@ export function discoverProjectSpec(
   const projectSpecFlag = options?.projectSpecFlag === true;
   const mutating = options?.mutating === true;
   const here = options?.here === true;
-  const field = options?.tool === undefined ? "packageManager" : devEnginesFieldFor(options.tool);
+  const tool = options?.tool;
+  const field = tool === undefined ? "packageManager" : devEnginesFieldFor(tool);
   const fields = mutating ? MUTATING_MANIFEST_FIELDS : MANIFEST_FIELDS;
+  // §15.40 — `undefined` for every entry that declares no version file, which is
+  // every package manager, and the walk then costs exactly what it always did.
+  const versionFileSpec = tool === undefined || mutating ? undefined : versionFileFor(tool);
 
   let currentDir = "";
   let nextDir = initialCwd;
   let selection: { data: Manifest; target: string } | undefined;
   let envFilePath: string | undefined;
+  let versionFile: VersionFile | undefined;
 
   // `envOnly` swaps the stop condition for "an env file has been found"; both
   // forms still terminate at the filesystem root, where `dirname(d) === d`.
@@ -209,6 +226,13 @@ export function discoverProjectSpec(
 
     if (envOnly) {
       continue;
+    }
+
+    // §15.40 — before the manifest read, because that read `continue`s on ENOENT
+    // and a directory holding a version file and no `package.json` is an
+    // ordinary shape. Only the nearest one is kept, as with the env file above.
+    if (versionFileSpec !== undefined && versionFile === undefined) {
+      versionFile = loadVersionFile(currentDir, versionFileSpec) ?? undefined;
     }
 
     // Step 3 — read the manifest.
@@ -262,21 +286,70 @@ export function discoverProjectSpec(
 
   const specDisabled = projectSpecFlag && envDisabled(ENV.ENABLE_PROJECT_SPEC);
 
-  // §15.35d — the external file is the project's declaration and outranks the
-  // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
-  // "never look at the project at all" covers a redirected spec too.
-  if (specFile !== undefined && !specDisabled) {
-    return describe(readExternalSpec(specFile), specFile, initialCwd, envFilePath, field);
+  const result = ((): SpecResult => {
+    // §15.35d — the external file is the project's declaration and outranks the
+    // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
+    // "never look at the project at all" covers a redirected spec too.
+    if (specFile !== undefined && !specDisabled) {
+      return describe(readExternalSpec(specFile), specFile, initialCwd, envFilePath, field);
+    }
+
+    // A manifest read *before* the env file that disables the project spec was
+    // found is still discarded here: §11.1 says "entirely", and that includes the
+    // eager devEngines validation below.
+    if (selection === undefined || specDisabled) {
+      return { type: "NoProject", target: join(initialCwd, MANIFEST_NAME), envFilePath };
+    }
+
+    return describe(selection.data, selection.target, initialCwd, envFilePath, field);
+  })();
+
+  // §15.40 — the version file ranks strictly below the manifest and strictly
+  // above §03.5's fallback, so it is consulted on exactly the two outcomes that
+  // mean "this project said nothing about the requested tool". A `Found` is
+  // never displaced: the `devEngines` member is jup's own field and is the one a
+  // user edits to override a version file they are not free to delete.
+  //
+  // `specDisabled` is re-tested because it may have been set by an env file
+  // found further up than a version file recorded earlier in the same walk.
+  if (versionFile !== undefined && tool !== undefined && !specDisabled && result.type !== "Found") {
+    return describeVersionFile(versionFile, tool, initialCwd, result.envFilePath);
   }
 
-  // A manifest read *before* the env file that disables the project spec was
-  // found is still discarded here: §11.1 says "entirely", and that includes the
-  // eager devEngines validation below.
-  if (selection === undefined || specDisabled) {
-    return { type: "NoProject", target: join(initialCwd, MANIFEST_NAME), envFilePath };
-  }
+  return result;
+}
 
-  return describe(selection.data, selection.target, initialCwd, envFilePath, field);
+/**
+ * §15.40 — the `SpecResult` for a version file, in the `describe` shape.
+ *
+ * `hasPin` is false and no `devEngines` declaration is carried, which is the
+ * truth about it: nothing here is a committed pin, so §15.23's `up` treats it as
+ * it treats a synthesised spec and §03.6's auto-pin — which fires on `NoSpec`
+ * and this is not one — leaves it alone.
+ *
+ * Parsing stays lazy for the reason `describe` keeps it lazy: a malformed file
+ * must fail the request that needed it, not the walk. Routing the synthesised
+ * string back through {@link parseSpec} rather than returning a descriptor
+ * directly is what keeps one definition of what a spec string means.
+ */
+function describeVersionFile(
+  file: VersionFile,
+  tool: string,
+  initialCwd: string,
+  envFilePath: string | undefined,
+): SpecResult {
+  const source = relative(initialCwd, file.path);
+  return {
+    type: "Found",
+    target: file.path,
+    hasPin: false,
+    envFilePath,
+    getSpec: (opts: ParseSpecOptions) =>
+      parseSpec(`${tool}@${versionFileRange(file, source)}`, source, {
+        ...opts,
+        packageManagerField: false,
+      }),
+  };
 }
 
 /**

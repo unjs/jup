@@ -24,7 +24,7 @@ always wins over the file.
 
 | Variable | Accepted values | Effect | Env file |
 |---|---|---|---|
-| `COREPACK_ENABLE_PROJECT_SPEC` | `0` | Ignore the project's `packageManager` / `devEngines` entirely; always use the fallback (last-known-good or built-in default) version. | yes |
+| `COREPACK_ENABLE_PROJECT_SPEC` | `0` | Ignore the project's `packageManager` / `devEngines`, and its version file (§15.40), entirely; always use the fallback (last-known-good or built-in default) version. | yes |
 | `COREPACK_ENABLE_STRICT` | `0` | Don't error when the invoked package manager differs from the project's. Behaves as if every command were transparent (§01.4): the project's own package manager still honours the pin; a different one falls back to its global default. | yes |
 | `COREPACK_ENABLE_AUTO_PIN` | `1` | When the project has a `package.json` but no spec, resolve and write a `packageManager` pin before running. | yes |
 | `COREPACK_DEFAULT_TO_LATEST` | `0` | Never query the registry for "latest", and never auto-bump last-known-good on install. Use the compiled-in default version. | yes |

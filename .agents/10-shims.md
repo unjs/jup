@@ -286,6 +286,21 @@ that report answers is "what does this name currently resolve to?", and for `bun
 is the interesting question precisely because the answer is usually someone else's
 install.
 
+### Living beside a version manager
+
+`enable node` claims the name `node` on `PATH`, and on a great many machines something
+else already has it — nvm being the common case. There is no arbitration and none is
+required: whichever shim directory comes first on `PATH` wins, and nvm re-prepends its
+own on every shell start and on every `nvm use`, so after an `nvm use` nvm's `node` is
+normally the one that runs.
+
+This is why the last row of the table is a **MUST** rather than a preference. A bare
+`jup enable` never claims `node`, so the collision exists only for someone who typed
+`jup enable node`, which is a deliberate act with a predictable outcome. §15.40 is the
+other half of the same posture: jup **reads** `.nvmrc` and leaves everything else about
+a machine's version manager alone — it installs no shell hooks, writes no profile, and
+never removes or shadows another tool's directory.
+
 ## 10.6 `disable`
 
 ```

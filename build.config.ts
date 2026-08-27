@@ -49,6 +49,7 @@ export const WARM_MODULES = [
   "project/env.ts",
   "project/lockfile.ts",
   "project/manifest.ts",
+  "project/version-file.ts",
   "run/exec.ts",
   "utils/json.ts",
   "utils/self.ts",

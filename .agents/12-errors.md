@@ -207,7 +207,15 @@ Unsupported hash algorithm '<algo>' in the packageManager field                 
 <name>@<reference> publishes no artifact for <platform>-<arch> (this version ships: <targets>)                                   §15.28
 Unable to execute <binPath>: <reason>                                                       §15.28
 "packageManager" cannot name <name>: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead   §15.39
+Invalid <source>: expected a single version, optionally with # comments and key=value lines   §15.40
+Unsupported version "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"   §15.40
 ```
+
+The two version-file messages name `<source>` — the file's path relative to the
+initial cwd, the same origin §03.4 reports for a manifest — because in a monorepo
+which `.nvmrc` spoke is the first thing the reader needs. Neither is a warning:
+falling back to the compiled-in default would run a version the project explicitly
+did not ask for.
 
 The three per-host messages are deliberately distinct. The first two say the **tool**
 does not cover this host — it is outside §15.28's normalised vocabulary — and the

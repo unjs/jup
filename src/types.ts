@@ -29,6 +29,26 @@ export type ToolKind = "package-manager" | "runtime";
  */
 export type DevEnginesField = "packageManager" | "runtime";
 
+/**
+ * §02.3, §15.40 — a file the tool's own ecosystem writes the wanted version
+ * into, consulted when the manifest declares nothing for this tool.
+ *
+ * Per **entry**, so the name of the file is a table fact and appears nowhere
+ * else: §15.21 requires that adding one be a data-only change, and hardcoding
+ * "if the tool is node, read `.nvmrc`" anywhere in §03 would be exactly the
+ * name-in-the-structure that rule forbids.
+ *
+ * `format` is the dialect of the contents, not the file name — two ecosystems
+ * that spell the same grammar differently are two formats, and two file names
+ * carrying one grammar are one.
+ */
+export interface VersionFileSpec {
+  /** File name, looked for in each directory of §03.1's walk. */
+  path: string;
+  /** Content grammar. `"nvm"` is `.nvmrc` as `nvm_process_nvmrc_content` reads it. */
+  format: "nvm";
+}
+
 /** §02.1 — a tool name plus anything range-ish: version, range, tag, URL. */
 export interface Descriptor {
   name: string;
@@ -215,6 +235,15 @@ export interface ToolDefinition {
     commands: string[][];
   };
   ranges: Array<readonly [range: string, spec: ToolSpec]>;
+  /**
+   * §02.3, §15.40 — the version file this entry's ecosystem already writes.
+   *
+   * Absent for every package manager, and for a runtime whose ecosystem has no
+   * such convention: it is not a property of the {@link ToolKind}. It ranks
+   * strictly below the manifest — §03.1 consults it only where the manifest
+   * declared nothing — and is never written back.
+   */
+  versionFile?: VersionFileSpec;
   /**
    * §10.5 — whether a bare `jup enable` installs this entry's shims.
    *

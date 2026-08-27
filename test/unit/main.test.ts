@@ -1116,6 +1116,29 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * Held at 246,000 rather than the 244,753 this leaves, on the same terms as
    * every raise above.
+   *
+   * And from 246,000 to 258,000 for §15.40's version file. Source +11,978:
+   * `project/version-file.ts` +6,859 (a new warm module — the reader, nvm's
+   * content grammar, and the prose stating why the LTS aliases are refused on
+   * the data rather than on principle), `project/manifest.ts` +3,153 (the read
+   * inside the walk, and the `Found` a version file produces), `errors.ts`
+   * +1,248 (two messages) and `config/table.ts` +718 (one entry field and its
+   * accessor).
+   *
+   * Measured, `_warm.mjs` went 90,862 -> 93,343, **+2,481 bytes or +2.73%** —
+   * a larger emitted delta than §15.39's for a source delta four times the size,
+   * because this one adds actual executable code rather than a branch: a file
+   * read, a line-by-line parse, and two long message strings. The ratio is the
+   * thing to note. Source grew by 4.9% and the chunk by 2.7%, which is the usual
+   * signature of a prose-heavy module; a future change where those two numbers
+   * converge is one that added code, not comments.
+   *
+   * It cannot move off the warm path: §03.1 reads the file *during* the walk,
+   * and the walk is synchronous, so there is no dynamic-import seam of the kind
+   * `pin.ts` and `resolve.ts` use. What keeps the cost off a `pnpm` run is
+   * cheaper than a seam and is not visible here — the whole path is skipped
+   * unless the requested tool's table entry declares a `versionFile`, which
+   * only `node` does, so the bytes are parsed and never executed.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1127,6 +1150,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(246_000);
+    ).toBeLessThanOrEqual(258_000);
   });
 });

@@ -625,6 +625,30 @@ export const messages = {
   runtimeInPackageManager: (name: string) =>
     `"packageManager" cannot name ${name}: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead`,
 
+  /* §15.40 — version files ------------------------------------------------ */
+
+  /**
+   * The file exists and does not carry exactly one version.
+   *
+   * Not a fallback: a file written to be obeyed and unreadable is a mistake to
+   * report, not a reason to quietly run the compiled-in default. nvm refuses the
+   * same input (`nvm_nvmrc_invalid_msg`), so an `.nvmrc` this rejects was already
+   * broken for the tool that reads it every day.
+   */
+  versionFileInvalid: (source: string) =>
+    `Invalid ${source}: expected a single version, optionally with # comments and key=value lines`,
+
+  /**
+   * The file carries one version and it is not a version.
+   *
+   * `lts/*` and `lts/<codename>` are the words that reach this most often, and
+   * the message deliberately does not single them out: every nvm alias fails for
+   * its own reason and the remedy is the same one. Naming `devEngines.runtime`
+   * is the point — it is the field that can express what the alias meant.
+   */
+  versionFileUnsupported: (declared: string, source: string) =>
+    `Unsupported version ${json(declared)} in ${source}: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"`,
+
   /* §15.11 — one verification tier ---------------------------------------- */
 
   /**

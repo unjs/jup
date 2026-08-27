@@ -8,6 +8,10 @@ Which manifest field carries the answer depends on the tool's `kind` (§02.3):
 `devEngines.runtime` for a runtime. Everything else in this file — the walk, the env
 file, the parse, the reconciliation — is one code path over both.
 
+A tool whose table entry declares a `versionFile` (§02.3, §15.40) has one more place
+to look, and it is the last one: the manifest is asked first, and the version file
+answers only where the manifest said nothing about that tool.
+
 ## 3.1 The upward walk
 
 Starting at `cwd`, walk toward the filesystem root. At each directory `d`:
@@ -20,7 +24,11 @@ Starting at `cwd`, walk toward the filesystem root. At each directory `d`:
    only `…/node_modules/foo` and `…/node_modules/@scope/foo` are.
 2. If no env file has been loaded yet and env files are enabled, attempt to load one
    from `d` (§3.2).
-3. Read `d/package.json`.
+3. If the requested tool declares a `versionFile` (§02.3) and none has been recorded
+   yet, attempt to read `d/<versionFile.path>`. `ENOENT` means absent; any other I/O
+   error propagates. Only the **nearest** one is ever kept, and finding one does not
+   stop the walk. See *Version files* below.
+4. Read `d/package.json`.
    * `ENOENT` → continue to parent.
    * Any other I/O error → propagate.
    * Content parses to a non-object or fails to parse → **fatal**:
@@ -53,6 +61,87 @@ Two consequences a re-implementation MUST reproduce:
 > That is usually the right answer for a monorepo, but it is surprising and
 > undocumented. A conforming implementation MUST reproduce it, and SHOULD name the
 > file it is about to modify in the auto-pin notice.
+
+### Version files (§15.40)
+
+Step 3 is skipped entirely — no `stat`, no open — unless the requested tool's table
+entry declares a `versionFile`, which no package manager does. A conforming
+implementation MUST:
+
+* look for it in the directories the walk visits anyway, keep the **first** (nearest)
+  one found, and not let it stop the walk;
+* skip it on a **mutating** walk (§15.27). §3.7 writes the `devEngines` member and
+  nothing else, so the file a command is about to edit is always the manifest, and an
+  unreadable version file must not block the command that would replace it;
+* skip it wherever the manifest would also be skipped — `COREPACK_ENABLE_PROJECT_SPEC=0`
+  means "never look at the project at all" (§11.1), and that covers this too;
+* use it **only** when the walk's result would otherwise be `NoSpec` or `NoProject`
+  for the requested tool. A `Found` is never displaced: the `devEngines` member is
+  jup's own field, and it is what a user edits to override a version file they are
+  not free to delete.
+
+When it is used, the result is a `Found` whose `target` is the version file's path,
+with no `devEngines` declaration and `hasPin` false — nothing in it is a committed
+pin. Because it is a `Found`, §3.6's auto-pin does not fire: the project has already
+said what it wants.
+
+The target being the version file has one visible consequence: a version file
+carrying a **range** resolves through `.jup.lock` like any other range (§15.23), and
+the record is written **beside the version file** — `dirname(target)`, as for a
+manifest. In a monorepo that is next to the `.nvmrc` that declared the range, not at
+the repository root. An exact version needs no lockfile and writes none.
+
+The contents are parsed **lazily**, exactly as `parseSpec` is: a version file that
+cannot be read must fail the request that needed it, not the walk. Both failures are
+errors and neither falls back to §3.5's default — a file written to be obeyed and not
+obeyable is a mistake to report, not a reason to silently run something else.
+
+#### `format: "nvm"`
+
+The grammar of `.nvmrc`, as nvm itself reads it (`nvm_process_nvmrc_content`):
+
+1. On each line, remove `#` and everything after it, then trim. Drop blank lines.
+2. A line whose text before the first `=` is a non-empty **identifier**
+   (`[A-Za-z_][\w.-]*`) is a `key=value` setting, and is **ignored** — those are
+   nvm's own settings and jup has no counterpart for any of them. Ignoring rather
+   than validating is deliberate: jup is not a linter for another tool's file, and
+   rejecting an unrecognised key would break on nvm's next release.
+3. Every other non-empty line is a candidate **version**. Exactly one MUST remain; a
+   file with two, or with none, is an error.
+
+> Step 2 narrows nvm's rule, which is "the line contains an `=`". That is exact for
+> nvm's vocabulary and wrong for jup's, because `>=18 <21` is a range this reader
+> accepts. The empty-key case (`=20`) stays nvm's: it is the version line, not a
+> setting, and it happens to round-trip since §04.2's grammar accepts a leading `=`.
+
+The surviving line becomes the descriptor's `range`:
+
+| Content | Range |
+| --- | --- |
+| `20`, `v20`, `20.10`, `v20.10.0`, `20.x`, `^20`, `>=18 <21` | itself, unchanged |
+| `node`, `stable` | the `latest` dist-tag |
+| anything else | error |
+
+The first row is the whole point and is not a coincidence worth hiding: §04.2's
+partial-version grammar accepts a leading `v`, so the numeric half of nvm's
+vocabulary — which is the overwhelming majority of `.nvmrc` files — is *already* jup
+range syntax. Ranges nvm would not understand are accepted too; the file is being
+read by jup, and narrowing it to nvm's subset would be arbitrary.
+
+The refusals are the rest of nvm's aliases, and they are refused for reasons rather
+than for tidiness:
+
+* `lts/*` and `lts/<codename>` have no data source. The `node` launcher package
+  publishes `latest` and `v4-lts` … `v20-lts`, and the series tags stop there — so
+  `lts/*` cannot be answered at all, and `lts/<codename>` would need a compiled-in
+  codename-to-major table growing by one release per LTS line, which is the shape
+  §15.21 exists to refuse.
+* `system` asks for a node jup did not install and cannot vouch for (§06). `iojs`,
+  `default` and any user-defined alias name state in someone's `$NVM_DIR`, not a
+  requirement of the project.
+
+All of them take one message, which names the word and points at the `devEngines`
+member — the field that can express what the alias meant (§12.12).
 
 ### Result type
 
@@ -206,8 +295,9 @@ field, and the rules collapse accordingly:
 * the result is `` `${de.name}@${de.version ?? "*"}` `` — the `pm`-absent branch,
   which is the only branch a runtime has.
 * `devEngines.runtime` absent, or naming a different tool, yields `NoSpec` for this
-  request. §03.5 then falls back exactly as it does for a package manager in an
-  unpinned project.
+  request — and that is the outcome §15.40's version file may then answer, for an
+  entry that declares one. Failing that, §03.5 falls back exactly as it does for a
+  package manager in an unpinned project.
 
 A manifest may declare both members. They are read independently and neither
 constrains the other, so a pnpm project that also pins `node` is one manifest with
@@ -295,6 +385,13 @@ switch (specResult.type):
                                   `This project is configured to use ${spec.name} because ${target} has a "packageManager" field`)
               else → spec
 ```
+
+**§15.40 — a version file arrives here as a `Found`.** It is resolved during
+discovery (§3.1), not here: by the time reconciliation runs, a version file that
+spoke has already become the spec result, so this table is unchanged and the name
+mismatch it guards cannot arise (the name comes from the entry that declared the
+file). The `NoSpec` branch — and with it auto-pin — is reached only when the version
+file was absent, unreadable, or not looked for.
 
 **§15.39 — the spec being reconciled is the one for the requested tool.**
 `specResult` is what §03.1 and §03.3 produced *for this request*: the

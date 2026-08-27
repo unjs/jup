@@ -25,7 +25,7 @@ Start with the overview, then follow the files in numeric order when implementin
 | --- | --- |
 | [`01-overview.md`](./01-overview.md) | Architecture, invocation modes, and the complete request flow |
 | [`02-data-model.md`](./02-data-model.md) | Descriptors, locators, specs, tool kinds, and the built-in tool registry |
-| [`03-project-spec.md`](./03-project-spec.md) | Manifest discovery, `packageManager`, `devEngines.packageManager`, `devEngines.runtime`, and env files |
+| [`03-project-spec.md`](./03-project-spec.md) | Manifest discovery, `packageManager`, `devEngines.packageManager`, `devEngines.runtime`, version files (`.nvmrc`), and env files |
 | [`04-version-resolution.md`](./04-version-resolution.md) | Tags, ranges, the supported semver operations, cache lookup, and last-known-good versions |
 | [`05-registry.md`](./05-registry.md) | HTTP behavior, the npm registry protocol, authentication, and proxies |
 | [`06-integrity.md`](./06-integrity.md) | Digest suffixes, npm registry signatures, and trusted keys |
@@ -49,7 +49,7 @@ An implementation conforms to this specification when it:
 - satisfies every **MUST** in files 01 through 12;
 - satisfies the additional requirements in §15;
 - passes tests 1–147 in §13; and
-- passes tests 148–236 in §15.38.
+- passes tests 148–243 in §15.38.
 
 Both §14 and §15 define intentional differences from Corepack. Section 14 records differences found while studying Corepack's source. Section 15 adds requirements derived from its issue tracker. If the two sections cover the same behavior, §15 takes precedence.
 

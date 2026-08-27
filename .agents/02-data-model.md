@@ -90,6 +90,10 @@ Each supported tool has one definition:
     [range: string]: PackageManagerSpec
   },
   shimByDefault?: boolean,      // §10.5; absent means true
+  versionFile?: {               // §15.40; absent means "this tool has none"
+    path: string,               // file name, looked for in §3.1's walk
+    format: "nvm",              // content grammar
+  },
 }
 ```
 
@@ -132,6 +136,25 @@ fold such a digest into the locator's reference.
 any project — `bun`, `deno` and `nub` all run a file you hand them — where claiming
 the name on `PATH` would be a takeover nobody asked for. Naming the entry
 (`jup enable bun`) still installs it, and `disable` with no names still removes it.
+
+### `versionFile`
+
+`versionFile` names a file the tool's **own ecosystem** already writes the wanted
+version into — `.nvmrc` for node — and is what lets jup answer correctly in a
+repository that has never heard of it. §15.40 states the rule; the parts that belong
+to the data model are these:
+
+* It is a per-entry **table** fact, so the file name appears in the table and nowhere
+  else. §15.21 requires that adding one be a data-only change, and §03's walk
+  therefore must not know what it is looking for.
+* It is **not** a property of `kind`. A runtime whose ecosystem has no such
+  convention declares none, and nothing stops a package manager from declaring one if
+  its ecosystem grows a file worth reading.
+* `format` is the grammar of the contents, not the file name. Two ecosystems spelling
+  the same grammar differently are two formats; two file names carrying one grammar
+  are one.
+* It ranks strictly **below** the manifest and strictly **above** §03.5's fallback,
+  and jup never writes it (§03.7 writes the `devEngines` member and only that).
 
 `ranges` exists because a package manager's *download shape* changes across major
 versions (pnpm's bin moved `.js` → `.cjs` → `.mjs`; Yarn 2+ is a single JS file from
@@ -536,6 +559,7 @@ Single range `*`:
 | `transparent.commands` | `[]` — a runtime is never enforced against (§2.3) |
 | `transparent.default` | — |
 | `shimByDefault` | `false` — required of a runtime (§2.3, §10.5) |
+| `versionFile` | `{path: ".nvmrc", format: "nvm"}` — §15.40 |
 
 Single range `*`:
 * `url` = `https://registry.npmjs.org/node-{target}/-/node-{target}-{}.tgz`
@@ -565,6 +589,14 @@ Single range `*`:
 > request, exactly as deno's absence does (§15.28). `linux-armv7l` — which node
 > *does* publish — is outside §15.28's `{arch}` vocabulary altogether and is the
 > other error, `unsupportedArch`.
+
+> **`.nvmrc`.** The one field here that is not about fetching bytes. `node` is the
+> first entry whose ecosystem has a version file of its own, and it is a widely
+> written one — so a checkout that has never heard of jup still says which node it
+> wants, and §15.40 is jup reading it. It ranks below `devEngines.runtime`, is never
+> written, and answers only what a semver range can answer: the numeric forms need no
+> translation at all, `node` and `stable` are the newest release, and the LTS aliases
+> are refused because the launcher's dist-tags cannot answer them (§15.40).
 
 > **On consent.** §15.21's requirement covers this entry too, and it is the one where
 > the launcher package is not published by the project whose name it carries: `node`

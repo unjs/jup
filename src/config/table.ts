@@ -24,6 +24,7 @@ import type {
   PackageManagerSpec,
   RegistrySpec,
   ToolKind,
+  VersionFileSpec,
 } from "../types.ts";
 
 /**
@@ -459,6 +460,11 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     // Required of a runtime (§02.3, §10.5), not a judgement call: `node` means
     // something outside a project on every machine that has ever had one.
     shimByDefault: false,
+    // §15.40 — the file node's own ecosystem already writes the wanted version
+    // into. `devEngines.runtime` outranks it and is the only field jup writes;
+    // this is read, in the directories §03.1 was walking anyway, and only where
+    // the manifest said nothing about the runtime.
+    versionFile: { path: ".nvmrc", format: "nvm" },
     // One band. See {@link NODE_TARGETS} for why the map has not had to move.
     ranges: [["*", { ...NODE_BAND, targets: NODE_TARGETS }]],
   },
@@ -485,6 +491,16 @@ export function toolKind(name: string): ToolKind {
 /** §15.39 — is this entry a runtime? The four questions below are the only callers. */
 export function isRuntime(name: string): boolean {
   return getDefinition(name)?.kind === "runtime";
+}
+
+/**
+ * §03.1, §15.40 — the version file this entry declares, if it declares one.
+ *
+ * The only reader of the field, and the reason §03.1 can consult `.nvmrc`
+ * without the string `.nvmrc` appearing outside this file.
+ */
+export function versionFileFor(name: string): VersionFileSpec | undefined {
+  return getDefinition(name)?.versionFile;
 }
 
 /**
