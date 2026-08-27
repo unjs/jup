@@ -112,13 +112,33 @@ afterEach(() => {
 });
 
 describe("target set (§10.5, §15.16)", () => {
-  // §15.16 redirected this row: npm used to be excluded by default.
+  // §15.16 redirected this row: npm used to be excluded by default. §15.21's
+  // `aube` joins it — a package manager, so it is in the default set; `bun` and
+  // `deno` are runtimes and stay out (`shimByDefault: false`).
   it("117: defaults to every package manager, npm included", () => {
-    expect(targetBinaries([])).toEqual(["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]);
+    expect(targetBinaries([])).toEqual([
+      "npm",
+      "npx",
+      "pnpm",
+      "pnpx",
+      "yarn",
+      "yarnpkg",
+      "aube",
+      "aubr",
+      "aubx",
+    ]);
   });
 
   it("175: --exclude npm restores the old default", () => {
-    expect(targetBinaries([], ["npm"])).toEqual(["pnpm", "pnpx", "yarn", "yarnpkg"]);
+    expect(targetBinaries([], ["npm"])).toEqual([
+      "pnpm",
+      "pnpx",
+      "yarn",
+      "yarnpkg",
+      "aube",
+      "aubr",
+      "aubx",
+    ]);
   });
 
   it("expands a single name to its full binary set", () => {

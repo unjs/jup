@@ -385,12 +385,19 @@ describe("§15.30 corepack info", () => {
       "bun",
       "bunx",
       "deno",
+      // §15.21's aube is per-host too and is *not* in that group: it is a
+      // package manager, so a bare `enable` claims its names like any other.
+      "aube",
+      "aubr",
+      "aubx",
     ]);
 
     // §15.28 / §10.5 — `enable` with no names left these alone, so the report
     // shows no shim for them while still showing the name.
     const bun = report.shims.entries.find((entry) => entry.binary === "bun")!;
     expect(bun.shim).toBeNull();
+    const aubx = report.shims.entries.find((entry) => entry.binary === "aubx")!;
+    expect(aubx.shim).toBe(join(shimDirectory, "aubx"));
 
     const yarn = report.shims.entries.find((entry) => entry.binary === "yarn")!;
     expect(yarn.shim).toBe(join(shimDirectory, "yarn"));

@@ -49,12 +49,15 @@
 ## Standing hazards
 
 * **The warm byte ceiling is a tripwire, not a budget** (`test/unit/main.test.ts`,
-  now 226,000). Raising it is allowed; raising it silently is not. §15.28's bun and
-  deno entries took it from 208,000 and cost a measured **+6,005 bytes (+7.5%)** in
-  `dist/_warm.mjs` — by far the largest raise so far, and the first where the cost is
-  code rather than prose. The accounting is in the test's own docstring; read it
-  before adding a third native entry, because the machinery is now paid for and the
-  next one should be nearly free.
+  now 234,000). Raising it is allowed; raising it silently is not. §15.28's bun and
+  deno entries took it from 208,000 to 226,000 and cost a measured **+6,005 bytes
+  (+7.5%)** in `dist/_warm.mjs` — by far the largest raise so far, and the first where
+  the cost was code rather than prose. §15.21's `aube` then took it to 234,000 for
+  **+1,964 bytes (+2.3%)**, which is what "the machinery is now paid for" turned out
+  to be worth: a third of the cost for a comparable entry, and most of the source
+  delta is the prose explaining the libc probe. The accounting is in the test's own
+  docstring. A fourth native entry that needs no new host dimension should cost
+  roughly the ~700 bytes of table data alone.
 * **A per-host digest is host-local, and references travel** (§15.28). Both places a
   reference is stored are copied between machines — `packageManager` is committed,
   `lastKnownGood.json` is baked into images and warmed caches — and §06.1 row 1 reads
@@ -92,17 +95,21 @@
 
 ## Not an engineering decision
 
-**Bun's and Deno's maintainers have not been asked.** §15.21 and §15.28 both require a
-package manager's maintainers to agree before an entry ships, and the entries are in
-the table now. Bun's reportedly declined the same request from corepack (#295). This
-is not a technical loose end and no further implementation work resolves it; it is a
-conversation someone has to have before a release carries these entries. Until then it
-is one more reason the item below stands.
+**Bun's, Deno's and aube's maintainers have not been asked.** §15.21 and §15.28 both
+require a package manager's maintainers to agree before an entry ships, and all three
+entries are in the table now. Bun's reportedly declined the same request from corepack
+(#295). This is not a technical loose end and no further implementation work resolves
+it; it is a conversation someone has to have before a release carries these entries.
+Until then it is one more reason the item below stands.
+
+aube is the one where the ask is least likely to be refused and most likely to be
+*wanted*, since it is a package manager rather than a runtime and it is the only entry
+whose names a bare `jup enable` claims — which makes asking more important, not less.
 
 
 `package.json` is still `0.0.0` and nothing has been published. Shipping is not neutral: the
 package installs a `corepack` bin alias, §15.33 moved yarn's compiled-in default from
 Classic 1.x to Berry 4.x so a bare `yarn` in an unpinned project behaves differently from
-corepack's, and the table now ships two entries whose maintainers have not been consulted.
+corepack's, and the table now ships three entries whose maintainers have not been consulted.
 All three are deliberate and documented; all three want a human to agree before a release
 carries them.

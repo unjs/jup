@@ -591,9 +591,9 @@ things.
 * An unknown name in `packageManager` remains an error, not a URL-fetch fallback
   (§03.4).
 
-### bun and deno are entries
+### bun, deno and aube are entries
 
-Both ship in §02.5. They are the first entries to use §15.28's per-host model, and
+All three ship in §02.5. They are the entries that use §15.28's per-host model, and
 adding them was a data-only change in the sense above — the machinery they use is
 §15.28's, declared per band, not per name.
 
@@ -607,10 +607,29 @@ What that model has to accommodate, and what §02.4 and §15.28 now spell out, i
 * the compiled-in `default` is likewise bare (§02.3), and clears §15.11's tier
   through the registry signature rather than through a literal.
 
-Both entries set `shimByDefault: false` (§02.3, §10.5). `bun` and `deno` name
-runtimes people install deliberately and run outside any project, so a bare
-`jup enable` — which existing users run on upgrade, having asked for nothing —
-must not claim those names on `PATH`. `jup enable bun` is the opt-in.
+`bun` and `deno` set `shimByDefault: false` (§02.3, §10.5). They name runtimes
+people install deliberately and run outside any project, so a bare `jup enable` —
+which existing users run on upgrade, having asked for nothing — must not claim those
+names on `PATH`. `jup enable bun` is the opt-in.
+
+**aube** (`@endevco/aube`) is the third, added under the same model, and it is where
+that flag's meaning gets tested. aube is a package manager and nothing else: `aube`,
+`aubr` and `aubx` name no runtime and mean nothing outside a project. So it does
+**not** opt out, and a bare `jup enable` claims its three names exactly as it claims
+`pnpm` and `pnpx`. The line §10.5 draws is runtime-versus-package-manager; an entry
+that opted out merely for being recent would freeze the default set at corepack's
+three names forever.
+
+Two further things aube contributes to the model:
+
+* Its published names are `<host>` verbatim, so its `targets` map is an identity —
+  and still load-bearing, because aube publishes **no `darwin-x64` build at all**.
+  A `targets` map is a declaration of the host set, not a spelling table, and this is
+  the entry that shows the difference.
+* It ships distinct musl artifacts, which is what added the libc half of §15.28's
+  host name. That fixed bun on Alpine as a side effect (bun publishes musl builds too
+  and was being handed the glibc one) and made deno's absence of a musl build an
+  error naming the host instead of a loader failure at exec time.
 
 > **On consent.** The requirement below is unchanged and is not satisfied by this
 > section. Bun's maintainers reportedly asked corepack not to add them (#295), and
@@ -827,6 +846,17 @@ This assumption is load-bearing across corepack: one URL template per version
 * `url` MAY contain `{platform}` and `{arch}` placeholders alongside `{}`, resolved
   against a normalised platform/arch pair (`linux`/`darwin`/`win32` ×
   `x64`/`arm64`).
+* The **host name** — what `targets` is keyed by and what §15.23 records a digest
+  under — is that pair, and on a musl Linux the pair suffixed `-musl`. Linux is the
+  one platform where `<platform>-<arch>` does not name a binary interface: a glibc
+  build does not start on Alpine, and a publisher shipping both says so in the
+  artifact name (`@oven/bun-linux-x64-musl`, `@endevco/aube-linux-x64-musl`). glibc
+  MUST stay unsuffixed, so every existing `targets` map and every recorded
+  `.jup.lock` key keeps its meaning and only a musl host sees a new one. How the
+  libc is detected is unspecified — it MUST describe the host rather than the build
+  machine; the reference implementation stats the two loader paths and reads musl
+  only when glibc's is absent, so that a glibc distribution with `musl` merely
+  installed as a package is not misread.
 * `url` and `artifactRegistry.package` MAY contain `{target}`, resolved through the
   band's own `targets` map from that same normalised pair. A pair the band does not
   declare MUST fail **before any request**, naming the host and what the band does
@@ -1196,3 +1226,8 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 219 | A version whose band declares no artifact for this host (e.g. `bun@1.2.0` on Windows arm64) | fails before any request, naming the host and what that version ships for (§12, §15.28) |
 | 220 | `deno` in a directory with no project spec, `JUP_DEFAULT_TO_LATEST=1` | runs; no digest is pinned from the launcher package, and the recorded default is a bare version (§04.5, §15.28) |
 | 221 | A `lastKnownGood.json` whose per-host entry carries a digest, as an earlier build wrote | the suffix is dropped on read and the file rewritten; the run makes no network request, and a non-per-host entry's digest is untouched (§04.5, §15.28) |
+| 222 | `packageManager: "aube@<v>"` | the host's `@endevco/aube-<host>` tarball is fetched and executed directly; the launcher is never downloaded, and the marker's `bin` comes from the artifact package's own declaration (§07.7, §15.21) |
+| 223 | `aubr <script>` and `aubx <args>` | both reach the same cached install, each under its own `argv[0]` (§15.21, §15.28) |
+| 224 | `enable` with no names | `aube`, `aubr` and `aubx` are installed while `bun` and `deno` are not — the default set is decided by `shimByDefault`, not by how recent the entry is (§10.5, §15.21) |
+| 225 | A Linux host whose glibc loader is absent and whose musl loader is present | the host names itself `<platform>-<arch>-musl`; the musl artifact is requested, and an entry that publishes no musl build (deno) fails before any request naming that host (§15.28) |
+| 226 | `aube` on `darwin-x64`, a host it has never published for | fails before any request, naming the host and the complete published set — the case a `targets` map that is otherwise an identity exists for (§12, §15.21) |

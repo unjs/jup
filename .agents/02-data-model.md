@@ -12,7 +12,7 @@ InstallSpec { location, bin, hash }             "where it landed on disk"
 ```
 
 * **Descriptor** — `name` is a package-manager name (`npm` | `pnpm` | `yarn` | `bun` |
-  `deno`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
+  `deno` | `aube`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
   version, a semver range, a dist-tag (`latest`, `next`, `canary`, `rc`, `stable`),
   `*`, or a URL. Descriptors are what §03 produces and §04 consumes.
 * **Locator** — `reference` is an exact semver version, optionally carrying a build
@@ -152,8 +152,16 @@ described by §15.28:
 |---|---|---|
 | `{platform}` | `linux` \| `darwin` \| `win32` | `url`, `artifactRegistry.package` |
 | `{arch}` | `x64` \| `arm64` | `url`, `artifactRegistry.package` |
-| `{target}` | `targets[<platform>-<arch>]` | `url`, `artifactRegistry.package` |
+| `{target}` | `targets[<host>]` | `url`, `artifactRegistry.package` |
 | `{exe}` | `.exe` on Windows, empty elsewhere | `bin` **paths** (never bin names) |
+
+`<host>` — the key `targets` is indexed by — is `<platform>-<arch>`, and on a musl
+Linux `<platform>-<arch>-musl`. Linux is the one platform where the pair alone does
+not name a binary interface, and publishers that ship both say so in the artifact
+name (`@oven/bun-linux-x64-musl`, `@endevco/aube-linux-x64-musl`). glibc stays
+unsuffixed, so an existing `targets` map and an existing `.jup.lock` key keep meaning
+what they meant; a musl host is the only one that sees a new key, and it is the host
+that was previously being handed a glibc binary that could not start.
 
 `{target}` exists because published per-host artifact names are not the product of
 two independent axes: bun renames both halves (`windows-aarch64` for what Node calls
@@ -333,11 +341,13 @@ the host set bun had actually published at that point in its history:
 |---|---|
 | `*` | `darwin-arm64`→`darwin-aarch64`, `darwin-x64`→`darwin-x64`, `linux-arm64`→`linux-aarch64`, `linux-x64`→`linux-x64` |
 | `>=1.1.0` | …and `win32-x64`→`windows-x64` |
+| `>=1.1.39` | …and `linux-arm64-musl`→`linux-aarch64-musl`, `linux-x64-musl`→`linux-x64-musl` |
 | `>=1.3.10` | …and `win32-arm64`→`windows-aarch64` |
 
-> `@oven/bun-*` first appeared in 0.5.0, Windows in 1.1.0, Windows on arm64 in 1.3.10.
-> Reversed, the narrowest true answer wins, so `bun@1.2.0` on Windows arm64 reports
-> that *that version* has no build for this host rather than 404ing.
+> `@oven/bun-*` first appeared in 0.5.0, Windows in 1.1.0, the musl builds in 1.1.39,
+> Windows on arm64 in 1.3.10. Reversed, the narrowest true answer wins, so `bun@1.2.0`
+> on Windows arm64 reports that *that version* has no build for this host rather than
+> 404ing.
 
 ### deno
 
@@ -369,8 +379,60 @@ Single range `*`:
 > and `deno add` all act on the project they are standing in, so §03.5's enforcement
 > still applies to them.
 
+> Deno publishes no musl build, and the `-glibc` suffix on its Linux target names says
+> so. A musl host is therefore outside its declared set and gets `unsupportedTarget`,
+> naming `linux-x64-musl` — which is the true answer, and better than the glibc
+> artifact it would otherwise be handed.
+
 > **On `transparent.commands` for both.** `bun x` and `bunx` are the same operation
 > and both are listed, because §01.4 matches an argv *prefix* and a user types either.
+
+### aube
+
+> §15.21, the same per-host model a third time. `@endevco/aube` is a ~12 kB package
+> whose `preinstall` runs `npm install @endevco/aube-<host>` and hardlinks the three
+> binaries out of it; jup asks for that package directly.
+
+| Field | Value |
+|---|---|
+| `default` | `2.2.0` — bare, per §2.3 |
+| `fetchLatestFrom` | `{type: npm, package: "@endevco/aube"}` |
+| `transparent.commands` | `[["aube","init"], ["aube","create"], ["aube","dlx"], ["aubx"]]` |
+| `transparent.default` | — |
+| `shimByDefault` | absent — **yes**, aube is a package manager, not a runtime (§10.5) |
+
+Single range `*`:
+* `url` = `https://registry.npmjs.org/@endevco/aube-{target}/-/aube-{target}-{}.tgz`
+* `bin` = `{"aube": "./bin/aube{exe}", "aubr": "./bin/aubr{exe}", "aubx": "./bin/aubx{exe}"}`
+* `registry` = `{type: npm, package: "@endevco/aube"}`
+* `artifactRegistry` = `{type: npm, package: "@endevco/aube-{target}"}`
+* `targets` = the identity on `darwin-arm64`, `linux-arm64`, `linux-arm64-musl`,
+  `linux-x64`, `linux-x64-musl`, `win32-arm64`, `win32-x64`
+* `exec` = `"native"`
+* `commands.use` = `["aube", "install"]`
+
+> **Why an identity map is still a map.** aube publishes under `<host>` verbatim, musl
+> suffix included, so `{target}` could in principle have been `{platform}-{arch}`. It
+> is a `targets` map because a map is a *declaration of the host set*, and aube's has
+> a hole: **there is no `darwin-x64` build.** An Intel Mac must be told that before any
+> request rather than after a 404 on a package that has never existed.
+
+> **One band, deliberately.** aube's host set moved once — the musl artifacts start at
+> `1.0.0-beta.12` — and that boundary is unexpressible: §2.3 matches bands with
+> prerelease-tolerant satisfaction, which strips the prerelease from both sides, so
+> `>=1.0.0-beta.12` and `>=1.0.0` are the same range and neither excludes
+> `1.0.0-beta.2`. bun's bands work because its boundaries are releases. Declaring a
+> band the lookup cannot honour would be worse than the 404 the eleven affected
+> prereleases get on Alpine.
+
+> **`aubr` and `aubx`** are `aube run` and `aube dlx` — three names over hardlinks of
+> one executable, dispatching on `argv[0]`, the same arrangement as `bun`/`bunx`. Only
+> `aubx` and `aube dlx` are transparent, along with `aube init` and `aube create`,
+> which are how a project comes to exist. `aubr <script>` and `aube exec` act on the
+> project they stand in and stay subject to §03.5.
+
+> Unlike bun's and deno's, aube's per-host packages **do** declare a `bin`, so §07.7
+> reads it and the table's copy is the ordinary fallback. The two agree.
 
 ## 2.6 Trust store
 

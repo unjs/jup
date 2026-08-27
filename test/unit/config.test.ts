@@ -19,11 +19,12 @@ import {
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
+import { satisfiesWithPrereleases } from "../../src/version/semver.ts";
 import type { BinSpec, PackageManagerSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
-  it("supports exactly npm, pnpm, yarn, bun and deno", () => {
-    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn", "bun", "deno"]);
+  it("supports exactly npm, pnpm, yarn, bun, deno and aube", () => {
+    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube"]);
     expect(isSupportedPackageManager("yarn")).toBe(true);
     expect(isSupportedPackageManager("bun")).toBe(true);
     // §01.7 / §15.21 — the table is closed and compiled in. `vlt` stands in for
@@ -500,14 +501,23 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
   });
 
   it("bands bun by the host set each version actually shipped", () => {
-    expect(DEFINITIONS.bun!.ranges.map(([range]) => range)).toEqual(["*", ">=1.1.0", ">=1.3.10"]);
+    expect(DEFINITIONS.bun!.ranges.map(([range]) => range)).toEqual([
+      "*",
+      ">=1.1.0",
+      ">=1.1.39",
+      ">=1.3.10",
+    ]);
 
-    // Reversed, first match wins (§02.3): Windows arrived in 1.1.0 and Windows
-    // on arm64 in 1.3.10, so an older version must not claim either.
+    // Reversed, first match wins (§02.3): Windows arrived in 1.1.0, Alpine in
+    // 1.1.39 and Windows on arm64 in 1.3.10, so an older version must not claim
+    // any of them.
     expect(Object.keys(getSpecFor("bun", "1.0.0").targets!)).not.toContain("win32-x64");
     expect(Object.keys(getSpecFor("bun", "1.2.0").targets!)).toContain("win32-x64");
     expect(Object.keys(getSpecFor("bun", "1.2.0").targets!)).not.toContain("win32-arm64");
     expect(Object.keys(getSpecFor("bun", "1.4.0").targets!)).toContain("win32-arm64");
+    expect(Object.keys(getSpecFor("bun", "1.1.38").targets!)).not.toContain("linux-x64-musl");
+    expect(Object.keys(getSpecFor("bun", "1.1.39").targets!)).toContain("linux-x64-musl");
+    expect(Object.keys(getSpecFor("bun", "1.4.0").targets!)).toContain("linux-arm64-musl");
   });
 
   it("resolves `{target}` to the published artifact name for each host", () => {
@@ -544,7 +554,9 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
         "darwin-arm64",
         "darwin-x64",
         "linux-arm64",
+        "linux-arm64-musl",
         "linux-x64",
+        "linux-x64-musl",
         "win32-x64",
       ]),
     );
@@ -616,5 +628,121 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
   it("declares what `use` runs afterwards", () => {
     expect(getSpecFor("bun", "1.4.0").commands).toEqual({ use: ["bun", "install"] });
     expect(getSpecFor("deno", "2.9.5").commands).toEqual({ use: ["deno", "install"] });
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §15.21 — aube                                                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * aube is the third per-host entry, and it is here to hold two things the first
+ * two could not say.
+ *
+ * The first is that `targets` is a **declaration**, not a spelling table: aube's
+ * published names are `hostTarget()` verbatim, so the map is an identity and
+ * still load-bearing, because aube publishes no `darwin-x64` at all. An Intel
+ * Mac must be told that before any request rather than after a 404.
+ *
+ * The second is that `shimByDefault` is about runtimes, not about newness. bun
+ * and deno opt out because their names belong to a runtime a user installed on
+ * purpose; `aube`, `aubr` and `aubx` mean nothing outside a project, so they
+ * join npm, pnpm and yarn in the set a bare `jup enable` claims.
+ */
+describe("aube — §15.21's third per-host entry", () => {
+  afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
+
+  it("splits the launcher from the artifact, like bun and deno", () => {
+    const spec = getSpecFor("aube", "2.2.0");
+    // `@endevco/aube` is a ~12 kB `preinstall` stub; the binaries are elsewhere.
+    expect(spec.registry).toEqual({ type: "npm", package: "@endevco/aube" });
+    expect(spec.artifactRegistry).toEqual({ type: "npm", package: "@endevco/aube-{target}" });
+    expect(DEFINITIONS.aube!.fetchLatestFrom).toEqual({ type: "npm", package: "@endevco/aube" });
+    expect(spec.exec).toBe("native");
+    expect(spec.commands).toEqual({ use: ["aube", "install"] });
+    expect(isPerHost({ name: "aube", reference: "2.2.0" })).toBe(true);
+  });
+
+  it("carries a bare default, because one version is many artifacts", () => {
+    expect(DEFINITIONS.aube!.default).toBe("2.2.0");
+  });
+
+  it("gives all three names one file, for argv[0] dispatch", () => {
+    pretendHost("linux", "x64");
+    const bin = resolveSpecBin(getSpecFor("aube", "2.2.0")) as BinSpec;
+    // Unlike bun's two, these are three *different* paths in the tarball — the
+    // publisher hardlinks one executable to three names — so the dispatch is
+    // aube's own, and the table only has to name them.
+    expect(bin).toEqual({ aube: "./bin/aube", aubr: "./bin/aubr", aubx: "./bin/aubx" });
+    expect(getBinariesFor("aube")).toEqual(["aube", "aubr", "aubx"]);
+    for (const name of ["aube", "aubr", "aubx"]) {
+      expect(getPackageManagerFor(name)).toBe("aube");
+    }
+
+    pretendHost("win32", "x64");
+    expect(resolveSpecBin(getSpecFor("aube", "2.2.0"))).toEqual({
+      aube: "./bin/aube",
+      aubr: "./bin/aubr",
+      aubx: "./bin/aubx",
+    });
+  });
+
+  it("resolves `{target}` straight through, because the names already match", () => {
+    pretendHost("linux", "x64");
+    expect(getSpecUrl({ name: "aube", reference: "2.2.0" })).toBe(
+      "https://registry.npmjs.org/@endevco/aube-linux-x64/-/aube-linux-x64-2.2.0.tgz",
+    );
+    expect(
+      resolveArtifactRegistry(getSpecFor("aube", "2.2.0"), {
+        name: "aube",
+        reference: "2.2.0",
+      }),
+    ).toEqual({ type: "npm", package: "@endevco/aube-linux-x64" });
+  });
+
+  it("says so when a perfectly ordinary host has no build at all", () => {
+    pretendHost("darwin", "x64");
+    // The whole reason an identity map is still written out: `@endevco/aube-darwin-x64`
+    // has never been published, and a 404 would read as a registry problem.
+    expect(() => getSpecUrl({ name: "aube", reference: "2.2.0" })).toThrow(
+      messages.unsupportedTarget("aube", "2.2.0", "darwin-x64", [
+        "darwin-arm64",
+        "linux-arm64",
+        "linux-arm64-musl",
+        "linux-x64",
+        "linux-x64-musl",
+        "win32-arm64",
+        "win32-x64",
+      ]),
+    );
+  });
+
+  it("declares one band, because its one host change is unexpressible", () => {
+    // aube gained its musl artifacts in `1.0.0-beta.12`, and §02.3's band lookup
+    // strips prereleases from both sides — so `>=1.0.0-beta.12` would also admit
+    // `1.0.0-beta.2` and promise an artifact that does not exist. bun's bands
+    // work because its boundaries (1.1.0, 1.1.39, 1.3.10) are releases.
+    expect(DEFINITIONS.aube!.ranges.map(([range]) => range)).toEqual(["*"]);
+    expect(Object.keys(getSpecFor("aube", "2.2.0").targets!)).toContain("linux-arm64-musl");
+    expect(satisfiesWithPrereleases("1.0.0-beta.2", ">=1.0.0-beta.12")).toBe(true);
+  });
+
+  it("joins the default shim set, unlike the two runtimes", () => {
+    expect(shimsByDefault("aube")).toBe(true);
+    expect(shimsByDefault("bun")).toBe(false);
+    expect(shimsByDefault("deno")).toBe(false);
+  });
+
+  it("exempts only the commands that do not act on a project (§03.5)", () => {
+    expect(DEFINITIONS.aube!.transparent.commands).toEqual([
+      ["aube", "init"],
+      ["aube", "create"],
+      ["aube", "dlx"],
+      ["aubx"],
+    ]);
+    // `aubr` is `aube run` and `aube exec` runs a locally installed binary: both
+    // need the project, so neither is exempt.
+    expect(DEFINITIONS.aube!.transparent.commands).not.toContainEqual(["aubr"]);
+    expect(DEFINITIONS.aube!.transparent.default).toBeUndefined();
   });
 });

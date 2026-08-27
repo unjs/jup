@@ -1,5 +1,6 @@
 /**
- * §15.21 / §15.28 — bun and deno as built-in entries (rows 212–218 and 220).
+ * §15.21 / §15.28 — bun, deno and aube as built-in entries (rows 212–218, 220
+ * and 222–224).
  *
  * §15.28 required the *architecture* to admit a native package manager;
  * `15-28-native.test.ts` proves that with a fixture manager and adds nothing to
@@ -15,6 +16,11 @@
  * npm's signature over them from `@oven/bun-<target>` / `@deno/<target>`
  * (§15.28's `artifactRegistry`). Everything downstream of "which digest?" then
  * has to stop assuming there is one.
+ *
+ * aube is the third, and is here for what it does *not* share with the other
+ * two: it is a package manager rather than a runtime, so it takes part in a bare
+ * `jup enable`, and its per-host packages declare a `bin` of their own, so §07.7
+ * has something to read for once.
  *
  * The mock publishes under `hostTarget()`, so the suite asserts about whatever
  * host it is running on rather than about Linux.
@@ -63,8 +69,12 @@ const DENO_TARGETS: Record<string, string> = {
   "win32-x64": "win32-x64",
 };
 
+const AUBE_VERSION = "2.2.0";
+
 const BUN_PACKAGE = `@oven/bun-${BUN_TARGETS[hostTarget()]}`;
 const DENO_PACKAGE = `@deno/${DENO_TARGETS[hostTarget()]}`;
+/** aube publishes under `hostTarget()` verbatim, musl suffix included. */
+const AUBE_PACKAGE = `@endevco/aube-${hostTarget()}`;
 
 /**
  * A stand-in for the real binary: it reports the name it was invoked under and
@@ -103,6 +113,27 @@ const BUN_TARBALL = artifact(BUN_PACKAGE, BUN_VERSION, "bin/bun");
 // Deno's executable sits at the package root, not under `bin/`.
 const DENO_TARBALL = artifact(DENO_PACKAGE, DENO_VERSION, "deno");
 
+/**
+ * aube's per-host packages are the exception to the note above: they *do*
+ * declare a `bin`, three names over three hardlinks of one executable. So §07.7
+ * reads it, the table's copy is the fallback it is everywhere else, and the two
+ * agreeing is part of what row 222 checks.
+ */
+const AUBE_TARBALL = makeTarball([
+  {
+    path: "package/package.json",
+    content: `${JSON.stringify({
+      name: AUBE_PACKAGE,
+      version: AUBE_VERSION,
+      bin: { aube: "bin/aube", aubr: "bin/aubr", aubx: "bin/aubx" },
+    })}\n`,
+    mode: 0o644,
+  },
+  { path: "package/bin/aube", content: PROBE, mode: 0o755 },
+  { path: "package/bin/aubr", content: PROBE, mode: 0o755 },
+  { path: "package/bin/aubx", content: PROBE, mode: 0o755 },
+]);
+
 beforeAll(async () => {
   if (!POSIX) return;
   await registry.start();
@@ -114,10 +145,14 @@ beforeAll(async () => {
   registry.publish("deno", DENO_VERSION, npmTarball({ "package.json": "{}\n" }), {
     distTags: { latest: DENO_VERSION },
   });
+  registry.publish("@endevco/aube", AUBE_VERSION, npmTarball({ "package.json": "{}\n" }), {
+    distTags: { latest: AUBE_VERSION },
+  });
 
   // The artifacts, which is where §06 asks what the bytes should be.
   registry.publish(BUN_PACKAGE, BUN_VERSION, BUN_TARBALL);
   registry.publish(DENO_PACKAGE, DENO_VERSION, DENO_TARBALL);
+  registry.publish(AUBE_PACKAGE, AUBE_VERSION, AUBE_TARBALL);
 });
 
 afterAll(async () => {
@@ -125,7 +160,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.21 bun and deno", () => {
+describe.skipIf(!POSIX)("§15.21 bun, deno and aube", () => {
   function options(fixture: Fixture, env?: Record<string, string | undefined>) {
     return {
       cwd: fixture.cwd,
@@ -302,6 +337,63 @@ describe.skipIf(!POSIX)("§15.21 bun and deno", () => {
     );
     expect(exists(join(shims, "bun"))).toBe(false);
     expect(exists(join(shims, "yarn"))).toBe(false);
+  });
+
+  it("222: installs aube's host package, whose own `bin` the table agrees with", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `aube@${AUBE_VERSION}` });
+    registry.reset();
+
+    const result = await run(["aube", "install", "--prod"], options(fixture));
+
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("ran=aube args=install --prod");
+
+    // The launcher is a `preinstall` stub that shells out to `npm install`; jup
+    // runs no lifecycle scripts, so caching it would cache something inert.
+    const fetched = registry.requests.map((request) => request.path);
+    expect(fetched.some((path) => path.includes(`${AUBE_PACKAGE}/-/`))).toBe(true);
+    expect(fetched.some((path) => path.includes("/@endevco/aube/-/"))).toBe(false);
+
+    // §07.7 — unlike bun's and deno's, this package declares its own `bin`, so
+    // the marker records what the *package* said, and the table's copy did not
+    // have to be right for the run to work. It is anyway.
+    expect(JSON.parse(readMarker(fixture, "aube", AUBE_VERSION)).bin).toEqual({
+      aube: "bin/aube",
+      aubr: "bin/aubr",
+      aubx: "bin/aubx",
+    });
+  });
+
+  it("223: `aubr` and `aubx` reach the same install under their own argv[0]", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `aube@${AUBE_VERSION}` });
+
+    // `aubr` is `aube run` and needs the project; `aubx` is `aube dlx` and is
+    // transparent (§01.4). Both are the same executable three hardlinks over,
+    // and both must arrive with the name the user typed.
+    expect((await run(["aubr", "build"], options(fixture))).stdout.trim()).toBe(
+      "ran=aubr args=build",
+    );
+    expect((await run(["aubx", "cowsay", "hi"], options(fixture))).stdout.trim()).toBe(
+      "ran=aubx args=cowsay hi",
+    );
+  });
+
+  it("224: a bare `enable` claims aube's names, because aube is not a runtime", async () => {
+    const fixture = createFixture({ name: "app" });
+    const shims = join(fixture.root, "shims");
+
+    expect((await run(["enable", "--install-directory", shims], options(fixture))).exitCode).toBe(
+      0,
+    );
+    // The line §15.21 draws is runtime-versus-package-manager, not old-versus-new:
+    // `aube`, `aubr` and `aubx` mean nothing outside a project, so they belong to
+    // the default set exactly as `pnpm` and `pnpx` do.
+    expect(exists(join(shims, "aube"))).toBe(true);
+    expect(exists(join(shims, "aubr"))).toBe(true);
+    expect(exists(join(shims, "aubx"))).toBe(true);
+    expect(exists(join(shims, "bun"))).toBe(false);
+    expect(exists(join(shims, "deno"))).toBe(false);
   });
 });
 

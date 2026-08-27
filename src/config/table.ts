@@ -11,6 +11,7 @@
  * comes from npm.
  */
 
+import { existsSync } from "node:fs";
 import { messages, UsageError } from "../errors.ts";
 import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {
@@ -55,6 +56,56 @@ const BUN_POSIX_TARGETS = {
   "darwin-x64": "darwin-x64",
   "linux-arm64": "linux-aarch64",
   "linux-x64": "linux-x64",
+} as const;
+
+/** Bun's Alpine builds, published from 1.1.39 on. */
+const BUN_MUSL_TARGETS = {
+  "linux-arm64-musl": "linux-aarch64-musl",
+  "linux-x64-musl": "linux-x64-musl",
+} as const;
+
+/**
+ * §15.28, §15.21 — the parts every aube band shares.
+ *
+ * The same launcher/artifact split as bun and deno, and the plainest instance of
+ * it: `@endevco/aube` is a ~12 kB package whose `preinstall` runs
+ * `npm install @endevco/aube-<platform>-<arch>[-musl]` and hardlinks the three
+ * binaries out of it. jup runs no lifecycle scripts, so it asks for that package
+ * directly.
+ *
+ * aube is the first entry whose published names *are* `hostTarget()` — Node's
+ * own `process.platform`/`process.arch` spelling, musl suffix included — so its
+ * `targets` map is an identity. It earns its place anyway, and this is the entry
+ * that shows why the map is a declaration rather than a formatting rule:
+ * **there is no `darwin-x64` build.** Without the map, an Intel Mac would 404 on
+ * a package that has never existed; with it, it is told so before any request.
+ *
+ * `aubr` and `aubx` are `aube run` and `aube dlx`, and are the same executable
+ * dispatching on `argv[0]` — the same arrangement as `bun`/`bunx`, three names
+ * deep.
+ */
+const AUBE_BAND = {
+  url: "https://registry.npmjs.org/@endevco/aube-{target}/-/aube-{target}-{}.tgz",
+  bin: { aube: "./bin/aube{exe}", aubr: "./bin/aubr{exe}", aubx: "./bin/aubx{exe}" },
+  registry: { type: "npm", package: "@endevco/aube" },
+  artifactRegistry: { type: "npm", package: "@endevco/aube-{target}" },
+  exec: "native",
+  commands: { use: ["aube", "install"] },
+} as const satisfies Omit<PackageManagerSpec, "targets">;
+
+/** aube's glibc and native hosts. Note the absent `darwin-x64`: there is none. */
+const AUBE_TARGETS = {
+  "darwin-arm64": "darwin-arm64",
+  "linux-arm64": "linux-arm64",
+  "linux-x64": "linux-x64",
+  "win32-arm64": "win32-arm64",
+  "win32-x64": "win32-x64",
+} as const;
+
+/** aube's Alpine builds, published from `1.0.0-beta.12` on. */
+const AUBE_MUSL_TARGETS = {
+  "linux-arm64-musl": "linux-arm64-musl",
+  "linux-x64-musl": "linux-x64-musl",
 } as const;
 
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
@@ -170,9 +221,10 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
     },
     shimByDefault: false,
-    // Three bands, and they differ in exactly one field: the host set bun had
+    // Four bands, and they differ in exactly one field: the host set bun had
     // published artifacts for at that point in its history. `@oven/bun-*`
-    // appeared in 0.5.0, Windows x64 in 1.1.0, Windows arm64 in 1.3.10.
+    // appeared in 0.5.0, Windows x64 in 1.1.0, the musl builds in 1.1.39,
+    // Windows arm64 in 1.3.10.
     // Reversed, the newest is tested first (§02.3), so a version gets the
     // narrowest true answer — and a host outside it is named as unsupported
     // *for that version*, rather than 404ing on a URL nobody typed.
@@ -182,11 +234,19 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
       // is only reached for a version the band below it did not claim.
       [">=1.1.0", { ...BUN_BAND, targets: { ...BUN_POSIX_TARGETS, "win32-x64": "windows-x64" } }],
       [
+        ">=1.1.39",
+        {
+          ...BUN_BAND,
+          targets: { ...BUN_POSIX_TARGETS, ...BUN_MUSL_TARGETS, "win32-x64": "windows-x64" },
+        },
+      ],
+      [
         ">=1.3.10",
         {
           ...BUN_BAND,
           targets: {
             ...BUN_POSIX_TARGETS,
+            ...BUN_MUSL_TARGETS,
             "win32-arm64": "windows-aarch64",
             "win32-x64": "windows-x64",
           },
@@ -232,6 +292,32 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
         },
       ],
     ],
+  },
+
+  // §15.21 — a package manager, not a runtime, so unlike bun and deno it takes
+  // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
+  // nothing outside a project, which is exactly what §10.5's default set is for.
+  aube: {
+    default: "2.2.0",
+    fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
+    // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
+    // starter kit through dlx; both are how a project comes to exist, so §03.5
+    // has nothing to enforce yet. `aube dlx` and its `aubx` spelling fetch into a
+    // throwaway environment and are project-independent for the same reason
+    // `yarn dlx` is. Everything else — `aube install`, `aubr <script>`,
+    // `aube exec` — acts on the project it is standing in and stays enforced.
+    transparent: {
+      commands: [["aube", "init"], ["aube", "create"], ["aube", "dlx"], ["aubx"]],
+    },
+    // One band. aube's host set has moved exactly once — the musl artifacts
+    // start at `1.0.0-beta.12` — and that boundary is *unexpressible*: §02.3
+    // matches bands with `satisfiesWithPrereleases`, which strips the prerelease
+    // from both sides, so `>=1.0.0-beta.12` and `>=1.0.0` are the same range and
+    // neither excludes `1.0.0-beta.2`. Declaring a second band would therefore
+    // be a promise the lookup cannot keep, and the honest alternative is this
+    // one: the eleven prereleases before Alpine support 404 on Alpine, and every
+    // release since is covered.
+    ranges: [["*", { ...AUBE_BAND, targets: { ...AUBE_TARGETS, ...AUBE_MUSL_TARGETS } }]],
   },
 };
 
@@ -329,18 +415,78 @@ const ARCHITECTURES: Record<string, string> = {
 };
 
 /**
- * §15.28 — the normalised `<platform>-<arch>` pair naming this host.
+ * §15.28 — the dynamic loader each libc puts at a fixed absolute path.
+ *
+ * Only the two architectures {@link ARCHITECTURES} normalises to are listed,
+ * spelled the way the loader filenames spell them rather than the way Node does.
+ */
+const LIBC_LOADERS: Record<string, { musl: string; glibc: string }> = {
+  arm64: { musl: "/lib/ld-musl-aarch64.so.1", glibc: "/lib/ld-linux-aarch64.so.1" },
+  x64: { musl: "/lib/ld-musl-x86_64.so.1", glibc: "/lib64/ld-linux-x86-64.so.2" },
+};
+
+/**
+ * §15.28 — is this Linux host musl or glibc?
+ *
+ * Linux is the one platform where the pair `<platform>-<arch>` does not name a
+ * binary interface: a glibc build does not run on Alpine, and a publisher that
+ * ships both says so in the artifact's name (`@endevco/aube-linux-x64-musl`,
+ * `@oven/bun-linux-x64-musl`). Without this the tool would pick a glibc artifact
+ * on a musl host, verify its signature, cache it, and hand the user a loader
+ * error naming a `.so` they never asked about.
+ *
+ * **Both** loaders are checked, and musl wins only when it is the *only* one
+ * present. Alpine has no glibc loader; a glibc distribution with `musl` merely
+ * installed as a package has both, and is a glibc host. One `stat` each, and the
+ * §16.3 cost is nil for the entries that are not per-host: the only callers are
+ * a `targets` lookup and §15.23's per-host integrity map, neither of which npm,
+ * pnpm or yarn ever reaches.
+ *
+ * Memoised by architecture rather than outright, because the suite reaches the
+ * unsupported branches by redefining `process.arch` and a single cached answer
+ * would outlive the pretence.
+ *
+ * A re-implementation MAY answer this any way its runtime allows — reading its
+ * own ELF interpreter, or `ldd --version` — as long as the answer is about the
+ * host rather than about the build machine.
+ */
+const LIBC_BY_ARCH = new Map<string, string>();
+
+function linuxLibc(arch: string): string {
+  const cached = LIBC_BY_ARCH.get(arch);
+  if (cached !== undefined) return cached;
+
+  const loaders = LIBC_LOADERS[arch];
+  const libc =
+    loaders !== undefined && existsSync(loaders.musl) && !existsSync(loaders.glibc)
+      ? "musl"
+      : "glibc";
+
+  LIBC_BY_ARCH.set(arch, libc);
+  return libc;
+}
+
+/**
+ * §15.28 — the normalised name of this host: `<platform>-<arch>`, and on a musl
+ * Linux `<platform>-<arch>-musl`.
  *
  * The key `targets` is indexed by, and the vocabulary `{platform}` and `{arch}`
  * draw on, so a band that uses either spelling agrees with one that uses the
  * other. An unrecognised half is passed through verbatim: the only consumer is
  * a `targets` lookup, which will miss and report the host it could not place,
  * and a made-up normalisation would only make that message wrong.
+ *
+ * glibc is unsuffixed, which is not a preference but a compatibility rule: it is
+ * the answer on every host that has ever reached this function, so committed
+ * `.jup.lock` files and every existing `targets` map keep meaning what they
+ * meant. A musl host is the only one that sees a new key, and it is the host
+ * that was being told the wrong thing before.
  */
 export function hostTarget(): string {
   const platform = PLATFORMS[process.platform] ?? process.platform;
   const arch = ARCHITECTURES[process.arch] ?? process.arch;
-  return `${platform}-${arch}`;
+  const pair = `${platform}-${arch}`;
+  return platform === "linux" && linuxLibc(arch) === "musl" ? `${pair}-musl` : pair;
 }
 
 /**

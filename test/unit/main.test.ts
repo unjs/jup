@@ -1058,6 +1058,25 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * Held at 226,000 rather than the 224,383 this leaves, on the same terms as
    * every raise above: the next addition is still a change worth arguing for.
+   *
+   * And once more, 226,000 -> 234,000, for §15.21's third native entry, `aube`,
+   * and for the libc half of §15.28's host name that it forced. All of it lands
+   * in `config/table.ts` (+6,757; nothing else on the warm path changed at all),
+   * and the previous raise predicted most of that: the machinery was paid for,
+   * so the entry itself is ~700 bytes of table data. Measured, `_warm.mjs` went
+   * 86,214 -> 88,178, **+1,964 bytes or +2.3%** — a third of the last raise for
+   * a comparable addition, which is what "nearly free" turned out to mean.
+   *
+   * The libc probe is the part that was not predicted, and it is worth naming
+   * what it costs: two `existsSync` calls, memoised per architecture, reached
+   * only from `hostTarget()` — which npm, pnpm and yarn never call, because
+   * neither a `targets` lookup nor §15.23's per-host integrity map exists for
+   * them. So the warm path grows in bytes and not in work. It cannot move off:
+   * `hostTarget()` is read by a lockfile *read*, which happens when there is no
+   * download to defer it to.
+   *
+   * Held at 234,000 rather than the 232,092 this leaves, on the same terms as
+   * every raise above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1069,6 +1088,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(226_000);
+    ).toBeLessThanOrEqual(234_000);
   });
 });

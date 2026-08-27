@@ -34,11 +34,11 @@ export const engine = { getBinariesFor };
 
 /**
  * Upstream types this as a set of the literal names; the rows index `config` with
- * it. Corepack's three, plus §15.21's two — which upstream has no notion of, and
- * which the rows that iterate this set therefore have to be read against: see
- * the `deno --version` note in `main.test.ts`.
+ * it. Corepack's three, plus §15.21's three — which upstream has no notion of,
+ * and which the rows that iterate this set therefore have to be read against:
+ * see the `deno --version` note in `main.test.ts`.
  */
-export type SupportedPackageManager = "npm" | "pnpm" | "yarn" | "bun" | "deno";
+export type SupportedPackageManager = "npm" | "pnpm" | "yarn" | "bun" | "deno" | "aube";
 
 export const SupportedPackageManagerSet = new Set(
   SUPPORTED_NAMES as readonly SupportedPackageManager[],
@@ -52,7 +52,9 @@ export const SupportedPackageManagerSet = new Set(
  * assert corepack's behaviour and are skipped where the two diverge. §15.28's `bun`
  * and `deno` are excluded for the *live* reason: they set `shimByDefault: false`,
  * so a bare `enable` genuinely does not create them, and a row expecting otherwise
- * would be asserting something jup does not do.
+ * would be asserting something jup does not do. §15.21's `aube` does not set it
+ * and so is *included*, which is the point of filtering on the flag rather than
+ * listing names.
  */
 export const SupportedPackageManagerSetWithoutNpm = new Set(
   (SUPPORTED_NAMES as readonly SupportedPackageManager[]).filter(

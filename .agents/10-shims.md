@@ -249,6 +249,12 @@ An entry MAY opt out of the default set with `shimByDefault: false` (§02.3), an
 outside any project, so a bare `enable` — which existing users run on upgrade, having
 asked for nothing — must not claim them on `PATH`. Naming the entry is the opt-in.
 
+The line is runtime-versus-package-manager, not old-versus-new. §15.21's `aube` is a
+per-host native entry exactly as those two are and does **not** opt out: `aube`,
+`aubr` and `aubx` name nothing outside a project, which is what the default set is
+for. An entry that opted out merely because it is recent would freeze the default set
+at the three names corepack shipped.
+
 `disable` with no names covers **every** entry, opt-outs included: removal has no
 such hazard, and a `disable` that declined to undo an `enable bun` would be the
 surprising one.
@@ -262,6 +268,7 @@ Each name expands to every binary name it declares across all range entries, ded
 | `yarn` | `yarn`, `yarnpkg` | yes |
 | `bun` | `bun`, `bunx` | no — `shimByDefault: false` |
 | `deno` | `deno` | no — `shimByDefault: false` |
+| `aube` | `aube`, `aubr`, `aubx` | yes |
 
 All binaries are processed concurrently.
 

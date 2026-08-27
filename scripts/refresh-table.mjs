@@ -173,7 +173,9 @@ const NATIVE_TARGETS = {
     "darwin-arm64": "@oven/bun-darwin-aarch64",
     "darwin-x64": "@oven/bun-darwin-x64",
     "linux-arm64": "@oven/bun-linux-aarch64",
+    "linux-arm64-musl": "@oven/bun-linux-aarch64-musl",
     "linux-x64": "@oven/bun-linux-x64",
+    "linux-x64-musl": "@oven/bun-linux-x64-musl",
     "win32-arm64": "@oven/bun-windows-aarch64",
     "win32-x64": "@oven/bun-windows-x64",
   },
@@ -184,6 +186,19 @@ const NATIVE_TARGETS = {
     "linux-x64": "@deno/linux-x64-glibc",
     "win32-arm64": "@deno/win32-arm64",
     "win32-x64": "@deno/win32-x64",
+  },
+  // aube publishes no `darwin-x64`, so the absence is declared here too — the
+  // check is "does the newest release cover what the newest band promises?", and
+  // listing a host the band does not is how this script would start failing on a
+  // package that has never existed.
+  aube: {
+    "darwin-arm64": "@endevco/aube-darwin-arm64",
+    "linux-arm64": "@endevco/aube-linux-arm64",
+    "linux-arm64-musl": "@endevco/aube-linux-arm64-musl",
+    "linux-x64": "@endevco/aube-linux-x64",
+    "linux-x64-musl": "@endevco/aube-linux-x64-musl",
+    "win32-arm64": "@endevco/aube-win32-arm64",
+    "win32-x64": "@endevco/aube-win32-x64",
   },
 };
 
@@ -257,12 +272,13 @@ async function refreshKeys(source) {
 }
 
 let table = readFileSync(TABLE, "utf8");
-const [npm, pnpm, yarn, bun, deno] = await Promise.all([
+const [npm, pnpm, yarn, bun, deno, aube] = await Promise.all([
   npmDefault("npm"),
   npmDefault("pnpm"),
   yarnDefault(),
   nativeDefault("bun", NATIVE_TARGETS.bun),
   nativeDefault("deno", NATIVE_TARGETS.deno),
+  nativeDefault("@endevco/aube", NATIVE_TARGETS.aube),
 ]);
 
 table = rewriteDefault(table, "npm", "default", npm);
@@ -274,6 +290,7 @@ table = rewriteDefault(table, "yarn", "default", yarn);
 table = rewriteDefault(table, "yarn", "transparent.default", yarn);
 table = rewriteDefault(table, "bun", "default", bun);
 table = rewriteDefault(table, "deno", "default", deno);
+table = rewriteDefault(table, "aube", "default", aube);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 
