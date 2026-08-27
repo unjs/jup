@@ -1091,6 +1091,31 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * Held at 238,000 rather than the 235,739 this leaves, on the same terms as
    * every raise above.
+   *
+   * And once more, 238,000 -> 246,000, for §15.39's `node` — and this one breaks
+   * the trend the last two established, because the entry is *not* where the
+   * cost went. `config/table.ts` +4,275 is the fifth per-host entry at about the
+   * price of the fourth; the other +4,739 is the `kind` branches, spread over
+   * three modules that had no reason to grow before: `project/manifest.ts`
+   * +2,762 (the walk, the read and the parse each taking a `devEngines` member
+   * rather than assuming one), `errors.ts` +1,563 (four messages parameterised
+   * by that member, plus §12.12's runtime refusal) and `main.ts` +414 (passing
+   * the requested tool into discovery).
+   *
+   * Measured, `_warm.mjs` went 89,097 -> 90,862, **+1,765 bytes or +1.98%** —
+   * still under the `aube` raise despite nearly three times the source delta,
+   * because most of what was added is prose and type annotations that the
+   * emitted chunk does not carry. What it *does* carry is one extra branch on
+   * two warm functions (`stopsWalk`, `readSpecFromManifest`), both comparing a
+   * string that is a compile-time constant for every caller but the proxy's.
+   *
+   * The number to watch next is not the second runtime — that is table data
+   * again, on the aube-to-nub trend — but any requirement that makes `kind`
+   * readable from a fifth place. §15.39 caps it at four deliberately, and this
+   * raise is what that cap costs when it is honoured.
+   *
+   * Held at 246,000 rather than the 244,753 this leaves, on the same terms as
+   * every raise above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1102,6 +1127,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(238_000);
+    ).toBeLessThanOrEqual(246_000);
   });
 });

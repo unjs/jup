@@ -440,7 +440,7 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
 
   it("reports the registry for every supported package manager", () => {
     const names = report().packageManagers.map((entry) => entry.name);
-    expect(names).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub"]);
+    expect(names).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "node"]);
 
     const yarn = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.binaries).toEqual(["yarn", "yarnpkg"]);
@@ -529,9 +529,13 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
       "aubx",
       "nub",
       "nubx",
+      // §15.39 — a runtime is reported for exactly the reason `bun` is: what the
+      // name currently resolves to is the interesting question, and for `node`
+      // the answer is somebody else's install on essentially every machine.
+      "node",
     ]);
     for (const entry of info.entries) {
-      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno|aube|nub)$/);
+      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno|aube|nub|node)$/);
     }
   });
 
@@ -578,7 +582,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     expect(info.directory).not.toBeNull();
     expect(info.problem).toBeNull();
     // And the rest of the report is still there.
-    expect(info.entries).toHaveLength(14);
+    expect(info.entries).toHaveLength(15);
   });
 });
 

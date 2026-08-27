@@ -187,7 +187,12 @@ export async function runProxy(
   // the manifest is never parsed either, or a malformed `package.json` still
   // fails the very run `COREPACK_ENABLE_PROJECT_SPEC=0` was set to rescue. The
   // walk still happens, because the env file it loads is what may set the flag.
-  const specResult = discoverProjectSpec(cwd, { projectSpecFlag: true });
+  // §15.39 — `tool` is what makes this the spec *for the requested tool*: a
+  // runtime reads `devEngines.runtime` and a package manager reads the pair it
+  // always read. Passing the resolved name rather than the binary name is what
+  // makes `bunx` ask bun's question and `nubx` ask nub's; an unknown binary
+  // answers `packageManager`, which is the path it already took to §12.2.
+  const specResult = discoverProjectSpec(cwd, { projectSpecFlag: true, tool: requestedName });
 
   // §03.6 — auto-pin runs *before* reconciliation, and only here: it is a proxy
   // -mode-only behaviour, so `reconcile` deliberately leaves it to this caller.

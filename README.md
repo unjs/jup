@@ -7,9 +7,9 @@
 
 <!-- /automd -->
 
-jup runs the package manager version your project asks for.
+jup runs the tool version your project asks for.
 
-It reads the pin in `package.json`, downloads and verifies the requested version, saves it in a local cache, and runs it. This keeps npm, pnpm, Yarn, Bun, Deno, aube, and nub versions consistent across developer machines and CI.
+It reads the pin in `package.json`, downloads and verifies the requested version, saves it in a local cache, and runs it. This keeps npm, pnpm, Yarn, Bun, Deno, aube, and nub versions consistent across developer machines and CI — and Node.js itself, pinned in `devEngines.runtime`.
 
 ```json
 {
@@ -21,7 +21,11 @@ It reads the pin in `package.json`, downloads and verifies the requested version
 pnpm install # jup runs the pinned pnpm version
 ```
 
-jup is designed as a fast, small, zero-dependency replacement for [Corepack](https://github.com/nodejs/corepack).
+```sh
+jup node@22 script.js # or a pinned runtime, without claiming the name on PATH
+```
+
+jup is designed as a fast, small, zero-dependency replacement for [Corepack](https://github.com/nodejs/corepack), widened from package managers to the tools around them.
 
 ## Documentation
 

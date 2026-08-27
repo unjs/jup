@@ -186,19 +186,35 @@ export const messages = {
 
   /* §12.3 — devEngines validation ---------------------------------------- */
 
+  /*
+   * §15.39 — these four take the member they are about, defaulting to
+   * `packageManager`.
+   *
+   * The default is what keeps §12.3's four strings byte-identical: every caller
+   * that existed before the `node` entry passes nothing and gets exactly the
+   * text §13 asserts. `devEngines.runtime` substitutes into the same sentence,
+   * which is new text and so free to be worded this way (§12.12) — and a reader
+   * who has seen one of these messages can read the other without learning
+   * anything.
+   *
+   * The two cross-check messages below take no member: they are about
+   * `packageManager` versus its own `devEngines` half, and a runtime has no
+   * top-level field to disagree with.
+   */
+
   /** Unconditional warning, regardless of `onFail`. Emitted with the `! ` already attached. */
-  devEnginesNotObject: (value: unknown) =>
-    `! jup only supports objects as valid value for devEngines.packageManager. The current value (${json(value)}) will be ignored.`,
+  devEnginesNotObject: (value: unknown, field: string = "packageManager") =>
+    `! jup only supports objects as valid value for devEngines.${field}. The current value (${json(value)}) will be ignored.`,
 
   /** Unconditional warning, regardless of `onFail`. */
-  devEnginesArray: () =>
-    `! jup does not currently support array values for devEngines.packageManager`,
+  devEnginesArray: (field: string = "packageManager") =>
+    `! jup does not currently support array values for devEngines.${field}`,
 
-  devEnginesBadName: (value: unknown) =>
-    `The value of devEngines.packageManager.name ${json(value)} is not a supported string value`,
+  devEnginesBadName: (value: unknown, field: string = "packageManager") =>
+    `The value of devEngines.${field}.name ${json(value)} is not a supported string value`,
 
-  devEnginesBadVersion: (value: unknown) =>
-    `The value of devEngines.packageManager.version ${json(value)} is not a valid semver range`,
+  devEnginesBadVersion: (value: unknown, field: string = "packageManager") =>
+    `The value of devEngines.${field}.version ${json(value)} is not a valid semver range`,
 
   devEnginesNameMismatch: (packageManager: unknown, name: unknown) =>
     `"packageManager" field is set to ${json(packageManager)} which does not match the "devEngines.packageManager" field set to ${json(name)}`,
@@ -595,6 +611,19 @@ export const messages = {
    * wrong platform).
    */
   cannotExecute: (binPath: string, reason: string) => `Unable to execute ${binPath}: ${reason}`,
+
+  /**
+   * §12.12, §03.4, §15.39 — a runtime named in the manifest's `packageManager`.
+   *
+   * Raised on the *field*, never on `parseSpec` in general: `jup node@22`,
+   * `jup use node@22` and `jup install -g node@24` all put a runtime name
+   * through the same parser from `CLI arguments` and are ordinary. It is only
+   * the committed pin that must not claim a runtime is the project's package
+   * manager, because that is the field §03.5 enforces `pnpm` and `yarn` with —
+   * so the message names the field that *would* have worked.
+   */
+  runtimeInPackageManager: (name: string) =>
+    `"packageManager" cannot name ${name}: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead`,
 
   /* §15.11 — one verification tier ---------------------------------------- */
 

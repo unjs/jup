@@ -58,7 +58,14 @@
   delta is the prose explaining the libc probe. `nub` then took it to 238,000 for
   **+919 bytes (+1.04%)** — pure table data, no new machinery, and it confirms the
   prediction the aube raise made. The accounting is in the test's own docstring.
-  A further native entry needing no new host dimension should cost about the same.
+  A further native entry needing no new host dimension should cost about the same,
+  and §15.39's `node` confirmed it — but the entry was not where that raise went.
+  238,000 -> 246,000 for **+1,765 bytes (+1.98%)**, of which `config/table.ts` is
+  the fifth per-host entry at roughly the fourth's price and the other ~4,700
+  source bytes are the `kind` branches in `project/manifest.ts`, `errors.ts` and
+  `main.ts`. The number to watch is not the second runtime — table data again —
+  but any requirement that makes `kind` readable from a fifth place. §15.39 caps
+  it at four deliberately.
 * **A per-host digest is host-local, and references travel** (§15.28). Both places a
   reference is stored are copied between machines — `packageManager` is committed,
   `lastKnownGood.json` is baked into images and warmed caches — and §06.1 row 1 reads
@@ -97,9 +104,8 @@
 ## Not an engineering decision
 
 **Bun's, Deno's, aube's, nub's and `node`'s maintainers have not been asked.** §15.21
-and §15.28 both require a tool's maintainers to agree before an entry ships, and four
-of the five are in the table now (§15.39's `node` is specified but not yet
-implemented — see the item below). Bun's reportedly declined the same request from
+and §15.28 both require a tool's maintainers to agree before an entry ships, and all
+five are in the table now. Bun's reportedly declined the same request from
 corepack (#295). This is not a technical loose end and no further implementation work
 resolves it; it is a conversation someone has to have before a release carries these
 entries. Until then it is one more reason the item below stands.
@@ -116,15 +122,12 @@ that is a fact about nub's current implementation, not an agreement, and it is e
 the kind of thing the maintainers should get to say something about.
 
 
-`node` (§15.39) is the entry the spec now requires and the code does not have. What is
-outstanding is the §02.5 row, `kind` on the definition, the four places §15.39 says
-`kind` may be read (§03.3's `devEngines.runtime`, §03.4's refusal, §03.5's skipped
-mismatch, §10.5's forced opt-out), §03.7's runtime write path, §12.12's message, and
-rows 230–236. It needs no new host machinery: §15.28's launcher/artifact split,
-`{target}`, `{exe}` and `exec: "native"` all carry over unchanged, so on the aube→nub
-trend the warm-byte cost should be table data plus the `kind` branches, not a new
-subsystem. `node`'s per-host packages are also the one launcher family published by
-someone other than the project whose name it carries, which is the consent item above.
+`node`'s per-host packages are also the one launcher family published by someone other
+than the project whose name it carries — `node` on npm is a community package, and
+`node-bin-setup` is what the `{target}` map's three renames come from. So the consent
+item above has a different addressee here than it does for the other four, and the ask
+is a smaller one: jup fetches the same per-host packages that installer fetches,
+without running it.
 
 `package.json` is still `0.0.0` and nothing has been published. Shipping is not neutral: the
 package installs a `corepack` bin alias, §15.33 moved yarn's compiled-in default from

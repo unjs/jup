@@ -17,11 +17,13 @@ import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {
   BinList,
   BinSpec,
+  DevEnginesField,
   Locator,
   NpmRegistrySpec,
   PackageManagerDefinition,
   PackageManagerSpec,
   RegistrySpec,
+  ToolKind,
 } from "../types.ts";
 
 /**
@@ -155,6 +157,53 @@ const NUB_TARGETS = {
   "linux-x64-musl": "linux-x64-musl",
   "win32-arm64": "win32-arm64",
   "win32-x64": "win32-x64",
+} as const;
+
+/**
+ * §15.39, §02.5 — the parts the `node` band is made of.
+ *
+ * The launcher/artifact split a fourth time, and the oldest instance of it on
+ * npm: the `node` package is ~1.8 kB whose `preinstall` runs `node-bin-setup`,
+ * which `npm install`s one per-host package and hardlinks its binary out. jup
+ * runs no lifecycle scripts, so it asks for that package directly, exactly as it
+ * does for bun, deno, aube and nub.
+ *
+ * What is new here is not the machinery — none of it — but the `kind`. node is a
+ * runtime and nothing else, so §03 reads `devEngines.runtime` for it, `03.5`
+ * cannot raise a mismatch against a project's package manager, and `packageManager`
+ * may not name it at all. Nothing in §04–§08 knows the difference.
+ */
+const NODE_BAND = {
+  url: "https://registry.npmjs.org/node-{target}/-/node-{target}-{}.tgz",
+  bin: { node: "./bin/node{exe}" },
+  registry: { type: "npm", package: "node" },
+  artifactRegistry: { type: "npm", package: "node-{target}" },
+  exec: "native",
+} as const satisfies Omit<PackageManagerSpec, "targets">;
+
+/**
+ * node's six published hosts, and the three renames `{target}` exists for.
+ *
+ * The per-host packages are `node-<platform>-<arch>` with `win32` spelled `win`,
+ * and on Apple Silicon the prefix is `node-bin-` rather than `node-`, because
+ * `node-darwin-arm64` belongs to an unrelated publisher and stops at 18.9.0.
+ * `node-bin-setup` makes exactly that substitution, unconditionally — this map
+ * is that rule, not an invention of this table, which is also why one band is
+ * enough: the mapping has not moved.
+ *
+ * There is no musl entry because Node publishes no musl build, so an Alpine host
+ * is told `unsupportedTarget` before any request rather than handed a glibc
+ * binary — deno's situation exactly (§15.28). `linux-armv7l`, which node *does*
+ * publish, is outside {@link ARCHITECTURES}' vocabulary altogether and is the
+ * other error.
+ */
+const NODE_TARGETS = {
+  "darwin-arm64": "bin-darwin-arm64",
+  "darwin-x64": "darwin-x64",
+  "linux-arm64": "linux-arm64",
+  "linux-x64": "linux-x64",
+  "win32-arm64": "win-arm64",
+  "win32-x64": "win-x64",
 } as const;
 
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
@@ -393,6 +442,26 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     // band names.
     ranges: [["*", { ...NUB_BAND, targets: NUB_TARGETS }]],
   },
+
+  // §15.39 — the first entry that is not a package manager. `kind` is the only
+  // field that says so, and the four things it decides all live in §03 and §10.
+  node: {
+    kind: "runtime",
+    // The current LTS line, bare per §02.3: node's artifact is per-host, so
+    // there is no portable digest to pin and the registry signature over this
+    // host's own `node-<target>` is what clears §15.11's tier.
+    default: "24.20.0",
+    fetchLatestFrom: { type: "npm", package: "node" },
+    // Empty, and not an oversight: §01.4's transparency exists to let a
+    // bootstrapping command escape §03.5's enforcement, and a runtime is never
+    // enforced against in the first place. There is nothing to bypass.
+    transparent: { commands: [] },
+    // Required of a runtime (§02.3, §10.5), not a judgement call: `node` means
+    // something outside a project on every machine that has ever had one.
+    shimByDefault: false,
+    // One band. See {@link NODE_TARGETS} for why the map has not had to move.
+    ranges: [["*", { ...NODE_BAND, targets: NODE_TARGETS }]],
+  },
 };
 
 export const SUPPORTED_NAMES: readonly string[] = Object.keys(DEFINITIONS);
@@ -403,6 +472,32 @@ export function getDefinition(name: string): PackageManagerDefinition | undefine
 
 export function isSupportedPackageManager(name: string): boolean {
   return getDefinition(name) !== undefined;
+}
+
+/**
+ * §02.3, §15.39 — what sort of tool this is. Absent in the table means
+ * `"package-manager"`, which is every entry but `node`.
+ */
+export function toolKind(name: string): ToolKind {
+  return getDefinition(name)?.kind ?? "package-manager";
+}
+
+/** §15.39 — is this entry a runtime? The four questions below are the only callers. */
+export function isRuntime(name: string): boolean {
+  return getDefinition(name)?.kind === "runtime";
+}
+
+/**
+ * §03.3, §15.39 — which `devEngines` member speaks for this tool.
+ *
+ * Chosen by the requested tool's kind, never by what the manifest happens to
+ * declare: a project may carry both members, and neither constrains the other.
+ * An unknown name answers `"packageManager"`, because an unknown name is on its
+ * way to §12.2's "unsupported specification" and must take the path it always
+ * took to get there.
+ */
+export function devEnginesFieldFor(name: string): DevEnginesField {
+  return isRuntime(name) ? "runtime" : "packageManager";
 }
 
 /**

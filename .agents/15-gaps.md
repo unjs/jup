@@ -1273,8 +1273,8 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 230 | `jup node@22 --version` in a directory with no project | the host's `node-<target>` tarball is fetched and executed directly; the `node` launcher package is never downloaded (§15.39, §15.28) |
 | 231 | `jup node --version` in a project pinning `packageManager: "pnpm@…"` | runs node; the project's package-manager pin is neither consulted nor an error, and `jup pnpm --version` in the same directory is unaffected (§03.5, §15.39) |
 | 232 | `devEngines.runtime: {name: "node", version: "22.x"}` and `packageManager: "pnpm@…"` in one manifest | `node` resolves within `22.x`, `pnpm` resolves from the pin; neither field constrains the other (§03.3, §15.39) |
-| 233 | `packageManager: "node@22.23.2"` | refused with §12.12's runtime-in-`packageManager` message, naming `devEngines.runtime`; no network request (§03.4, §15.39) |
-| 234 | `jup use node@22` | `devEngines.runtime.version` is written and its path printed; no top-level `packageManager` is created, and no install command runs (§03.7, §09.5, §15.39) |
+| 233 | `packageManager: "node@22.23.2"`, then a package-manager request in that project | refused with §12.12's runtime-in-`packageManager` message, naming `devEngines.runtime`; no network request. A *runtime* request there reads `devEngines.runtime`, finds nothing and falls back — the stray field never becomes the runtime's pin (§03.4, §15.39) |
+| 234 | `jup use node@22`, on a manifest with no `devEngines`, with one that has only `packageManager`, and with a `runtime` member naming another tool under `onFail: "warn"` | `devEngines.runtime` is written — created at the surrounding nesting where absent, name corrected where it disagreed — and its path printed; no top-level `packageManager` is created, an existing `devEngines.packageManager` is untouched, and no install command runs (§03.7, §09.5, §15.39) |
 | 235 | `jup enable` with no names, then `jup enable node` | no `node` shim first, one after — a runtime is never in the default set (§10.5, §15.39) |
 | 236 | `jup node@22` on a musl Linux host, and on `linux-armv7l` | `unsupportedTarget` naming `linux-x64-musl` in the first, `unsupportedArch` in the second; both before any request (§02.5, §15.28) |
 
@@ -1296,7 +1296,9 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
      `devEngines.packageManager`, or `devEngines.runtime` (§03.3);
   2. whether the name is legal in `packageManager` (§03.4) — it is not, for a
      runtime, and the message is in §12.12;
-  3. whether §03.5's name mismatch is enforced — it is not, for a runtime;
+  3. which spec §03.5 reconciles against, and therefore that its name mismatch
+     cannot arise *across* kinds: a project's package-manager pin is never a
+     reason to refuse a runtime. Within a kind the rule is unchanged;
   4. that a runtime MUST set `shimByDefault: false` (§10.5).
 * Nothing else may branch on `kind`. §04 resolution, §05 registry access, §06
   integrity, §07 the store, and §08 execution are one path over both kinds. A

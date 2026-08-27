@@ -10,8 +10,11 @@ import {
   hasRangeBand,
   hostTarget,
   isPerHost,
+  devEnginesFieldFor,
+  isRuntime,
   isSupportedPackageManager,
   packageManagerForRegistry,
+  toolKind,
   resolveArtifactRegistry,
   resolveSpecBin,
   resolveSpecUrl,
@@ -23,8 +26,20 @@ import { satisfiesWithPrereleases } from "../../src/version/semver.ts";
 import type { BinSpec, PackageManagerSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
-  it("supports exactly npm, pnpm, yarn, bun, deno, aube and nub", () => {
-    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub"]);
+  it("supports exactly npm, pnpm, yarn, bun, deno, aube, nub and node", () => {
+    expect([...SUPPORTED_NAMES]).toEqual([
+      "npm",
+      "pnpm",
+      "yarn",
+      "bun",
+      "deno",
+      "aube",
+      "nub",
+      // §15.39 — the first entry that is not a package manager. It is in
+      // `SUPPORTED_NAMES` like any other: the table is a table of *tools*, and
+      // `kind` is read in §03 and §10 only.
+      "node",
+    ]);
     expect(isSupportedPackageManager("yarn")).toBe(true);
     expect(isSupportedPackageManager("bun")).toBe(true);
     // §01.7 / §15.21 — the table is closed and compiled in. `vlt` stands in for
@@ -886,5 +901,124 @@ describe("nub — §15.21's fourth per-host entry", () => {
     ]);
     expect(DEFINITIONS.nub!.transparent.commands).not.toContainEqual(["nub", "run"]);
     expect(DEFINITIONS.nub!.transparent.default).toBeUndefined();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §15.39 — `node`, the first entry that is not a package manager             */
+/* -------------------------------------------------------------------------- */
+
+describe("the node entry (§02.5, §15.39)", () => {
+  afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
+
+  it("is the only entry declaring a `kind`, and that kind is `runtime`", () => {
+    expect(toolKind("node")).toBe("runtime");
+    expect(isRuntime("node")).toBe(true);
+    // Absent means package-manager, which is every entry corepack ever had and
+    // every entry jup shipped before this one. The point of asserting it here
+    // is that adding a runtime must not have reclassified anything else.
+    for (const name of SUPPORTED_NAMES) {
+      if (name === "node") continue;
+      expect(toolKind(name), name).toBe("package-manager");
+      expect(getDefinition(name)!.kind, name).toBeUndefined();
+    }
+  });
+
+  it("reads `devEngines.runtime`, and every package manager reads the other member", () => {
+    // §03.3's whole dependence on `kind`, in one lookup. An unknown name answers
+    // `packageManager`, because an unknown name is on its way to §12.2 and must
+    // take the path it always took to get there.
+    expect(devEnginesFieldFor("node")).toBe("runtime");
+    expect(devEnginesFieldFor("pnpm")).toBe("packageManager");
+    expect(devEnginesFieldFor("vlt")).toBe("packageManager");
+  });
+
+  it("MUST stay out of the default shim set, being a runtime (§02.3, §10.5)", () => {
+    // For `bun`, `deno` and `nub` this is a judgement about what the name means
+    // outside a project. For a runtime it is a requirement, and asserting it
+    // over every entry is what makes a future runtime unable to forget it.
+    expect(shimsByDefault("node")).toBe(false);
+    for (const name of SUPPORTED_NAMES) {
+      if (!isRuntime(name)) continue;
+      expect(getDefinition(name)!.shimByDefault, name).toBe(false);
+    }
+  });
+
+  it("declares no transparent commands and no `commands.use`", () => {
+    // §01.4's transparency exists to let a bootstrapping command escape §03.5's
+    // enforcement, and a runtime is never enforced against — there is nothing
+    // to bypass. `commands.use` is the other half: a runtime installs nothing,
+    // so `jup use node@22` returns after writing the pin (§09.5).
+    expect(DEFINITIONS.node!.transparent.commands).toEqual([]);
+    expect(DEFINITIONS.node!.transparent.default).toBeUndefined();
+    expect(getSpecFor("node", "24.20.0").commands).toBeUndefined();
+  });
+
+  it("renames three of its six targets, the way `node-bin-setup` does", () => {
+    // `win32` is spelled `win`, and Apple Silicon carries the `node-bin-` prefix
+    // because `node-darwin-arm64` belongs to an unrelated publisher and stops at
+    // 18.9.0. The launcher's own installer makes exactly this substitution, so
+    // the map is that rule written down rather than an invention.
+    expect(getSpecFor("node", "24.20.0").targets).toEqual({
+      "darwin-arm64": "bin-darwin-arm64",
+      "darwin-x64": "darwin-x64",
+      "linux-arm64": "linux-arm64",
+      "linux-x64": "linux-x64",
+      "win32-arm64": "win-arm64",
+      "win32-x64": "win-x64",
+    });
+
+    pretendHost("darwin", "arm64");
+    expect(getSpecUrl({ name: "node", reference: "24.20.0" })).toBe(
+      "https://registry.npmjs.org/node-bin-darwin-arm64/-/node-bin-darwin-arm64-24.20.0.tgz",
+    );
+    pretendHost("win32", "x64");
+    expect(getSpecUrl({ name: "node", reference: "24.20.0" })).toBe(
+      "https://registry.npmjs.org/node-win-x64/-/node-win-x64-24.20.0.tgz",
+    );
+    // §15.28's split: the launcher answers §04's questions, the per-host package
+    // answers §06's and §07's.
+    expect(
+      resolveArtifactRegistry(getSpecFor("node", "24.20.0"), {
+        name: "node",
+        reference: "24.20.0",
+      }),
+    ).toEqual({ type: "npm", package: "node-win-x64" });
+    expect(getSpecFor("node", "24.20.0").registry).toEqual({ type: "npm", package: "node" });
+    // §07.7 — the artifact packages declare their own `bin`, so the table's copy
+    // is the fallback rather than the authority. `{exe}` is read from the real
+    // host at module load and cannot be pretended at (see the `bun` row above),
+    // so what is asserted here is the placeholder resolving at all — the two
+    // Windows targets ship `bin/node.exe`, and this is the path that reaches it.
+    expect(resolveSpecBin(getSpecFor("node", "24.20.0"))).toEqual({
+      node: REAL_PLATFORM === "win32" ? "./bin/node.exe" : "./bin/node",
+    });
+  });
+
+  it("236: names a host node publishes no artifact for, before any request", () => {
+    // Node ships no musl build, so an Alpine host is outside the declared set —
+    // deno's situation exactly, and better than the glibc binary it would
+    // otherwise be handed.
+    pretendHost("linux", "x64");
+    const musl = { ...getSpecFor("node", "24.20.0"), targets: {} };
+    expect(() => resolveSpecUrl(musl, { name: "node", reference: "24.20.0" }, "24.20.0")).toThrow(
+      UsageError,
+    );
+
+    // And `linux-armv7l`, which node *does* publish, is the other error: the
+    // architecture is outside the tool's own vocabulary, so the gap is jup's
+    // rather than the release's. Both are raised from the URL template, which is
+    // what "before any request" means — there is no request to make yet.
+    pretendHost("linux", "armv7l");
+    expect(() => getSpecUrl({ name: "node", reference: "24.20.0" })).toThrow(
+      messages.unsupportedTarget("node", "24.20.0", "linux-armv7l", [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-arm64",
+        "linux-x64",
+        "win32-arm64",
+        "win32-x64",
+      ]),
+    );
   });
 });

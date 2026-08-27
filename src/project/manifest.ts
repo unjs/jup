@@ -9,7 +9,7 @@ import { readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { ENV, readEnv } from "../config/env-vars.ts";
-import { isSupportedPackageManager } from "../config/table.ts";
+import { devEnginesFieldFor, isRuntime, isSupportedPackageManager } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
@@ -17,6 +17,7 @@ import { isValidRange, isValidVersion, parse, satisfies } from "../version/semve
 import type {
   Descriptor,
   DevEnginesDeclaration,
+  DevEnginesField,
   DevEnginesPackageManager,
   DevEnginesRange,
   LazyLocator,
@@ -68,17 +69,20 @@ const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
  * truthiness: a declared-but-invalid value stops the walk and is then reported
  * by `parseSpec`, which is where an invalid value belongs.
  */
-function stopsWalk(data: Manifest | undefined): boolean {
+function stopsWalk(data: Manifest | undefined, field: DevEnginesField): boolean {
   if (data === undefined) return false;
-  if (Object.hasOwn(data, "packageManager")) return true;
+  // §15.39 — the top-level field speaks for package managers only, so a nested
+  // manifest pinning `pnpm` says nothing about the runtime and must not stop a
+  // runtime's walk. The `devEngines` member is the symmetric half.
+  if (field === "packageManager" && Object.hasOwn(data, "packageManager")) return true;
 
   const devEngines = data.devEngines;
   return (
     typeof devEngines === "object" &&
     devEngines !== null &&
-    Object.hasOwn(devEngines, "packageManager") &&
-    devEngines.packageManager !== undefined &&
-    devEngines.packageManager !== null
+    Object.hasOwn(devEngines, field) &&
+    devEngines[field] !== undefined &&
+    devEngines[field] !== null
   );
 }
 
@@ -116,6 +120,12 @@ function isWorkspaceRoot(dir: string, data: Manifest): boolean {
  * `envOnly` loads the env file and stops at the first one found, never reading
  * manifests: for commands given an explicit package-manager pattern on the CLI.
  *
+ * `tool` names the tool the answer is *for*, and §15.39 is the whole of what it
+ * changes: a `kind: "runtime"` name reads `devEngines.runtime` and nothing else,
+ * where every other name reads `packageManager` / `devEngines.packageManager` as
+ * before. Absent means the package-manager field pair, which is what every
+ * caller predating the `node` entry wants and what keeps this a no-op for them.
+ *
  * `projectSpecFlag` lets the caller honour `COREPACK_ENABLE_PROJECT_SPEC=0`
  * (§03.5, §11.1: "never look at the project at all"). It degrades the walk to
  * `envOnly` the moment the flag is seen, so a broken manifest cannot defeat the
@@ -125,7 +135,13 @@ function isWorkspaceRoot(dir: string, data: Manifest): boolean {
  */
 export function discoverProjectSpec(
   cwd: string,
-  options?: { envOnly?: boolean; projectSpecFlag?: boolean; mutating?: boolean; here?: boolean },
+  options?: {
+    envOnly?: boolean;
+    projectSpecFlag?: boolean;
+    mutating?: boolean;
+    here?: boolean;
+    tool?: string;
+  },
 ): SpecResult {
   const initialCwd = resolve(cwd);
   // §15.35d — an external spec file replaces the manifest, so the walk climbs
@@ -140,6 +156,7 @@ export function discoverProjectSpec(
   const projectSpecFlag = options?.projectSpecFlag === true;
   const mutating = options?.mutating === true;
   const here = options?.here === true;
+  const field = options?.tool === undefined ? "packageManager" : devEnginesFieldFor(options.tool);
   const fields = mutating ? MUTATING_MANIFEST_FIELDS : MANIFEST_FIELDS;
 
   let currentDir = "";
@@ -151,7 +168,7 @@ export function discoverProjectSpec(
   // forms still terminate at the filesystem root, where `dirname(d) === d`.
   while (
     nextDir !== currentDir &&
-    (envOnly ? envFilePath === undefined : !stopsWalk(selection?.data))
+    (envOnly ? envFilePath === undefined : !stopsWalk(selection?.data, field))
   ) {
     currentDir = nextDir;
     nextDir = dirname(currentDir);
@@ -249,7 +266,7 @@ export function discoverProjectSpec(
   // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
   // "never look at the project at all" covers a redirected spec too.
   if (specFile !== undefined && !specDisabled) {
-    return describe(readExternalSpec(specFile), specFile, initialCwd, envFilePath);
+    return describe(readExternalSpec(specFile), specFile, initialCwd, envFilePath, field);
   }
 
   // A manifest read *before* the env file that disables the project spec was
@@ -259,7 +276,7 @@ export function discoverProjectSpec(
     return { type: "NoProject", target: join(initialCwd, MANIFEST_NAME), envFilePath };
   }
 
-  return describe(selection.data, selection.target, initialCwd, envFilePath);
+  return describe(selection.data, selection.target, initialCwd, envFilePath, field);
 }
 
 /**
@@ -272,14 +289,19 @@ function describe(
   target: string,
   initialCwd: string,
   envFilePath: string | undefined,
+  field: DevEnginesField = "packageManager",
 ): SpecResult {
-  const { raw, range, hasPin, devEngines } = readSpecFromManifest(data, target);
+  const { raw, range, hasPin, devEngines } = readSpecFromManifest(data, target, field);
   if (raw === undefined) {
     return { type: "NoSpec", target, envFilePath };
   }
 
   // Messages name the manifest relative to where the user was standing.
   const source = relative(initialCwd, target);
+  // §15.39 — the runtime refusal is about the `packageManager` *field*, so it
+  // applies exactly when `raw` came from it. A spec synthesised out of a
+  // `devEngines` member did not, and neither did anything the user typed.
+  const packageManagerField = field === "packageManager" && hasPin;
   return {
     type: "Found",
     target,
@@ -287,7 +309,7 @@ function describe(
     devEngines,
     hasPin,
     envFilePath,
-    getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, opts),
+    getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, { ...opts, packageManagerField }),
   };
 }
 
@@ -356,12 +378,25 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
       // Name-only form reports the *name*, not the raw string.
       throw new UsageError(messages.unsupportedSpec(bareName));
     }
+    // §15.39 — the version-bearing form is checked below; a `packageManager`
+    // reading exactly `node` reaches this branch and is the same mistake.
+    if (options.packageManagerField === true && isRuntime(bareName)) {
+      throw new UsageError(messages.runtimeInPackageManager(bareName));
+    }
     return { name: bareName, range: "*" };
   }
 
   // 3 — split on the *first* `@`.
   const name = raw.slice(0, atIndex);
   const range = raw.slice(atIndex + 1);
+
+  // §15.39 — a runtime is never a `packageManager` value. Checked here rather
+  // than in `readSpecFromManifest` because §03.1's laziness is load-bearing:
+  // `jup use pnpm@9` must be able to overwrite a manifest saying `node@22`,
+  // and it can only do that if reading the field is what fails, not discovery.
+  if (options.packageManagerField === true && isRuntime(name)) {
+    throw new UsageError(messages.runtimeInPackageManager(name));
+  }
 
   // 4 — a URL reference is a different thing entirely from a version.
   if (URL.canParse(range)) {
@@ -394,10 +429,18 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
  *
  * Validation happens in a specific order because each failure has a different
  * outcome, and `packageManager` always wins when present.
+ *
+ * §15.39 — `field` selects which `devEngines` member speaks. For `"runtime"`
+ * there is no top-level counterpart, so `pm` is `undefined` throughout and the
+ * function collapses to its last branch: the cross-checks never run (the two
+ * members describe different tools and cannot disagree), `hasPin` is false, and
+ * the answer is the declaration itself. Everything else — the four validations,
+ * the `onFail` routing, §15.12's sidecar — is one rule over both members.
  */
 export function readSpecFromManifest(
   manifest: unknown,
   manifestPath: string,
+  field: DevEnginesField = "packageManager",
 ): {
   raw: unknown;
   range?: DevEnginesRange;
@@ -408,8 +451,10 @@ export function readSpecFromManifest(
   void manifestPath; // Reserved: §15.25/§15.26 need it to report *which* file is at fault.
 
   const data = (manifest ?? {}) as Manifest;
-  const pm = data.packageManager;
-  const de = data.devEngines?.packageManager;
+  // §15.39 — a runtime has no top-level field, so there is nothing here to win
+  // over its `devEngines` member, and nothing for the cross-checks to compare.
+  const pm = field === "packageManager" ? data.packageManager : undefined;
+  const de = data.devEngines?.[field];
 
   // Only a *string* counts as a declared pin: `packageManager: 42` is a spec
   // error waiting to be reported, not a range `up` could refresh.
@@ -422,11 +467,11 @@ export function readSpecFromManifest(
   // These first two never throw, whatever `onFail` says: the field is too
   // malformed for its own `onFail` to be trustworthy.
   if (typeof de !== "object") {
-    console.warn(messages.devEnginesNotObject(de));
+    console.warn(messages.devEnginesNotObject(de, field));
     return { raw: pm, hasPin };
   }
   if (Array.isArray(de)) {
-    console.warn(messages.devEnginesArray());
+    console.warn(messages.devEnginesArray(field));
     return { raw: pm, hasPin };
   }
 
@@ -436,12 +481,12 @@ export function readSpecFromManifest(
   const integrity = (de as Record<string, unknown>).integrity;
 
   if (typeof name !== "string" || name.includes("@")) {
-    warnOrThrow(messages.devEnginesBadName(name), onFail);
+    warnOrThrow(messages.devEnginesBadName(name, field), onFail);
     return { raw: pm, hasPin };
   }
   if (version !== undefined && version !== null) {
     if (typeof version !== "string" || !isValidRange(version)) {
-      warnOrThrow(messages.devEnginesBadVersion(version), onFail);
+      warnOrThrow(messages.devEnginesBadVersion(version, field), onFail);
       return { raw: pm, hasPin };
     }
   }

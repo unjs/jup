@@ -24,6 +24,7 @@ tsconfig.tsbuildinfo
 /src/aubx.js
 /src/nub.js
 /src/nubx.js
+/src/node.js
 
 # Local recording for the ported Corepack suite (NOCK_ENV=record).
 /test/corepack/nocks.db

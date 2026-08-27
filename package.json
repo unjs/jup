@@ -1,16 +1,18 @@
 {
   "name": "jup",
   "version": "0.0.0",
-  "description": "A fast, small, zero-dependency package manager version manager.",
+  "description": "A fast, small, zero-dependency version manager for package managers and runtimes.",
   "keywords": [
     "aube",
     "bun",
     "corepack",
     "deno",
+    "node",
     "npm",
     "nub",
     "package-manager",
     "pnpm",
+    "runtime",
     "version-manager",
     "yarn"
   ],

@@ -306,16 +306,14 @@ export interface Manifest {
  * for the requested tool, when one is declared.
  *
  * Which member that is comes from the tool's {@link ToolKind}: `packageManager`
- * for a package manager, `runtime` for a runtime (§03.3). {@link
- * DevEnginesRange.field} carries it so a message or a write can name the member
- * it came from without re-deriving the kind.
+ * for a package manager, `runtime` for a runtime (§03.3). It is not carried on
+ * this view: every consumer already knows the tool it asked about, and deriving
+ * the member from that is what keeps one answer rather than two.
  */
 export interface DevEnginesRange {
   name: string;
   range: string;
   onFail?: string;
-  /** Absent means `"packageManager"`, the only member that existed before §15.39. */
-  field?: DevEnginesField;
 }
 
 /**
@@ -333,8 +331,6 @@ export interface DevEnginesDeclaration {
   name: string;
   version?: string;
   onFail?: string;
-  /** §15.39 — which member this was read from. Absent means `"packageManager"`. */
-  field?: DevEnginesField;
 }
 
 /**

@@ -395,6 +395,9 @@ describe("§15.30 corepack info", () => {
       // decides is that `nub` names something outside a project (§10.5).
       "nub",
       "nubx",
+      // §15.39 — a runtime is never in the default set (§10.5 requires it), so
+      // `node` joins the reported-but-not-installed group with bun and deno.
+      "node",
     ]);
 
     // §15.28 / §10.5 — `enable` with no names left these alone, so the report
