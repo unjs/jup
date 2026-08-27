@@ -353,6 +353,19 @@ export function integrityForHost(entry: Resolution): string | undefined {
   return integrity[hostTarget()];
 }
 
+/**
+ * `sha512-<base64>` -> `sha512.<hex>`, the build-suffix spelling of §02.1.
+ *
+ * The base64 body is matched before it is decoded, because `Buffer.from` drops
+ * characters it does not recognise: without the test, `sha512-a!b` decodes to a
+ * byte and a malformed field becomes a plausible-looking digest instead of
+ * `undefined`.
+ *
+ * `integrity` itself is a different matter, and is not reached for here: it
+ * pulls `node:crypto` (§16.3). An algorithm this implementation does not support
+ * is rejected by `install` with §12's own message, and rejecting it twice would
+ * give one input two errors.
+ */
 export function hashFromIntegrity(integrity: string): string | undefined {
   const entry = integrity.trim().split(/\s+/)[0] ?? "";
   const dash = entry.indexOf("-");
@@ -361,7 +374,10 @@ export function hashFromIntegrity(integrity: string): string | undefined {
   const algo = entry.slice(0, dash).toLowerCase();
   if (!/^[a-z][\da-z]*$/.test(algo)) return undefined;
 
-  const hex = Buffer.from(entry.slice(dash + 1).split("?")[0] ?? "", "base64").toString("hex");
+  const base64 = entry.slice(dash + 1).split("?")[0] ?? "";
+  if (!/^[\d+/A-Za-z]+={0,2}$/.test(base64)) return undefined;
+
+  const hex = Buffer.from(base64, "base64").toString("hex");
   return hex === "" ? undefined : `${algo}.${hex}`;
 }
 

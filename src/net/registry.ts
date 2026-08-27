@@ -41,11 +41,16 @@ export function getRegistryUrl(options?: { name?: string; packageName?: string }
  * §05.2 rewrite 1 — a band's `npmRegistry` replaces its `registry` once the user
  * has configured an npm-protocol registry that would serve it.
  *
- * `resolve.ts` performs the same substitution for `COREPACK_NPM_REGISTRY`
- * before it ever calls in here, and the two are idempotent: given an npm spec
- * this returns it unchanged. What this adds is the `.npmrc` half — §15.38 row
- * 150 configures nothing but `@yarnpkg:registry`, and that alone must switch
- * Yarn Berry onto `@yarnpkg/cli-dist`.
+ * The one place the substitution happens, and it covers both halves of "has
+ * configured": `COREPACK_NPM_REGISTRY` and `.npmrc` — §15.38 row 150 configures
+ * nothing but `@yarnpkg:registry`, and that alone must switch Yarn Berry onto
+ * `@yarnpkg/cli-dist`. Every fetcher applies it to its own argument, so the
+ * substitution reaches the **resolution** path and not only the download one:
+ * repo.yarnpkg.com is not an npm registry and cannot be mirrored, so consulting
+ * the fallback only when downloading left `yarn@latest` resolving its tag from
+ * the public internet — which fails outright behind a firewall, and leaks
+ * traffic the user asked to keep internal everywhere else. Idempotent: given an
+ * npm spec this returns it unchanged.
  *
  * `COREPACK_REGISTRY_YARN` deliberately does **not** trigger the switch: §15.2
  * defines it as an origin replacement on Yarn's own distribution URLs, i.e. a

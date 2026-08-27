@@ -371,8 +371,10 @@ describe("an untrusted certificate authority (row 153)", () => {
     const path = join(tmpdir(), "jup-missing-bundle.pem");
     process.env.COREPACK_CAFILE = path;
 
+    // The variable the user actually set, not the canonical spelling: the
+    // message names what to go and fix.
     await expect(httpGet(`https://127.0.0.1:${origin.port}/pkg`)).rejects.toThrow(
-      messages.cafileUnreadable(path),
+      messages.cafileUnreadable(path, "COREPACK_CAFILE"),
     );
     // Nothing was sent: the bundle is applied before a socket is opened.
     expect(origin.connections).toBe(0);

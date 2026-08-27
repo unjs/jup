@@ -4,7 +4,7 @@
  * Descriptor in, Locator out (or `null`, meaning "no release matches").
  */
 
-import { ENV, readEnv } from "../config/env-vars.ts";
+import { ENV } from "../config/env-vars.ts";
 import { getDefinition, isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { messages, UsageError } from "../errors.ts";
@@ -19,49 +19,12 @@ import {
   satisfiesWithPrereleases,
 } from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "../cache/store.ts";
-import type {
-  Descriptor,
-  LazyLocator,
-  Locator,
-  PackageManagerSpec,
-  RegistrySpec,
-} from "../types.ts";
+import type { Descriptor, LazyLocator, Locator } from "../types.ts";
 
 export interface ResolveOptions {
   allowTags?: boolean;
   /** `use` and `up` pass `false` so "give me the latest" consults the registry. */
   useCache?: boolean;
-}
-
-/**
- * §04.1 — the six steps, in order.
- *
- * Order matters in ways that are easy to get wrong: the cache probe (step 4)
- * comes **before** the exact-version passthrough (step 5); tags resolve against
- * the **last** range entry's registry, not a per-version one; and the range
- * query fans out over every band **in parallel** and unions, because a range
- * like `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry.
- */
-/**
- * §05.2 rewrite 1 — with a custom npm registry configured, a band's
- * `npmRegistry` replaces its `registry` **everywhere**, not only on the download
- * path.
- *
- * This is what makes Yarn Berry usable behind a corporate mirror at all:
- * repo.yarnpkg.com is not an npm registry and cannot be mirrored, so §02.5 gives
- * Berry an `@yarnpkg/cli-dist` fallback. Consulting it only when downloading
- * meant `yarn@latest` still resolved its tag from the public internet — which
- * fails outright behind a firewall, and leaks traffic the user asked to keep
- * internal everywhere else.
- */
-function registryFor(spec: PackageManagerSpec): RegistrySpec {
-  return hasRegistryOverride() && spec.npmRegistry !== undefined ? spec.npmRegistry : spec.registry;
-}
-
-/** Whether the user pointed us at a registry other than the built-in default. */
-function hasRegistryOverride(): boolean {
-  const configured = readEnv(ENV.NPM_REGISTRY);
-  return configured !== undefined && configured !== "";
 }
 
 /**
@@ -77,6 +40,21 @@ function loadRegistry(): Promise<typeof import("../net/registry.ts")> {
   return import("../net/registry.ts");
 }
 
+/**
+ * §04.1 — the six steps, in order.
+ *
+ * Order matters in ways that are easy to get wrong: the cache probe (step 4)
+ * comes **before** the exact-version passthrough (step 5); tags resolve against
+ * the **last** range entry's registry, not a per-version one; and the range
+ * query fans out over every band **in parallel** and unions, because a range
+ * like `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry.
+ *
+ * Every registry this hands to the client is the band's own `registry`. §05.2
+ * rewrite 1 — swapping a band onto its `npmRegistry` once the user has
+ * configured an npm-protocol registry that would serve it — belongs to
+ * `registry.resolveRegistrySpec`, which every fetcher below applies to its
+ * argument.
+ */
 export async function resolveDescriptor(
   descriptor: Descriptor,
   options?: ResolveOptions,
@@ -115,7 +93,7 @@ export async function resolveDescriptor(
     // per-version one. This is why `yarn@latest` consults repo.yarnpkg.com even
     // though `yarn@1.22.22` would come from npm.
     const lastEntry = definition.ranges[definition.ranges.length - 1]!;
-    const tagRegistry = registryFor(lastEntry[1]);
+    const tagRegistry = lastEntry[1].registry;
     const { capToReleaseAge, fetchAvailableTags } = await loadRegistry();
     const tags = await fetchAvailableTags(tagRegistry);
     if (!Object.hasOwn(tags, range)) {
@@ -175,7 +153,7 @@ export async function resolveDescriptor(
   const { fetchResolvableVersions, undatedSourceError } = await loadRegistry();
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {
-      const candidates = await fetchResolvableVersions(registryFor(spec));
+      const candidates = await fetchResolvableVersions(spec.registry);
       const matched = candidates.versions.filter(
         (version) =>
           satisfiesWithPrereleases(version, range) && (wantsPrereleases || !isPrerelease(version)),

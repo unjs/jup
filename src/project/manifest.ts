@@ -16,6 +16,7 @@ import {
   versionFileFor,
 } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
+import { hashFromIntegrity } from "./lockfile.ts";
 import { loadVersionFile, type VersionFile, versionFileRange } from "./version-file.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
@@ -665,34 +666,6 @@ function withSidecarIntegrity(raw: unknown, integrity: unknown, onFail: unknown)
   }
 
   return `${raw.slice(0, at)}@${parsed.version}+${hash}`;
-}
-
-/**
- * `sha512-<base64>` -> `sha512.<hex>`, the build-suffix spelling of §02.1.
- *
- * Duplicated from `lockfile.ts`'s function of the same name. The reason was that
- * importing it would have put that module in every invocation's graph to serve
- * one field almost no manifest carries — but §15.23 put `lockfile.ts` on the
- * warm path itself, so the copy no longer buys anything and could go.
- *
- * `integrity` is a different matter, and is still not reached for: it pulls
- * `node:crypto` (§16.3). An algorithm this implementation does not support is
- * rejected by `install` with §12's own message, and rejecting it twice would
- * give one input two errors.
- */
-function hashFromIntegrity(integrity: string): string | undefined {
-  const entry = integrity.trim().split(/\s+/)[0] ?? "";
-  const dash = entry.indexOf("-");
-  if (dash <= 0) return undefined;
-
-  const algo = entry.slice(0, dash).toLowerCase();
-  if (!/^[a-z][\da-z]*$/.test(algo)) return undefined;
-
-  const base64 = entry.slice(dash + 1).split("?")[0] ?? "";
-  if (!/^[\d+/A-Za-z]+={0,2}$/.test(base64)) return undefined;
-
-  const hex = Buffer.from(base64, "base64").toString("hex");
-  return hex === "" ? undefined : `${algo}.${hex}`;
 }
 
 /**

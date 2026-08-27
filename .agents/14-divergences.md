@@ -118,6 +118,26 @@ process environment. When an env file attempts to set one, ignore it and warn on
 ! Ignoring <NAME> from <path>: this variable can only be set in the environment
 ```
 
+§15.2's `COREPACK_REGISTRY_<NAME>` is env-file **eligible** (§15.37), and that is
+deliberate: it is the per-package-manager form of `COREPACK_NPM_REGISTRY`, which
+§11 has always allowed a project to set, and pinning a repository to its own
+mirror is the ordinary reason to commit an env file at all. It is nonetheless a
+weaker form of the redirection the deny-list above exists to stop — a committed
+file moves where an artifact is fetched from — so what keeps it weaker is that
+the entries which would make the redirection *pay* are the ones the deny-list
+holds. `COREPACK_INTEGRITY_KEYS` stays env-only, so a signature still has to
+verify against the keys the **machine** trusts; `COREPACK_ALLOW_UNVERIFIED`
+stays env-only, so the file cannot declare "no verification tier is fine"; and
+`COREPACK_NPM_TOKEN` / `USERNAME` / `PASSWORD` stay env-only, so no credential
+follows the redirection — §14.6 scopes them to the configured origin, which is
+precisely the origin such a file would have moved.
+
+That leaves a real residue and it should be named: a mirror that publishes no
+signatures at all soft-fails under §15.7 rather than refusing, so a committed
+`COREPACK_REGISTRY_<NAME>` can downgrade a signed download to a warned, unsigned
+one. `COREPACK_REQUIRE_SIGNATURES` is the answer, and the asymmetry is the right
+way round — an env file may make verification *stricter*, never looser.
+
 ## 14.6 One credential rule — [sec]
 
 **Corepack:** two independent auth paths that disagree. Metadata requests use a

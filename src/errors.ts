@@ -8,7 +8,7 @@
  * `<JSON x>` in the spec means `JSON.stringify(x)` — strings appear quoted.
  */
 
-import { ENV, readEnv } from "./config/env-vars.ts";
+import { ENV, jupSpelling, readEnv } from "./config/env-vars.ts";
 
 /**
  * §12.1 — the user asked for something impossible or contradictory.
@@ -365,8 +365,15 @@ export const messages = {
   strictSslDisabled: (source: string) =>
     `! TLS certificate verification is disabled (set by ${source})`,
 
-  cafileUnreadable: (path: string) =>
-    `Unable to read the TLS certificate bundle at ${path} (set by JUP_CAFILE)`,
+  /**
+   * `<source>` names where the bundle came from, exactly as
+   * {@link strictSslDisabled} does: the variable under the spelling the user
+   * actually set, or `cafile (/home/u/.npmrc)` when a file supplied it. Saying
+   * `JUP_CAFILE` unconditionally is a lie in the `.npmrc` case, and §15.4's
+   * whole point is that a TLS failure names what to go and fix.
+   */
+  cafileUnreadable: (path: string, source: string = jupSpelling(ENV.CAFILE)) =>
+    `Unable to read the TLS certificate bundle at ${path} (set by ${source})`,
 
   cafileEmpty: (path: string) =>
     `The TLS certificate bundle at ${path} contains no PEM certificate`,
