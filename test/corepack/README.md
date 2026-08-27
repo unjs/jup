@@ -5,11 +5,22 @@ specification to. The point is not to make it pass: it is an outside view of how
 jup answers the questions Corepack's own maintainers thought worth asking, and a
 place where a real regression shows up as a *new* failure.
 
-The five CLI-level files are copied with their **test bodies untouched**. Two
+The five CLI-level files are copied with their **test bodies untouched**. Three
 kinds of edit were made and no others: the import lines were rewritten (below),
-and rows covering a deliberate divergence were turned into `it.skip` /
+rows covering a deliberate divergence were turned into `it.skip` /
 `describe.skip` with a `// SKIP (jup §…)` comment above naming the section that
-makes them deliberate. Every skip is listed under *What it reports*.
+makes them deliberate, and seven path literals renamed by §14.24 were respelled
+in place. Every skip is listed under *What it reports*.
+
+The third kind is new and deliberately narrow — `corepack.tgz` → `jup.tgz` in
+the three hydration rows, and `.corepack` → `.jup` in the four that hand-write a
+store marker. Those rows are about `pack`/`install -g` round-tripping and about
+exit codes and ESM handover; the spelling of a path is incidental to every one
+of them, and skipping seven rows to preserve it would discard the coverage that
+caught **both** of the bugs described under *The two that were not divergences*.
+A skip is for a row that asserts something jup deliberately does differently.
+This is not that: jup does the same thing, at a different path. It stays a
+one-token edit per site so the upstream diff still reads as one.
 
 | Upstream | Here |
 | --- | --- |
@@ -43,6 +54,12 @@ vitest run --config test/corepack/vitest.config.ts
 It is **not** part of `pnpm test`: it talks to the real npm registry, and
 several rows install multi-megabyte package managers.
 
+Every upstream row that writes a `.corepack.env` is left exactly as it is, and
+passes: §03.2 still reads that name when the directory has no `.jup.env`, which
+is what §14.24 asks for. The suite is therefore also the regression test for the
+legacy spelling — the fallback going away would show up here as ten-odd red rows
+rather than as a quiet behaviour change in somebody's repository.
+
 Upstream's own `nocks.db` cannot be reused. The recording is keyed on a hash of
 the request *including its headers*, and jup sends its own `user-agent` and
 abridged-metadata `accept` — so every lookup misses. A local recording has to be
@@ -50,7 +67,10 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-**141 rows: 103 pass, 37 skipped, 1 expected fail, 0 failing.**
+**141 rows: 96 pass, 44 skipped, 1 expected fail, 0 failing.**
+
+> Measured 2026-08-27. The per-cause table below still adds up to 40 of those
+> skips and wants a recount; the headline is what a run reports.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
 which green means green. Without it, 52 rows fail — see *Compat mode* below.
@@ -67,7 +87,7 @@ red row is a regression, which is the whole point of keeping the port.
 | 6 | **§14.16 / §15.13** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
 | 5 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
 | 4 | **§15.23** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
-| 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe `.corepack.env` discovery. |
+| 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe env-file discovery. |
 | 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
 | 1 | **§15, #138** — `enable`'s default target set includes npm. |
 | 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |

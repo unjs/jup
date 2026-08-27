@@ -1,5 +1,5 @@
 /**
- * Environment and `.corepack.env` — §03.2, §11, §14.5.
+ * Environment and `.jup.env` — §03.2, §11, §14.5.
  *
  * Reading the environment is the *only* configuration input the tool has. There
  * is no config file, no user profile, no registry of registries.
@@ -29,7 +29,13 @@ import { advisory, messages } from "../errors.ts";
 export const ENV_FILE_PREFIX = COREPACK_PREFIX;
 
 /** §03.2 — the file looked for when `COREPACK_ENV_FILE` is unset. */
-export const DEFAULT_ENV_FILE_NAME = ".corepack.env";
+export const DEFAULT_ENV_FILE_NAME = ".jup.env";
+
+/**
+ * §03.2 — corepack's spelling, still read. Unlike `.jup.lock` (§15.23) this file
+ * exists in repositories today, so §14.24's rename keeps the read side.
+ */
+export const LEGACY_ENV_FILE_NAME = ".corepack.env";
 
 /**
  * §03.2 + §14.5 — variables an env file may never supply.
@@ -81,14 +87,14 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   ENV.CAFILE,
   ENV.STRICT_SSL,
   // §15.11 / §15.37 — the one opt-out from "every artifact clears a verification
-  // tier". A cloned repository that could set it from `.corepack.env` would be
+  // tier". A cloned repository that could set it from an env file would be
   // able to turn its own unsigned, unpinned download into a permitted one, which
   // is the whole of what §15.11 refuses; the deny-list is what keeps the opt-out
   // a decision the person running the tool makes.
   ENV.ALLOW_UNVERIFIED,
   // §15.35d / §15.37 — the file that supplies the project spec. Eligibility is a
   // *deny*-list, so a variable is project-settable until it is named here: a
-  // cloned repository whose `.corepack.env` set this could point the spec at a
+  // cloned repository whose env file set this could point the spec at a
   // file of its own and run a package manager the manifest never names.
   ENV.SPEC_FILE,
   // §11.5 / §14.23 — the advisory mute covers TLS verification being off
@@ -124,7 +130,7 @@ const CH_BACKTICK = 0x60;
  * Written out by hand rather than delegating, because `node:util` is ~40 kB of
  * JavaScript and 3 native modules loaded on **every** invocation to serve a file
  * that, for almost every project, does not exist: `parseEnvFile` runs only when
- * `.corepack.env` is actually there. `await import` cannot help — the walk in
+ * an env file is actually there. `await import` cannot help — the walk in
  * §03.1 is synchronous — so the ~80 lines §16.2 budgets are what buys it back
  * (measured: −0.85 ms on a warm run, out of ~10 ms of our own).
  *
@@ -318,12 +324,30 @@ function withoutExport(key: string): string {
   return key.slice(from);
 }
 
+/** Read a file, mapping `ENOENT` to `null` and propagating everything else. */
+function readIfPresent(path: string): string | null {
+  try {
+    return readFileSync(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
 /**
  * Load the env file for one directory, if any.
  *
- * Path is `resolve(dir, COREPACK_ENV_FILE ?? ".corepack.env")`; `COREPACK_ENV_FILE === "0"`
+ * Path is `resolve(dir, COREPACK_ENV_FILE ?? ".jup.env")`; `COREPACK_ENV_FILE === "0"`
  * disables env files entirely. `ENOENT` is not an error. Only the **closest**
  * file is ever loaded.
+ *
+ * With the variable unset, `.corepack.env` is tried second (§03.2, §14.24) — per
+ * directory, which is what keeps a parent's `.jup.env` from out-ranking a child's
+ * `.corepack.env`: closest still wins, whichever name it carries. A *configured*
+ * path gets no fallback — naming a file that is not there is worth surfacing.
+ * Costs one extra `openat` per walked directory when neither exists (§01.3).
  */
 export function loadEnvFileFrom(
   dir: string,
@@ -333,19 +357,16 @@ export function loadEnvFileFrom(
     return null;
   }
 
-  const path = resolve(dir, configured ?? DEFAULT_ENV_FILE_NAME);
+  const names =
+    configured === undefined ? [DEFAULT_ENV_FILE_NAME, LEGACY_ENV_FILE_NAME] : [configured];
 
-  let content: string;
-  try {
-    content = readFileSync(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return null;
-    }
-    throw error;
+  for (const name of names) {
+    const path = resolve(dir, name);
+    const content = readIfPresent(path);
+    if (content !== null) return { vars: parseEnvFile(content), path };
   }
 
-  return { vars: parseEnvFile(content), path };
+  return null;
 }
 
 /**

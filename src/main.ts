@@ -177,7 +177,7 @@ export async function runProxy(
         }
       : { name, reference: () => fallbackReference(name, transparent) };
 
-  // Step 3 — one `package.json` read plus at most one `.corepack.env` open per
+  // Step 3 — one `package.json` read plus at most two env-file opens per
   // directory walked. The env file it loads is applied to `process.env` here,
   // before anything reads a `COREPACK_*` variable below.
   const cwd = process.cwd();
@@ -229,7 +229,7 @@ export async function runProxy(
     throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
   }
 
-  // Step 6 — one `.corepack` read on a hit; download, verify and promote on a miss.
+  // Step 6 — one `.jup` read on a hit; download, verify and promote on a miss.
   const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
   // §15.23 — record only what we had to go and resolve. The hash comes from the

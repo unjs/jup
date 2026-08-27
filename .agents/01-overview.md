@@ -75,7 +75,7 @@ This is the hot path. Every step is specified in the referenced file.
  │
  ├─ 3. discover project spec ─────────────────────── §03
  │      walk up from cwd looking for package.json,
- │      loading .corepack.env on the way;
+ │      loading .jup.env on the way;
  │      → NoProject | NoSpec | Found
  │
  ├─ 4. reconcile ─────────────────────────────────── §03.5
@@ -91,7 +91,7 @@ This is the hot path. Every step is specified in the referenced file.
  │      range?  → fetch version list, pick highest
  │
  ├─ 6. ensure installed ──────────────────────────── §07
- │      hit:  read <store>/<name>/<version>/.corepack   ← FAST PATH ENDS HERE
+ │      hit:  read <store>/<name>/<version>/.jup        ← FAST PATH ENDS HERE
  │      miss: download → verify (§06) → atomic rename
  │
  └─ 7. execute ───────────────────────────────────── §08
@@ -105,11 +105,12 @@ A conforming implementation **MUST** be able to complete a warm proxy invocation
 
 * **zero** network requests,
 * **zero** reads of the last-known-good file,
-* at most: one `.corepack.env` `open` attempt per directory walked, one
-  `package.json` read, one `.corepack` read, plus the execution syscalls.
+* at most: two env-file `open` attempts per directory walked — `.jup.env`, then
+  `.corepack.env` only if the first is `ENOENT` (§03.2) — one `package.json` read,
+  one `.jup` read, plus the execution syscalls.
 
 Corepack itself satisfies this because `findInstalledVersion` short-circuits before
-any registry call and `installVersion` returns early on a `.corepack` hit. Any
+any registry call and `installVersion` returns early on a marker hit. Any
 re-implementation that, for example, always reads `lastKnownGood.json` or always
 lists the store directory violates the budget.
 
@@ -117,7 +118,7 @@ lists the store directory violates the budget.
 > `<store>/<name>/` directory whenever the descriptor is a *range*. When the
 > descriptor is an exact version (the overwhelmingly common case, since
 > `packageManager` normally pins exactly) an implementation SHOULD `stat`
-> `<store>/<name>/<version>/.corepack` directly and skip the directory scan.
+> `<store>/<name>/<version>/.jup` directly and skip the directory scan.
 
 ## 1.4 Transparent commands
 

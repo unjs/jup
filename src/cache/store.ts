@@ -33,7 +33,7 @@ import type { SemVer } from "../version/semver.ts";
 import type { CorepackMarker, InstallSpec, Locator } from "../types.ts";
 
 /** §07.2 — the file whose presence means "this install is complete and valid". */
-export const MARKER_NAME = ".corepack";
+export const MARKER_NAME = ".jup";
 
 /** §04.4 — the global default map. Lives outside `v1`, so `cache clean` spares it. */
 export const LAST_KNOWN_GOOD_NAME = "lastKnownGood.json";
@@ -60,11 +60,16 @@ function randomSuffix(): string {
 
 /**
  * §07.1 — `COREPACK_HOME`, else `XDG_CACHE_HOME`/`LOCALAPPDATA`/platform default,
- * joined with `node/corepack`.
+ * joined with `jup`.
+ *
+ * No `node/` segment, and `jup` not `corepack` (§14.24): the tool does not ship
+ * inside Node and the store holds package managers, not anything Node owns. So a
+ * corepack cache under `node/corepack` is never read — `v1`'s abandon-wholesale
+ * migration, applied one segment higher up.
  *
  * `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA` on every platform,
  * including Windows. That is a quirk of corepack's fallback chain rather than
- * design, and it is reproduced for cache compatibility.
+ * design, kept because nothing recommends changing it.
  *
  * §15.13 point 5 narrows the other half: `LOCALAPPDATA` is consulted **only on
  * Windows** (row 171). Corepack reads it on POSIX too, which is #673 — a Linux
@@ -86,7 +91,7 @@ export function getHomeFolder(): string {
     (isWindows ? process.env[SYSTEM_ENV.LOCALAPPDATA] : undefined) ??
     join(homedir(), isWindows ? join("AppData", "Local") : ".cache");
 
-  return join(cacheRoot, "node", "corepack");
+  return join(cacheRoot, "jup");
 }
 
 /** `<home>/v1` — a layout-version segment. Incrementing it abandons old caches wholesale. */
@@ -121,7 +126,7 @@ function versionDirFor(locator: Locator, parsed: SemVer | null): string {
 }
 
 /**
- * §07.2 — read the `.corepack` marker. Its presence is the "this install is
+ * §07.2 — read the `.jup` marker. Its presence is the "this install is
  * complete and valid" signal, and reading it is the entire warm path: `ENOENT`
  * proceeds to download, any other error propagates.
  */
@@ -306,7 +311,7 @@ export function writeMarker(dir: string, marker: CorepackMarker): void {
  * bookkeeping, carrying the hash of the bytes we actually have.
  *
  * `ensureInstalled` rewrites `locator.reference` on the download path, but the
- * warm path returns from the `.corepack` marker without touching it, so the hash
+ * warm path returns from the `.jup` marker without touching it, so the hash
  * has to be re-attached here. The installed artifact's hash always wins:
  * composing the result from `parse().version` rather than appending means a
  * reference that already carries a suffix is rewritten, not grown a second one.
@@ -343,7 +348,7 @@ export function createTempDir(): string {
 
   // The name only has to be unique; `EEXIST` simply means "draw again".
   for (;;) {
-    const dir = join(installFolder, `corepack-${process.pid}-${randomSuffix()}`);
+    const dir = join(installFolder, `jup-${process.pid}-${randomSuffix()}`);
     try {
       mkdirSync(dir);
       return dir;
@@ -573,7 +578,7 @@ export function bumpLastKnownGood(locator: Locator): void {
   const current = lkg[locator.name];
 
   // The entry is only ever *created* by §04.5 step 3 or by `install -g`. A
-  // one-off `corepack yarn@4.9.0 …` must not silently become the global default.
+  // one-off `jup yarn@4.9.0 …` must not silently become the global default.
   if (current === undefined || !isValidVersion(current)) {
     return;
   }
@@ -593,7 +598,7 @@ export function bumpLastKnownGood(locator: Locator): void {
  * Every complete install in the store, sorted by name then version.
  *
  * "Complete" means §07.2's definition and nothing looser: a directory carrying a
- * `.corepack` marker. A half-extracted temp folder (`corepack-<pid>-<rand>`) and
+ * `.jup` marker. A half-extracted temp folder (`jup-<pid>-<rand>`) and
  * a `.DS_Store` are both directory entries, and neither is a cached version —
  * counting them would make `cache list` (§15.19) report an image as seeded when
  * it is not.

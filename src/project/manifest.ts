@@ -165,7 +165,7 @@ export function discoverProjectSpec(
     }
 
     // Step 1 — a vendored dependency must never speak for its host, and that
-    // includes its `.corepack.env`, so this runs before the env file is loaded.
+    // includes its env file, so this runs before the env file is loaded.
     if (NODE_MODULES_RE.test(currentDir)) {
       continue;
     }
@@ -181,7 +181,7 @@ export function discoverProjectSpec(
 
     // §03.5 / §11.1 — with the project spec disabled the manifest must not be
     // read at all, let alone parsed or devEngines-validated. The test lives here,
-    // *after* the env-file step, because `.corepack.env` is allowed to be what
+    // *after* the env-file step, because the env file is allowed to be what
     // sets the variable (§03.2); corepack returns before any walk and so cannot
     // honour an env file at all. From this point the walk is exactly `envOnly`:
     // it keeps climbing for an env file and records no manifest, so the result is

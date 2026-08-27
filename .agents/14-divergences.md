@@ -20,7 +20,7 @@ normative. Where the two overlap, §15 refines §14.
 already an exact version and the answer is trivially itself.
 
 **Required:** when the descriptor's range is a valid exact semver version, skip the
-directory scan and go straight to `stat(<store>/<name>/<version>/.corepack)`. This is
+directory scan and go straight to `stat(<store>/<name>/<version>/.jup)`. This is
 the single hottest path in the tool — the overwhelming majority of real invocations
 are an exactly-pinned `packageManager` field — and it turns an O(installed versions)
 directory walk plus N semver parses into one `stat`.
@@ -62,14 +62,14 @@ skewed system clock could then reject valid keys, an implementation SHOULD accep
 otherwise-valid signature from an expired key with a loud warning rather than hard
 failing — but MUST NOT do so silently. Ship only unexpired keys.
 
-## 14.5 Restrict what `.corepack.env` may set — [sec]
+## 14.5 Restrict what `.jup.env` may set — [sec]
 
 **Corepack:** any `COREPACK_`-prefixed variable can be set from a project-local
 `.corepack.env`, except `COREPACK_ENV_FILE` and `COREPACK_ENABLE_DOWNLOAD_PROMPT`.
 That includes `COREPACK_INTEGRITY_KEYS`.
 
 **Consequence:** `cd` into a cloned repository and run `yarn`, and a committed
-`.corepack.env` containing `COREPACK_INTEGRITY_KEYS=0` has already disabled signature
+env file containing `COREPACK_INTEGRITY_KEYS=0` has already disabled signature
 verification before anything is downloaded. `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1`
 lets that same file point `packageManager` at an arbitrary host. `COREPACK_NPM_TOKEN`
 lets it exfiltrate a token by pairing with a hostile `COREPACK_NPM_REGISTRY`.
@@ -296,7 +296,7 @@ its default, so nothing fails loudly.
 specific statement about *this* tool. The pair shares its default, its env-file
 eligibility and its §14.5 deny-list entry — the deny-lists are keyed by the
 `COREPACK_` spelling and a name is canonicalised before it is checked, so
-`JUP_INTEGRITY_KEYS` in a `.corepack.env` is refused exactly as
+`JUP_INTEGRITY_KEYS` in a `.jup.env` is refused exactly as
 `COREPACK_INTEGRITY_KEYS` is. §03.2's prefix sandbox admits both prefixes and
 nothing else. §11.3's two exported variables are written under both names, so a
 package manager looking for `COREPACK_ROOT` still finds it.
@@ -327,7 +327,7 @@ ineligible under §14.5: several of the lines it covers are the notice that a
 verification step was skipped, and a cloned repository must not be able to
 silence them, least of all §14.5's own "Ignoring `<NAME>`" warning.
 
-## 14.24 The tool names itself in its own output — [correct]
+## 14.24 The tool names itself, in its output and on disk — [correct]
 
 **Corepack:** every user-facing string names Corepack. The usage lines and
 `--help` synopsis are spelled `corepack <command>`, the `devEngines` warnings and
@@ -351,21 +351,37 @@ name is lowercase and a capitalised variant would be a third spelling — and th
 `JUP_` spelling in every remedy that names a variable (§11, §14.22). The
 troubleshooting link points at this project. §12 carries the resulting strings.
 
-Three things this does **not** move, because they are layout rather than prose,
-and renaming them would strand caches, env files and archives that already
-exist:
+The layout is renamed too, and each of the four costs less than leaving it:
 
-* the store, its marker and its temp directories — `<cache>/node/corepack`,
-  `.corepack`, `corepack-<pid>-<suffix>` (§07.1, §07.2);
-* the env file, `.corepack.env`, and the default shim directory on Windows,
-  `%LOCALAPPDATA%\node\corepack\bin` (§03.2, §15.13);
-* `pack`'s default output, `corepack.tgz` (§07.10, §09.6).
+| Was | Is | Why it is safe to move |
+| --- | --- | --- |
+| `<cache>/node/corepack` | `<cache>/jup` (§07.1) | Abandoning a cache is the `v1` mechanism applied one segment higher, and §07.1 already calls that the cheapest migration story. The cost is one re-download of versions the store can rebuild from the registry; the `node/` segment goes with it, because jup is not part of Node and the store holds package managers rather than anything Node owns. |
+| `.corepack` | `.jup` (§07.2) | Store-internal, and reachable only through a root that has already moved. There is no directory in which the old marker could still be found. |
+| `corepack-<pid>-<suffix>` | `jup-<pid>-<suffix>` (§07.4) | A temp directory that outlives its process is garbage either way; nothing reads one back. |
+| `corepack.tgz` | `jup.tgz` (§07.10, §09.6) | Only `pack`'s **default** output name. `install -g <file>` takes the path it is given, so an archive already on disk keeps working under whatever name it has. |
 
-The `COREPACK_*` variables keep working exactly as §14.22 specifies — this entry
-changes which spelling a *message* names, never which spellings are read. For
-the same reason `DEBUG=jup` joins `DEBUG=corepack` (§15.35l) rather than
-replacing it.
+`%LOCALAPPDATA%\node\corepack\bin` becomes `%LOCALAPPDATA%\jup\bin` on the same
+terms (§15.13). That directory is this spec's own invention — Corepack installs
+shims beside its own binary — so there is nothing at the old path to strand.
 
-Byte-compatibility with Corepack's own text is therefore given up, deliberately
-and in exactly one dimension: a CI job matching on a message matches everything
-but the name. §13's rows assert this spec's spelling.
+The env file is the one that could have stranded something. `.corepack.env` is a
+file real repositories have on disk today, so §03.2 renames it to `.jup.env` and
+keeps reading the old name: `.jup.env` first, `.corepack.env` only when the first
+is `ENOENT`, closest-directory-wins across both. That is §11.6's rule for the
+variables applied to the file, and it costs one extra `openat` per walked
+directory (§01.3).
+
+The `COREPACK_*` variables keep working exactly as §14.22 specifies — for them
+this entry changes which spelling a *message* names, never which spellings are
+read. For the same reason `DEBUG=jup` joins `DEBUG=corepack` (§15.35l) rather
+than replacing it.
+
+Byte-compatibility with Corepack's own text is therefore given up, deliberately:
+a CI job matching on a message matches everything but the name, and a CI job that
+seeds a cache by path or names `corepack.tgz` has to be told the new spelling.
+Neither is silent — the first shows up as a failed match, the second as a missing
+file. §13's rows assert this spec's spelling.
+
+The one thing that stays is the `COREPACK_HOME` variable and its `JUP_HOME` twin
+(§11.6): a CI job that already points the store somewhere explicit keeps working
+unchanged, because what moved is the *default*, not the setting.

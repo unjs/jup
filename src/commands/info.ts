@@ -689,7 +689,7 @@ function displayValue(name: string, value: string): string {
  *
  * The four buckets are the four things that can happen to a line in that file,
  * and the difference between them is the whole answer to "why is my
- * `.corepack.env` not doing anything": it was refused for security (§14.5), it
+ * `.jup.env` not doing anything": it was refused for security (§14.5), it
  * was shadowed by a real environment variable (§11.6), or it was never
  * `COREPACK_`-prefixed in the first place.
  */

@@ -91,7 +91,7 @@ interface ArtifactSource {
 }
 
 /**
- * Returns the install spec, downloading only on a `.corepack` miss.
+ * Returns the install spec, downloading only on a `.jup` miss.
  *
  * Verification follows §06.1's decision table exactly. Two of its consequences
  * are deliberate and must not be "fixed": a user-supplied hash overrides

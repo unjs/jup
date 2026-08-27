@@ -151,7 +151,7 @@ must match the embedded `keys` object:
 A malformed JSON value causes a parse error at verification time, not at startup.
 
 > **Divergence (§14.5):** because `COREPACK_INTEGRITY_KEYS` can be set from a
-> project-local `.corepack.env`, a hostile repository can currently substitute its own
+> project-local `.jup.env`, a hostile repository can currently substitute its own
 > trust store or disable verification entirely by committing a file. A conforming
 > implementation MUST ignore this variable when it originates from an env file.
 
@@ -187,6 +187,6 @@ What this design defends against, and what it does not:
 | Compromised mirror serving unpinned **Yarn Berry** (`npmRegistry` path, `registry.bin` set) | **No** — see §14.10 |
 | Compromised `repo.yarnpkg.com` serving unpinned Yarn Berry | **No** — url-type registries have no signatures at all |
 | Man-in-the-middle on the wire | Via TLS only |
-| Hostile repository disabling verification via `.corepack.env` | **No** — see §14.5 |
+| Hostile repository disabling verification via `.jup.env` | **No** — see §14.5 |
 | Hostile repository pointing `packageManager` at an arbitrary URL | **Yes** for known package managers (blocked unless `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1`); **no** for unknown names |
 | Tarball path traversal / symlink escape during extraction | Delegated to the tar library; see §07.4 |

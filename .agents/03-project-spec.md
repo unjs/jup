@@ -66,17 +66,19 @@ until the consumer asks for it.
 `range` is populated only when `devEngines.packageManager.version` is present:
 `{name, range: version, onFail}`.
 
-## 3.2 Env file (`.corepack.env`)
+## 3.2 Env file (`.jup.env`)
 
 Before reading each directory's manifest, and only until one is found:
 
-* Path = `resolve(d, COREPACK_ENV_FILE ?? ".corepack.env")`.
-* If `COREPACK_ENV_FILE === "0"` → env files are disabled entirely; skip.
+* Path = `resolve(d, JUP_ENV_FILE ?? ".jup.env")`. If `JUP_ENV_FILE` is unset and
+  `resolve(d, ".jup.env")` is `ENOENT`, try `resolve(d, ".corepack.env")` — see
+  *Legacy name* below.
+* If `JUP_ENV_FILE === "0"` → env files are disabled entirely; skip.
 * Parse as a dotenv-style file (Node's `util.parseEnv` semantics).
 * **Filter**: keep only keys carrying one of the tool's two prefixes — `JUP_` or
   `COREPACK_` (§11.6). Everything else is dropped.
 * **Merge**: `{...filteredFileVars, ...process.env}` — i.e. the **real environment
-  wins**. A `.corepack.env` value can only supply a variable the ambient environment
+  wins**. A `.jup.env` value can only supply a variable the ambient environment
   has not set. "Has not set" means *neither* spelling of it (§11.6): a file's
   `JUP_HOME` must not out-rank a real `COREPACK_HOME`, which a plain key-wise merge
   would let it do, since the two keys do not collide and `JUP_` is the one that
@@ -86,6 +88,28 @@ Before reading each directory's manifest, and only until one is found:
 * Only the **closest** env file is loaded; once one is found, no further directories
   are checked for env files (`!localEnv` guard). *(This is the behaviour of commit
   `70bb9c5`/#891 "only load closest env file, for every commands".)*
+
+### Legacy name
+
+Corepack's spelling is `.corepack.env`, and unlike `.jup.lock` (§15.23) it is a file
+that exists in real repositories today. §14.24 renames it; this is the read side of
+that rename, and it follows §11.6's rule for the variables exactly: `.jup.env` is the
+name, `.corepack.env` is still *read*, and the jup spelling wins.
+
+* The fallback applies **only** when `JUP_ENV_FILE`/`COREPACK_ENV_FILE` is unset. An
+  explicitly configured path is used as given, with no second candidate — naming a
+  file that is not there is a mistake worth surfacing, not one worth papering over.
+* A directory is decided by its **own** two candidates before the walk moves on. A
+  parent's `.jup.env` MUST NOT out-rank a child's `.corepack.env`; the closest file
+  wins whichever name it carries, because "closest" is the rule a user reasons with
+  and the rename must not quietly change which file applies.
+* Loading a `.corepack.env` is not a warning. It is a supported spelling, not a
+  deprecation, and the walk is on the cold path of every run in a project that has
+  no pin yet — a line printed there would be printed constantly.
+
+The cost is one extra `openat` per walked directory in the common case where neither
+file exists (§01.3, §16.1 carry the revised budgets). It is confined to the directory
+walk, which the exact-pin fast path already stops at the first manifest.
 
 Variables that MUST NOT be honoured from an env file, even though they carry a
 prefix. The list is keyed by the `COREPACK_` spelling and a key MUST be

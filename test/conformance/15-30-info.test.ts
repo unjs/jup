@@ -287,7 +287,7 @@ describe("§15.30 corepack info", () => {
   it("196: names the env file and the variables it contributed", async () => {
     const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
     fixture.write(
-      ".corepack.env",
+      ".jup.env",
       [
         "COREPACK_ENABLE_STRICT=0",
         "COREPACK_NPM_REGISTRY=https://from-the-file.example.org",
@@ -302,7 +302,7 @@ describe("§15.30 corepack info", () => {
     });
 
     expect(report.envFile).toMatchObject({
-      path: join(fixture.cwd, ".corepack.env"),
+      path: join(fixture.cwd, ".jup.env"),
       applied: ["COREPACK_ENABLE_STRICT"],
       // §11.6 — the real environment wins over the file.
       overridden: ["COREPACK_NPM_REGISTRY"],

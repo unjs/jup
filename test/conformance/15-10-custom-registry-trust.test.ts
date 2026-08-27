@@ -4,7 +4,7 @@
  * Driven by corepack #884 and its open PR #885: verification always used npm's
  * keys, whoever served the package, so every re-signing private registry
  * (Cloudsmith and the like) failed with "not signed by any trusted keys" and no
- * way to say otherwise. #741 is the compounding half — `.corepack.env` was not
+ * way to say otherwise. #741 is the compounding half — `.jup.env` was not
  * loaded for `install`/`prepare`, so even the per-project workaround did not
  * work — and §14.5 answers it by making the variable environment-only, which
  * row 166 pins.
@@ -150,16 +150,16 @@ describe("§15.10 — trust keyed by registry origin", () => {
     expect(registry.requests[0]!.original).toBe(`${registry.origin}/pnpm/6.6.2`);
   });
 
-  it("166: a project `.corepack.env` cannot supply keys for any origin", async () => {
+  it("166: a project `.jup.env` cannot supply keys for any origin", async () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
-    fixture.write(".corepack.env", `COREPACK_INTEGRITY_KEYS=${keysFor(registry.origin)}\n`);
+    fixture.write(".jup.env", `COREPACK_INTEGRITY_KEYS=${keysFor(registry.origin)}\n`);
     fixture.write(".npmrc", `registry=${registry.origin}\n`);
 
     const result = await run(["pnpm", "--version"], { ...fixture });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      `! Ignoring COREPACK_INTEGRITY_KEYS from ${join(fixture.cwd, ".corepack.env")}: this variable can only be set in the environment`,
+      `! Ignoring COREPACK_INTEGRITY_KEYS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
     );
     expect(result.stderr).toContain("The package was not signed by any trusted keys");
     expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);

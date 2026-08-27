@@ -193,9 +193,9 @@ describe("§13.5 environment variables", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("41: a .corepack.env may still be what sets the variable", async () => {
+  it("41: a .jup.env may still be what sets the variable", async () => {
     const fixture = createFixture("{ this is not json");
-    fixture.write(".corepack.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
+    fixture.write(".jup.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
     seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
 
     const result = await run(["yarn", "--version"], fixture);
@@ -296,9 +296,9 @@ describe("§13.5 environment variables", () => {
     expect(second.stdout).toBe("3.0.0\n");
   });
 
-  it("48: .corepack.env cannot enable the download prompt", async () => {
+  it("48: .jup.env cannot enable the download prompt", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-    fixture.write(".corepack.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
+    fixture.write(".jup.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
 
     const result = await run(["yarn", "--version"], { ...fixture, registry });
 

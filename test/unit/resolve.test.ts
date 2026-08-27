@@ -184,7 +184,7 @@ async function startYarnServersWithoutMirror(): Promise<{ npm: TestServer; berry
 }
 
 /**
- * A cached install: the directory, plus the `.corepack` marker §07.2 stats.
+ * A cached install: the directory, plus the `.jup` marker §07.2 stats.
  *
  * §15.11 — `hash` matters now: the probe checks a hash-bearing reference against
  * the marker before answering, so an install standing for a *pinned* reference
@@ -194,7 +194,7 @@ function seedInstalled(name: string, version: string, hash?: string): void {
   const dir = join(home, "v1", name, version);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, ".corepack"),
+    join(dir, ".jup"),
     JSON.stringify({
       locator: { name, reference: version },
       ...(hash === undefined ? {} : { hash }),

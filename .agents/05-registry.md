@@ -225,7 +225,7 @@ if COREPACK_NPM_TOKEN and url.origin === registry.origin:
 
 The reference implementation does **not** read `.npmrc`, at any level. Registry and
 auth configuration comes only from `COREPACK_*` variables (and, indirectly,
-`.corepack.env`).
+`.jup.env`).
 
 This is corepack's single most-requested missing capability. **§15.1 requires a
 conforming implementation to read a constrained subset of `.npmrc`**, and specifies
@@ -257,4 +257,4 @@ not by the tool's core (§10.1):
 | A package-manager shim (`yarn …`) | `1` — the user did not ask to download anything |
 
 Both are `??=`-style defaults, so a real environment variable overrides them. This
-default MUST NOT be settable from `.corepack.env` (§03.2).
+default MUST NOT be settable from `.jup.env` (§03.2).

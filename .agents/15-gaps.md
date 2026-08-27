@@ -60,7 +60,7 @@ unlisted keys.
 
 ```
 1. COREPACK_NPM_REGISTRY / COREPACK_NPM_TOKEN / COREPACK_NPM_USERNAME|PASSWORD   (highest)
-2. .corepack.env, for the env-file-eligible subset only (§11, §14.5)
+2. .jup.env, for the env-file-eligible subset only (§11, §14.5)
 3. .npmrc, in the file order above
 4. the built-in default registry                                                 (lowest)
 ```
@@ -379,7 +379,7 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
    `COREPACK_SHIM_DIRECTORY`, else the **per-user default**:
    * Linux/BSD: `$XDG_BIN_HOME`, else `~/.local/bin`
    * macOS: `~/.local/bin`
-   * Windows: `%LOCALAPPDATA%\node\corepack\bin`
+   * Windows: `%LOCALAPPDATA%\jup\bin` (no `node\` segment — §07.1)
 2. **Probe writability before writing anything.** On `EROFS`/`EACCES`/`EPERM`, fall
    back to the per-user default and say so:
    `! <dir> is not writable; installing shims to <fallback> instead`
@@ -1006,7 +1006,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 163 | Same with `COREPACK_ENABLE_NETWORK=0` or pinned `COREPACK_INTEGRITY_KEYS` | no refresh attempted (§15.9) |
 | 164 | Warm cache hit | **no** key-refresh request (§15.9, §01.3) |
 | 165 | Trust store keyed by a non-default registry origin | that origin's keys are used (§15.10) |
-| 166 | Project `.corepack.env` supplying keys for a custom origin | ignored (§15.10, §14.5) |
+| 166 | Project `.jup.env` supplying keys for a custom origin | ignored (§15.10, §14.5) |
 | 167 | Yarn Berry from `repo.yarnpkg.com`, no hash pinned | refused unless `COREPACK_ALLOW_UNVERIFIED=1` (§15.11) |
 | 168 | Yarn Berry via a custom npm registry, no hash | tarball-stream digest verified against signed `integrity` (§15.11, §14.10) |
 | 169 | `devEngines.packageManager.integrity` present, `packageManager` clean semver | integrity enforced (§15.12) |

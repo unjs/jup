@@ -1,6 +1,6 @@
 /**
  * Fixtures: throwaway projects, throwaway `COREPACK_HOME`s, and fake package
- * managers — both as store entries (a hand-written `.corepack` marker plus a
+ * managers — both as store entries (a hand-written `.jup` marker plus a
  * trivial entry script) and as npm-shaped tarballs the mock registry can serve.
  *
  * The `bin` layout comes from the embedded table, so the entry point a fake
@@ -189,7 +189,7 @@ export function seedPackageManager(
   const hash = pinned.length > 0 ? pinned.join(".") : "sha512.seeded";
 
   writeFileSync(
-    join(location, ".corepack"),
+    join(location, ".jup"),
     JSON.stringify({ locator: { name, reference }, bin: spec.bin, hash }),
   );
 

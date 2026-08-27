@@ -57,7 +57,7 @@ import { create, extract, listEntries } from "../cache/tar.ts";
 import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
-const DEFAULT_ARCHIVE_NAME = "corepack.tgz";
+const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
 import { HELP_TEXT } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
@@ -391,8 +391,8 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
 /**
  * §07.10 — validate that the archive came from `pack` before touching anything.
  *
- * Only entries whose **last** path segment is the `.corepack` marker are
- * considered; anything shorter than `<name>/<version>/.corepack` poisons the
+ * Only entries whose **last** path segment is the `.jup` marker are
+ * considered; anything shorter than `<name>/<version>/.jup` poisons the
  * whole archive. This guards against passing the wrong tarball by accident — it
  * is **not** a security boundary, which is why the extraction below still runs
  * through §07.4's rules with nothing relaxed.
@@ -418,7 +418,7 @@ async function readArchiveEntries(
 
     // §07.10's algorithm records `segments[0]` and `segments[1]` verbatim, and
     // neither it nor corepack validates them — but they are then used as path
-    // components *and* written to `lastKnownGood.json`. `<name>/./.corepack`
+    // components *and* written to `lastKnownGood.json`. `<name>/./.jup`
     // survives the extractor (`join` folds the `.` away), so `promote` operates
     // on `<name>` and the recorded default becomes the literal `"."`, which
     // every later spec-less run classifies as a dist-tag and takes to the
@@ -921,7 +921,7 @@ export async function cmdPrepare(args: string[]): Promise<number> {
     if (activate) setLastKnownGood(locator.name, referenceWithHash(locator.reference, spec.hash));
   }
 
-  // §09.10 — `--output` tolerates a bare flag, defaulting to `corepack.tgz`.
+  // §09.10 — `--output` tolerates a bare flag, defaulting to `jup.tgz`.
   const output = firstValue(parsed, "-o", "--output");
   const bare = hasFlag(parsed, "-o", "--output");
   if (output !== undefined || bare) {

@@ -1000,7 +1000,7 @@ it(`should support hydrating package managers from cached archives`, async () =>
     // Disable the network to make sure we don't succeed by accident
     process.env.COREPACK_ENABLE_NETWORK = `0`;
 
-    await expect(runCli(cwd, [`install`, `-g`, `corepack.tgz`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });
@@ -1033,7 +1033,7 @@ it(`should support hydrating package managers if cache folder was removed`, asyn
     // Disable the network to make sure we don't succeed by accident
     process.env.COREPACK_ENABLE_NETWORK = `0`;
 
-    await expect(runCli(cwd, [`install`, `-g`, `corepack.tgz`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });
@@ -1066,7 +1066,7 @@ it(`should support hydrating multiple package managers from cached archives`, as
     // Disable the network to make sure we don't succeed by accident
     process.env.COREPACK_ENABLE_NETWORK = `0`;
 
-    await expect(runCli(cwd, [`install`, `-g`, `corepack.tgz`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });
@@ -1151,7 +1151,7 @@ it(`should not override the package manager exit code`, async () => {
 
     const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
     await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.corepack`), {});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
 
     await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
       process.exitCode = 42;
@@ -1176,7 +1176,7 @@ it(`should not preserve the process.exitCode when a package manager throws`, asy
 
     const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
     await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.corepack`), {});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
 
     await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
       process.exitCode = 42;
@@ -1199,7 +1199,7 @@ it(`should not set the exit code after successfully launching the package manage
 
     const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
     await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.corepack`), {});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
 
     await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
       process.once('beforeExit', () => {
@@ -1225,7 +1225,7 @@ it(`should support package managers in ESM format`, async () => {
 
     const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
     await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.corepack`), {});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
 
     await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
       import 'fs';

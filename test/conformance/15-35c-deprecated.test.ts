@@ -50,7 +50,7 @@ describe("§15.35c — a deprecated command names its replacement and still work
     expect(result.stderr).toBe(PREPARE_LINE);
     // stdout parses: the notice is on the other stream, where it belongs.
     expect(() => JSON.parse(result.stdout) as unknown).not.toThrow();
-    expect(fixture.exists("corepack.tgz")).toBe(true);
+    expect(fixture.exists("jup.tgz")).toBe(true);
   });
 
   it("201: `hydrate` prints its own line and consumes the archive", async () => {

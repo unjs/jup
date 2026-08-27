@@ -47,9 +47,10 @@ getenv × N                        (one pass over environ, in-process; the
                                    JUP_/COREPACK_ pair resolves in that pass)
 openat  ./package.json            → read → close
   ...plus one openat per ancestor directory until found
-openat  ./.corepack.env           → ENOENT (cheap; only until a manifest is found)
-stat    <store>/<pm>/<ver>/.corepack
-openat  <store>/<pm>/<ver>/.corepack → read → close
+openat  ./.jup.env                → ENOENT (cheap; only until a manifest is found)
+openat  ./.corepack.env           → ENOENT (legacy name, §03.2; only when .jup.env is absent)
+stat    <store>/<pm>/<ver>/.jup
+openat  <store>/<pm>/<ver>/.jup   → read → close
 execve  <node> <binPath> <args...>
 ```
 
@@ -149,7 +150,7 @@ The reference implementation's suite is the right model and worth copying wholes
   serve a *validly signed but wrong* artifact is what makes the integrity tests real.
 * A **record/replay HTTP cache** so the suite runs offline against real registry
   responses, keyed by `sha256(url + headers)`.
-* **Fake package managers**: a directory in the store with a hand-written `.corepack`
+* **Fake package managers**: a directory in the store with a hand-written `.jup`
   and a trivial entry script. This is how §13.12's exit-code, signal, and stdio tests
   get written without downloading anything.
 * A **live staleness test** comparing the embedded trust store against

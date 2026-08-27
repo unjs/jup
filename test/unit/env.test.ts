@@ -13,6 +13,7 @@ import {
   isCI,
   isEnvFileEligible,
   isFrozenLockfile,
+  LEGACY_ENV_FILE_NAME,
   loadEnvFileFrom,
   parseEnvFile,
 } from "../../src/project/env.ts";
@@ -295,7 +296,7 @@ describe("parseEnvFile — differential against node:util's parseEnv", () => {
 });
 
 describe("loadEnvFileFrom", () => {
-  it("reads .corepack.env from the given directory", () => {
+  it("reads .jup.env from the given directory", () => {
     const path = writeEnvFile(DEFAULT_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
 
     expect(loadEnvFileFrom(dir)).toEqual({
@@ -309,7 +310,7 @@ describe("loadEnvFileFrom", () => {
   });
 
   it("propagates read errors other than ENOENT", () => {
-    // A directory named `.corepack.env` fails with EISDIR, not ENOENT.
+    // A directory named `.jup.env` fails with EISDIR, not ENOENT.
     mkdirSync(join(dir, DEFAULT_ENV_FILE_NAME));
 
     expect(() => loadEnvFileFrom(dir)).toThrow();
@@ -324,7 +325,7 @@ describe("loadEnvFileFrom", () => {
   });
 
   // Test 58.
-  it("reads the file named by COREPACK_ENV_FILE and ignores .corepack.env", () => {
+  it("reads the file named by COREPACK_ENV_FILE and ignores .jup.env", () => {
     writeEnvFile(DEFAULT_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
     const other = writeEnvFile(".other.env", "COREPACK_ENABLE_STRICT=0\n");
     process.env.COREPACK_ENV_FILE = ".other.env";
@@ -333,6 +334,44 @@ describe("loadEnvFileFrom", () => {
       path: other,
       vars: { COREPACK_ENABLE_STRICT: "0" },
     });
+  });
+
+  // Test 62b.
+  it("falls back to .corepack.env, reporting the path it actually read", () => {
+    const path = writeEnvFile(LEGACY_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
+
+    expect(loadEnvFileFrom(dir)).toEqual({
+      path,
+      vars: { COREPACK_ENABLE_AUTO_PIN: "1" },
+    });
+  });
+
+  // Test 62c. The reported `path` matters beyond bookkeeping: §14.5's
+  // "Ignoring <NAME> from <path>" warning and `info`'s env-file report both
+  // name it, so a fallback that read one file and reported the other would
+  // point the user at a file that had nothing to do with the outcome.
+  it("prefers .jup.env over a .corepack.env beside it", () => {
+    const path = writeEnvFile(DEFAULT_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
+    writeEnvFile(LEGACY_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=0\n");
+
+    expect(loadEnvFileFrom(dir)).toEqual({
+      path,
+      vars: { COREPACK_ENABLE_AUTO_PIN: "1" },
+    });
+  });
+
+  // Test 62e.
+  it("gives a configured COREPACK_ENV_FILE no fallback", () => {
+    writeEnvFile(LEGACY_ENV_FILE_NAME, "COREPACK_ENABLE_AUTO_PIN=1\n");
+    process.env.COREPACK_ENV_FILE = ".other.env";
+
+    expect(loadEnvFileFrom(dir)).toBeNull();
+  });
+
+  it("propagates a non-ENOENT error from the legacy name too", () => {
+    mkdirSync(join(dir, LEGACY_ENV_FILE_NAME));
+
+    expect(() => loadEnvFileFrom(dir)).toThrow();
   });
 });
 
@@ -436,7 +475,7 @@ describe("applyEnvFile", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     process.env.COREPACK_ENV_FILE = "0";
 
-    applyEnvFile({ COREPACK_ENV_FILE: ".corepack.env" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    applyEnvFile({ COREPACK_ENV_FILE: ".jup.env" }, join(dir, DEFAULT_ENV_FILE_NAME));
 
     expect(process.env.COREPACK_ENV_FILE).toBe("0");
   });
@@ -530,7 +569,7 @@ describe("isEnvFileEligible", () => {
 
     // §15.35d / §15.37 — the same trap, and the same two assertions. The file
     // named here supplies `packageManager` for the whole project, so a
-    // `.corepack.env` able to set it could run a package manager the manifest
+    // `.jup.env` able to set it could run a package manager the manifest
     // never names — a repository silently choosing its own tooling, which is
     // precisely what §03.2's prefix sandbox exists to prevent.
     expect(isEnvFileEligible("COREPACK_SPEC_FILE")).toBe(false);
@@ -605,7 +644,7 @@ describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
   });
 
   // §15.37 marks it env-file eligible: it is a behavioural preference, not a
-  // security decision, so a project may ship it in `.corepack.env`.
+  // security decision, so a project may ship it in `.jup.env`.
   it("is settable from an env file", () => {
     expect(isEnvFileEligible("COREPACK_FROZEN_LOCKFILE")).toBe(true);
 

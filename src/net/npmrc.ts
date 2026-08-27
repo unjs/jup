@@ -627,7 +627,7 @@ function scopeOf(packageName: string | undefined): string | undefined {
  * 4. the built-in default
  * ```
  *
- * `.corepack.env` does not appear because it is not a separate tier: it has
+ * `.jup.env` does not appear because it is not a separate tier: it has
  * already been merged into `process.env` by the time anything asks (§11.6), and
  * the real environment wins over it there.
  *

@@ -86,7 +86,7 @@ row under either name. Row 41b covers the pair itself.
 | 45 | `COREPACK_ENABLE_NETWORK=0`, version not cached | exit 1, stderr contains `Network access disabled by the environment` |
 | 46 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`, project pins `yarn@3.0.0` | stderr exactly `! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n` |
 | 47 | Same, second run (cached) | stderr empty |
-| 48 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` only in `.corepack.env` | stderr empty — the file cannot set it |
+| 48 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` only in `.jup.env` | stderr empty — the file cannot set it |
 | 49 | `COREPACK_NPM_REGISTRY` + prompt, no project spec | stderr matches `! jup is about to download <registry>/yarn/-/yarn-1.x.y.tgz` |
 | 50 | Same with `packageManager: yarn@3.0.0-rc.2+sha224.…` | stderr names `<registry>/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz` |
 | 51 | Project pins `npm@6.14.2` | `npm run env` output contains `COREPACK_ROOT=<tool root>` — and `JUP_ROOT=<tool root>`, since §11.3's exports are written under both spellings |
@@ -95,20 +95,25 @@ row under either name. Row 41b covers the pair itself.
 
 | # | Setup | Expected |
 |---|---|---|
-| 52 | `.corepack.env` sets `COREPACK_ENABLE_AUTO_PIN=1` | auto-pin happens |
+| 52 | `.jup.env` sets `COREPACK_ENABLE_AUTO_PIN=1` | auto-pin happens |
 | 53 | Same + real `COREPACK_ENV_FILE=0` | auto-pin does not happen |
-| 54 | `.corepack.env` in both root and `subdir`, run from `subdir` | `subdir`'s value wins |
-| 55 | `.corepack.env` above the directory containing `package.json` | ignored |
-| 56 | `.corepack.env` inside `node_modules/pkg`, run from there | ignored |
-| 57 | Real env var and `.corepack.env` both set the same key | real env var wins |
-| 58 | `COREPACK_ENV_FILE=.other.env` | `.other.env` is read, `.corepack.env` ignored |
-| 59 | `.corepack.env` sets a key with neither prefix (§11.6) | ignored |
-| 59b | `.corepack.env` sets `JUP_ENABLE_AUTO_PIN=1` | applied — a `JUP_` key is eligible on exactly the terms its `COREPACK_` twin is |
-| 59c | `.corepack.env` sets `JUP_INTEGRITY_KEYS=0` | refused and warned, as `COREPACK_INTEGRITY_KEYS` is: the deny-list is checked against the canonical spelling (§03.2, §14.5) |
-| 59d | Real `COREPACK_HOME` set, `.corepack.env` sets `JUP_HOME` | the real environment wins; the file's value is not applied (§11.6) |
-| 60 ⊕ | `.corepack.env` sets `COREPACK_INTEGRITY_KEYS=0` | **ignored** — verification still runs (§14.5) |
-| 61 ⊕ | `.corepack.env` sets `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1` | **ignored** (§14.5) |
-| 62 ⊕ | `.corepack.env` sets `COREPACK_NPM_TOKEN` | **ignored** (§14.5) |
+| 54 | `.jup.env` in both root and `subdir`, run from `subdir` | `subdir`'s value wins |
+| 55 | `.jup.env` above the directory containing `package.json` | ignored |
+| 56 | `.jup.env` inside `node_modules/pkg`, run from there | ignored |
+| 57 | Real env var and `.jup.env` both set the same key | real env var wins |
+| 58 | `COREPACK_ENV_FILE=.other.env` | `.other.env` is read, `.jup.env` ignored |
+| 59 | `.jup.env` sets a key with neither prefix (§11.6) | ignored |
+| 59b | `.jup.env` sets `JUP_ENABLE_AUTO_PIN=1` | applied — a `JUP_` key is eligible on exactly the terms its `COREPACK_` twin is |
+| 59c | `.jup.env` sets `JUP_INTEGRITY_KEYS=0` | refused and warned, as `COREPACK_INTEGRITY_KEYS` is: the deny-list is checked against the canonical spelling (§03.2, §14.5) |
+| 59d | Real `COREPACK_HOME` set, `.jup.env` sets `JUP_HOME` | the real environment wins; the file's value is not applied (§11.6) |
+| 60 ⊕ | `.jup.env` sets `COREPACK_INTEGRITY_KEYS=0` | **ignored** — verification still runs (§14.5) |
+| 61 ⊕ | `.jup.env` sets `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1` | **ignored** (§14.5) |
+| 62 ⊕ | `.jup.env` sets `COREPACK_NPM_TOKEN` | **ignored** (§14.5) |
+| 62b | Only `.corepack.env` present, setting `COREPACK_ENABLE_AUTO_PIN=1` | applied — the legacy name is still read (§03.2) |
+| 62c | `.jup.env` and `.corepack.env` in the same directory, disagreeing | `.jup.env` wins; `.corepack.env` is not read |
+| 62d | Root `.jup.env`, `subdir/.corepack.env`, run from `subdir` | `subdir`'s `.corepack.env` wins — closest file, either name |
+| 62e | `COREPACK_ENV_FILE=.other.env` (absent), `.corepack.env` present | `.corepack.env` ignored — an explicit path has no fallback |
+| 62f | The same file under each name | identical exit code, stderr and pin — the legacy name is a spelling, not a deprecation |
 
 ## 13.7 Registry, auth, integrity
 
@@ -146,7 +151,7 @@ row under either name. Row 41b covers the pair itself.
 | 87 | Then `COREPACK_ENABLE_NETWORK=0`, `yarn --version` | `2.2.2\n` |
 | 88 | Then corrupt `lastKnownGood.json` to `{`, chmod home `0555`, proxies to `0.0.0.0` | `yarn --version` → exit 0, `2.2.2\n`, stderr empty |
 | 89 | `jup install --global yarn@2.2.2` | stdout `Installing yarn@2.2.2...\n`; survives the same read-only/offline treatment |
-| 90 | `jup pack yarn@2.2.2`, fresh empty `COREPACK_HOME`, network off, `install -g corepack.tgz` | exit 0; `yarn --version` → `2.2.2\n` |
+| 90 | `jup pack yarn@2.2.2`, fresh empty `COREPACK_HOME`, network off, `install -g jup.tgz` | exit 0; `yarn --version` → `2.2.2\n` |
 | 91 | Same but the new `COREPACK_HOME` directory is deleted first | still works |
 | 92 | `jup pack yarn@2.2.2 pnpm@5.8.0`, hydrate, offline | both resolve |
 | 93 | `install -g` with a tarball that is not from `pack` | exit 1, `Invalid archive format; did it get generated by 'jup pack'?` |

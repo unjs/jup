@@ -179,12 +179,12 @@ describe.skipIf(IS_WINDOWS)("§15.20 the download prompt from a shim entry point
 
   it("180: an already-suppressing entry point stays silent, and the value is not env-file settable", async () => {
     // The other entry point, for completeness: `bin.ts` defaults to `0`, and an
-    // explicit `0` must not un-suppress anything. The `.corepack.env` half is
+    // explicit `0` must not un-suppress anything. The `.jup.env` half is
     // §03.2's deny-list — a project that tries to turn the prompt on for the
     // tool's own entry point is ignored, silently (row 48), and the same file
     // must not be able to turn it on for a shim either.
     const { shimDir, options, fixture } = shimFixture();
-    fixture.write(".corepack.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
+    fixture.write(".jup.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
     const shim = await installShim(shimDir, options);
     registry.reset();
 
@@ -199,7 +199,7 @@ describe.skipIf(IS_WINDOWS)("§15.20 the download prompt from a shim entry point
 
     // A second, separate project so the shim run downloads too.
     const second = shimFixture();
-    second.fixture.write(".corepack.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
+    second.fixture.write(".jup.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
     registry.reset();
 
     const viaShim = await run(["--version"], {

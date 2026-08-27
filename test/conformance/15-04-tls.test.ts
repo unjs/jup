@@ -181,10 +181,10 @@ describe("§15.38 TLS (§15.4)", () => {
     }
   });
 
-  it("a project's .corepack.env cannot disable verification or nominate a CA (§15.37)", async () => {
+  it("a project's .jup.env cannot disable verification or nominate a CA (§15.37)", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
-    fixture.write(".corepack.env", `COREPACK_STRICT_SSL=0\nCOREPACK_CAFILE=${caFile}\n`);
+    fixture.write(".jup.env", `COREPACK_STRICT_SSL=0\nCOREPACK_CAFILE=${caFile}\n`);
 
     try {
       const result = await run(["pnpm", "--version"], {

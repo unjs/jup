@@ -128,7 +128,7 @@ describe("§15.24 prereleases in implicit resolution", () => {
     // that is where §03.2's walk loads the file (`corepack use` takes its spec
     // from the command line and never walks — see the note in the report).
     const fixture = createFixture({ name: "project", packageManager: "pnpm@>=11" });
-    fixture.write(".corepack.env", "COREPACK_ENABLE_PRERELEASES=1\n");
+    fixture.write(".jup.env", "COREPACK_ENABLE_PRERELEASES=1\n");
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 

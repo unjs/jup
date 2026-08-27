@@ -9,7 +9,7 @@
  *
  * §15.37 marks it env-file **ineligible**, and that is the half worth being
  * careful about: eligibility in `env.ts` is a *deny*-list, so a `COREPACK_*`
- * variable is project-settable until it is named. A `.corepack.env` able to set
+ * variable is project-settable until it is named. A `.jup.env` able to set
  * this would let a cloned repository run a package manager its own manifest
  * never mentions. `test/unit/env.test.ts` pins the set membership; the row here
  * pins the observable consequence.
@@ -135,10 +135,10 @@ describe("§15.35d — COREPACK_SPEC_FILE overrides the manifest", () => {
     expect(result.stderr).toContain(fixture.path("vendor/spec.json"));
   });
 
-  it("§15.37: a project's .corepack.env cannot set it", async () => {
+  it("§15.37: a project's .jup.env cannot set it", async () => {
     const fixture = project();
     fixture.write("vendor/spec.json", `{"packageManager":"pnpm@11.1.2"}\n`);
-    fixture.write(".corepack.env", "COREPACK_SPEC_FILE=vendor/spec.json\n");
+    fixture.write(".jup.env", "COREPACK_SPEC_FILE=vendor/spec.json\n");
 
     // The manifest's yarn pin still governs, so `pnpm` is the mismatch it always
     // was — the repository could not redirect its own spec.

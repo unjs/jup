@@ -48,8 +48,8 @@
 
 ## Standing hazards
 
-* **The warm byte ceiling is a tripwire, not a budget** (`test/unit/main.test.ts:1017`,
-  204,000). Raising it is allowed; raising it silently is not.
+* **The warm byte ceiling is a tripwire, not a budget** (`test/unit/main.test.ts:1030`,
+  206,000). Raising it is allowed; raising it silently is not.
 * **The sandbox has live network and the conformance harness does not disable it.** A row
   relying on a fallback version can pass over the wire. Seed the store and set
   `COREPACK_ENABLE_NETWORK=0` wherever the answer must come from the fixture.
@@ -57,6 +57,13 @@
   outright and has never written a lockfile of any name, so a `.corepack.lock` read path
   would be compatibility with a file that never existed — and a second `stat` on the range
   fast path.
+* **`.corepack.env` is the opposite case and must not lose its fallback.** §14.24 renamed
+  every other layout path outright, because nothing on disk could still be reached through
+  them. This one can: it is a file real repositories have committed. The second `openat` per
+  walked directory (`src/project/env.ts:363`) is the price, it is paid on the cold walk
+  rather than the exact-pin fast path, and the upstream suite's ten-odd `.corepack.env` rows
+  are what would go red if someone reclaimed it. Removing it is a deliberate act with a
+  deprecation cycle, not a cleanup.
 * **A plan organised by value will miss requirements.** Phase 2 shipped twelve items and
   left eight §15 sections unassigned. Walk the spec first, then rank.
 

@@ -198,6 +198,6 @@ the resolved package manager's directory to `PATH`** in the child environment.
 
 Variables the tool consumed for its own configuration are **not** stripped — the
 package manager sees the full ambient environment, including any values that came
-from `.corepack.env`. A conforming implementation MUST propagate the env-file values
+from `.jup.env`. A conforming implementation MUST propagate the env-file values
 too, since a project may legitimately use them to configure the package manager's own
 registry access.

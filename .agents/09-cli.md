@@ -180,7 +180,7 @@ for each:
     setLastKnownGood(resolved)
     collect info.location
 
-output := --output ?? "./corepack.tgz"
+output := --output ?? "./jup.tgz"
 tar.create({gzip: true, cwd: <installFolder>, file: resolve(output)},
            locations.map(l => relative(<installFolder>, l)))
 
@@ -233,7 +233,7 @@ archive handling, except:
 of `pack` + `install -g`. Its "no spec in project" error omits the `devEngines`
 mention: `The local project doesn't feature a 'packageManager' field - please specify
 the package manager to pack, or update the manifest to reference it`. `--output`
-tolerates a bare flag, defaulting to `corepack.tgz`.
+tolerates a bare flag, defaulting to `jup.tgz`.
 
 ## 9.11 Output stream discipline
 

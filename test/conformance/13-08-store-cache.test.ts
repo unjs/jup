@@ -2,7 +2,7 @@
  * §13.8 — store, cache and offline operation (rows 86–96).
  *
  * The store's whole concurrency story is "rename is atomic and losing the race is
- * a success" (§07.5), and its whole offline story is "a `.corepack` marker is
+ * a success" (§07.5), and its whole offline story is "a `.jup` marker is
  * enough" (§07.2). Both are asserted here against real processes.
  */
 
@@ -70,7 +70,7 @@ describe("§13.8 store, cache and offline", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`Adding yarn@${BERRY} to the cache...\n`);
     expect(result.stderr).toBe("");
-    expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
+    expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
   });
 
   it("86: corepack install leaves lastKnownGood.json untouched", async () => {
@@ -161,10 +161,10 @@ describe("§13.8 store, cache and offline", () => {
     const source = createFixture();
     const packed = await run(["pack", `yarn@${BERRY}`], { ...source, registry, env: trusted() });
     expect(packed.exitCode).toBe(0);
-    expect(source.exists("corepack.tgz")).toBe(true);
+    expect(source.exists("jup.tgz")).toBe(true);
 
     const target = createFixture({ packageManager: `yarn@${BERRY}` });
-    const hydrated = await run(["install", "-g", source.path("corepack.tgz")], {
+    const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });
@@ -187,7 +187,7 @@ describe("§13.8 store, cache and offline", () => {
     const target = createFixture({ packageManager: `yarn@${BERRY}` });
     rmSync(target.home, { recursive: true, force: true });
 
-    const hydrated = await run(["install", "-g", source.path("corepack.tgz")], {
+    const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });
@@ -208,7 +208,7 @@ describe("§13.8 store, cache and offline", () => {
     expect(packed.exitCode).toBe(0);
 
     const target = createFixture();
-    const hydrated = await run(["install", "-g", source.path("corepack.tgz")], {
+    const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });
@@ -252,7 +252,7 @@ describe("§13.8 store, cache and offline", () => {
       expect(result.stdout).toBe("2.2.2\n");
     }
     // Exactly one install survives, and no temp folder is left behind (§07.5).
-    expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".corepack"))).toBe(true);
+    expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
     const { readdirSync } = await import("node:fs");
     expect(
       readdirSync(join(fixture.home, "v1")).filter((entry) => entry.startsWith("corepack-")),

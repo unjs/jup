@@ -39,7 +39,7 @@ export type BinSpec = Record<string, string>;
 /** §02.4 — `[binaryName, …]`, used when the download is a single `.js` file. */
 export type BinList = string[];
 
-/** §07.2 — the parsed `.corepack` marker plus the directory it was found in. */
+/** §07.2 — the parsed `.jup` marker plus the directory it was found in. */
 export interface InstallSpec {
   location: string;
   /** Optional: a marker written by an older corepack may not carry one (§08.1). */
@@ -47,7 +47,7 @@ export interface InstallSpec {
   hash: string;
 }
 
-/** §07.2 — the on-disk shape of the `.corepack` marker file. */
+/** §07.2 — the on-disk shape of the `.jup` marker file. */
 export interface CorepackMarker {
   locator: Locator;
   /** Optional: markers written by older corepack releases omit it (§08.1). */

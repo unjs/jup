@@ -17,7 +17,7 @@ diagnostic reporting a variable the user actually set, which names the spelling
 they used (§11.6).
 
 Legend for **Env file** column: whether the variable may be supplied by
-`.corepack.env` (§03.2), under either spelling. A real environment variable
+`.jup.env` (§03.2), under either spelling. A real environment variable
 always wins over the file.
 
 ## 11.1 Behaviour
@@ -31,8 +31,8 @@ always wins over the file.
 | `COREPACK_ENABLE_NETWORK` | `0` | Refuse every network request: `Network access disabled by the environment; can't reach <url>`. | yes |
 | `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* package manager name. Without it, `yarn@https://…` is refused. Unknown names may always use URLs. | **no** (§14.5) |
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT` | `0` / `1` | `1` prints `! jup is about to download <url>` before each artifact download and, on a TTY outside CI, asks for confirmation. Default is `0` when invoked as the tool itself, `1` when invoked through a package-manager shim. | **no** |
-| `COREPACK_ENV_FILE` | `0` or a path | `0` disables env-file loading. Otherwise names the file to look for instead of `.corepack.env`. | **no** |
-| `COREPACK_HOME` | path | Root of the store and `lastKnownGood.json`. Default `$XDG_CACHE_HOME/node/corepack`, else `%LOCALAPPDATA%\node\corepack`, else `~/.cache/node/corepack` (`~/AppData/Local/node/corepack` on Windows). | yes |
+| `COREPACK_ENV_FILE` | `0` or a path | `0` disables env-file loading. Otherwise names the file to look for instead of `.jup.env` (§03.2 also reads `.corepack.env` when this is unset). | **no** |
+| `COREPACK_HOME` | path | Root of the store and `lastKnownGood.json`. Default `$XDG_CACHE_HOME/jup`, else `%LOCALAPPDATA%\jup` on Windows, else `~/.cache/jup` (`~/AppData/Local/jup` on Windows). | yes |
 
 ## 11.2 Registry and auth
 
@@ -83,7 +83,7 @@ For any variable:
 ```
 1. real process environment, JUP_<NAME>            (highest)
 2. real process environment, COREPACK_<NAME>
-3. .corepack.env, either spelling, if the variable is env-file-eligible
+3. .jup.env, either spelling, if the variable is env-file-eligible
 4. the tool's built-in default                     (lowest)
 ```
 

@@ -68,7 +68,7 @@ With no names, enable and disable target every supported package manager,
 npm included (§15.16) — pass --exclude npm to leave npm alone. Shims are
 installed to a per-user directory that never needs elevation (§15.13):
 JUP_SHIM_DIRECTORY, else $XDG_BIN_HOME or ~/.local/bin, else
-%LOCALAPPDATA%\\node\\corepack\\bin on Windows.
+%LOCALAPPDATA%\\jup\\bin on Windows.
 
 Configuration is by environment variable only; JUP_ENABLE_DOWNLOAD_PROMPT
 defaults to 1 when invoked through a package-manager shim and 0 when invoked as

@@ -113,7 +113,7 @@ describe("§15.17 — `bin` comes from the verified package", () => {
     expect(existsSync(join(location, "bin", "pnpm.mjs"))).toBe(false);
     // And it is the *marker* that says so, which is what every later cache hit
     // reads — the resolution is not repeated per run (§07.7).
-    const marker = JSON.parse(readFileSync(join(location, ".corepack"), "utf8")) as {
+    const marker = JSON.parse(readFileSync(join(location, ".jup"), "utf8")) as {
       bin: Record<string, string>;
     };
     expect(marker.bin).toEqual({ pnpm: "./dist/pnpm.mjs", pnpx: "./dist/pnpx.mjs" });

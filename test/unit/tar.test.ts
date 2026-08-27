@@ -539,7 +539,7 @@ describe("create", () => {
   beforeEach(async () => {
     source = await mkdtemp(join(tmpdir(), "jup-tar-src-"));
     await mkdir(join(source, "yarn/2.2.2/bin"), { recursive: true });
-    await writeFile(join(source, "yarn/2.2.2/.corepack"), `{"locator":{"name":"yarn"}}`);
+    await writeFile(join(source, "yarn/2.2.2/.jup"), `{"locator":{"name":"yarn"}}`);
     await writeFile(join(source, "yarn/2.2.2/bin/yarn.js"), "console.log(1)\n", { mode: 0o755 });
     await writeFile(join(source, `yarn/2.2.2/${"deep".repeat(40)}.js`), "long");
   });
@@ -549,11 +549,11 @@ describe("create", () => {
   });
 
   it("round-trips through listEntries and extract", async () => {
-    const archive = join(source, "corepack.tgz");
+    const archive = join(source, "jup.tgz");
     await create(source, ["yarn/2.2.2"], archive);
 
     const listed = await listEntries(streamOf(await readFile(archive)));
-    expect(listed.map((entry) => entry.path)).toContain("yarn/2.2.2/.corepack");
+    expect(listed.map((entry) => entry.path)).toContain("yarn/2.2.2/.jup");
     expect(listed.map((entry) => entry.path)).toContain("yarn/2.2.2/bin/yarn.js");
     // The >100 byte name survives via a PAX header rather than being truncated.
     expect(listed.map((entry) => entry.path)).toContain(`yarn/2.2.2/${"deep".repeat(40)}.js`);
@@ -562,7 +562,7 @@ describe("create", () => {
     );
 
     await extract(streamOf(await readFile(archive)), dest, { strip: 0 });
-    expect(await readFile(join(dest, "yarn/2.2.2/.corepack"), "utf8")).toBe(
+    expect(await readFile(join(dest, "yarn/2.2.2/.jup"), "utf8")).toBe(
       `{"locator":{"name":"yarn"}}`,
     );
     expect(await readFile(join(dest, "yarn/2.2.2/bin/yarn.js"), "utf8")).toBe("console.log(1)\n");
@@ -572,7 +572,7 @@ describe("create", () => {
 
   it("never packs a symlink", async () => {
     await symlink("/etc/passwd", join(source, "yarn/2.2.2/escape"));
-    const archive = join(source, "corepack.tgz");
+    const archive = join(source, "jup.tgz");
     await create(source, ["yarn/2.2.2"], archive);
 
     const listed = await listEntries(streamOf(await readFile(archive)));

@@ -29,7 +29,7 @@ const BIN = join(REPO_ROOT, "src", "bin.ts");
 /* ------------------------------------------------------------------ *
  * Fixtures: fake package managers written straight into the store.
  *
- * A `.corepack` marker is the only thing that makes an install "real"
+ * A `.jup` marker is the only thing that makes an install "real"
  * (§07.2), so a hand-written marker plus a trivial entry script gives
  * the whole proxy pipeline something to hand over to without a single
  * byte of network traffic.
@@ -78,7 +78,7 @@ function installFake(home: string, name: string, reference: string, body?: strin
   }
 
   writeFileSync(
-    join(location, ".corepack"),
+    join(location, ".jup"),
     // §15.11 — a cache hit is now checked against the pin, so a seeded install
     // has to record the digest the reference it stands for actually names.
     JSON.stringify({
@@ -587,7 +587,7 @@ describe("runProxy — dispatch and errors", () => {
     const location = installFake(home, "yarn", "1.0.0");
     // A truncated marker is a broken install, not a cache miss (§07.2): it must
     // surface as a bug, with a stack, not as a friendly usage error.
-    writeFileSync(join(location, ".corepack"), "{ not json");
+    writeFileSync(join(location, ".jup"), "{ not json");
 
     const result = run(cwd, home, ["yarn", "--version"]);
 
@@ -620,11 +620,11 @@ describe("runProxy — the package manager owns the exit code (§08.4)", () => {
   });
 });
 
-describe("runProxy — .corepack.env applies before the flags are read (test 52)", () => {
+describe("runProxy — .jup.env applies before the flags are read (test 52)", () => {
   it("auto-pins when only the env file asks for it", () => {
     const { cwd, home } = makeProject({});
     installFake(home, "yarn", YARN_DEFAULT);
-    writeFileSync(join(cwd, ".corepack.env"), "COREPACK_ENABLE_AUTO_PIN=1\n");
+    writeFileSync(join(cwd, ".jup.env"), "COREPACK_ENABLE_AUTO_PIN=1\n");
 
     const result = run(cwd, home, ["yarn", "--version"]);
 
@@ -777,7 +777,7 @@ const COLD_PATH_MODULES = [
  * At the time of writing all three entries cost **2**, against a ceiling that
  * was 25 and had 24 of them spent: `node:util`, imported by `env.ts` for
  * `parseEnv`, was dragging in `internal/util/parse_args`, `internal/util/colors`
- * and `internal/util/diff` on every invocation to parse a `.corepack.env` that
+ * and `internal/util/diff` on every invocation to parse a `.jup.env` that
  * usually does not exist. The hand-rolled parser that replaced it (§16.2) is
  * what freed the headroom, and this is now a real ceiling again rather than one
  * a single import would breach.
@@ -1003,6 +1003,19 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * gate reads the environment, and `env.ts`'s own §14.5 warning goes through
    * it. Held at 204,000 rather than the 203,432 this leaves, so the next
    * addition is still a change worth arguing for.
+   *
+   * And once more, 204,000 -> 206,000, for §14.24's layout rename. Only one of
+   * the five names cost anything: the store root, the marker, the temp prefix
+   * and `jup.tgz` are all string edits, but `.corepack.env` is a file that
+   * exists in repositories today, so §03.2 keeps reading it — `.jup.env` first,
+   * the old name only on `ENOENT`, per directory so that closest still wins.
+   * `project/env.ts` +911 (the second candidate, `readIfPresent`, the constant,
+   * and the comment for why a *configured* path gets no fallback), plus +236 in
+   * `cache/store.ts` and +184 in `run/exec.ts`, both pure comment for why
+   * abandoning the old paths strands nothing. Source +1,310; measured,
+   * `warm.mjs` went 79,359 -> 79,597, +238 bytes or +0.30%. The fallback cannot
+   * move off the warm path — it *is* the §03.1 walk. Held at 206,000 rather
+   * than the 205,209 this leaves, on the same terms as the raise above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1014,6 +1027,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(204_000);
+    ).toBeLessThanOrEqual(206_000);
   });
 });

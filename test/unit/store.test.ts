@@ -71,12 +71,12 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-/** Create `<store>/<name>/<version>/` with a complete `.corepack` marker. */
+/** Create `<store>/<name>/<version>/` with a complete `.jup` marker. */
 function seedInstall(name: string, version: string, marker?: unknown): string {
   const dir = join(getInstallFolder(), name, version);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
-    join(dir, ".corepack"),
+    join(dir, ".jup"),
     JSON.stringify(
       marker ?? { locator: { name, reference: version }, bin: [name], hash: "sha1.ab" },
     ),
@@ -99,7 +99,7 @@ describe("getHomeFolder — §07.1", () => {
     vi.stubEnv("COREPACK_HOME", undefined);
     vi.stubEnv("XDG_CACHE_HOME", join("/xdg", "cache"));
     vi.stubEnv("LOCALAPPDATA", join("/lad"));
-    expect(getHomeFolder()).toBe(join("/xdg", "cache", "node", "corepack"));
+    expect(getHomeFolder()).toBe(join("/xdg", "cache", "jup"));
   });
 
   // §15.13 point 5 redirected this row (conformance 171). Corepack honours
@@ -111,9 +111,7 @@ describe("getHomeFolder — §07.1", () => {
     vi.stubEnv("LOCALAPPDATA", join("/lad"));
 
     const expected =
-      process.platform === "win32"
-        ? join("/lad", "node", "corepack")
-        : join(homedir(), ".cache", "node", "corepack");
+      process.platform === "win32" ? join("/lad", "jup") : join(homedir(), ".cache", "jup");
     expect(getHomeFolder()).toBe(expected);
   });
 
@@ -124,8 +122,7 @@ describe("getHomeFolder — §07.1", () => {
     const expected = join(
       homedir(),
       process.platform === "win32" ? join("AppData", "Local") : ".cache",
-      "node",
-      "corepack",
+      "jup",
     );
     expect(getHomeFolder()).toBe(expected);
   });
@@ -189,7 +186,7 @@ describe("readMarker / writeMarker — §07.2", () => {
   it("propagates a corrupt marker rather than silently re-downloading", () => {
     const dir = join(getInstallFolder(), "yarn", "4.1.0");
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, ".corepack"), "{ truncated");
+    writeFileSync(join(dir, ".jup"), "{ truncated");
     expect(() => readMarker(dir)).toThrow(SyntaxError);
   });
 });
@@ -198,9 +195,9 @@ describe("readMarker / writeMarker — §07.2", () => {
 /* §15.11 — the cache hit checks the pin                                       */
 /* -------------------------------------------------------------------------- */
 
-/** How many of the recorded `readFileSync` calls asked for a `.corepack`. */
+/** How many of the recorded `readFileSync` calls asked for a `.jup`. */
 function markerReads(mock: { mock: { calls: unknown[][] } }): number {
-  return mock.mock.calls.filter((call) => String(call[0]).endsWith(".corepack")).length;
+  return mock.mock.calls.filter((call) => String(call[0]).endsWith(".jup")).length;
 }
 
 describe("readHashPin — §02.1", () => {
@@ -300,7 +297,7 @@ describe("resolveInstallTarget — §15.11's cache-hit check", () => {
   it("reads exactly one marker on the warm path (§01.3)", () => {
     seed("pnpm", "9.0.0", "sha512.aaaa");
 
-    // §01.3 budgets one `.corepack` read for a warm, exactly-pinned run, and
+    // §01.3 budgets one `.jup` read for a warm, exactly-pinned run, and
     // §15.11's check must not turn that into two. The second read exists only
     // for a reference the cached marker cannot vouch for.
     const readFileSyncMock = vi.mocked(readFileSync);
@@ -470,7 +467,7 @@ describe("createTempDir — §07.4", () => {
     const tmp = createTempDir();
     expect(dirname(tmp)).toBe(getInstallFolder());
     expect(statSync(tmp).isDirectory()).toBe(true);
-    expect(tmp).toMatch(/[\\/]corepack-\d+-[\da-f]{8}$/);
+    expect(tmp).toMatch(/[\\/]jup-\d+-[\da-f]{8}$/);
   });
 
   it("creates the install folder on demand and hands out unique names", () => {

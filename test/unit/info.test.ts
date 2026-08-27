@@ -110,7 +110,7 @@ function seed(name: string, version: string, hash = "sha512.seeded"): string {
     bin: { [name]: `./bin/${name}.js` },
     hash,
   };
-  writeFileSync(join(location, ".corepack"), JSON.stringify(marker));
+  writeFileSync(join(location, ".jup"), JSON.stringify(marker));
   return location;
 }
 
@@ -375,7 +375,7 @@ describe("buildReport — the env file (§03.2, §15.30)", () => {
   it("sorts every line into applied, overridden, refused and ignored", async () => {
     await manifest({ packageManager: "pnpm@11.1.2" });
     await writeFile(
-      join(project, ".corepack.env"),
+      join(project, ".jup.env"),
       [
         "COREPACK_ENABLE_STRICT=0",
         "COREPACK_NPM_REGISTRY=https://mirror.example.org",
@@ -389,7 +389,7 @@ describe("buildReport — the env file (§03.2, §15.30)", () => {
 
     const info = report().envFile!;
 
-    expect(info.path).toBe(join(project, ".corepack.env"));
+    expect(info.path).toBe(join(project, ".jup.env"));
     expect(info.applied).toEqual(["COREPACK_ENABLE_STRICT"]);
     expect(info.overridden).toEqual(["COREPACK_NPM_REGISTRY"]);
     // §14.5 — a project file may never supply a credential.

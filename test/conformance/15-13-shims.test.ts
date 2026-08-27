@@ -119,7 +119,7 @@ describe("§15.13 — never require elevation", () => {
       store: { home: string };
       shims: { directory: string };
     };
-    expect(report.store.home).toBe(join(fixture.root, ".cache", "node", "corepack"));
+    expect(report.store.home).toBe(join(fixture.root, ".cache", "jup"));
     expect(report.store.home.startsWith(alien)).toBe(false);
     expect(report.shims.directory).toBe(join(fixture.root, ".local", "bin"));
   });
