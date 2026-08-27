@@ -34,6 +34,13 @@ import type { Descriptor, Locator } from "../types.ts";
 /**
  * §15.23 — at the project root, next to the manifest that declared the spec.
  * The name is jup's own: corepack has no lockfile of any name.
+ *
+ * So this is the one layout path §14.24 renamed that must **not** grow a
+ * `.corepack.lock` fallback — unlike `.corepack.env`, which keeps one because
+ * real repositories have committed it. Corepack rejects ranges outright and has
+ * never written a lockfile of any spelling, so a legacy read path would be
+ * compatibility with a file that never existed, bought with a second `stat` on
+ * the range fast path.
  */
 export const LOCKFILE_NAME = ".jup.lock";
 

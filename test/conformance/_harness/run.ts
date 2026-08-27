@@ -6,6 +6,13 @@
  * variable, `COREPACK_HOME` is always a fresh directory the caller owns, and
  * `COREPACK_DEFAULT_TO_LATEST` is `0` unless the test is about default-version
  * lookup and says otherwise.
+ *
+ * What it does **not** do is take the network away. The sandbox these tests run
+ * in has one, so a row whose answer is supposed to come from a fixture — a
+ * fallback version, a seeded store, an offline degradation — can pass over the
+ * wire instead, and go green for the wrong reason. Any such row must seed the
+ * store *and* set `COREPACK_ENABLE_NETWORK=0`, which is why so many of the rows
+ * below already do.
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
