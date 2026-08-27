@@ -591,9 +591,9 @@ things.
 * An unknown name in `packageManager` remains an error, not a URL-fetch fallback
   (§03.4).
 
-### bun, deno and aube are entries
+### bun, deno, aube and nub are entries
 
-All three ship in §02.5. They are the entries that use §15.28's per-host model, and
+All four ship in §02.5. They are the entries that use §15.28's per-host model, and
 adding them was a data-only change in the sense above — the machinery they use is
 §15.28's, declared per band, not per name.
 
@@ -630,6 +630,37 @@ Two further things aube contributes to the model:
   host name. That fixed bun on Alpine as a side effect (bun publishes musl builds too
   and was being handed the glibc one) and made deno's absence of a musl build an
   error naming the host instead of a loader failure at exec time.
+
+**nub** (`@nubjs/nub`) is the fourth, and it is what settles what `shimByDefault`
+actually asks. nub is a package manager — `nub install`, `add`, `remove` are
+pnpm-compatible on the CLI and on the lockfile — and it opts **out** anyway, because
+it is also a runtime: `nub server.ts` executes a TypeScript file on the installed
+Node, `nubx` is an npx, and `nub node` manages Node versions. So the flag is not
+about category any more than it is about recency. The question is whether the name
+means anything outside a project, and `nub` means plenty; §10.5 now states it that
+way, with `aube` and `nub` as the two sides.
+
+Two smaller things nub contributes:
+
+* Its `targets` map is an identity over the **whole** host vocabulary — no rename,
+  no hole — because nub's own launcher builds `${process.platform}-${process.arch}`
+  and appends `-musl`, which is §15.28's host rule in someone else's repository. It
+  is written out regardless: a band with no `targets` claims every host forever, and
+  the map is the only place a host leaving the set could be said.
+* `nub` and `nubx` are one file, as `bun` and `bunx` are, but for a stated reason —
+  the per-host packages shipped a byte-identical second copy until 0.7.0 and dropped
+  it because it doubled a ~50 MB artifact per host. §15.28's `argv[0]` rule is what
+  keeps two names over one file working for a native artifact.
+* Its binary is published at mode **0644**, which is what forced §07.4 rule 6 to
+  grow a second half. npm sets 0755 on extract only for a file the package's `bin`
+  names, and these packages declare none; nub's `postinstall` chmods it back, and
+  jup runs no lifecycle scripts. A native band's declared entry points are now made
+  executable on the way into the store — bounded to those paths, to files that
+  begin like a program (`#!`/ELF/Mach-O), to `+x`, and best-effort. The
+  program-image bound is what keeps test 193's diagnosis intact: a stale `bin`
+  path naming a data file must stay unexecutable, or `execvp`'s `/bin/sh`
+  fallback turns a clear `cannotExecute` into exit 127 and a shell message. bun,
+  deno and aube all publish 0755 and are unaffected.
 
 > **On consent.** The requirement below is unchanged and is not satisfied by this
 > section. Bun's maintainers reportedly asked corepack not to add them (#295), and
@@ -1231,3 +1262,6 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 224 | `enable` with no names | `aube`, `aubr` and `aubx` are installed while `bun` and `deno` are not — the default set is decided by `shimByDefault`, not by how recent the entry is (§10.5, §15.21) |
 | 225 | A Linux host whose glibc loader is absent and whose musl loader is present | the host names itself `<platform>-<arch>-musl`; the musl artifact is requested, and an entry that publishes no musl build (deno) fails before any request naming that host (§15.28) |
 | 226 | `aube` on `darwin-x64`, a host it has never published for | fails before any request, naming the host and the complete published set — the case a `targets` map that is otherwise an identity exists for (§12, §15.21) |
+| 227 | `packageManager: "nub@<v>"`, then `nubx <args>` | the host's `@nubjs/nub-<host>` tarball is fetched and run; the launcher is never downloaded, and both names resolve to the single executable the artifact ships, from the table, because that package declares no `bin` (§07.7, §15.21) |
+| 228 | `enable` with no names, then `enable nub`, then `disable` with no names | no `nub`/`nubx` shim first, both after naming nub, none after the bare disable — a package manager stays out of the default set because its name also means something outside a project (§10.5, §15.21) |
+| 229 | A native artifact whose tarball ships its entry point at mode 0644 (as `@nubjs/nub-<host>` does) | the cached entry point is executable and the run succeeds; nothing else in the archive gains the bit, and a `bin` path naming a non-program keeps its mode and still reports `cannotExecute` (§07.4 rule 6, §15.28) |

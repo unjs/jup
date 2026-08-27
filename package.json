@@ -8,6 +8,7 @@
     "corepack",
     "deno",
     "npm",
+    "nub",
     "package-manager",
     "pnpm",
     "version-manager",

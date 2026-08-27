@@ -161,7 +161,7 @@ async function nativeDefault(launcher, artifactFor) {
 }
 
 /**
- * The host sets §02.5's newest bun and deno bands declare.
+ * The host sets §02.5's newest per-host bands declare.
  *
  * Duplicated from the table rather than imported: `nativeDefault` is checking
  * that the *newest* release covers what the newest band promises, and reading
@@ -199,6 +199,16 @@ const NATIVE_TARGETS = {
     "linux-x64-musl": "@endevco/aube-linux-x64-musl",
     "win32-arm64": "@endevco/aube-win32-arm64",
     "win32-x64": "@endevco/aube-win32-x64",
+  },
+  nub: {
+    "darwin-arm64": "@nubjs/nub-darwin-arm64",
+    "darwin-x64": "@nubjs/nub-darwin-x64",
+    "linux-arm64": "@nubjs/nub-linux-arm64",
+    "linux-arm64-musl": "@nubjs/nub-linux-arm64-musl",
+    "linux-x64": "@nubjs/nub-linux-x64",
+    "linux-x64-musl": "@nubjs/nub-linux-x64-musl",
+    "win32-arm64": "@nubjs/nub-win32-arm64",
+    "win32-x64": "@nubjs/nub-win32-x64",
   },
 };
 
@@ -272,13 +282,14 @@ async function refreshKeys(source) {
 }
 
 let table = readFileSync(TABLE, "utf8");
-const [npm, pnpm, yarn, bun, deno, aube] = await Promise.all([
+const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
   npmDefault("npm"),
   npmDefault("pnpm"),
   yarnDefault(),
   nativeDefault("bun", NATIVE_TARGETS.bun),
   nativeDefault("deno", NATIVE_TARGETS.deno),
   nativeDefault("@endevco/aube", NATIVE_TARGETS.aube),
+  nativeDefault("@nubjs/nub", NATIVE_TARGETS.nub),
 ]);
 
 table = rewriteDefault(table, "npm", "default", npm);
@@ -291,6 +302,7 @@ table = rewriteDefault(table, "yarn", "transparent.default", yarn);
 table = rewriteDefault(table, "bun", "default", bun);
 table = rewriteDefault(table, "deno", "default", deno);
 table = rewriteDefault(table, "aube", "default", aube);
+table = rewriteDefault(table, "nub", "default", nub);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 

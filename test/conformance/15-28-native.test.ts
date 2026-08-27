@@ -465,6 +465,13 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     // archive is not executable in the store either, and `spawn` says so. An
     // implementation that swallowed the spawn error would exit 0 here with no
     // output at all, which is the failure this row exists to make impossible.
+    //
+    // Rule 6's chmod half (added for `@nubjs/nub-<host>`, which publishes its
+    // binary at 0644) deliberately does not reach this file: `hare`'s `bin`
+    // names a data file, and the grant is limited to a file whose first bytes
+    // are a program image. Without that limit this row would exit 127 with
+    // `/bin/sh`'s complaint instead — `execvp` falls back to the shell — and the
+    // diagnosis below would be gone.
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(

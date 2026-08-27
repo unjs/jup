@@ -1077,6 +1077,20 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * Held at 234,000 rather than the 232,092 this leaves, on the same terms as
    * every raise above.
+   *
+   * And once more, 234,000 -> 238,000, for §15.21's fourth native entry, `nub`.
+   * Table data and nothing else: `config/table.ts` +3,647, no other warm module
+   * touched, and no new machinery at all — `nub` uses §15.28's per-host model
+   * exactly as the three before it do, and the identity `targets` map is eight
+   * lines of it. Measured, `_warm.mjs` went 88,178 -> 89,097, **+919 bytes or
+   * +1.04%**, which is the smallest per-entry cost so far and is what the
+   * 226,000 -> 234,000 raise predicted would happen once the machinery was paid
+   * for. Roughly half the source delta is the prose above the band explaining
+   * why one file serves both `nub` and `nubx`; the emitted chunk carries none of
+   * it.
+   *
+   * Held at 238,000 rather than the 235,739 this leaves, on the same terms as
+   * every raise above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1088,6 +1102,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(234_000);
+    ).toBeLessThanOrEqual(238_000);
   });
 });

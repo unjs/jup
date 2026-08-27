@@ -108,6 +108,55 @@ const AUBE_MUSL_TARGETS = {
   "linux-x64-musl": "linux-x64-musl",
 } as const;
 
+/**
+ * §15.28, §15.21 — the parts every nub band shares.
+ *
+ * `@nubjs/nub` is the launcher again, and the plainest one yet: a ~30 kB Node
+ * script that resolves an `optionalDependencies` entry named after the host and
+ * spawns the binary inside it. jup resolves no dependency graph, so it asks for
+ * that package directly, exactly as it does for bun, deno and aube.
+ *
+ * nub is the entry whose published host names are not merely *like*
+ * {@link hostTarget}'s — they are computed the same way. Its own `platform.js`
+ * builds `${process.platform}-${process.arch}` and appends `-musl` on a musl
+ * Linux, which is this file's rule written out in someone else's repository. So
+ * the `targets` map below is an identity over the whole vocabulary, with no
+ * rename and no hole.
+ *
+ * `nub` and `nubx` are one file. The per-host packages shipped a byte-identical
+ * second copy under the name `nubx` until 0.7.0 and stopped because it doubled
+ * every artifact; `bin/nub{exe}` is the one path present in every version, and
+ * `argv[0]` is what tells the two apart — `run/native.ts` passes the invoked
+ * name through, which is the same arrangement `bun`/`bunx` relies on.
+ */
+const NUB_BAND = {
+  url: "https://registry.npmjs.org/@nubjs/nub-{target}/-/nub-{target}-{}.tgz",
+  bin: { nub: "./bin/nub{exe}", nubx: "./bin/nub{exe}" },
+  registry: { type: "npm", package: "@nubjs/nub" },
+  artifactRegistry: { type: "npm", package: "@nubjs/nub-{target}" },
+  exec: "native",
+  commands: { use: ["nub", "install"] },
+} as const satisfies Omit<PackageManagerSpec, "targets">;
+
+/**
+ * nub's hosts: every name the table knows, spelled the way the table spells it.
+ *
+ * The identity is complete — unlike aube's, which has a `darwin-x64` hole — and
+ * the map is still written out for the same reason aube's is. It is where a host
+ * leaving the set would be *said*, and a band with no `targets` is a band that
+ * claims every host forever.
+ */
+const NUB_TARGETS = {
+  "darwin-arm64": "darwin-arm64",
+  "darwin-x64": "darwin-x64",
+  "linux-arm64": "linux-arm64",
+  "linux-arm64-musl": "linux-arm64-musl",
+  "linux-x64": "linux-x64",
+  "linux-x64-musl": "linux-x64-musl",
+  "win32-arm64": "win32-arm64",
+  "win32-x64": "win32-x64",
+} as const;
+
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   npm: {
     default: "11.14.1+sha1.4a6839650da0005f323fec6abd39d77ee24f842f",
@@ -212,7 +261,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     ],
   },
 
-  // §15.28, §15.21 — the two entries the table's per-host machinery exists for;
+  // §15.28, §15.21 — the entries the table's per-host machinery exists for;
   // `BUN_BAND` above explains the launcher-versus-artifact split they share.
   bun: {
     default: "1.4.0",
@@ -318,6 +367,31 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     // one: the eleven prereleases before Alpine support 404 on Alpine, and every
     // release since is covered.
     ranges: [["*", { ...AUBE_BAND, targets: { ...AUBE_TARGETS, ...AUBE_MUSL_TARGETS } }]],
+  },
+
+  // §15.21 — a package manager *and* a runtime, which is what this entry adds to
+  // the flag below: `nub install` is pnpm-compatible, and `nub server.ts` runs a
+  // file. Being a package manager is not what earns a place in the default shim
+  // set; meaning nothing outside a project is, and `nub` means plenty (§10.5).
+  nub: {
+    default: "0.7.5",
+    fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
+    // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
+    // reached under its own name as `nubx` — fetches into a throwaway
+    // environment. Both are project-independent for the reasons `pnpm init` and
+    // `pnpm dlx` are. `nub run`, `nub install` and `nub <file>` all act on the
+    // project they stand in and stay subject to §03.5.
+    transparent: {
+      commands: [["nub", "init"], ["nub", "dlx"], ["nub", "x"], ["nubx"]],
+    },
+    shimByDefault: false,
+    // One band. nub has published the same eight hosts since its first release
+    // carrying a binary (0.0.2 — 0.0.1's per-host packages are 273-byte
+    // placeholders with nothing inside, and resolve to a missing entry point,
+    // which is what an artifact-less version should do). The layout has moved
+    // within the package, but never `bin/nub{exe}`, which is the only path this
+    // band names.
+    ranges: [["*", { ...NUB_BAND, targets: NUB_TARGETS }]],
   },
 };
 

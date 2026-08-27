@@ -12,7 +12,7 @@ InstallSpec { location, bin, hash }             "where it landed on disk"
 ```
 
 * **Descriptor** — `name` is a package-manager name (`npm` | `pnpm` | `yarn` | `bun` |
-  `deno` | `aube`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
+  `deno` | `aube` | `nub`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
   version, a semver range, a dist-tag (`latest`, `next`, `canary`, `rc`, `stable`),
   `*`, or a URL. Descriptors are what §03 produces and §04 consumes.
 * **Locator** — `reference` is an exact semver version, optionally carrying a build
@@ -101,9 +101,9 @@ fold such a digest into the locator's reference.
 
 `shimByDefault: false` keeps an entry out of the set a bare `jup enable` installs
 (§10.5). It is for a name users routinely install deliberately and reach for outside
-any project — `bun` and `deno` are runtimes first — where claiming the name on `PATH`
-would be a takeover nobody asked for. Naming the entry (`jup enable bun`) still
-installs it, and `disable` with no names still removes it.
+any project — `bun`, `deno` and `nub` all run a file you hand them — where claiming
+the name on `PATH` would be a takeover nobody asked for. Naming the entry
+(`jup enable bun`) still installs it, and `disable` with no names still removes it.
 
 `ranges` exists because a package manager's *download shape* changes across major
 versions (pnpm's bin moved `.js` → `.cjs` → `.mjs`; Yarn 2+ is a single JS file from
@@ -158,7 +158,7 @@ described by §15.28:
 `<host>` — the key `targets` is indexed by — is `<platform>-<arch>`, and on a musl
 Linux `<platform>-<arch>-musl`. Linux is the one platform where the pair alone does
 not name a binary interface, and publishers that ship both say so in the artifact
-name (`@oven/bun-linux-x64-musl`, `@endevco/aube-linux-x64-musl`). glibc stays
+name (`@oven/bun-linux-x64-musl`, `@nubjs/nub-linux-x64-musl`). glibc stays
 unsuffixed, so an existing `targets` map and an existing `.jup.lock` key keep meaning
 what they meant; a musl host is the only one that sees a new key, and it is the host
 that was previously being handed a glibc binary that could not start.
@@ -433,6 +433,55 @@ Single range `*`:
 
 > Unlike bun's and deno's, aube's per-host packages **do** declare a `bin`, so §07.7
 > reads it and the table's copy is the ordinary fallback. The two agree.
+
+### nub
+
+> §15.21, the per-host model a fourth time. `@nubjs/nub` is a ~30 kB Node launcher
+> that resolves an `optionalDependencies` entry named after the host and spawns the
+> binary inside it; jup resolves no dependency graph, so it asks for that package.
+
+| Field | Value |
+|---|---|
+| `default` | `0.7.5` — bare, per §2.3 |
+| `fetchLatestFrom` | `{type: npm, package: "@nubjs/nub"}` |
+| `transparent.commands` | `[["nub","init"], ["nub","dlx"], ["nub","x"], ["nubx"]]` |
+| `transparent.default` | — |
+| `shimByDefault` | `false` — nub is a package manager *and* a runtime (§10.5) |
+
+Single range `*`:
+* `url` = `https://registry.npmjs.org/@nubjs/nub-{target}/-/nub-{target}-{}.tgz`
+* `bin` = `{"nub": "./bin/nub{exe}", "nubx": "./bin/nub{exe}"}` — one file, two names
+* `registry` = `{type: npm, package: "@nubjs/nub"}`
+* `artifactRegistry` = `{type: npm, package: "@nubjs/nub-{target}"}`
+* `targets` = the identity on all eight of `darwin-arm64`, `darwin-x64`,
+  `linux-arm64`, `linux-arm64-musl`, `linux-x64`, `linux-x64-musl`, `win32-arm64`,
+  `win32-x64`
+* `exec` = `"native"`
+* `commands.use` = `["nub", "install"]`
+
+> **The identity, without a hole.** nub's launcher computes
+> `${process.platform}-${process.arch}` and appends `-musl` on a musl Linux — this
+> section's `<host>` rule, written out in someone else's repository — so `{target}`
+> is `<host>` for every host the table can name. The map is still written out, on
+> aube's reasoning minus the hole: a band with no `targets` claims every host
+> forever, and the map is where a host leaving the set would be said.
+
+> **One band.** The eight have been the eight since `0.0.2`, the first release whose
+> per-host packages carried a binary. (`0.0.1` published 273-byte placeholders with
+> nothing inside; that version resolves to a missing entry point, which is what a
+> version with no artifact should do.) The package's internal layout has moved
+> several times; `bin/nub{exe}` has been in all of them, and it is the only path the
+> band names.
+
+> **`nub` and `nubx` are one file.** The per-host packages shipped a byte-identical
+> `bin/nubx` until 0.7.0 and dropped it because it doubled a ~50 MB artifact per
+> host. So the table points both names at `bin/nub{exe}` and relies on §15.28's
+> `argv[0]` rule, exactly as `bun`/`bunx` does. Only `nubx`, `nub x`, `nub dlx` and
+> `nub init` are transparent; `nub run`, `nub install` and `nub <file>` act on the
+> project they stand in and stay subject to §03.5.
+
+> Like bun's and deno's — and unlike aube's — nub's per-host packages declare **no
+> `bin`**, so §07.7 finds nothing to read and the table is the authority.
 
 ## 2.6 Trust store
 

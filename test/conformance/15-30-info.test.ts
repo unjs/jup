@@ -390,6 +390,11 @@ describe("§15.30 corepack info", () => {
       "aube",
       "aubr",
       "aubx",
+      // §15.21's nub is back in the first group, and is why that group is not
+      // "the runtimes": nub is a package manager *and* a runtime, and what
+      // decides is that `nub` names something outside a project (§10.5).
+      "nub",
+      "nubx",
     ]);
 
     // §15.28 / §10.5 — `enable` with no names left these alone, so the report
@@ -398,6 +403,8 @@ describe("§15.30 corepack info", () => {
     expect(bun.shim).toBeNull();
     const aubx = report.shims.entries.find((entry) => entry.binary === "aubx")!;
     expect(aubx.shim).toBe(join(shimDirectory, "aubx"));
+    const nubx = report.shims.entries.find((entry) => entry.binary === "nubx")!;
+    expect(nubx.shim).toBeNull();
 
     const yarn = report.shims.entries.find((entry) => entry.binary === "yarn")!;
     expect(yarn.shim).toBe(join(shimDirectory, "yarn"));

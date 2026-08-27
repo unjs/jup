@@ -168,6 +168,33 @@ attacker-controlled input.
    planted one.
 6. **Apply a sane mode mask**: take only the executable bit from the tar header,
    `mode & 0o777 & ~umask`, and never honour setuid/setgid/sticky bits.
+
+   The mask is a ceiling, not a grant, and for a `native` band (§15.28) the
+   ceiling alone is not enough: the implementation **MUST** additionally set
+   `+x` — `mode | (0o111 & ~umask)` — on each path the resolved `bin` names,
+   after §7.7 has decided what that is. `@nubjs/nub-<host>` publishes its
+   binary at 0644, because npm normalises an extracted file to 0755 only when
+   the package's `bin` names it and these per-host packages declare no `bin`;
+   the publisher's own `postinstall` chmods it back, and an implementation that
+   runs no lifecycle scripts must do it here or cache a file it cannot execute.
+
+   The grant is bounded on every side, and each bound is required:
+
+   * only a `native` band — a JavaScript one is loaded, not executed;
+   * only the paths in the resolved `bin`, which are confined to the install by
+     §14.13 and named by the band or the package manifest, never by a tar
+     header;
+   * only a file whose first bytes are a **program image** — `#!`, ELF, or one
+     of Mach-O's magics. This bound keeps the grant from destroying information:
+     a band whose `bin` path has gone stale and now names a data file would, if
+     made executable, reach `execvp`, which falls back to `/bin/sh` and exits
+     127 with the shell's complaint. Left alone it is the `EACCES` that §12's
+     `cannotExecute` reports with the path in it;
+   * only `+x`, never setuid/setgid/sticky, and never a write to a file that
+     already carries the bit.
+
+   It is best-effort: a failure to chmod MUST NOT fail an install, because
+   `cannotExecute` already names the path if the bit really is missing.
 7. **Bound the output**: cap total uncompressed bytes and entry count, and reject a
    gzip stream whose expansion ratio is implausible (zip-bomb defence). 512 MiB and
    200 000 entries are generous ceilings for this use case.

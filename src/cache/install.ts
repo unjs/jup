@@ -7,7 +7,7 @@
  */
 
 import { readFileSync } from "node:fs";
-import { open, rm } from "node:fs/promises";
+import { chmod, open, rm, stat } from "node:fs/promises";
 import { join, posix, resolve, sep } from "node:path";
 import { ENV, SYSTEM_ENV } from "../config/env-vars.ts";
 import {
@@ -223,6 +223,7 @@ export async function ensureInstalled(
     }
 
     const bin = resolveBin(tmp, locator, isSingleFile);
+    await makeEntryPointsExecutable(tmp, locator, version, bin);
     const hash = `${artifactAlgo}.${artifactDigest}`;
 
     // §07.6 step 3 — the reference now carries the digest we actually saw, which
@@ -390,6 +391,111 @@ async function chooseSource(
 
   return source;
 }
+
+/**
+ * The leading bytes of a file the kernel would agree to execute, for
+ * {@link isProgramImage}.
+ *
+ * A shebang, ELF, and Mach-O in its four single-architecture forms plus the
+ * universal-binary wrapper. Windows never reaches this — a `.exe` runs because
+ * of its name — so `MZ` is deliberately absent.
+ */
+const PROGRAM_MAGIC: readonly (readonly number[])[] = [
+  [0x23, 0x21], // `#!` — any interpreted script
+  [0x7f, 0x45, 0x4c, 0x46], // ELF: Linux, the BSDs, Solaris
+  [0xfe, 0xed, 0xfa, 0xce], // Mach-O, 32-bit, big-endian
+  [0xfe, 0xed, 0xfa, 0xcf], // Mach-O, 64-bit, big-endian
+  [0xce, 0xfa, 0xed, 0xfe], // Mach-O, 32-bit, little-endian
+  [0xcf, 0xfa, 0xed, 0xfe], // Mach-O, 64-bit, little-endian
+  [0xca, 0xfe, 0xba, 0xbe], // Mach-O universal binary
+];
+
+/** Whether `path` begins with one of {@link PROGRAM_MAGIC}. */
+async function isProgramImage(path: string): Promise<boolean> {
+  const file = await open(path, "r");
+  try {
+    const head = Buffer.alloc(4);
+    const { bytesRead } = await file.read(head, 0, 4, 0);
+    return PROGRAM_MAGIC.some(
+      (magic) => magic.length <= bytesRead && magic.every((byte, at) => head[at] === byte),
+    );
+  } finally {
+    await file.close();
+  }
+}
+
+/**
+ * §07.4 rule 6, §15.28 — set the executable bit on a native band's entry points.
+ *
+ * Rule 6 takes the executable bit *from the tar header* and nothing else, which
+ * is right for an archive whose modes are attacker-controlled: it is a mask, not
+ * a grant. But it assumes the publisher set the bit, and for a native artifact
+ * that assumption is a run that ends in `EACCES` with no output.
+ *
+ * `@nubjs/nub-<host>` publishes `bin/nub` at 0644 — deliberately, because npm
+ * normalises an extracted file to 0755 only when the package's `bin` names it,
+ * and these per-host packages declare no `bin` at all (that is also why §07.7
+ * has nothing to read for them). nub's own `postinstall` chmods it back; jup
+ * runs no lifecycle scripts, so nothing did.
+ *
+ * The grant is the narrowest one that fixes it, and every bound is load-bearing:
+ *
+ * * **Only a `native` band.** A JavaScript package manager is imported into this
+ *   process (§08.2), never executed, so the bit would mean nothing there.
+ * * **Only the paths in `bin`.** These are the files jup is about to hand to
+ *   `execNative`, they have already been confined to the install (`confine`),
+ *   and they are named by the band or by the package's own manifest — not by a
+ *   tar header. Nothing else in the archive is touched.
+ * * **Only a file that begins like a program.** A shebang, ELF or Mach-O magic.
+ *   This is what keeps the grant from *losing* information: a band whose `bin`
+ *   path has gone stale and now names a README would, if chmod'd, be handed to
+ *   `execvp`, which falls back to `/bin/sh` and exits 127 with the shell's
+ *   complaint. Left alone it is the `EACCES` §12's `cannotExecute` reports with
+ *   the path in it, which is the answer that says what is wrong.
+ * * **Only `+x`, and only where it is missing.** `mode | (0o111 & ~umask)`:
+ *   setuid, setgid and sticky are still never honoured, and a publisher who did
+ *   ship 0755 gets no write at all.
+ *
+ * Best-effort by design: a store that is read-only, or a file another process
+ * has already promoted, must not fail an install that would otherwise succeed —
+ * and if the bit really is missing, `execNative` reports the `EACCES`.
+ */
+async function makeEntryPointsExecutable(
+  tmpDir: string,
+  locator: Locator,
+  version: string | undefined,
+  bin: BinSpec | BinList,
+): Promise<void> {
+  // Windows has no execute bit; a `.exe` runs because of its name.
+  if (process.platform === "win32" || Array.isArray(bin) || version === undefined) return;
+  if (!isSupportedPackageManager(locator.name)) return;
+  if (getSpecFor(locator.name, version).exec !== "native") return;
+
+  // Deduped: `nub` and `nubx` are one file, and so are bun's two.
+  const paths = new Set(Object.values(bin).map((relative) => join(tmpDir, relative)));
+
+  await Promise.all(
+    [...paths].map(async (path) => {
+      try {
+        const mode = (await stat(path)).mode & 0o777;
+        const wanted = mode | (0o111 & ~UMASK);
+        if (wanted === mode) return;
+        if (!(await isProgramImage(path))) return;
+        await chmod(path, wanted);
+      } catch {
+        // See the note above: never fail an install for this.
+      }
+    }),
+  );
+}
+
+/**
+ * The process umask, read the way §07.4 rule 6's mask reads it.
+ *
+ * `process.umask()` with no argument is a read; calling it with one would be a
+ * write, and a global one at that.
+ */
+const UMASK = process.umask();
 
 /* -------------------------------------------------------------------------- */
 /* §07.7, §15.17 — what goes in the marker's `bin`                             */

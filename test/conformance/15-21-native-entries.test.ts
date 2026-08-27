@@ -1,6 +1,6 @@
 /**
- * §15.21 / §15.28 — bun, deno and aube as built-in entries (rows 212–218, 220
- * and 222–224).
+ * §15.21 / §15.28 — bun, deno, aube and nub as built-in entries (rows 212–218,
+ * 220 and 222–229).
  *
  * §15.28 required the *architecture* to admit a native package manager;
  * `15-28-native.test.ts` proves that with a fixture manager and adds nothing to
@@ -22,6 +22,12 @@
  * `jup enable`, and its per-host packages declare a `bin` of their own, so §07.7
  * has something to read for once.
  *
+ * nub is the fourth, and it is here because it is both at once — `nub install`
+ * is a package manager's command and `nub server.ts` is a runtime's — which is
+ * what settles what `shimByDefault` is actually about. Its two names are one
+ * file, as bun's are, and its per-host packages declare no `bin`, as bun's and
+ * deno's do not.
+ *
  * The mock publishes under `hostTarget()`, so the suite asserts about whatever
  * host it is running on rather than about Linux.
  *
@@ -30,7 +36,7 @@
  * nothing on Windows, and a committed `.exe` is not worth carrying.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hostTarget } from "../../src/config/table.ts";
@@ -70,11 +76,18 @@ const DENO_TARGETS: Record<string, string> = {
 };
 
 const AUBE_VERSION = "2.2.0";
+const NUB_VERSION = "0.7.5";
 
 const BUN_PACKAGE = `@oven/bun-${BUN_TARGETS[hostTarget()]}`;
 const DENO_PACKAGE = `@deno/${DENO_TARGETS[hostTarget()]}`;
 /** aube publishes under `hostTarget()` verbatim, musl suffix included. */
 const AUBE_PACKAGE = `@endevco/aube-${hostTarget()}`;
+/**
+ * So does nub, and for a less coincidental reason: its launcher computes
+ * `${process.platform}-${process.arch}` and appends `-musl` on a musl Linux,
+ * which is `hostTarget()`'s own rule.
+ */
+const NUB_PACKAGE = `@nubjs/nub-${hostTarget()}`;
 
 /**
  * A stand-in for the real binary: it reports the name it was invoked under and
@@ -134,6 +147,28 @@ const AUBE_TARBALL = makeTarball([
   { path: "package/bin/aubx", content: PROBE, mode: 0o755 },
 ]);
 
+/**
+ * nub's per-host packages are shaped like bun's: no `bin` field, and — since
+ * 0.7.0 — one executable rather than one per name. The second copy was dropped
+ * because it doubled a ~50 MB artifact, so `bin/nub` is what both `nub` and
+ * `nubx` have to reach, under their own `argv[0]`.
+ *
+ * **Mode 0644, which is what nub really publishes**, and the reason this fixture
+ * does not use `artifact()`. npm normalises an extracted file to 0755 only when
+ * the package's `bin` names it, and these packages declare no `bin`; nub's own
+ * `postinstall` chmods the binary back. jup runs no lifecycle scripts, so §07.4
+ * rule 6 — which takes the executable bit *from the tar header* — would cache a
+ * file that cannot be executed. Row 227 is where that is not allowed to happen.
+ */
+const NUB_TARBALL = makeTarball([
+  {
+    path: "package/package.json",
+    content: `${JSON.stringify({ name: NUB_PACKAGE, version: NUB_VERSION })}\n`,
+    mode: 0o644,
+  },
+  { path: "package/bin/nub", content: PROBE, mode: 0o644 },
+]);
+
 beforeAll(async () => {
   if (!POSIX) return;
   await registry.start();
@@ -148,11 +183,15 @@ beforeAll(async () => {
   registry.publish("@endevco/aube", AUBE_VERSION, npmTarball({ "package.json": "{}\n" }), {
     distTags: { latest: AUBE_VERSION },
   });
+  registry.publish("@nubjs/nub", NUB_VERSION, npmTarball({ "package.json": "{}\n" }), {
+    distTags: { latest: NUB_VERSION },
+  });
 
   // The artifacts, which is where §06 asks what the bytes should be.
   registry.publish(BUN_PACKAGE, BUN_VERSION, BUN_TARBALL);
   registry.publish(DENO_PACKAGE, DENO_VERSION, DENO_TARBALL);
   registry.publish(AUBE_PACKAGE, AUBE_VERSION, AUBE_TARBALL);
+  registry.publish(NUB_PACKAGE, NUB_VERSION, NUB_TARBALL);
 });
 
 afterAll(async () => {
@@ -160,7 +199,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.21 bun, deno and aube", () => {
+describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
   function options(fixture: Fixture, env?: Record<string, string | undefined>) {
     return {
       cwd: fixture.cwd,
@@ -394,6 +433,76 @@ describe.skipIf(!POSIX)("§15.21 bun, deno and aube", () => {
     expect(exists(join(shims, "aubx"))).toBe(true);
     expect(exists(join(shims, "bun"))).toBe(false);
     expect(exists(join(shims, "deno"))).toBe(false);
+  });
+
+  it("227, 229: runs nub's host package, whose one 0644 executable answers to both names", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `nub@${NUB_VERSION}` });
+    registry.reset();
+
+    expect((await run(["nub", "install"], options(fixture))).stdout.trim()).toBe(
+      "ran=nub args=install",
+    );
+
+    // `@nubjs/nub` is a Node launcher that resolves an `optionalDependencies`
+    // entry and spawns what is inside it; jup resolves no dependency graph, so
+    // it goes to the per-host package and never fetches the launcher.
+    const fetched = registry.requests.map((request) => request.path);
+    expect(fetched.some((path) => path.includes(`${NUB_PACKAGE}/-/`))).toBe(true);
+    expect(fetched.some((path) => path.includes("/@nubjs/nub/-/"))).toBe(false);
+
+    // One file, two names — the artifact declares no `bin`, so §07.7 has nothing
+    // to read and the marker records the table's answer, which points both names
+    // at the single executable the package actually ships.
+    expect(JSON.parse(readMarker(fixture, "nub", NUB_VERSION)).bin).toEqual({
+      nub: "./bin/nub",
+      nubx: "./bin/nub",
+    });
+
+    // The run above already proves it, but this is the assertion that names the
+    // reason: the tarball ships `bin/nub` at 0644 and a native band's declared
+    // entry points are made executable on the way into the store (§07.4 rule 6).
+    // Nothing else in the archive is: `package.json` keeps the mode it came with
+    // — it is not in `bin`, and it does not begin like a program either, which
+    // is the bound `15-28-native.test.ts` row 193 depends on.
+    const installed = join(fixture.home, "v1", "nub", NUB_VERSION);
+    expect(statSync(join(installed, "bin", "nub")).mode & 0o111).not.toBe(0);
+    expect(statSync(join(installed, "package.json")).mode & 0o111).toBe(0);
+    // `nubx` reaches that same file. The probe reports `nub` because `$0` in a
+    // `#!/bin/sh` artifact is the script path rather than `argv[0]` — which is
+    // the point: there is only one script, and the real `argv[0]` handover is
+    // asserted in `test/unit/exec.test.ts` against an artifact that can see it.
+    expect((await run(["nubx", "vitest", "--run"], options(fixture))).stdout.trim()).toBe(
+      "ran=nub args=vitest --run",
+    );
+  });
+
+  it("228: a bare `enable` leaves nub alone; naming it installs both names", async () => {
+    const fixture = createFixture({ name: "app" });
+    const shims = join(fixture.root, "shims");
+
+    expect((await run(["enable", "--install-directory", shims], options(fixture))).exitCode).toBe(
+      0,
+    );
+    // nub is a package manager — `nub install` is pnpm-compatible — and is still
+    // out of the default set, which is what pins down what §10.5's flag means.
+    // It is not category and not recency: `nub server.ts` runs a file, so the
+    // name means something outside a project and usually belongs to an install
+    // the user chose. aube, in the same bare `enable`, is claimed.
+    expect(exists(join(shims, "nub"))).toBe(false);
+    expect(exists(join(shims, "nubx"))).toBe(false);
+    expect(exists(join(shims, "aube"))).toBe(true);
+
+    expect(
+      (await run(["enable", "nub", "--install-directory", shims], options(fixture))).exitCode,
+    ).toBe(0);
+    expect(exists(join(shims, "nub"))).toBe(true);
+    expect(exists(join(shims, "nubx"))).toBe(true);
+
+    // And a bare `disable` covers the opt-out, as it does for bun (row 218).
+    expect((await run(["disable", "--install-directory", shims], options(fixture))).exitCode).toBe(
+      0,
+    );
+    expect(exists(join(shims, "nub"))).toBe(false);
   });
 });
 

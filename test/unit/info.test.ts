@@ -440,7 +440,7 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
 
   it("reports the registry for every supported package manager", () => {
     const names = report().packageManagers.map((entry) => entry.name);
-    expect(names).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube"]);
+    expect(names).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub"]);
 
     const yarn = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.binaries).toEqual(["yarn", "yarnpkg"]);
@@ -527,9 +527,11 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
       "aube",
       "aubr",
       "aubx",
+      "nub",
+      "nubx",
     ]);
     for (const entry of info.entries) {
-      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno|aube)$/);
+      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno|aube|nub)$/);
     }
   });
 
@@ -576,7 +578,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     expect(info.directory).not.toBeNull();
     expect(info.problem).toBeNull();
     // And the rest of the report is still there.
-    expect(info.entries).toHaveLength(12);
+    expect(info.entries).toHaveLength(14);
   });
 });
 

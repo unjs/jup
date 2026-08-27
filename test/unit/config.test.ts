@@ -23,8 +23,8 @@ import { satisfiesWithPrereleases } from "../../src/version/semver.ts";
 import type { BinSpec, PackageManagerSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 describe("registry table — shape (§02.5)", () => {
-  it("supports exactly npm, pnpm, yarn, bun, deno and aube", () => {
-    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube"]);
+  it("supports exactly npm, pnpm, yarn, bun, deno, aube and nub", () => {
+    expect([...SUPPORTED_NAMES]).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub"]);
     expect(isSupportedPackageManager("yarn")).toBe(true);
     expect(isSupportedPackageManager("bun")).toBe(true);
     // §01.7 / §15.21 — the table is closed and compiled in. `vlt` stands in for
@@ -98,6 +98,12 @@ describe("registry table — shape (§02.5)", () => {
       ["bunx"],
     ]);
     expect(DEFINITIONS.deno!.transparent.commands).toEqual([["deno", "init"]]);
+    expect(DEFINITIONS.nub!.transparent.commands).toEqual([
+      ["nub", "init"],
+      ["nub", "dlx"],
+      ["nub", "x"],
+      ["nubx"],
+    ]);
     expect(DEFINITIONS.npm!.transparent.default).toBeUndefined();
     expect(DEFINITIONS.pnpm!.transparent.default).toBeUndefined();
   });
@@ -239,6 +245,7 @@ describe("binary names (§02.4)", () => {
     expect(getBinariesFor("npm")).toEqual(["npm", "npx"]);
     expect(getBinariesFor("bun")).toEqual(["bun", "bunx"]);
     expect(getBinariesFor("deno")).toEqual(["deno"]);
+    expect(getBinariesFor("nub")).toEqual(["nub", "nubx"]);
     expect(getBinariesFor("vlt")).toEqual([]);
   });
 
@@ -249,6 +256,7 @@ describe("binary names (§02.4)", () => {
     expect(getPackageManagerFor("npx")).toBe("npm");
     expect(getPackageManagerFor("bunx")).toBe("bun");
     expect(getPackageManagerFor("deno")).toBe("deno");
+    expect(getPackageManagerFor("nubx")).toBe("nub");
     expect(getPackageManagerFor("vlt")).toBeUndefined();
   });
 
@@ -744,5 +752,139 @@ describe("aube — §15.21's third per-host entry", () => {
     // need the project, so neither is exempt.
     expect(DEFINITIONS.aube!.transparent.commands).not.toContainEqual(["aubr"]);
     expect(DEFINITIONS.aube!.transparent.default).toBeUndefined();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §15.21 — nub                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * nub is the fourth per-host entry, and the first that is a package manager and
+ * a runtime at once: `nub install` is pnpm-compatible on the CLI and on the
+ * lockfile, and `nub server.ts` runs a TypeScript file on the installed Node.
+ *
+ * That combination is what these rows are for. aube established that
+ * `shimByDefault` is not about newness; nub establishes that it is not about
+ * category either. Being a package manager does not earn a place in the default
+ * set — meaning nothing outside a project does, and `nub` means plenty. So nub
+ * opts out beside bun and deno despite doing the same job aube does.
+ *
+ * The second thing it holds is the identity `targets` map with no hole in it.
+ * aube's identity is load-bearing because `darwin-x64` is missing from it; nub's
+ * covers every host the table can name, which is the case where a reader might
+ * reasonably ask why the map is written at all.
+ */
+describe("nub — §15.21's fourth per-host entry", () => {
+  afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
+
+  it("splits the launcher from the artifact, like the three before it", () => {
+    const spec = getSpecFor("nub", "0.7.5");
+    expect(spec.registry).toEqual({ type: "npm", package: "@nubjs/nub" });
+    expect(spec.artifactRegistry).toEqual({ type: "npm", package: "@nubjs/nub-{target}" });
+    expect(DEFINITIONS.nub!.fetchLatestFrom).toEqual({ type: "npm", package: "@nubjs/nub" });
+    expect(spec.exec).toBe("native");
+    expect(spec.commands).toEqual({ use: ["nub", "install"] });
+    expect(isPerHost({ name: "nub", reference: "0.7.5" })).toBe(true);
+    // Bare, because one version is many artifacts (§02.3).
+    expect(DEFINITIONS.nub!.default).toBe("0.7.5");
+  });
+
+  it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {
+    pretendHost("linux", "x64");
+    const bin = resolveSpecBin(getSpecFor("nub", "0.7.5")) as BinSpec;
+    // The per-host packages shipped a byte-identical `bin/nubx` until 0.7.0 and
+    // dropped it because it doubled every artifact. `bin/nub` is the path that
+    // has been in all of them, so it is the one the table names — for both.
+    expect(bin).toEqual({ nub: "./bin/nub", nubx: "./bin/nub" });
+    // The identity is the assertion; the `.exe` half of `{exe}` is read once
+    // from the real host (`EXE`) and `15-28-native.test.ts` is where it is
+    // exercised, so pretending to be Windows here would prove nothing.
+    expect(bin.nub).toBe(bin.nubx);
+    expect(getBinariesFor("nub")).toEqual(["nub", "nubx"]);
+    for (const name of ["nub", "nubx"]) expect(getPackageManagerFor(name)).toBe("nub");
+  });
+
+  it("resolves `{target}` straight through, on every host it declares", () => {
+    // nub's own launcher builds `${process.platform}-${process.arch}` and
+    // appends `-musl`, which is `hostTarget()`'s rule in someone else's
+    // repository — so the map is an identity, and a complete one.
+    for (const host of ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"]) {
+      const [platform, arch] = host.split("-") as [string, string];
+      pretendHost(platform, arch);
+      expect(getSpecUrl({ name: "nub", reference: "0.7.5" })).toBe(
+        `https://registry.npmjs.org/@nubjs/nub-${host}/-/nub-${host}-0.7.5.tgz`,
+      );
+    }
+
+    // `resolveArtifactRegistry` memoises per spec — a process cannot change
+    // host — so it is asked once, on whatever host is pretended last.
+    pretendHost("linux", "x64");
+    expect(
+      resolveArtifactRegistry(getSpecFor("nub", "0.7.5"), { name: "nub", reference: "0.7.5" }),
+    ).toEqual({ type: "npm", package: "@nubjs/nub-linux-x64" });
+  });
+
+  it("declares its host set even though the map is an identity", () => {
+    // aube's identity map earns itself by having a hole; nub's has none. It is
+    // written out anyway, because a band with no `targets` claims every host
+    // forever and there would be nowhere to say that a host had gone.
+    expect(getSpecFor("nub", "0.7.5").targets).toEqual({
+      "darwin-arm64": "darwin-arm64",
+      "darwin-x64": "darwin-x64",
+      "linux-arm64": "linux-arm64",
+      "linux-arm64-musl": "linux-arm64-musl",
+      "linux-x64": "linux-x64",
+      "linux-x64-musl": "linux-x64-musl",
+      "win32-arm64": "win32-arm64",
+      "win32-x64": "win32-x64",
+    });
+    // One band: the eight have been the eight since 0.0.2, the first release
+    // whose per-host packages carried a binary at all.
+    expect(DEFINITIONS.nub!.ranges.map(([range]) => range)).toEqual(["*"]);
+    expect(Object.keys(getSpecFor("nub", "0.0.2").targets!)).toEqual(
+      Object.keys(getSpecFor("nub", "0.7.5").targets!),
+    );
+  });
+
+  it("still names a host outside the vocabulary as the tool's own gap", () => {
+    // A `targets` miss is the *release's* answer; an unrecognised platform is
+    // the tool's, and stays a different error even for an entry that ships
+    // everywhere the tool can name (§15.28).
+    pretendHost("freebsd", "x64");
+    expect(() => getSpecUrl({ name: "nub", reference: "0.7.5" })).toThrow(
+      messages.unsupportedTarget("nub", "0.7.5", "freebsd-x64", [
+        "darwin-arm64",
+        "darwin-x64",
+        "linux-arm64",
+        "linux-arm64-musl",
+        "linux-x64",
+        "linux-x64-musl",
+        "win32-arm64",
+        "win32-x64",
+      ]),
+    );
+  });
+
+  it("stays out of the default shim set, because it is a runtime too", () => {
+    // The distinction is not package-manager-versus-runtime — nub is both — but
+    // whether the name means something outside a project. `nub file.ts` does,
+    // and a bare `jup enable` must not claim a name someone curl-installed.
+    expect(shimsByDefault("nub")).toBe(false);
+    expect(shimsByDefault("aube")).toBe(true);
+  });
+
+  it("exempts only the commands that do not act on a project (§03.5)", () => {
+    // `nub x` and `nubx` are the same operation and both are listed, because
+    // §01.4 matches an argv prefix and a user types either — the `bun x`/`bunx`
+    // reason. `nub run`, `nub install` and `nub <file>` stay enforced.
+    expect(DEFINITIONS.nub!.transparent.commands).toEqual([
+      ["nub", "init"],
+      ["nub", "dlx"],
+      ["nub", "x"],
+      ["nubx"],
+    ]);
+    expect(DEFINITIONS.nub!.transparent.commands).not.toContainEqual(["nub", "run"]);
+    expect(DEFINITIONS.nub!.transparent.default).toBeUndefined();
   });
 });

@@ -686,14 +686,17 @@ for (const name of SupportedPackageManagerSet) {
       // Upstream asserts the exact stdout, which assumes `--version` prints the
       // version and nothing else. That holds for every manager corepack ships
       // and for bun; `deno --version` prints a three-line banner naming V8 and
-      // TypeScript too, and `aube --version` appends its host triple and build
-      // date. The claim being made is "the pinned version ran", so for those two
-      // the assertion is on the version appearing rather than on the whole of
-      // stdout — a weaker assertion only where the stronger one was never about
-      // this behaviour.
-      await (name === `deno` || name === `aube`
-        ? result.toMatchObject({ stdout: expect.stringContaining(`${version} `), exitCode: 0 })
-        : result.toMatchObject({ stdout: `${version}\n`, exitCode: 0 }));
+      // TypeScript too, `aube --version` appends its host triple and build date,
+      // and `nub --version` prints `v` in front. The claim being made is "the
+      // pinned version ran", so each is asserted as tightly as its own output
+      // allows — never loosened past what this row was ever about.
+      const expected =
+        name === `deno` || name === `aube`
+          ? expect.stringContaining(`${version} `)
+          : name === `nub`
+            ? `v${version}\n`
+            : `${version}\n`;
+      await result.toMatchObject({ stdout: expected, exitCode: 0 });
     });
   });
 }

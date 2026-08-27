@@ -245,15 +245,21 @@ break a machine than to help it. `enable npm` explicitly is supported.
 > `npm install` silently works anyway. `--exclude npm` restores it.
 
 An entry MAY opt out of the default set with `shimByDefault: false` (§02.3), and
-`bun` and `deno` do. Those names are runtimes people install deliberately and run
+`bun`, `deno` and `nub` do. Those names are ones people install deliberately and run
 outside any project, so a bare `enable` — which existing users run on upgrade, having
 asked for nothing — must not claim them on `PATH`. Naming the entry is the opt-in.
 
-The line is runtime-versus-package-manager, not old-versus-new. §15.21's `aube` is a
-per-host native entry exactly as those two are and does **not** opt out: `aube`,
-`aubr` and `aubx` name nothing outside a project, which is what the default set is
-for. An entry that opted out merely because it is recent would freeze the default set
-at the three names corepack shipped.
+The test is **whether the name means anything outside a project**, and it is neither
+old-versus-new nor a category the entry is filed under:
+
+* §15.21's `aube` is a per-host native entry exactly as `bun` and `deno` are, and
+  does **not** opt out: `aube`, `aubr` and `aubx` name nothing outside a project.
+  An entry that opted out merely for being recent would freeze the default set at
+  the three names corepack shipped.
+* §15.21's `nub` is a package manager — `nub install` is pnpm-compatible on the CLI
+  and on the lockfile — and opts out anyway, because `nub server.ts` runs a file and
+  `nub node` manages Node versions. Being a package manager is not what earns a
+  place in the default set; having no meaning outside a project is.
 
 `disable` with no names covers **every** entry, opt-outs included: removal has no
 such hazard, and a `disable` that declined to undo an `enable bun` would be the
@@ -269,6 +275,7 @@ Each name expands to every binary name it declares across all range entries, ded
 | `bun` | `bun`, `bunx` | no — `shimByDefault: false` |
 | `deno` | `deno` | no — `shimByDefault: false` |
 | `aube` | `aube`, `aubr`, `aubx` | yes |
+| `nub` | `nub`, `nubx` | no — `shimByDefault: false` |
 
 All binaries are processed concurrently.
 
