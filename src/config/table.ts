@@ -159,7 +159,7 @@ const NUB_TARGETS = {
 
 export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   npm: {
-    default: "11.14.1+sha1.4a6839650da0005f323fec6abd39d77ee24f842f",
+    default: "12.0.2+sha1.788d93dc8869000b1078e0395c60748a0aadc4f1",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
       commands: [["npm", "init"], ["npx"]],
@@ -178,7 +178,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
   },
 
   pnpm: {
-    default: "11.1.2+sha1.ed39d701687311ce9345771c62376f9fe7286694",
+    default: "11.24.0+sha1.a042a648b5e519c43c5b2c3ff99901448190cd66",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -222,10 +222,10 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     // a pin this table already ships rather than a fresh unverified one.
     // `scripts/refresh-table.mjs` (§16.9) is what stops both rotting; the fields
     // stay separate because §15.33 bullet 1 floors only the transparent one.
-    default: "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113",
+    default: "4.18.0+sha224.5707fce90df5d8720fae4e85a07ab55e90aa20fded8914893e2ba225",
     fetchLatestFrom: { type: "npm", package: "yarn" },
     transparent: {
-      default: "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113",
+      default: "4.18.0+sha224.5707fce90df5d8720fae4e85a07ab55e90aa20fded8914893e2ba225",
       commands: [
         ["yarn", "init"],
         ["yarn", "dlx"],
