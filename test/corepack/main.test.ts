@@ -687,13 +687,14 @@ for (const name of SupportedPackageManagerSet) {
       // version and nothing else. That holds for every manager corepack ships
       // and for bun; `deno --version` prints a three-line banner naming V8 and
       // TypeScript too, `aube --version` appends its host triple and build date,
-      // and `nub --version` prints `v` in front. The claim being made is "the
-      // pinned version ran", so each is asserted as tightly as its own output
-      // allows — never loosened past what this row was ever about.
+      // and `nub --version` and `node --version` both print `v` in front. The
+      // claim being made is "the pinned version ran", so each is asserted as
+      // tightly as its own output allows — never loosened past what this row was
+      // ever about.
       const expected =
         name === `deno` || name === `aube`
           ? expect.stringContaining(`${version} `)
-          : name === `nub`
+          : name === `nub` || name === `node`
             ? `v${version}\n`
             : `${version}\n`;
       await result.toMatchObject({ stdout: expected, exitCode: 0 });

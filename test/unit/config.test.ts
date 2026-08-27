@@ -50,8 +50,8 @@ describe("registry table — shape (§02.5)", () => {
   });
 
   it("pins hash-suffixed defaults", () => {
-    expect(DEFINITIONS.npm!.default).toBe("11.14.1+sha1.4a6839650da0005f323fec6abd39d77ee24f842f");
-    expect(DEFINITIONS.pnpm!.default).toBe("11.1.2+sha1.ed39d701687311ce9345771c62376f9fe7286694");
+    expect(DEFINITIONS.npm!.default).toBe("12.0.2+sha1.788d93dc8869000b1078e0395c60748a0aadc4f1");
+    expect(DEFINITIONS.pnpm!.default).toBe("11.24.0+sha1.a042a648b5e519c43c5b2c3ff99901448190cd66");
   });
 
   /**
@@ -65,7 +65,7 @@ describe("registry table — shape (§02.5)", () => {
    */
   it("puts yarn's default on the supported major, hash-pinned (§15.33)", () => {
     const yarn = DEFINITIONS.yarn!;
-    const supported = "4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113";
+    const supported = "4.18.0+sha224.5707fce90df5d8720fae4e85a07ab55e90aa20fded8914893e2ba225";
     expect(yarn.default).toBe(supported);
     expect(yarn.transparent.default).toBe(supported);
     // §14.21's asymmetry is gone, and the classic line is what it is gone *from*.

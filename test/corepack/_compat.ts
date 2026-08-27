@@ -34,11 +34,22 @@ export const engine = { getBinariesFor };
 
 /**
  * Upstream types this as a set of the literal names; the rows index `config` with
- * it. Corepack's three, plus §15.21's four — which upstream has no notion of,
- * and which the rows that iterate this set therefore have to be read against:
- * see the `deno --version` note in `main.test.ts`.
+ * it. Corepack's three, plus §15.21's four and §15.39's runtime — none of which
+ * upstream has any notion of, and which the rows that iterate this set therefore
+ * have to be read against: see the `deno --version` note in `main.test.ts`.
+ *
+ * The name the type carries is upstream's and is now half wrong — `node` is a
+ * runtime — but renaming it would diverge from the vendored rows for nothing.
  */
-export type SupportedPackageManager = "npm" | "pnpm" | "yarn" | "bun" | "deno" | "aube" | "nub";
+export type SupportedPackageManager =
+  | "npm"
+  | "pnpm"
+  | "yarn"
+  | "bun"
+  | "deno"
+  | "aube"
+  | "nub"
+  | "node";
 
 export const SupportedPackageManagerSet = new Set(
   SUPPORTED_NAMES as readonly SupportedPackageManager[],
