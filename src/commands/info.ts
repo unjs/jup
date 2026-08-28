@@ -388,7 +388,10 @@ function describeProject(cwd: string): ProjectInfo {
   // as the error a `yarn` invocation would actually hit. §15.23 widened what the
   // version may *be* — a range, a dist-tag — not whether a pin has to carry one.
   try {
-    const descriptor = parseSpec(declared.raw, "package.json", { requireVersion: true });
+    const descriptor = parseSpec(declared.raw, "package.json", {
+      requireVersion: true,
+      packageManagerField: declared.packageManagerField,
+    });
     return {
       ...info,
       status: status === "invalid" ? "invalid" : "found",
@@ -422,6 +425,8 @@ function describeDeclaration(manifest: Manifest | undefined): {
   field: string | null;
   spec: string | null;
   raw: unknown;
+  /** §15.39's refusal is about the *field*, so it travels with the declaration. */
+  packageManagerField: boolean;
   devEngines: ProjectInfo["devEngines"];
 } {
   const de = manifest?.devEngines?.packageManager;
@@ -442,6 +447,9 @@ function describeDeclaration(manifest: Manifest | undefined): {
       // reported as `42`, next to the sentence explaining why it is not a spec.
       spec: typeof pm === "string" ? pm : (JSON.stringify(pm) ?? String(pm)),
       raw: pm,
+      // The same condition `manifest.ts`'s own `describe` uses: the field is
+      // only speaking for itself when it actually carries a string pin.
+      packageManagerField: typeof pm === "string",
       devEngines,
     };
   }
@@ -452,10 +460,18 @@ function describeDeclaration(manifest: Manifest | undefined): {
     const name = typeof devEngines.name === "string" ? devEngines.name : undefined;
     const version = typeof devEngines.version === "string" ? devEngines.version : undefined;
     const spec = name === undefined ? null : `${name}@${version ?? "*"}`;
-    return { field: "devEngines.packageManager", spec, raw: spec ?? undefined, devEngines };
+    return {
+      field: "devEngines.packageManager",
+      spec,
+      raw: spec ?? undefined,
+      // Synthesised out of `devEngines`, so §15.39 does not apply: a runtime
+      // named there is exactly where a runtime belongs.
+      packageManagerField: false,
+      devEngines,
+    };
   }
 
-  return { field: null, spec: null, raw: undefined, devEngines };
+  return { field: null, spec: null, raw: undefined, packageManagerField: false, devEngines };
 }
 
 /** A tolerant manifest read: anything unreadable is simply "no fields". */
