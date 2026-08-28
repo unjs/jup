@@ -217,7 +217,11 @@ attacker-controlled input.
    devices, block devices, FIFOs).
 5. **Never follow an existing symlink when creating a file** — open with
    `O_NOFOLLOW`-equivalent semantics, since a prior malicious entry could have
-   planted one.
+   planted one. "Equivalent" is a requirement, not a hedge: a host with no such
+   flag — Windows — MUST substitute `O_EXCL`, which fails on anything already at
+   the path, and then remove that entry and retry. Treating a missing flag as
+   `0` makes the rule hold on POSIX and silently not hold elsewhere, and the
+   write then lands wherever the link points.
 6. **Write a fixed mode, not the header's.** The header contributes exactly one
    bit — whether any of `0o111` is set — and nothing else. The mode written is
 

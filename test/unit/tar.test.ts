@@ -122,14 +122,21 @@ describe("extract — the happy path", () => {
     expect(await exists(join(dest, "README.md"))).toBe(false);
   });
 
-  it("takes only the executable bit from the header mode", async () => {
-    await extract(gzipStream(NPM_TARBALL), dest, { strip: 1 });
+  // §07.4 rule 6 writes a POSIX mode, and Windows has none: `chmod` there toggles
+  // the read-only attribute and `stat` reports `0o666`/`0o444`, so the executable
+  // bit this asserts cannot exist. The extraction itself is exercised by every
+  // other row in the file.
+  it.skipIf(process.platform === "win32")(
+    "takes only the executable bit from the header mode",
+    async () => {
+      await extract(gzipStream(NPM_TARBALL), dest, { strip: 1 });
 
-    const script = await stat(join(dest, "bin/yarn.js"));
-    const manifest = await stat(join(dest, "package.json"));
-    expect(script.mode & 0o111).not.toBe(0);
-    expect(manifest.mode & 0o111).toBe(0);
-  });
+      const script = await stat(join(dest, "bin/yarn.js"));
+      const manifest = await stat(join(dest, "package.json"));
+      expect(script.mode & 0o111).not.toBe(0);
+      expect(manifest.mode & 0o111).toBe(0);
+    },
+  );
 
   it("reassembles ustar prefix/name pairs", async () => {
     await extract(gzipStream([{ name: "deep/file.js", prefix: "package", body: "ok" }]), dest, {
@@ -520,7 +527,10 @@ describe("create", () => {
     );
     expect(await readFile(join(dest, "yarn/2.2.2/bin/yarn.js"), "utf8")).toBe("console.log(1)\n");
     expect(await readFile(join(dest, `yarn/2.2.2/${"deep".repeat(40)}.js`), "utf8")).toBe("long");
-    expect((await stat(join(dest, "yarn/2.2.2/bin/yarn.js"))).mode & 0o111).not.toBe(0);
+    // The executable bit survives the round trip — where the platform has one.
+    if (process.platform !== "win32") {
+      expect((await stat(join(dest, "yarn/2.2.2/bin/yarn.js"))).mode & 0o111).not.toBe(0);
+    }
   });
 
   it("never packs a symlink", async () => {

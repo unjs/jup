@@ -74,6 +74,21 @@ const TYPE_LINK = new Set(["1", "2"]);
 /** Not a portable constant everywhere; degrades to 0 (i.e. no-op) on Windows. */
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 
+/**
+ * §07.4 rule 5's flag, on whichever platform this is.
+ *
+ * `O_NOFOLLOW` states the rule directly: the open fails rather than following a
+ * symlink standing at the path. Windows has no such flag, and `0` there would
+ * make rule 5 hold on POSIX and silently not hold on Windows — a tarball
+ * extracted over a planted link would edit the link's *target*, anywhere on the
+ * volume. `O_EXCL` is the substitute: it fails on anything already at the path,
+ * a symlink included, which hands the decision to the recovery in
+ * {@link writeFile} instead of to the filesystem. It costs an `unlink` per
+ * overwrite, and extraction writes into a fresh directory (§07.3), so there is
+ * normally nothing to overwrite.
+ */
+const O_NO_SYMLINK = O_NOFOLLOW === 0 ? fsConstants.O_EXCL : O_NOFOLLOW;
+
 let cachedUmask: number | undefined;
 function getUmask(): number {
   if (cachedUmask === undefined) {
@@ -576,9 +591,10 @@ async function ensureDir(root: string, relativeDir: string, made: Set<string>): 
 }
 
 async function writeFile(target: string, mode: number, body: EntryBody): Promise<void> {
-  // §07.4 rule 5: O_NOFOLLOW, because a prior entry (or another process) could
-  // have planted a symlink here and a plain open would write through it.
-  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | O_NOFOLLOW;
+  // §07.4 rule 5: never write *through* a symlink a prior entry — or another
+  // process — could have planted here. See `O_NO_SYMLINK` for what enforces it
+  // on a platform with no `O_NOFOLLOW`.
+  const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | O_NO_SYMLINK;
   let handle;
   try {
     handle = await open(target, flags, mode);
@@ -586,6 +602,7 @@ async function writeFile(target: string, mode: number, body: EntryBody): Promise
     const code = errnoOf(error);
     if (code !== "ELOOP" && code !== "EEXIST") throw error;
     // Never followed, so the link's target is untouched: drop the link itself.
+    // `unlink` removes the link, never what it points at — on Windows too.
     await unlink(target);
     handle = await open(target, flags, mode);
   }
