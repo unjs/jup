@@ -311,6 +311,22 @@ class ByteReader {
 /* Header decoding                                                              */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * POSIX ustar writes `"ustar\0"` at 257 followed by a two-byte version; GNU
+ * writes `"ustar  \0"` across the same eight bytes. Only the former defines a
+ * `prefix` field at 345.
+ */
+function isPosixUstar(header: Uint8Array): boolean {
+  return (
+    header[257] === 0x75 && // u
+    header[258] === 0x73 && // s
+    header[259] === 0x74 && // t
+    header[260] === 0x61 && // a
+    header[261] === 0x72 && // r
+    header[262] === 0
+  );
+}
+
 function decodeString(block: Uint8Array, offset: number, length: number): string {
   const field = block.subarray(offset, offset + length);
   const end = field.indexOf(0);
@@ -496,7 +512,13 @@ async function walk(
         continue;
       }
 
-      const prefix = decodeString(header, 345, 155);
+      // Offset 345 is `prefix` only in POSIX ustar. GNU's format reuses the
+      // same bytes for `atime`/`ctime`, so reading them unconditionally splices
+      // a timestamp onto the front of the path — `tar --format=gnu -g` populates
+      // them, and the entry then arrives as `15244270016/package/a.txt`. The
+      // magic at 257 is what separates the two: `ustar\0` plus a version is
+      // POSIX, `ustar  \0` is GNU.
+      const prefix = isPosixUstar(header) ? decodeString(header, 345, 155) : "";
       const base = decodeString(header, 0, 100);
       let name = prefix.length > 0 ? `${prefix}/${base}` : base;
       if (longName !== undefined) name = longName;
