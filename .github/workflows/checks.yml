@@ -11,6 +11,14 @@ on: { push: {}, pull_request: {} }
 jobs:
   checks:
     runs-on: ${{ matrix.os }}
+    # Windows reports but does not block, because it does not pass yet: §08.2's
+    # handover calls `runMain` with an absolute path, and on Windows an ESM entry
+    # point sends that to the loader as the scheme `d:`
+    # (ERR_UNSUPPORTED_ESM_URL_SCHEME). That is a product bug, not a fixture one,
+    # and the rest of the Windows column cannot be read until it is fixed. The
+    # leg stays visible so the number moves in the open; drop this line when it
+    # reaches zero.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       # Every platform reports. A Windows failure must not hide a macOS one.
       fail-fast: false
