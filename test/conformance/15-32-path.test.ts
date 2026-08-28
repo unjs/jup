@@ -24,6 +24,7 @@ import {
   cleanupFixtures,
   copyTool,
   createFixture,
+  perUserShims,
   run,
   seedPackageManager,
   versionOf,
@@ -76,7 +77,8 @@ function scene(): Scene {
   const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM}` });
   seedPackageManager(fixture.home, "pnpm", PNPM, { script: SCRIPT, esm: true });
 
-  const shimDir = join(fixture.root, "user-bin");
+  // §15.13's per-user default, spelled for this platform — see `perUserShims`.
+  const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   const decoy = join(fixture.root, "decoy");
   mkdirSync(shimDir, { recursive: true });
   mkdirSync(decoy, { recursive: true });
@@ -95,8 +97,7 @@ function scene(): Scene {
       env: {
         HOME: fixture.root,
         USERPROFILE: fixture.root,
-        XDG_BIN_HOME: shimDir,
-        LOCALAPPDATA: undefined,
+        ...shimEnv,
         // The decoy first, then the real PATH — `node` has to stay reachable,
         // because the shim is `#!/usr/bin/env node`.
         PATH: `${decoy}${delimiter}${process.env.PATH ?? ""}`,

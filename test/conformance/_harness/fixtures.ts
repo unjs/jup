@@ -41,6 +41,41 @@ export interface Fixture {
 }
 
 /**
+ * §15.13's per-user shim directory for a fixture whose home is `root`, and the
+ * environment that redirects it there.
+ *
+ * Both halves are platform-specific, and a row that hardcodes either one tests
+ * nothing on the other two platforms. Linux and the BSDs honour
+ * `XDG_BIN_HOME`; **macOS has no XDG convention** and always lands on
+ * `~/.local/bin`; Windows uses `%LOCALAPPDATA%\jup\bin` (§15.13 point 1, and
+ * point 5 for why `LOCALAPPDATA` is cleared everywhere else).
+ *
+ * A row that set only `XDG_BIN_HOME` therefore redirected nothing on macOS and
+ * `enable` wrote into the developer's own `~/.local/bin` — which is what the
+ * macOS CI leg found, in every shim row at once.
+ */
+export function perUserShims(root: string): {
+  dir: string;
+  env: Record<string, string | undefined>;
+} {
+  if (process.platform === "win32") {
+    const localAppData = join(root, "AppData", "Local");
+    return {
+      dir: join(localAppData, "jup", "bin"),
+      env: { LOCALAPPDATA: localAppData, XDG_BIN_HOME: undefined },
+    };
+  }
+  if (process.platform === "darwin") {
+    return {
+      dir: join(root, ".local", "bin"),
+      env: { LOCALAPPDATA: undefined, XDG_BIN_HOME: undefined },
+    };
+  }
+  const dir = join(root, "user-bin");
+  return { dir, env: { LOCALAPPDATA: undefined, XDG_BIN_HOME: dir } };
+}
+
+/**
  * A temporary directory, by its **real** path.
  *
  * `realpath`, because macOS puts `$TMPDIR` behind a symlink (`/var` ->

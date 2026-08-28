@@ -48,16 +48,13 @@ interface Origin {
   connections: number;
 }
 
-/**
- * A TLS origin on `0.0.0.0`, so the same server can be reached as `127.0.0.1`
- * (which the certificate names) and as `127.0.0.2` (which it does not).
- */
-async function startTlsOrigin(): Promise<Origin> {
+/** A TLS origin on `127.0.0.1`, which the certificate names. */
+async function startTlsOrigin(host = "127.0.0.1"): Promise<Origin> {
   const server: Server = createHttpsServer({ key: KEY, cert: CERT }, (_request, response) => {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(`{"ok":true}`);
   });
-  return await listen(server);
+  return await listen(server, host);
 }
 
 async function startPlainOrigin(): Promise<Origin> {
@@ -68,7 +65,10 @@ async function startPlainOrigin(): Promise<Origin> {
   return await listen(server);
 }
 
-async function listen(server: Server | ReturnType<typeof createHttpServer>): Promise<Origin> {
+async function listen(
+  server: Server | ReturnType<typeof createHttpServer>,
+  host = "127.0.0.1",
+): Promise<Origin> {
   const sockets = new Set<Socket>();
   const origin: Origin = { port: 0, connections: 0 };
 
@@ -80,7 +80,7 @@ async function listen(server: Server | ReturnType<typeof createHttpServer>): Pro
   // A TLS handshake that fails is not an error the *test* should crash on.
   server.on("tlsClientError", () => {});
 
-  await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve));
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   origin.port = (server.address() as AddressInfo).port;
 
   closers.push(
@@ -383,16 +383,21 @@ describe("an untrusted certificate authority (row 153)", () => {
 
 describe("a certificate for another name", () => {
   it("says so, rather than blaming the authority", async () => {
-    const origin = await startTlsOrigin();
-    // The issuer is trusted, so the only thing left to fail is the name: the
-    // fixture's SAN list has `IP:127.0.0.1` and not `127.0.0.2`.
+    // IPv6 loopback, not `127.0.0.2`. The whole of `127.0.0.0/8` is local on
+    // Linux, but macOS binds only `127.0.0.1` by default, so a connection to
+    // `127.0.0.2` there is never refused and never answered — the row failed as
+    // a five-second timeout rather than as a certificate error. `::1` is up on
+    // all three platforms, and the fixture's SAN list — `DNS:localhost`,
+    // `IP:127.0.0.1` and the `example` names — does not contain it.
+    const origin = await startTlsOrigin("::1");
+    // The issuer is trusted, so the only thing left to fail is the name.
     process.env.COREPACK_CAFILE = bundleFile(CERT);
 
-    const error = await httpGet(`https://127.0.0.2:${origin.port}/pkg`).catch(
+    const error = await httpGet(`https://[::1]:${origin.port}/pkg`).catch(
       (error_: Error) => error_,
     );
 
-    expect((error as Error).message).toBe(messages.tlsHostnameMismatch(`127.0.0.2:${origin.port}`));
+    expect((error as Error).message).toBe(messages.tlsHostnameMismatch(`[::1]:${origin.port}`));
   });
 });
 

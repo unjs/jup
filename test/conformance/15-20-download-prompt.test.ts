@@ -37,6 +37,7 @@ import {
   cleanupFixtures,
   copyTool,
   createFixture,
+  perUserShims,
   type Fixture,
   MockRegistry,
   packageManagerTarball,
@@ -74,8 +75,9 @@ beforeEach(() => registry.reset());
  * A project pinned to an **uncached** package manager, with its own per-user
  * shim directory (§15.13) inside the fixture and on `PATH`.
  *
- * `XDG_BIN_HOME` is what redirects the default install directory; without it
- * `enable` would write into the developer's own `~/.local/bin`.
+ * `perUserShims` is what redirects the default install directory, and which
+ * variable does it is platform-specific; without the redirection `enable`
+ * writes into the developer's own `~/.local/bin`.
  */
 function shimFixture(): {
   fixture: Fixture;
@@ -89,7 +91,8 @@ function shimFixture(): {
   };
 } {
   const fixture = createFixture({ name: "app", packageManager: `pnpm@${VERSION}` });
-  const shimDir = join(fixture.root, "user-bin");
+  // §15.13's per-user default, spelled for this platform — see `perUserShims`.
+  const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   mkdirSync(shimDir, { recursive: true });
 
   return {
@@ -103,8 +106,7 @@ function shimFixture(): {
       env: {
         HOME: fixture.root,
         USERPROFILE: fixture.root,
-        XDG_BIN_HOME: shimDir,
-        LOCALAPPDATA: undefined,
+        ...shimEnv,
         PATH: `${shimDir}${delimiter}${process.env.PATH ?? ""}`,
         COREPACK_INTEGRITY_KEYS: registry.trustStore(),
         // §05.5's third condition. Leaving the developer's own `CI` in place

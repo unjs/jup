@@ -36,6 +36,7 @@ import {
   cleanupFixtures,
   copyTool,
   createFixture,
+  perUserShims,
   run,
   seedPackageManager,
 } from "./_harness/index.ts";
@@ -54,7 +55,9 @@ interface ShimFixtureOptions {
 
 function shimFixture(options: ShimFixtureOptions = {}) {
   const fixture = createFixture();
-  const shimDir = join(fixture.root, "user-bin");
+  // §15.13's per-user default is spelled differently on each platform, and so
+  // is the variable that redirects it — see `perUserShims`.
+  const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   mkdirSync(shimDir, { recursive: true });
 
   const entries = [...(options.pathPrefix ?? [])];
@@ -70,8 +73,7 @@ function shimFixture(options: ShimFixtureOptions = {}) {
       env: {
         HOME: fixture.root,
         USERPROFILE: fixture.root,
-        XDG_BIN_HOME: shimDir,
-        LOCALAPPDATA: undefined,
+        ...shimEnv,
         PATH: [...entries, process.env.PATH ?? ""].join(delimiter),
       } as Record<string, string | undefined>,
     },

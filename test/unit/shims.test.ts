@@ -57,7 +57,7 @@ let root: string;
 let dist: string;
 let binDir: string;
 /** §15.13's per-user default, redirected into the fixture. */
-let xdgBin: string;
+let perUserBin: string;
 let corepackHome: string;
 let warn: ReturnType<typeof vi.spyOn>;
 
@@ -93,7 +93,11 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), "jup-shims-")));
   dist = join(root, "dist");
   binDir = join(root, "bin");
-  xdgBin = join(root, "xdg-bin");
+  // §15.13's per-user default is platform-specific, and so is the variable that
+  // moves it: Linux and the BSDs honour `XDG_BIN_HOME`, macOS has no XDG
+  // convention and is always `~/.local/bin`. `HOME` is stubbed to `root` below,
+  // so both spellings stay inside the fixture.
+  perUserBin = process.platform === "darwin" ? join(root, ".local", "bin") : join(root, "xdg-bin");
   corepackHome = join(root, "corepack-home");
   mkdirSync(dist);
   mkdirSync(binDir);
@@ -105,13 +109,13 @@ beforeEach(() => {
   // reads `HOME` on POSIX and `USERPROFILE` on Windows.
   vi.stubEnv("HOME", root);
   vi.stubEnv("USERPROFILE", root);
-  vi.stubEnv("XDG_BIN_HOME", xdgBin);
+  vi.stubEnv("XDG_BIN_HOME", perUserBin);
   vi.stubEnv("LOCALAPPDATA", undefined);
   vi.stubEnv("COREPACK_SHIM_DIRECTORY", undefined);
   vi.stubEnv("COREPACK_HOME", corepackHome);
   // Both candidate directories are on `PATH`, so §15.29's verification is
   // satisfied and a successful `enable` stays silent.
-  vi.stubEnv("PATH", `${binDir}${delimiter}${xdgBin}`);
+  vi.stubEnv("PATH", `${binDir}${delimiter}${perUserBin}`);
 
   warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 });
@@ -186,7 +190,7 @@ describe("install directory resolution (§15.13)", () => {
   });
 
   it("falls back to COREPACK_SHIM_DIRECTORY, then to the per-user default", () => {
-    expect(resolveInstallDirectory({}, false)).toBe(xdgBin);
+    expect(resolveInstallDirectory({}, false)).toBe(perUserBin);
 
     const configured = join(root, "configured");
     vi.stubEnv("COREPACK_SHIM_DIRECTORY", configured);
@@ -197,13 +201,16 @@ describe("install directory resolution (§15.13)", () => {
   });
 
   it.skipIf(process.platform === "win32")(
-    "171: honours XDG_BIN_HOME on Linux and ignores LOCALAPPDATA",
+    "171: honours XDG_BIN_HOME on Linux, ignores it on macOS, and never reads LOCALAPPDATA",
     () => {
       vi.stubEnv("LOCALAPPDATA", "/mnt/c/Users/someone/AppData/Local");
-      expect(perUserShimDirectory()).toBe(xdgBin);
+      // §15.13 point 5 — `LOCALAPPDATA` is Windows-only, so #673's WSL-interop
+      // value must not move this on either platform.
+      expect(perUserShimDirectory()).toBe(perUserBin);
 
       vi.stubEnv("XDG_BIN_HOME", undefined);
-      // macOS has no XDG convention; Linux and the BSDs do — both land here.
+      // Linux and the BSDs fall back to `~/.local/bin` from here; macOS was
+      // never anywhere else, because it has no XDG convention to honour.
       expect(perUserShimDirectory()).toBe(join(root, ".local", "bin"));
     },
   );
@@ -213,7 +220,7 @@ describe("install directory resolution (§15.13)", () => {
     // (§10.4). §15.13 replaced that chain wholesale; the old behaviour is
     // reachable only by naming the directory.
     write(join(binDir, "jup"), "#!/bin/sh\n", 0o755);
-    expect(resolveInstallDirectory({}, false)).toBe(xdgBin);
+    expect(resolveInstallDirectory({}, false)).toBe(perUserBin);
   });
 });
 
@@ -225,26 +232,26 @@ describe("enable (§10.2)", () => {
     expect(warn).not.toHaveBeenCalled();
     // §15.16 redirected this row: npm and npx are now in the default set.
     for (const binName of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
-      const file = join(xdgBin, binName);
+      const file = join(perUserBin, binName);
       expect(lstatSync(file).isSymbolicLink()).toBe(true);
-      expect(readlinkSync(file)).toBe(expectedTarget(xdgBin));
+      expect(readlinkSync(file)).toBe(expectedTarget(perUserBin));
     }
   });
 
   it("175: --exclude npm leaves npm and npx alone", async () => {
     expect(await cmdEnable(["--exclude", "npm"], dist)).toBe(0);
 
-    expect(existsSync(join(xdgBin, "yarn"))).toBe(true);
-    expect(existsSync(join(xdgBin, "npm"))).toBe(false);
-    expect(existsSync(join(xdgBin, "npx"))).toBe(false);
+    expect(existsSync(join(perUserBin, "yarn"))).toBe(true);
+    expect(existsSync(join(perUserBin, "npm"))).toBe(false);
+    expect(existsSync(join(perUserBin, "npx"))).toBe(false);
   });
 
   it("175: --exclude=a,b is accepted too", async () => {
     expect(await cmdEnable(["--exclude=npm,pnpm"], dist)).toBe(0);
 
-    expect(existsSync(join(xdgBin, "yarn"))).toBe(true);
-    expect(existsSync(join(xdgBin, "npm"))).toBe(false);
-    expect(existsSync(join(xdgBin, "pnpm"))).toBe(false);
+    expect(existsSync(join(perUserBin, "yarn"))).toBe(true);
+    expect(existsSync(join(perUserBin, "npm"))).toBe(false);
+    expect(existsSync(join(perUserBin, "pnpm"))).toBe(false);
   });
 
   it("118: honours --install-directory", async () => {
@@ -466,11 +473,11 @@ describe("read-only install directories (§15.13, §14.18)", () => {
       try {
         expect(await cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).toBe(0);
 
-        expect(warn).toHaveBeenCalledWith(shimDirectoryFallback(readOnly, xdgBin));
-        expect(shimDirectoryFallback(readOnly, xdgBin)).toBe(
-          `! ${readOnly} is not writable; installing shims to ${xdgBin} instead`,
+        expect(warn).toHaveBeenCalledWith(shimDirectoryFallback(readOnly, perUserBin));
+        expect(shimDirectoryFallback(readOnly, perUserBin)).toBe(
+          `! ${readOnly} is not writable; installing shims to ${perUserBin} instead`,
         );
-        expect(lstatSync(join(xdgBin, "yarn")).isSymbolicLink()).toBe(true);
+        expect(lstatSync(join(perUserBin, "yarn")).isSymbolicLink()).toBe(true);
         expect(existsSync(join(readOnly, "yarn"))).toBe(false);
       } finally {
         chmodSync(readOnly, 0o755);
@@ -483,20 +490,20 @@ describe("read-only install directories (§15.13, §14.18)", () => {
     async () => {
       const readOnly = join(root, "read-only-2");
       mkdirSync(readOnly);
-      mkdirSync(xdgBin);
+      mkdirSync(perUserBin, { recursive: true });
       chmodSync(readOnly, 0o555);
-      chmodSync(xdgBin, 0o555);
+      chmodSync(perUserBin, 0o555);
 
       try {
         await expect(cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).rejects.toThrow(
-          shimDirectoryNotWritable(xdgBin),
+          shimDirectoryNotWritable(perUserBin),
         );
         await expect(cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).rejects.toThrow(
           UsageError,
         );
       } finally {
         chmodSync(readOnly, 0o755);
-        chmodSync(xdgBin, 0o755);
+        chmodSync(perUserBin, 0o755);
       }
     },
   );
@@ -504,14 +511,16 @@ describe("read-only install directories (§15.13, §14.18)", () => {
   it.skipIf(process.getuid?.() === 0)(
     "does not announce a fallback when the per-user directory is itself the target",
     async () => {
-      mkdirSync(xdgBin);
-      chmodSync(xdgBin, 0o555);
+      mkdirSync(perUserBin, { recursive: true });
+      chmodSync(perUserBin, 0o555);
 
       try {
-        await expect(cmdEnable(["yarn"], dist)).rejects.toThrow(shimDirectoryNotWritable(xdgBin));
+        await expect(cmdEnable(["yarn"], dist)).rejects.toThrow(
+          shimDirectoryNotWritable(perUserBin),
+        );
         expect(warn).not.toHaveBeenCalled();
       } finally {
-        chmodSync(xdgBin, 0o755);
+        chmodSync(perUserBin, 0o755);
       }
     },
   );
@@ -523,11 +532,11 @@ describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
 
     expect(await cmdEnable(["yarn"], dist)).toBe(0);
 
-    expect(warn).toHaveBeenCalledWith(shimDirectoryNotOnPath(xdgBin));
-    expect(shimDirectoryNotOnPath(xdgBin)).toContain(`export PATH="${xdgBin}:$PATH"`);
-    expect(shimDirectoryNotOnPath(xdgBin)).toContain("hash -r");
+    expect(warn).toHaveBeenCalledWith(shimDirectoryNotOnPath(perUserBin));
+    expect(shimDirectoryNotOnPath(perUserBin)).toContain(`export PATH="${perUserBin}:$PATH"`);
+    expect(shimDirectoryNotOnPath(perUserBin)).toContain("hash -r");
     // Warning, not failure — the shims are on disk either way.
-    expect(lstatSync(join(xdgBin, "yarn")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(perUserBin, "yarn")).isSymbolicLink()).toBe(true);
   });
 
   it("195: warns, naming the winner, when something else on PATH shadows the shim", async () => {
@@ -535,12 +544,12 @@ describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
     const volta = join(root, "volta");
     mkdirSync(volta);
     write(join(volta, "yarn"), "#!/bin/sh\necho volta\n", 0o755);
-    vi.stubEnv("PATH", `${volta}${delimiter}${xdgBin}`);
+    vi.stubEnv("PATH", `${volta}${delimiter}${perUserBin}`);
 
     expect(await cmdEnable(["yarn"], dist)).toBe(0);
 
     expect(warn).toHaveBeenCalledWith(
-      shimShadowed("yarn", join(volta, "yarn"), join(xdgBin, "yarn")),
+      shimShadowed("yarn", join(volta, "yarn"), join(perUserBin, "yarn")),
     );
     expect(warn).toHaveBeenCalledWith(rehashNotice());
     expect(shimShadowed("yarn", "/v/yarn", "/s/yarn")).toBe(
