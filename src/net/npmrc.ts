@@ -650,6 +650,9 @@ function setAuth(config: NpmrcConfig, entry: NpmrcAuthEntry): void {
   else config.auth[existing] = entry;
 }
 
+/** §15.1's file tiers, lowest first. A later file outranks an earlier one. */
+const LEVEL_RANK: Record<NpmrcLevel, number> = { global: 0, user: 1, project: 2 };
+
 /** `username` + `_password` only become a credential once both halves are in. */
 function finishBasicAuth(
   config: NpmrcConfig,
@@ -658,8 +661,18 @@ function finishBasicAuth(
   for (const [prefix, entry] of basic) {
     if (entry.username === undefined || entry.password === undefined) continue;
     // A `_authToken` for the same prefix is the more specific statement and npm
-    // prefers it, so a pair only fills a gap.
-    if (config.auth.some((candidate) => candidate.prefix === prefix)) continue;
+    // prefers it, so a pair only fills a gap — but only within its own tier or
+    // above. The pairs are completed here, after every file has been folded in,
+    // so an unqualified "is there already an entry?" let a machine-wide token in
+    // `<prefix>/etc/npmrc` suppress the `username`/`_password` a user wrote in
+    // their own `~/.npmrc`, inverting the precedence every other setting obeys.
+    const existing = config.auth.find((candidate) => candidate.prefix === prefix);
+    if (
+      existing !== undefined &&
+      LEVEL_RANK[existing.origin.level] >= LEVEL_RANK[entry.origin.level]
+    ) {
+      continue;
+    }
     setAuth(config, {
       prefix,
       type: "basic",
