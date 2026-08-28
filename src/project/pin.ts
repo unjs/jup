@@ -209,10 +209,14 @@ export function writePin(
       wroteDevEngines = true;
     }
   }
-  // What the pin field now holds, which is what the caller reports (§15.35l). It
-  // differs from `info.reference` only in §15.12's sidecar form, where the
-  // digest moved out of the version string and a line quoting the suffix would
-  // name a string that is nowhere in the file.
+  // What the pin field now holds, which is what the caller reports (§15.35l).
+  //
+  // A `devEngines` member always carries the *clean* version, with any digest
+  // beside it in `integrity`. So whenever that member is the only place the pin
+  // landed, quoting `info.reference` would name a suffixed string that is
+  // nowhere in the file. The top-level field is the one that keeps the suffix,
+  // and only while it is still being written.
+  const cleanReference = (): string => parse(info.reference)?.version ?? info.reference;
   let written = info.reference;
   // §15.39 — the fallback below is `packageManager`, and a runtime may not go
   // there (§03.4). Its write is therefore not best-effort: a member that could
@@ -222,12 +226,17 @@ export function writePin(
     if (!wroteDevEngines) {
       throw new Error(`Failed to set "devEngines.runtime" in package.json`);
     }
+    written = cleanReference();
   } else if (!devEnginesTarget.exclusive || !wroteDevEngines) {
     // A sidecar write that landed is what makes the clean version *readable*
     // again (§15.12 reads them as one pin); one that did not must keep the
     // suffix, or the pin would be written nowhere at all.
-    if (sidecar && wroteDevEngines) written = parse(info.reference)?.version ?? info.reference;
+    if (sidecar && wroteDevEngines) written = cleanReference();
     updated = setTopLevelString(updated, "packageManager", `${info.name}@${written}`);
+  } else {
+    // Exclusively `devEngines`, and it took the write: no top-level field is
+    // left to carry the suffix.
+    written = cleanReference();
   }
 
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
