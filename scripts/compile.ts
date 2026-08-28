@@ -36,8 +36,13 @@
  * targets at a time. Each `xz` is single-threaded whatever `-T` asks for: this
  * input is smaller than the block size a 64 MiB dictionary implies, so there is
  * one block and nothing to split, which is exactly why the parallelism has to be
- * across targets and not inside one. Eight sequential runs pinning one core is
- * four minutes; the pass below is under one.
+ * across targets and not inside one, and why the run below says `-T1` outright
+ * rather than `-T0`. Asking for a pool xz cannot use only makes it size one
+ * against its memory limit and warn that it trimmed the threads back — noise
+ * about work that was never going to happen, and a multi-threaded encoder whose
+ * memory ceiling is higher than the 674 MiB the lane count below is built on.
+ * Eight sequential runs pinning one core is four minutes; the pass below is
+ * under one.
  *
  * `xz -9e` is what packs them, measured on the linux-x64 binary against every
  * alternative available: 26.9 MB with the branch filter below, 27.6 MB without
@@ -245,7 +250,7 @@ try {
       // `<name>.tar.xz` and the uncompressed binary beside it.
       const archive = join(OUTDIR, `${name}.tar`);
       await run("tar", ["-cf", archive, "-C", OUTDIR, basename(outfile)], name);
-      await run("xz", ["-T0", "-f", ...filterChain(target), archive], name);
+      await run("xz", ["-T1", "-f", ...filterChain(target), archive], name);
 
       console.log(`packed  ${archive}.xz  ${megabytes(`${archive}.xz`)}`);
     });
