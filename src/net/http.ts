@@ -67,6 +67,33 @@ const MAX_BACKOFF = 8_000;
 const MAX_RETRY_AFTER = 30_000;
 
 /**
+ * How much of a *failed* response is worth reading before the socket is worth
+ * less than the memory.
+ *
+ * Draining keeps a connection reusable, which is why it is done at all — but
+ * `arrayBuffer()` reads to the end whatever the end turns out to be, and the
+ * peer chooses that. A registry's error document is JSON measured in bytes; a
+ * hostile (or merely broken) one answering `500` with a gigabyte behind it used
+ * to be an allocation we performed on request. Past the cap the body is
+ * abandoned and the connection torn down, which is the correct trade in the one
+ * direction it can go wrong.
+ */
+const MAX_DRAIN_BYTES = 64 * 1024;
+
+/**
+ * The largest JSON document this module will parse.
+ *
+ * `Response.json()` has no ceiling at all. npm's abbreviated packument for the
+ * package managers in the table is measured in hundreds of kilobytes and the
+ * full one — §04.1 step 6's candidate list, the only caller that asks for it —
+ * in single-digit megabytes, so this is several times the largest legitimate
+ * answer and still a bound. Follows `install.ts`'s `MAX_SINGLE_FILE_BYTES` in
+ * style and in reasoning: a counter costs nothing, and "the registry decides how
+ * much memory we allocate" is not a property worth keeping.
+ */
+const MAX_JSON_BYTES = 32 * 1024 * 1024;
+
+/**
  * §15.5 — statuses worth trying again. Everything else in the 4xx range is a
  * statement about the request, and repeating it changes nothing.
  */
@@ -475,13 +502,9 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
 
     if (!response.ok) {
       // Drain before throwing (or retrying) so the connection goes back to the
-      // pool instead of being torn down.
-      try {
-        await response.arrayBuffer();
-      } catch {
-        // Nothing to drain, or the peer went away. Either way the status is the
-        // error we care about.
-      }
+      // pool instead of being torn down — but only up to a point (see
+      // {@link MAX_DRAIN_BYTES}).
+      await drain(response);
 
       if (!last && isRetryableStatus(response.status)) {
         await sleep(retryAfterMs(response.headers.get("retry-after")) ?? backoffFor(attempt));
@@ -494,6 +517,69 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
     // undiagnosable CI hang #458 describes, and no header timeout catches it.
     return withIdleTimeout(response, timeout, href, controller);
   }
+}
+
+/**
+ * Read at most {@link MAX_DRAIN_BYTES} of a body, then let it go.
+ *
+ * Cancelling the reader is what releases the socket when the cap is hit; below
+ * the cap the stream reaches its end on its own and the cancel is a no-op, which
+ * is the case that keeps the connection reusable.
+ */
+async function drain(response: Response): Promise<void> {
+  const body = response.body;
+  if (body === null) return;
+
+  const reader = body.getReader();
+  try {
+    let seen = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      seen += value?.byteLength ?? 0;
+      if (seen > MAX_DRAIN_BYTES) return;
+    }
+  } catch {
+    // Nothing to drain, or the peer went away. Either way the status is the
+    // error we care about.
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+/**
+ * The body as text, refusing anything past `limit`.
+ *
+ * Stands in for `Response.text()`/`Response.json()`, which buffer to whatever
+ * length the peer sends. The overflow is a plain `Error` and always arrives as
+ * the *cause* of §12.6's `requestFailed`, so no new user-facing string enters
+ * the contract.
+ */
+async function readCapped(response: Response, limit: number): Promise<string> {
+  const body = response.body;
+  if (body === null) return "";
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let seen = 0;
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value === undefined) continue;
+      seen += value.byteLength;
+      if (seen > limit) {
+        throw new RangeError(`The response body exceeds the ${limit} byte limit`);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+
+  return text + decoder.decode();
 }
 
 /** Note the retries in the cause chain, so "it tried three times" is visible. */
@@ -555,7 +641,9 @@ function withIdleTimeout(
 export async function httpGetJson<T = unknown>(url: string, options?: HttpOptions): Promise<T> {
   const response = await httpGet(url, options);
   try {
-    return (await response.json()) as T;
+    // Not `response.json()`: it has no ceiling, and a metadata document is the
+    // one response on this path whose whole content is held in memory at once.
+    return JSON.parse(await readCapped(response, MAX_JSON_BYTES)) as T;
   } catch (error) {
     throw networkError(new Error(messages.requestFailed(redactUserinfo(url))), error);
   }
