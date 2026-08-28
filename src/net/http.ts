@@ -28,7 +28,7 @@ import {
   redactUserinfo,
   UsageError,
 } from "../errors-cold.ts";
-import { npmrcAuthorizationFor } from "./npmrc.ts";
+import { npmrcAuthorizationFor, registryTrustFor, type RegistryTrust } from "./npmrc.ts";
 import { nodeFetch, proxyForUrl } from "./proxy.ts";
 import {
   applyTlsConfiguration,
@@ -237,6 +237,16 @@ export interface HttpOptions {
    */
   anonymous?: boolean;
   /**
+   * Who chose {@link registryOrigin} — the user, or the repository (§15.37).
+   *
+   * Left undefined it is derived from the origin itself, which is what every
+   * caller relies on: `install.ts` hands over a `dist.tarball` and a registry
+   * URL, not the `RegistryDecision` that produced them, and re-deriving is
+   * cheaper than threading a field through the download pipeline. A caller that
+   * *does* hold the decision may pass its `trust` and skip the derivation.
+   */
+  registryTrust?: RegistryTrust;
+  /**
    * The transport seam.
    *
    * Left undefined — which every caller does — the transport is chosen per
@@ -253,12 +263,20 @@ export interface HttpOptions {
  * §15.1's `.npmrc` tier appended below the environment:
  *
  *     userinfo present                        -> Basic from userinfo, stripped from the URL
- *     origin === registryOrigin, and:
+ *     origin === registryOrigin, and the registry is the user's own choice:
  *         COREPACK_NPM_TOKEN present          -> Bearer
  *         registry URL carries user:pass@     -> Basic
  *         USERNAME and PASSWORD both present  -> Basic
  *     .npmrc entry whose prefix matches       -> Bearer or Basic
  *     otherwise                               -> none
+ *
+ * Two gates sit across the whole table, both of them about *who chose the
+ * registry* rather than what the registry is (see `npmrc.RegistryTrust`):
+ *
+ * * a registry the **repository** named gets no environment credential at all,
+ *   whatever its origin; and
+ * * no credential of any tier is sent over `http:` unless the user chose that
+ *   origin themselves.
  *
  * The `.npmrc` tier is **not** gated on `registryOrigin`, and that is not a
  * relaxation: `//host/path/:_authToken` names its own scope, and
@@ -273,16 +291,37 @@ export interface HttpOptions {
 export function credentialsFor(
   url: URL,
   registryOrigin?: string,
+  registryTrust?: RegistryTrust,
 ): { url: URL; authorization?: string } {
+  // Who moved us here. Derived from the registry decision when there is one and
+  // from the target itself when there is not — a URL nobody redirected us to is
+  // one no repository named, which is the deny-list `registryTrustFor`
+  // documents.
+  const trust = registryTrust ?? registryTrustFor(registryOrigin ?? url.href);
+  const projectChosen = trust === "project";
+
+  // The plaintext floor. §15.1's matching rule ignores the scheme on purpose —
+  // npm's keys name a host and a path, and a registry reachable over both
+  // schemes is one registry — but *matching* and *sending* are separate
+  // questions, and this is the second one. A project-chosen `http:` registry
+  // otherwise collects whatever credential the user holds for that host and
+  // hands it to anyone on the path, which needs no more than a repository and a
+  // café. Where the user chose the `http:` origin themselves the downgrade is
+  // theirs to make and nothing changes.
+  const cleartext = url.protocol === "http:";
+  const withheld = projectChosen && cleartext;
+
   // The URL's own userinfo wins over the environment, and MUST be stripped: a
   // redirect would otherwise carry it to the redirect target, and every error
-  // message below interpolates this URL.
+  // message below interpolates this URL. Stripping is unconditional; only
+  // *sending* it back as a header is gated, so a refusal never leaves userinfo
+  // on the wire or in a message.
   if (url.username !== "" || url.password !== "") {
     const authorization = basic(url.username, url.password);
     const stripped = new URL(url.href);
     stripped.username = "";
     stripped.password = "";
-    return { url: stripped, authorization };
+    return { url: stripped, authorization: withheld ? undefined : authorization };
   }
 
   // Credentials never leave the configured registry's origin. This is §14.6's
@@ -290,7 +329,25 @@ export function credentialsFor(
   // COREPACK_NPM_USERNAME/PASSWORD to whatever host a request targets.
   const registry = originOf(registryOrigin);
   if (registry === undefined || url.origin !== registry) {
-    return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
+    return { url, authorization: npmrcCredential(url, withheld) };
+  }
+
+  // §14.6's origin scoping is necessary and — as of §15.37 — no longer
+  // sufficient, because the origin it scopes to became something a repository
+  // can choose. `COREPACK_NPM_TOKEN` is env-file-ineligible and
+  // `COREPACK_NPM_REGISTRY` is not, which blocks half of a pair whose danger is
+  // the pairing: a clone that ships `.jup.env` with `JUP_NPM_REGISTRY=
+  // https://attacker.example`, or an `.npmrc` with `registry=` pointing there,
+  // used to make `https://attacker.example` "the configured registry's origin"
+  // and collect the CI machine's token on the first metadata fetch.
+  //
+  // So the environment tier is withheld outright once the repository is what
+  // named this origin. The request still goes where the project asked — §15.37
+  // is explicit that redirecting a download is a project's business — it simply
+  // goes there as nobody. `.npmrc`'s tier survives below, because it carries its
+  // own scope: a prefix the *user* wrote names the host it is willing to reach.
+  if (projectChosen) {
+    return { url, authorization: npmrcCredential(url, withheld) };
   }
 
   // Presence, not truthiness — an empty COREPACK_NPM_TOKEN still counts, and
@@ -324,7 +381,19 @@ export function credentialsFor(
   // §15.1's tier, below every `COREPACK_*` one. This is the case #540 is
   // actually about: an organisation whose `.npmrc` already carries the token
   // for its internal registry, and a tool that ignored it.
-  return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
+  return { url, authorization: npmrcCredential(url, withheld) };
+}
+
+/**
+ * §15.1's tier, subject to the plaintext floor.
+ *
+ * One function so the floor cannot be forgotten at one of the four places the
+ * `.npmrc` tier is reached — which is how it came to be missing in the first
+ * place.
+ */
+function npmrcCredential(url: URL, withheld: boolean): string | undefined {
+  if (withheld) return undefined;
+  return npmrcAuthorizationFor(url)?.authorization;
 }
 
 /** The `Basic` header a registry URL's own `user:pass@` implies, if it has one. */
@@ -401,7 +470,7 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
     throw networkError(new Error(messages.requestFailed(redactUserinfo(url))), error);
   }
 
-  const credentials = credentialsFor(parsed, options.registryOrigin);
+  const credentials = credentialsFor(parsed, options.registryOrigin, options.registryTrust);
   const target = credentials.url;
   // The URL is still the stripped one: `anonymous` withholds the header, it does
   // not put userinfo back on the wire or into an error message.

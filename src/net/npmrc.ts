@@ -36,9 +36,16 @@ import { Buffer } from "node:buffer";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve as resolvePath } from "node:path";
-import { ENV, jupSpelling, registryVariableFor, SYSTEM_ENV } from "../config/env-vars.ts";
+import {
+  corepackSpelling,
+  ENV,
+  jupSpelling,
+  registryVariableFor,
+  SYSTEM_ENV,
+} from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { advisory } from "../errors.ts";
+import { loadEnvFileFrom } from "../project/env.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Types                                                                       */
@@ -54,6 +61,32 @@ export interface NpmrcOrigin {
   /** The key exactly as written in the file. */
   key: string;
 }
+
+/**
+ * Who chose the registry a request is about to be sent to — §15.1's three tiers
+ * and §15.2's variables collapsed to the one distinction that decides whether a
+ * credential may ride along.
+ *
+ * `"project"` means the effective origin was named by a source that lives
+ * **inside the repository**: a project-level `.npmrc`'s `registry` /
+ * `@scope:registry`, or a `.jup.env` that set one of §15.2's registry
+ * variables. §15.37 deliberately keeps those variables project-settable, on the
+ * reasoning that redirecting a *download* is a project's own business — but the
+ * user's `COREPACK_NPM_TOKEN` is not the project's business, and the two were
+ * only ever coupled because §14.6 scopes credentials to "the configured
+ * registry's origin" without asking who configured it. A cloned repository
+ * could therefore name an origin and collect the token scoped to it, which is
+ * precisely the pairing `env.ts`'s deny-list comment describes and only half
+ * blocks: the token cannot come from the file, but the registry can, and one
+ * hostile half is enough.
+ *
+ * Splitting the decision from the credential is the fix. The registry still
+ * moves wherever the project says; the secrets do not follow it.
+ *
+ * The classification is a **deny-list**, not an allow-list — see
+ * {@link registryTrustFor} for why that is the right way round here.
+ */
+export type RegistryTrust = "user" | "project";
 
 export interface NpmrcAuthEntry {
   /** `//host[:port]/path/`, always ending in `/`. The credential's whole scope. */
@@ -85,6 +118,26 @@ export interface NpmrcConfig {
   cafile?: { value: string; origin: NpmrcOrigin };
   ca?: { value: string[]; origin: NpmrcOrigin };
   strictSsl?: { value: boolean; origin: NpmrcOrigin };
+  /**
+   * Every origin a **project-level** file named as a registry, including ones a
+   * higher-precedence file went on to override. The winning value is not enough
+   * on its own: what {@link registryTrustFor} asks is "did the repository put
+   * this origin in front of us", and a project file that lost the precedence
+   * race still did.
+   */
+  projectRegistryOrigins: Set<string>;
+  /** The same, for the user and global files — the configuration the user owns. */
+  userRegistryOrigins: Set<string>;
+  /**
+   * The closest project env file's variables, as `applyEnvFile` saw them.
+   *
+   * Kept here because provenance is not recoverable afterwards: `applyEnvFile`
+   * merges `{...file, ...process.env}` into `process.env` and keeps no record
+   * of which half a value came from, so by the time a request asks whether
+   * `JUP_NPM_REGISTRY` was the user's or the repository's, the only remaining
+   * evidence is the file itself.
+   */
+  projectEnvVars: Record<string, string>;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -126,6 +179,18 @@ export const npmrcMessages = {
    */
   refusedProjectExpansion: (key: string, path: string) =>
     `! Ignoring ${key} from ${path}: a project-level .npmrc may not expand \${...} from the environment`,
+
+  /**
+   * A configured registry that is not an HTTP URL.
+   *
+   * §05.1 speaks HTTP and nothing else, so a `file:`, `data:` or `ftp:`
+   * registry used to travel the whole way to `httpGet` and fail there as a
+   * transport error — which reads as "the network is broken" for what is a
+   * one-character configuration mistake. Refused at the point of decision
+   * instead, and the tier below is used.
+   */
+  refusedRegistryScheme: (source: string, scheme: string) =>
+    `! Ignoring ${source}: a registry must be an http: or https: URL, and this one is ${scheme}`,
 } as const;
 
 /** One warning per `<path>\0<key>`; a memoised load cannot repeat itself anyway. */
@@ -212,10 +277,19 @@ export function userNpmrcPath(): string | undefined {
  * directory, whose `.npmrc` is the **user** file and must not be reclassified as
  * project-level — that distinction is the whole of §15.1's security rule.
  *
- * Returned closest-first.
+ * The env file is collected on the same climb, for {@link registryTrustFor}'s
+ * sake: it is the other thing inside a repository that can name a registry
+ * (§15.37), and answering "who chose this origin" needs both halves. Only the
+ * *closest* one is taken, exactly as §03.2 and `manifest.ts` apply it. That
+ * costs at most two extra `openat` calls per walked directory, all of them on
+ * this module's already-cold, already-memoised path — §01.3 measures the warm
+ * run, which never reaches here.
+ *
+ * `.npmrc` paths are returned closest-first.
  */
-function projectNpmrcPaths(cwd: string): string[] {
+function projectSources(cwd: string): { npmrc: string[]; envVars: Record<string, string> } {
   const found: string[] = [];
+  let envVars: Record<string, string> | undefined;
   const home = homeDirectory();
   let dir = resolvePath(cwd);
 
@@ -225,6 +299,14 @@ function projectNpmrcPaths(cwd: string): string[] {
     if (!isInsideNodeModules(dir)) {
       const candidate = join(dir, ".npmrc");
       if (readIfPresent(candidate) !== undefined) found.push(candidate);
+      if (envVars === undefined) {
+        // `loadEnvFileFrom` rather than a second reader: it already honours
+        // `JUP_ENV_FILE`, its `0` disable and the legacy name, and a provenance
+        // check that disagreed with the loader about *which* file applies would
+        // be worse than no check at all.
+        const loaded = loadEnvFileFrom(dir);
+        if (loaded !== null) envVars = loaded.vars;
+      }
       if (declaresPackageManager(join(dir, "package.json"))) break;
     }
 
@@ -233,7 +315,7 @@ function projectNpmrcPaths(cwd: string): string[] {
     dir = parent;
   }
 
-  return found;
+  return { npmrc: found, envVars: envVars ?? {} };
 }
 
 /** §03.1 step 1's regex, verbatim: only the package directory itself is skipped. */
@@ -396,7 +478,14 @@ export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
 
-  const config: NpmrcConfig = { files: [], scoped: new Map(), auth: [] };
+  const config: NpmrcConfig = {
+    files: [],
+    scoped: new Map(),
+    auth: [],
+    projectRegistryOrigins: new Set(),
+    userRegistryOrigins: new Set(),
+    projectEnvVars: {},
+  };
 
   // Lowest precedence first, so a later file simply overwrites: global, user,
   // then the project files from the *outermost* inward, leaving the closest one
@@ -406,7 +495,9 @@ export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
   ];
   const user = userNpmrcPath();
   if (user !== undefined) sources.push({ path: user, level: "user" });
-  for (const path of projectNpmrcPaths(cwd).reverse()) sources.push({ path, level: "project" });
+  const project = projectSources(cwd);
+  for (const path of project.npmrc.reverse()) sources.push({ path, level: "project" });
+  config.projectEnvVars = project.envVars;
 
   const basic = new Map<string, { username?: string; password?: string; origin: NpmrcOrigin }>();
 
@@ -492,17 +583,21 @@ function apply(
   origin: NpmrcOrigin,
 ): boolean {
   if (pair.key === "registry") {
-    if (!URL.canParse(value)) return false;
-    config.registry = { value: stripTrailingSlashes(value), origin };
+    const registry = registryValue(value);
+    if (registry === undefined) return false;
+    config.registry = { value: registry.value, origin };
+    noteRegistryOrigin(config, origin.level, registry.origin);
     return true;
   }
 
   if (SCOPED_REGISTRY.test(pair.key)) {
-    if (!URL.canParse(value)) return false;
+    const registry = registryValue(value);
+    if (registry === undefined) return false;
     config.scoped.set(pair.key.slice(0, -":registry".length), {
-      value: stripTrailingSlashes(value),
+      value: registry.value,
       origin,
     });
+    noteRegistryOrigin(config, origin.level, registry.origin);
     return true;
   }
 
@@ -583,6 +678,41 @@ function stripTrailingSlashes(value: string): string {
 }
 
 /**
+ * A configured registry, validated once: it must parse, and it must be a scheme
+ * §05.1 can actually speak.
+ *
+ * The origin comes back with it because that is the unit
+ * {@link registryTrustFor} compares — and `URL.origin` never carries userinfo,
+ * so recording it cannot turn a `https://user:pass@host` registry into a
+ * password in a `Set` that `jup info` might one day print.
+ */
+function registryValue(raw: string): { value: string; origin: string } | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+  return { value: stripTrailingSlashes(raw), origin: parsed.origin };
+}
+
+/** The scheme of a configured value, for the refusal message. Never the value itself. */
+function schemeOf(raw: string): string {
+  try {
+    return new URL(raw).protocol;
+  } catch {
+    return "not a URL";
+  }
+}
+
+/** File-tier bookkeeping for {@link registryTrustFor}. */
+function noteRegistryOrigin(config: NpmrcConfig, level: NpmrcLevel, origin: string): void {
+  const into = level === "project" ? config.projectRegistryOrigins : config.userRegistryOrigins;
+  into.add(origin);
+}
+
+/**
  * `//host[:port]/path` in any of the spellings npm accepts, normalised to end
  * with exactly one `/`.
  *
@@ -636,6 +766,12 @@ export interface RegistryDecision {
   kind: "per-source" | "environment" | "npmrc" | "built-in";
   /** Set when the decision came from a file. */
   origin?: NpmrcOrigin;
+  /**
+   * Whether the user's own configuration chose this registry, or the repository
+   * did (§14.6, §15.37). `credentialsFor` gates the environment credential tier
+   * on it, and the plaintext floor on it as well.
+   */
+  trust: RegistryTrust;
 }
 
 /**
@@ -658,6 +794,63 @@ function envSetting(name: string): { name: string; value: string } | undefined {
     if (value !== undefined && value !== "") return { name: spelling, value };
   }
   return undefined;
+}
+
+/**
+ * {@link envSetting}, but only for a value that is a usable registry URL, with
+ * the trust tier the variable's provenance implies.
+ *
+ * A value that is not an `http:`/`https:` URL is refused *here* rather than four
+ * layers down in the transport, and the next tier is used — a `file:` registry
+ * is a mistake, and falling back to the one the user had before is the least
+ * surprising thing to do with a mistake.
+ */
+function envRegistrySetting(
+  name: string,
+  cwd?: string,
+): { name: string; value: string; trust: RegistryTrust } | undefined {
+  const configured = envSetting(name);
+  if (configured === undefined) return undefined;
+
+  const registry = registryValue(configured.value);
+  if (registry === undefined) {
+    warnOnce(
+      npmrcMessages.refusedRegistryScheme(configured.name, schemeOf(configured.value)),
+      `${configured.name}\0scheme\0${configured.value}`,
+    );
+    return undefined;
+  }
+
+  return {
+    name: configured.name,
+    value: registry.value,
+    trust: suppliedByProjectEnvFile(loadNpmrc(cwd), configured.name, configured.value)
+      ? "project"
+      : "user",
+  };
+}
+
+/**
+ * Did the closest project env file supply this exact variable and value?
+ *
+ * `applyEnvFile` merges `{...fileVars, ...process.env}`, so the real environment
+ * always wins and a variable it sets never shows the file's value. Comparing the
+ * value is therefore what separates "the user exported this" from "the clone
+ * shipped it". When both happen to spell the same URL the distinction does not
+ * matter: the request goes to that origin either way, and calling it
+ * project-supplied only withholds a credential from an origin the user could
+ * still authorise by deleting the file — a conservative answer to a case that
+ * does not arise.
+ *
+ * Both spellings are checked because §11 gives every variable two, and the file
+ * may use either.
+ */
+function suppliedByProjectEnvFile(config: NpmrcConfig, name: string, value: string): boolean {
+  const corepack = corepackSpelling(name);
+  for (const spelling of [corepack, jupSpelling(corepack)]) {
+    if (config.projectEnvVars[spelling] === value) return true;
+  }
+  return false;
 }
 
 /** The `@scope` of an npm package name, with the `@`, or `undefined`. */
@@ -693,18 +886,27 @@ export function resolveRegistry(options?: {
 }): RegistryDecision {
   const name = options?.name;
   if (name !== undefined) {
-    const configured = envSetting(registryVariableFor(name));
+    const configured = envRegistrySetting(registryVariableFor(name), options?.cwd);
     if (configured !== undefined) {
       return {
-        registry: stripTrailingSlashes(configured.value),
+        registry: configured.value,
         source: configured.name,
         kind: "per-source",
+        trust: configured.trust,
       };
     }
   }
 
   const npmRegistry = npmProtocolRegistry(options);
-  return npmRegistry ?? { registry: DEFAULT_REGISTRY, source: "built-in", kind: "built-in" };
+  return (
+    npmRegistry ?? {
+      registry: DEFAULT_REGISTRY,
+      source: "built-in",
+      kind: "built-in",
+      // Ours, embedded, and the one origin no repository can have moved us to.
+      trust: "user",
+    }
+  );
 }
 
 /**
@@ -721,12 +923,13 @@ export function npmProtocolRegistry(options?: {
   packageName?: string;
   cwd?: string;
 }): RegistryDecision | undefined {
-  const environment = envSetting(ENV.NPM_REGISTRY);
+  const environment = envRegistrySetting(ENV.NPM_REGISTRY, options?.cwd);
   if (environment !== undefined) {
     return {
-      registry: stripTrailingSlashes(environment.value),
+      registry: environment.value,
       source: environment.name,
       kind: "environment",
+      trust: environment.trust,
     };
   }
 
@@ -742,7 +945,83 @@ export function npmProtocolRegistry(options?: {
     source: `.npmrc ${chosen.origin.key} (${chosen.origin.path})`,
     kind: "npmrc",
     origin: chosen.origin,
+    // The file's own level *is* the trust tier: §15.1 already refuses every
+    // other key from a project file, and `registry` is the one it lets through.
+    trust: chosen.origin.level === "project" ? "project" : "user",
   };
+}
+
+/** The origin of the registry that ships with the binary; nothing can move it. */
+const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;
+
+/** §15.2's variables, both spellings, without needing to know the tool names. */
+const REGISTRY_VARIABLE = /^(?:COREPACK|JUP)_(?:NPM_REGISTRY|REGISTRY_.+)$/;
+
+/**
+ * Registry origins the *environment* currently names, split by who put them
+ * there.
+ *
+ * Scanning `process.env` rather than asking for a list of tool names is
+ * deliberate: `COREPACK_REGISTRY_<NAME>` is open-ended by construction
+ * (`registryVariableFor` will spell a variable for a name this build has never
+ * heard of), so an enumeration of the built-in table would have holes exactly
+ * where an unknown name is, which is where an attacker would put one.
+ */
+function envRegistryOrigins(config: NpmrcConfig): { user: Set<string>; project: Set<string> } {
+  const user = new Set<string>();
+  const project = new Set<string>();
+
+  for (const [name, raw] of Object.entries(process.env)) {
+    if (raw === undefined || raw === "" || !REGISTRY_VARIABLE.test(name)) continue;
+    const registry = registryValue(raw);
+    if (registry === undefined) continue;
+    (suppliedByProjectEnvFile(config, name, raw) ? project : user).add(registry.origin);
+  }
+
+  return { user, project };
+}
+
+/**
+ * Who chose the registry at `registryUrl` — the question `credentialsFor` asks
+ * before it attaches anything.
+ *
+ * This is a **deny-list**, and the direction matters. An allow-list ("only
+ * origins the user named may carry a credential") is the stricter rule and the
+ * wrong one here, because the caller does not always *have* a registry decision
+ * to hand: a tarball URL from `dist.tarball`, a redirect target, a test's local
+ * server. Under an allow-list every one of those would silently lose its
+ * credentials, which is a broken tool rather than a safe one — and the whole
+ * point of §14.6 is that the answer must be legible.
+ *
+ * So the rule states the hazard instead: an origin is `"project"` when a source
+ * inside the repository named it **and** the user's own configuration did not.
+ * Both halves are exhaustively enumerable — the project `.npmrc` files on the
+ * §03.1 walk, and the closest project env file — which is what makes a
+ * deny-list sound here rather than merely convenient. Anything the repository
+ * never mentioned is, by construction, not a redirect it performed.
+ *
+ * The user's side is checked first: a user who exported `COREPACK_NPM_REGISTRY`
+ * or wrote `registry=` in `~/.npmrc` has named that origin themselves, and a
+ * project file that happens to name the same one has moved nothing.
+ */
+export function registryTrustFor(registryUrl: string | undefined, cwd?: string): RegistryTrust {
+  if (registryUrl === undefined) return "user";
+
+  let origin: string;
+  try {
+    origin = new URL(registryUrl).origin;
+  } catch {
+    return "user";
+  }
+  if (origin === "null" || origin === DEFAULT_REGISTRY_ORIGIN) return "user";
+
+  const config = loadNpmrc(cwd);
+  const environment = envRegistryOrigins(config);
+  if (environment.user.has(origin) || config.userRegistryOrigins.has(origin)) return "user";
+  if (environment.project.has(origin) || config.projectRegistryOrigins.has(origin)) {
+    return "project";
+  }
+  return "user";
 }
 
 /**
