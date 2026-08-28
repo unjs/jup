@@ -58,6 +58,8 @@ let dist: string;
 let binDir: string;
 /** §15.13's per-user default, redirected into the fixture. */
 let perUserBin: string;
+/** §15.13 point 1's Windows spelling, redirected into the fixture. */
+let localAppData: string;
 let corepackHome: string;
 let warn: ReturnType<typeof vi.spyOn>;
 
@@ -87,6 +89,50 @@ function write(file: string, content: string, mode = 0o644): void {
   chmodSync(file, mode);
 }
 
+/**
+ * `enable` leaves a different shape behind on each platform: §10.2's one
+ * relative symlink to the shared stub, or §10.3's three regular files citing a
+ * per-name one. Rows that only care *that* the name was taken assert through
+ * this rather than reaching for `readlink`, which is `EINVAL` on a Windows
+ * wrapper.
+ */
+function expectShim(dir: string, binName: string): void {
+  if (process.platform === "win32") {
+    for (const extension of ["", ".cmd", ".ps1"]) {
+      expect(existsSync(join(dir, `${binName}${extension}`))).toBe(true);
+    }
+    expect(readFileSync(join(dir, `${binName}.cmd`), "utf8")).toContain(
+      expectedWin32Stub(binName, dir).replaceAll("/", "\\"),
+    );
+    return;
+  }
+  expect(lstatSync(join(dir, binName)).isSymbolicLink()).toBe(true);
+  expect(readlinkSync(join(dir, binName))).toBe(expectedTarget(dir));
+}
+
+/**
+ * A file that a `PATH` lookup will actually find. Windows resolves a bare name
+ * through `PATHEXT`, which never contains the empty extension, so an
+ * extensionless `yarn` sitting on `PATH` is not a `yarn` anybody can run — and
+ * `whichFile` is right not to return it. `.cmd` is the entry §10.3 installs for
+ * that purpose.
+ */
+const PATH_EXTENSION = process.platform === "win32" ? ".cmd" : "";
+
+/**
+ * §10's shims are `chmod 0o755`, but Windows has no POSIX mode bits: `chmod`
+ * there toggles the read-only attribute and nothing else, and `lstat` reports
+ * `0o666` for anything writable. The bit is asserted where it means something,
+ * and the file is asserted to exist everywhere.
+ */
+function expectMode(file: string, mode: number): void {
+  if (process.platform === "win32") {
+    expect(existsSync(file)).toBe(true);
+    return;
+  }
+  expect(lstatSync(file).mode & 0o777).toBe(mode);
+}
+
 beforeEach(() => {
   // realpath: macOS puts the temp directory behind a symlink, and `enable`
   // resolves the install directory (§10.4) before computing relative targets.
@@ -95,9 +141,17 @@ beforeEach(() => {
   binDir = join(root, "bin");
   // §15.13's per-user default is platform-specific, and so is the variable that
   // moves it: Linux and the BSDs honour `XDG_BIN_HOME`, macOS has no XDG
-  // convention and is always `~/.local/bin`. `HOME` is stubbed to `root` below,
-  // so both spellings stay inside the fixture.
-  perUserBin = process.platform === "darwin" ? join(root, ".local", "bin") : join(root, "xdg-bin");
+  // convention and is always `~/.local/bin`, Windows reads `%LOCALAPPDATA%`.
+  // `HOME` and `USERPROFILE` are stubbed to `root` below, so every spelling
+  // stays inside the fixture. This is `perUserShims()` from the conformance
+  // harness, inline: this file predates it and imports nothing from there.
+  localAppData = join(root, "AppData", "Local");
+  perUserBin =
+    process.platform === "win32"
+      ? join(localAppData, "jup", "bin")
+      : process.platform === "darwin"
+        ? join(root, ".local", "bin")
+        : join(root, "xdg-bin");
   corepackHome = join(root, "corepack-home");
   mkdirSync(dist);
   mkdirSync(binDir);
@@ -110,7 +164,7 @@ beforeEach(() => {
   vi.stubEnv("HOME", root);
   vi.stubEnv("USERPROFILE", root);
   vi.stubEnv("XDG_BIN_HOME", perUserBin);
-  vi.stubEnv("LOCALAPPDATA", undefined);
+  vi.stubEnv("LOCALAPPDATA", localAppData);
   vi.stubEnv("COREPACK_SHIM_DIRECTORY", undefined);
   vi.stubEnv("COREPACK_HOME", corepackHome);
   // Both candidate directories are on `PATH`, so §15.29's verification is
@@ -232,9 +286,7 @@ describe("enable (§10.2)", () => {
     expect(warn).not.toHaveBeenCalled();
     // §15.16 redirected this row: npm and npx are now in the default set.
     for (const binName of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
-      const file = join(perUserBin, binName);
-      expect(lstatSync(file).isSymbolicLink()).toBe(true);
-      expect(readlinkSync(file)).toBe(expectedTarget(perUserBin));
+      expectShim(perUserBin, binName);
     }
   });
 
@@ -256,7 +308,7 @@ describe("enable (§10.2)", () => {
 
   it("118: honours --install-directory", async () => {
     expect(await cmdEnable(["--install-directory", binDir], dist)).toBe(0);
-    expect(readlinkSync(join(binDir, "yarn"))).toBe(expectedTarget());
+    expectShim(binDir, "yarn");
   });
 
   it("119: a single named package manager expands to its binaries only", async () => {
@@ -272,28 +324,34 @@ describe("enable (§10.2)", () => {
 
     expect(await cmdEnable([`--install-directory=${fresh}`, "yarn"], dist)).toBe(0);
 
-    expect(lstatSync(join(fresh, "yarn")).isSymbolicLink()).toBe(true);
+    expectShim(fresh, "yarn");
   });
 
-  it("122: is idempotent — an already-correct symlink is not rewritten", async () => {
-    await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist);
+  // §10.3 is explicit that Windows has no idempotency short-circuit: all three
+  // wrappers are rewritten on every run, and there is no shared `shim-proxy.js`
+  // for the row to age either. The claim is POSIX's alone.
+  it.skipIf(process.platform === "win32")(
+    "122: is idempotent — an already-correct symlink is not rewritten",
+    async () => {
+      await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist);
 
-    const file = join(binDir, "yarn");
-    const stub = join(dist, PROXY_STUB_NAME);
-    const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
-    lutimesSync(file, past, past);
-    lutimesSync(stub, past, past);
-    const before = lstatSync(file);
+      const file = join(binDir, "yarn");
+      const stub = join(dist, PROXY_STUB_NAME);
+      const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+      lutimesSync(file, past, past);
+      lutimesSync(stub, past, past);
+      const before = lstatSync(file);
 
-    await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist);
+      await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist);
 
-    const after = lstatSync(file);
-    expect(after.mtime.getTime()).toBe(past.getTime());
-    expect(after.mtimeMs).toBe(before.mtimeMs);
-    expect(after.ino).toBe(before.ino);
-    // The stub itself is left alone too, so a read-only dist folder still works.
-    expect(lstatSync(stub).mtime.getTime()).toBe(past.getTime());
-  });
+      const after = lstatSync(file);
+      expect(after.mtime.getTime()).toBe(past.getTime());
+      expect(after.mtimeMs).toBe(before.mtimeMs);
+      expect(after.ino).toBe(before.ino);
+      // The stub itself is left alone too, so a read-only dist folder still works.
+      expect(lstatSync(stub).mtime.getTime()).toBe(past.getTime());
+    },
+  );
 
   it("123: corrects a symlink pointing elsewhere", async () => {
     const file = join(binDir, "yarn");
@@ -330,7 +388,7 @@ describe("enable (§10.2)", () => {
     expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
     expect(warn).not.toHaveBeenCalled();
-    expect(readlinkSync(file)).toBe(expectedTarget());
+    expectShim(binDir, "yarn");
     // Nothing was recorded as displaced: a stale shim of ours is not a foreign
     // binary (§15.15).
     expect(readDisplacedRecord()).toEqual([]);
@@ -347,7 +405,7 @@ describe("enable (§10.2)", () => {
     expect(readFileSync(file, "utf8")).toBe(foreign);
     expect(lstatSync(file).isSymbolicLink()).toBe(false);
     // The other binary of the same package manager is still installed.
-    expect(readlinkSync(join(binDir, "pnpx"))).toBe(expectedTarget());
+    expectShim(binDir, "pnpx");
     // Nothing was displaced, so nothing was recorded.
     expect(readDisplacedRecord()).toEqual([]);
   });
@@ -359,7 +417,7 @@ describe("enable (§10.2)", () => {
     expect(await cmdEnable([`--install-directory=${binDir}`, "--force", "pnpm"], dist)).toBe(0);
 
     expect(warn).not.toHaveBeenCalled();
-    expect(readlinkSync(file)).toBe(expectedTarget());
+    expectShim(binDir, "pnpm");
   });
 
   it("replaces one of our own stubs left as a regular file, without --force", async () => {
@@ -372,25 +430,32 @@ describe("enable (§10.2)", () => {
     expect(readlinkSync(file)).toBe(expectedTarget());
   });
 
-  it("124: leaves a Yarn Switch install alone, warns, and exits 0", async () => {
-    const switchBin = join(root, "switch", "bin");
-    mkdirSync(switchBin, { recursive: true });
-    write(join(switchBin, "yarn"), "#!/bin/sh\n", 0o755);
+  // §10.2 scopes the Yarn Switch guard to POSIX, and `generateWin32Link` says so
+  // in as many words: on Windows the same install is a foreign entry like any
+  // other and is refused by §14.16 with §14.16's message. Row 128 is the
+  // Windows half of this pair.
+  it.skipIf(process.platform === "win32")(
+    "124: leaves a Yarn Switch install alone, warns, and exits 0",
+    async () => {
+      const switchBin = join(root, "switch", "bin");
+      mkdirSync(switchBin, { recursive: true });
+      write(join(switchBin, "yarn"), "#!/bin/sh\n", 0o755);
 
-    const file = join(binDir, "yarn");
-    symlinkSync(join(switchBin, "yarn"), file);
+      const file = join(binDir, "yarn");
+      symlinkSync(join(switchBin, "yarn"), file);
 
-    expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
-    expect(warn).toHaveBeenCalledWith(messages.yarnSwitchSkip("yarn", file));
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(`${messages.yarnSwitchSkip("yarn", file)}\n`).toMatch(
-      /^yarn is already installed in .+ and points to a Yarn Switch install - skipping\n$/,
-    );
-    expect(readlinkSync(file)).toBe(join(switchBin, "yarn"));
-    // `yarnpkg` is a different entry and is installed normally.
-    expect(readlinkSync(join(binDir, "yarnpkg"))).toBe(expectedTarget());
-  });
+      expect(warn).toHaveBeenCalledWith(messages.yarnSwitchSkip("yarn", file));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(`${messages.yarnSwitchSkip("yarn", file)}\n`).toMatch(
+        /^yarn is already installed in .+ and points to a Yarn Switch install - skipping\n$/,
+      );
+      expect(readlinkSync(file)).toBe(join(switchBin, "yarn"));
+      // `yarnpkg` is a different entry and is installed normally.
+      expect(readlinkSync(join(binDir, "yarnpkg"))).toBe(expectedTarget());
+    },
+  );
 
   it("130: rejects an invalid package manager name before touching the filesystem", async () => {
     await expect(cmdEnable([`--install-directory=${binDir}`, "cargo"], dist)).rejects.toThrow(
@@ -428,7 +493,7 @@ describe("enable (§10.2)", () => {
       prompt: "1",
     });
     // The stub is executable in its own right, for the `#!/usr/bin/env node` path.
-    expect(lstatSync(join(dist, PROXY_STUB_NAME)).mode & 0o777).toBe(0o755);
+    expectMode(join(dist, PROXY_STUB_NAME), 0o755);
   });
 
   /**
@@ -462,69 +527,79 @@ describe("enable (§10.2)", () => {
   });
 });
 
-describe("read-only install directories (§15.13, §14.18)", () => {
-  it.skipIf(process.getuid?.() === 0)(
-    "170: falls back to the per-user directory and says so",
-    async () => {
-      const readOnly = join(root, "read-only");
-      mkdirSync(readOnly);
-      chmodSync(readOnly, 0o555);
+// §15.13's fallback and §14.18's refusal are real on Windows, but nothing here
+// can put the fixture in the state that triggers them: `chmod` on that platform
+// toggles the read-only *file* attribute and has no effect on a directory, so a
+// `0o555` directory stays writable and `enable` correctly declines to fall back.
+// Reproducing it would mean denying a WRITE_DATA ACE through `icacls`, which is
+// a different test than this one. Same reason `getuid() === 0` is skipped:
+// root ignores the mode too.
+describe.skipIf(process.platform === "win32")(
+  "read-only install directories (§15.13, §14.18)",
+  () => {
+    it.skipIf(process.getuid?.() === 0)(
+      "170: falls back to the per-user directory and says so",
+      async () => {
+        const readOnly = join(root, "read-only");
+        mkdirSync(readOnly);
+        chmodSync(readOnly, 0o555);
 
-      try {
-        expect(await cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).toBe(0);
+        try {
+          expect(await cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).toBe(0);
 
-        expect(warn).toHaveBeenCalledWith(shimDirectoryFallback(readOnly, perUserBin));
-        expect(shimDirectoryFallback(readOnly, perUserBin)).toBe(
-          `! ${readOnly} is not writable; installing shims to ${perUserBin} instead`,
-        );
-        expect(lstatSync(join(perUserBin, "yarn")).isSymbolicLink()).toBe(true);
-        expect(existsSync(join(readOnly, "yarn"))).toBe(false);
-      } finally {
-        chmodSync(readOnly, 0o755);
-      }
-    },
-  );
+          expect(warn).toHaveBeenCalledWith(shimDirectoryFallback(readOnly, perUserBin));
+          expect(shimDirectoryFallback(readOnly, perUserBin)).toBe(
+            `! ${readOnly} is not writable; installing shims to ${perUserBin} instead`,
+          );
+          expectShim(perUserBin, "yarn");
+          expect(existsSync(join(readOnly, "yarn"))).toBe(false);
+        } finally {
+          chmodSync(readOnly, 0o755);
+        }
+      },
+    );
 
-  it.skipIf(process.getuid?.() === 0)(
-    "gives up with an actionable message when the fallback is unwritable too (§14.18)",
-    async () => {
-      const readOnly = join(root, "read-only-2");
-      mkdirSync(readOnly);
-      mkdirSync(perUserBin, { recursive: true });
-      chmodSync(readOnly, 0o555);
-      chmodSync(perUserBin, 0o555);
+    it.skipIf(process.getuid?.() === 0)(
+      "gives up with an actionable message when the fallback is unwritable too (§14.18)",
+      async () => {
+        const readOnly = join(root, "read-only-2");
+        mkdirSync(readOnly);
+        mkdirSync(perUserBin, { recursive: true });
+        chmodSync(readOnly, 0o555);
+        chmodSync(perUserBin, 0o555);
 
-      try {
-        await expect(cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).rejects.toThrow(
-          shimDirectoryNotWritable(perUserBin),
-        );
-        await expect(cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist)).rejects.toThrow(
-          UsageError,
-        );
-      } finally {
-        chmodSync(readOnly, 0o755);
-        chmodSync(perUserBin, 0o755);
-      }
-    },
-  );
+        try {
+          await expect(
+            cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist),
+          ).rejects.toThrow(shimDirectoryNotWritable(perUserBin));
+          await expect(
+            cmdEnable([`--install-directory=${readOnly}`, "yarn"], dist),
+          ).rejects.toThrow(UsageError);
+        } finally {
+          chmodSync(readOnly, 0o755);
+          chmodSync(perUserBin, 0o755);
+        }
+      },
+    );
 
-  it.skipIf(process.getuid?.() === 0)(
-    "does not announce a fallback when the per-user directory is itself the target",
-    async () => {
-      mkdirSync(perUserBin, { recursive: true });
-      chmodSync(perUserBin, 0o555);
+    it.skipIf(process.getuid?.() === 0)(
+      "does not announce a fallback when the per-user directory is itself the target",
+      async () => {
+        mkdirSync(perUserBin, { recursive: true });
+        chmodSync(perUserBin, 0o555);
 
-      try {
-        await expect(cmdEnable(["yarn"], dist)).rejects.toThrow(
-          shimDirectoryNotWritable(perUserBin),
-        );
-        expect(warn).not.toHaveBeenCalled();
-      } finally {
-        chmodSync(perUserBin, 0o755);
-      }
-    },
-  );
-});
+        try {
+          await expect(cmdEnable(["yarn"], dist)).rejects.toThrow(
+            shimDirectoryNotWritable(perUserBin),
+          );
+          expect(warn).not.toHaveBeenCalled();
+        } finally {
+          chmodSync(perUserBin, 0o755);
+        }
+      },
+    );
+  },
+);
 
 describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
   it("172: prints the exact line to add when the directory is not on PATH", async () => {
@@ -533,24 +608,25 @@ describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
     expect(await cmdEnable(["yarn"], dist)).toBe(0);
 
     expect(warn).toHaveBeenCalledWith(shimDirectoryNotOnPath(perUserBin));
-    expect(shimDirectoryNotOnPath(perUserBin)).toContain(`export PATH="${perUserBin}:$PATH"`);
+    // §15.13 point 3 spells the line for the shell the user is in, so the row
+    // asks for that spelling rather than hardcoding `sh`'s.
+    expect(shimDirectoryNotOnPath(perUserBin)).toContain(pathExportLine(perUserBin));
     expect(shimDirectoryNotOnPath(perUserBin)).toContain("hash -r");
     // Warning, not failure — the shims are on disk either way.
-    expect(lstatSync(join(perUserBin, "yarn")).isSymbolicLink()).toBe(true);
+    expectShim(perUserBin, "yarn");
   });
 
   it("195: warns, naming the winner, when something else on PATH shadows the shim", async () => {
     // A rival version manager, earlier on `PATH` than our shim directory.
     const volta = join(root, "volta");
     mkdirSync(volta);
-    write(join(volta, "yarn"), "#!/bin/sh\necho volta\n", 0o755);
+    const rival = join(volta, `yarn${PATH_EXTENSION}`);
+    write(rival, "#!/bin/sh\necho volta\n", 0o755);
     vi.stubEnv("PATH", `${volta}${delimiter}${perUserBin}`);
 
     expect(await cmdEnable(["yarn"], dist)).toBe(0);
 
-    expect(warn).toHaveBeenCalledWith(
-      shimShadowed("yarn", join(volta, "yarn"), join(perUserBin, "yarn")),
-    );
+    expect(warn).toHaveBeenCalledWith(shimShadowed("yarn", rival, join(perUserBin, "yarn")));
     expect(warn).toHaveBeenCalledWith(rehashNotice());
     expect(shimShadowed("yarn", "/v/yarn", "/s/yarn")).toBe(
       `! yarn on PATH resolves to /v/yarn, not the shim just installed at /s/yarn. Another version manager may be shadowing it.`,
@@ -558,7 +634,7 @@ describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
   });
 
   it("says nothing when the shim itself is what PATH resolves to", () => {
-    write(join(binDir, "yarn"), "#!/bin/sh\n", 0o755);
+    write(join(binDir, `yarn${PATH_EXTENSION}`), "#!/bin/sh\n", 0o755);
 
     verifyOnPath(binDir, [["yarn", join(binDir, "yarn")]]);
 
@@ -566,8 +642,9 @@ describe("verifying that enable took effect (§15.29, §15.13 point 3)", () => {
   });
 
   it("whichFile returns the winning path, not its directory", () => {
-    write(join(binDir, "yarn"), "#!/bin/sh\n", 0o755);
-    expect(whichFile("yarn")).toBe(join(binDir, "yarn"));
+    const winner = join(binDir, `yarn${PATH_EXTENSION}`);
+    write(winner, "#!/bin/sh\n", 0o755);
+    expect(whichFile("yarn")).toBe(winner);
     expect(whichFile("nothing-of-that-name")).toBeUndefined();
   });
 
@@ -614,19 +691,25 @@ describe("disable (§10.6, §15.15)", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("127: skips a Yarn Switch install with the same warning, exit 0", async () => {
-    const switchBin = join(root, "switch", "bin");
-    mkdirSync(switchBin, { recursive: true });
-    write(join(switchBin, "yarn"), "#!/bin/sh\n", 0o755);
+  // POSIX-only for row 124's reason: `cmdDisable` dispatches to
+  // `removeWin32Link` on Windows, which §10.2 gives no Switch check. The row
+  // below drives `removePosixLink` directly and covers the claim there.
+  it.skipIf(process.platform === "win32")(
+    "127: skips a Yarn Switch install with the same warning, exit 0",
+    async () => {
+      const switchBin = join(root, "switch", "bin");
+      mkdirSync(switchBin, { recursive: true });
+      write(join(switchBin, "yarn"), "#!/bin/sh\n", 0o755);
 
-    const file = join(binDir, "yarn");
-    symlinkSync(join(switchBin, "yarn"), file);
+      const file = join(binDir, "yarn");
+      symlinkSync(join(switchBin, "yarn"), file);
 
-    expect(await cmdDisable([`--install-directory=${binDir}`, "yarn"])).toBe(0);
+      expect(await cmdDisable([`--install-directory=${binDir}`, "yarn"])).toBe(0);
 
-    expect(warn).toHaveBeenCalledWith(messages.yarnSwitchSkip("yarn", file));
-    expect(lstatSync(file).isSymbolicLink()).toBe(true);
-  });
+      expect(warn).toHaveBeenCalledWith(messages.yarnSwitchSkip("yarn", file));
+      expect(lstatSync(file).isSymbolicLink()).toBe(true);
+    },
+  );
 
   // §15.15 redirected this row: `disable` used to unlink the three Windows files
   // unconditionally. It now removes only what it created — on every platform —
@@ -686,39 +769,46 @@ describe("restoring what enable displaced (§15.15)", () => {
     write(file, foreign, 0o755);
 
     expect(await cmdEnable([`--install-directory=${binDir}`, "--force", "pnpm"], dist)).toBe(0);
-    expect(lstatSync(file).isSymbolicLink()).toBe(true);
+    expectShim(binDir, "pnpm");
 
     const record = readDisplacedRecord();
     expect(record).toHaveLength(1);
-    expect(record[0]).toMatchObject({ path: file, type: "file", mode: 0o755 });
+    expect(record[0]).toMatchObject({ path: file, type: "file" });
 
     expect(await cmdDisable([`--install-directory=${binDir}`, "pnpm"])).toBe(0);
 
     expect(lstatSync(file).isSymbolicLink()).toBe(false);
     expect(readFileSync(file, "utf8")).toBe(foreign);
-    expect(lstatSync(file).mode & 0o777).toBe(0o755);
+    expectMode(file, 0o755);
     // The record is cleared, so a second disable is a no-op.
     expect(readDisplacedRecord()).toEqual([]);
     expect(await cmdDisable([`--install-directory=${binDir}`, "pnpm"])).toBe(0);
   });
 
-  it("restores a displaced symlink, target and all", async () => {
-    const real = join(root, "real-yarn");
-    write(real, "#!/bin/sh\n", 0o755);
-    const file = join(binDir, "yarn");
-    symlinkSync(real, file);
+  // A foreign *symlink* is only replaced-without-`--force` on POSIX: §10.2 makes
+  // symlinks ours to manage, and §10.3 has no such rule, so on Windows the same
+  // entry is §14.16's foreign file and is left alone with a warning. There is
+  // nothing displaced there to restore.
+  it.skipIf(process.platform === "win32")(
+    "restores a displaced symlink, target and all",
+    async () => {
+      const real = join(root, "real-yarn");
+      write(real, "#!/bin/sh\n", 0o755);
+      const file = join(binDir, "yarn");
+      symlinkSync(real, file);
 
-    // A foreign *symlink* is replaced without --force (§10.2), so it too has to
-    // be recorded or #112 stands for the commonest case of all.
-    expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
-    const record: DisplacedEntry[] = readDisplacedRecord();
-    expect(record).toHaveLength(1);
-    expect(record[0]).toMatchObject({ path: file, type: "symlink", target: real });
+      // A foreign *symlink* is replaced without --force (§10.2), so it too has to
+      // be recorded or #112 stands for the commonest case of all.
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+      const record: DisplacedEntry[] = readDisplacedRecord();
+      expect(record).toHaveLength(1);
+      expect(record[0]).toMatchObject({ path: file, type: "symlink", target: real });
 
-    expect(await cmdDisable([`--install-directory=${binDir}`, "yarn"])).toBe(0);
+      expect(await cmdDisable([`--install-directory=${binDir}`, "yarn"])).toBe(0);
 
-    expect(readlinkSync(file)).toBe(real);
-  });
+      expect(readlinkSync(file)).toBe(real);
+    },
+  );
 
   it("says so and continues when a recorded entry cannot be restored", async () => {
     const file = join(binDir, "pnpm");
@@ -760,7 +850,7 @@ describe("restoring what enable displaced (§15.15)", () => {
 
     expect(restoreDisplaced(binDir, [file])).toBe(1);
 
-    expect(lstatSync(file).mode & 0o777).toBe(0o755);
+    expectMode(file, 0o755);
     expect(readDisplacedRecord()).toEqual([]);
   });
 
@@ -858,7 +948,7 @@ exit $ret
     expect(readFileSync(`${file}.ps1`, "utf8")).toBe(expectedPs1(rel.replaceAll("\\", "/")));
 
     for (const path of [file, `${file}.cmd`, `${file}.ps1`]) {
-      expect(lstatSync(path).mode & 0o777).toBe(0o755);
+      expectMode(path, 0o755);
     }
   });
 

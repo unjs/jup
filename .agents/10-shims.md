@@ -186,6 +186,14 @@ All three are created unconditionally (the generator is invoked with
 machine), all `chmod 0o755`, and all **overwrite unconditionally** — there is no
 idempotency short-circuit on Windows.
 
+Each existing entry MUST be **removed** before its replacement is written, never
+written through. §14.16 and §15.15 still decide *whether* the name may be taken
+at all, so what reaches the write is one of our own entries — or any entry, under
+`--force` — and one of ours can be a symlink: left by an earlier POSIX-style
+`enable`, or pointing at a `dist/` that no longer exists (§15.14). A write that
+follows the link edits the link's target instead of replacing the shim, and
+fails with `ENOENT` when that target is gone.
+
 Let `<rel>` be the path from the shim directory to `dist/<B>.js`, backslash-separated
 for `.cmd` and forward-slash-separated for the other two.
 

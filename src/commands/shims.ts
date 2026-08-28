@@ -1221,6 +1221,18 @@ export async function generateWin32Link(
 
   await guardWrites(installDirectory, async () => {
     for (const [path, source] of files) {
+      // Removed first, never written *through*. What survives to here is one of
+      // our own entries (or any entry, under `--force`), and one of ours can be
+      // a symlink: an older POSIX-style `enable` left one, or §15.14's stale
+      // shim points at a `dist/` that is gone. `writeFile` follows a symlink to
+      // its target, which resurrects the link's target instead of replacing the
+      // shim — and fails outright with `ENOENT` when that target no longer
+      // exists, which is exactly #751's shape. §10.3's "overwrite
+      // unconditionally" is about not short-circuiting, not about writing into
+      // whatever the name happens to point at.
+      await unlink(path).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
       await writeFile(path, source);
       await chmod(path, 0o755);
     }
