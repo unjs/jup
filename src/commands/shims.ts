@@ -60,7 +60,7 @@ import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
-import { perUserShimDirectory as perUserDefault } from "../run/exec.ts";
+import { perUserShimDirectory as perUserDefault, SHIM_MARKER } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder } from "../cache/store.ts";
 
@@ -70,8 +70,12 @@ const TOOL_NAME = "jup";
 /**
  * §14.16 — how we recognise a stub we wrote. A regular file that does not carry
  * this marker is somebody else's binary and is never replaced without `--force`.
+ *
+ * Declared in `exec.ts` because §15.32's `PATH` promotion reads it on every
+ * invocation and this module imports that one, not the other way round;
+ * re-exported here because this is where the concept belongs.
  */
-export const SHIM_MARKER = "@jup-shim";
+export { SHIM_MARKER } from "../run/exec.ts";
 
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;

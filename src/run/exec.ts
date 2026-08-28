@@ -5,7 +5,7 @@
  * manager itself can tell a trampoline was involved.
  */
 
-import { existsSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
 import { runMain } from "node:module";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:path";
@@ -57,9 +57,15 @@ export function perUserShimDirectory(): string | undefined {
   }
 
   // macOS has no XDG convention; Linux and the BSDs do.
+  //
+  // `resolve`d for the same reason `COREPACK_SHIM_DIRECTORY` is below: this
+  // directory is prepended to `PATH` for every child process (§15.32), and a
+  // relative value there is a *cwd-relative* `PATH` entry — one that follows the
+  // package manager into every directory it happens to chdir into. The XDG base
+  // directory specification requires an absolute path anyway.
   if (process.platform !== "darwin") {
     const xdg = process.env[SYSTEM_ENV.XDG_BIN_HOME];
-    if (xdg !== undefined && xdg !== "") return xdg;
+    if (xdg !== undefined && xdg !== "") return resolve(xdg);
   }
 
   const home = homedir();
@@ -74,6 +80,50 @@ function defaultShimDirectory(): string | undefined {
 }
 
 /**
+ * §14.16 — how we recognise a stub we wrote.
+ *
+ * It lives here rather than in `shims.ts` because `shims.ts` imports *this*
+ * module and the reverse would be a cycle — and because §15.32's `PATH`
+ * promotion below is the one reader of it that runs on every invocation, not
+ * just under `enable`. `shims.ts` re-exports it, so there is still one spelling.
+ */
+export const SHIM_MARKER = "@jup-shim";
+
+/** First `length` bytes of a file as UTF-8, or `undefined` if it cannot be read. */
+function readHeadSync(file: string, length: number): string | undefined {
+  let handle: number | undefined;
+  try {
+    handle = openSync(file, "r");
+    const buffer = Buffer.allocUnsafe(length);
+    const read = readSync(handle, buffer, 0, length, 0);
+    return buffer.toString("utf8", 0, read);
+  } catch {
+    return undefined;
+  } finally {
+    if (handle !== undefined) closeSync(handle);
+  }
+}
+
+/**
+ * Is the entry at `file` a shim **we** wrote, rather than any file that happens
+ * to wear the name?
+ *
+ * A POSIX shim is a symlink to the shared stub (§10.2), so the open follows it
+ * and reads the stub's banner — which is the point: a link is ours exactly when
+ * what it points at is. §10.3's Windows wrappers cannot carry the marker (their
+ * bodies are byte-exact), so there they are recognised the way `shims.ts`
+ * recognises them, by shebang plus the `<binName>.js` stub they invoke.
+ */
+function isOurShim(file: string, binName: string): boolean {
+  const head = readHeadSync(file, 1024);
+  if (head === undefined) return false;
+  if (head.includes(SHIM_MARKER)) return true;
+  return (
+    process.platform === "win32" && head.startsWith("#!/bin/sh") && head.includes(`${binName}.js`)
+  );
+}
+
+/**
  * §15.32 — the directory to put in front of `PATH` for a JavaScript package
  * manager, or `undefined` when there is none.
  *
@@ -82,16 +132,24 @@ function defaultShimDirectory(): string | undefined {
  * this tool, walks the same project and resolves the same version, with nothing
  * copied or generated to make it so.
  *
- * The one `stat` keeps that claim honest. Shims may never have been installed,
- * and the per-user default (`~/.local/bin`) is full of *other* programs;
- * prepending it when it holds no shim of ours would put the package manager
- * nowhere and only re-rank the user's own binaries for the child — which is what
- * §15.32's "the prepended entry MUST be the only modification" forbids.
+ * The check keeps that claim honest. Shims may never have been installed, and
+ * the per-user default (`~/.local/bin`) is full of *other* programs; prepending
+ * it when it holds no shim of ours would put the package manager nowhere and
+ * only re-rank the user's own binaries for the child — which is what §15.32's
+ * "the prepended entry MUST be the only modification" forbids.
+ *
+ * A plain existence test was not enough for that. `~/.local/bin/pnpm` installed
+ * by anything else — a distro package, a `pip install --user`, a file someone
+ * dropped there — was enough to move that directory to the **front** of `PATH`
+ * for every child of every `jup pnpm` run, re-ranking the whole of the user's
+ * `PATH` on the strength of a name. Reading the banner costs one open+read on a
+ * path we were about to `stat` anyway (§16.3) and makes the promotion mean what
+ * it says.
  */
 function shimDirectoryFor(binName: string): string | undefined {
   const directory = defaultShimDirectory();
   if (directory === undefined) return undefined;
-  return existsSync(join(directory, binName)) ? directory : undefined;
+  return isOurShim(join(directory, binName), binName) ? directory : undefined;
 }
 
 /**
