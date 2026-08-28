@@ -36,6 +36,28 @@ import type {
 /** Directories inside a `node_modules` are skipped, so a dependency cannot hijack its host. */
 export const NODE_MODULES_RE = /[\\/]node_modules[\\/](@[^\\/]*[\\/])?([^@\\/][^\\/]*)$/;
 
+/**
+ * §03.2 — anything *under* a `node_modules`, for the env-file step alone.
+ *
+ * {@link NODE_MODULES_RE} matches only the last segment pair, which §03.1
+ * requires it to (a manifest at `node_modules/foo/src` is read, and corepack
+ * reads it too). That tail match is the wrong shape for the env file: a
+ * dependency that cannot supply a `packageManager` from `node_modules/evil` can
+ * still supply a whole *environment* from `node_modules/evil/src/.jup.env`, and
+ * the env file is the more dangerous of the two — §03.2's prefix filter is the
+ * only sandbox around it, and nothing inside a `node_modules` is ever the
+ * project's own configuration. Containment, and the trailing `$` so the
+ * `node_modules` directory itself — writable by any dependency's install — is
+ * covered as well.
+ */
+const INSIDE_NODE_MODULES_RE = /[\\/]node_modules([\\/]|$)/;
+
+/**
+ * §03.1 — a `.git` entry marks a repository root. A file on a worktree or a
+ * submodule, a directory otherwise, so presence is the whole test.
+ */
+const GIT_ENTRY_NAME = ".git";
+
 /** The manifest file name the walk looks for in every directory. */
 const MANIFEST_NAME = "package.json";
 
@@ -112,20 +134,48 @@ function isWorkspaceRoot(dir: string, data: Manifest): boolean {
 }
 
 /**
+ * §03.2 — where the env-file search stops: the outer edge of *this* project.
+ *
+ * A directory carrying its own `package.json` is a project, and a directory
+ * carrying a `.git` is a checkout; either way what lies above it belongs to
+ * somebody else and cannot be this project's configuration. Deliberately not
+ * the manifest walk's stop condition (§15.25), which is about *pins*: an
+ * unpinned project is still a project, and it is the unpinned case that used to
+ * climb all the way to `/`.
+ *
+ * `package.json` first: it is the commoner marker, and on the directory the walk
+ * is standing in it is the file about to be read anyway. `.git` may be a file
+ * (worktrees, submodules) or a directory, so presence is the whole test.
+ */
+function isProjectBoundary(dir: string): boolean {
+  return (
+    statSync(join(dir, MANIFEST_NAME), { throwIfNoEntry: false }) !== undefined ||
+    statSync(join(dir, GIT_ENTRY_NAME), { throwIfNoEntry: false }) !== undefined
+  );
+}
+
+/**
  * §03.1 — walk from `cwd` toward the root.
  *
  * At each directory: skip if it is a package dir inside `node_modules`; load the
- * env file if none has been loaded yet; read `package.json`. The walk stops on a
- * manifest declaring either package-manager field ({@link stopsWalk}, §15.25),
- * and the **last** manifest seen is what gets recorded — which is why a monorepo
- * with no declaration anywhere yields `NoSpec` targeting the *root*.
+ * env file if none has been loaded yet and the project boundary is not behind us
+ * ({@link isProjectBoundary}); read `package.json`. The walk stops on a manifest
+ * declaring either package-manager field ({@link stopsWalk}, §15.25), and the
+ * **last** manifest seen is what gets recorded — which is why a monorepo with no
+ * declaration anywhere yields `NoSpec` targeting the *root*.
+ *
+ * The two searches therefore end in different places, and deliberately: reading
+ * a *pin* from an ancestor is the documented monorepo behaviour (§03.1), while
+ * an ancestor of the project supplying its whole environment is §03.2's hazard.
  *
  * `mutating` adds §15.27's workspace-boundary stop condition and `here` confines
  * the selection to `cwd`'s own manifest; both are for commands that are about to
  * *write*, and neither affects what the proxy path reads.
  *
- * `envOnly` loads the env file and stops at the first one found, never reading
- * manifests: for commands given an explicit package-manager pattern on the CLI.
+ * `envOnly` loads the env file and stops at the first one found — or at the
+ * project boundary, which is where there is no longer one to find — never
+ * reading manifests: for commands given an explicit package-manager pattern on
+ * the CLI.
  *
  * `tool` names the tool the answer is *for*, and §15.39 is the whole of what it
  * changes: a `kind: "runtime"` name reads `devEngines.runtime` and nothing else,
@@ -181,12 +231,15 @@ export function discoverProjectSpec(
   let selection: { data: Manifest; target: string } | undefined;
   let envFilePath: string | undefined;
   let versionFile: VersionFile | undefined;
+  // §03.2 — set once the env file has been found *or* the walk has left the
+  // project; either way no further directory is asked for one.
+  let envSearchOver = false;
 
-  // `envOnly` swaps the stop condition for "an env file has been found"; both
+  // `envOnly` swaps the stop condition for "the env-file search is over"; both
   // forms still terminate at the filesystem root, where `dirname(d) === d`.
   while (
     nextDir !== currentDir &&
-    (envOnly ? envFilePath === undefined : !stopsWalk(selection?.data, field))
+    (envOnly ? !envSearchOver : !stopsWalk(selection?.data, field))
   ) {
     currentDir = nextDir;
     nextDir = dirname(currentDir);
@@ -205,12 +258,36 @@ export function discoverProjectSpec(
       continue;
     }
 
-    // Step 2 — only the *closest* env file is ever applied (§03.2).
-    if (envFilePath === undefined) {
+    // Step 2 — only the *closest* env file is ever applied (§03.2), and only
+    // from inside the project.
+    //
+    // §11.6 already describes the search as reaching "only directories at or
+    // below the project root", but the stop condition it names — a manifest
+    // carrying `packageManager` — is the *manifest* walk's, and an unpinned
+    // project has none: the common case climbed to `/`. That is how a
+    // `/tmp/.jup.env` written by any user on a shared host governs every build
+    // run under `/tmp` by every other user, and §03.2's prefix filter does not
+    // help, because the variables it admits are exactly the ones worth
+    // hijacking. The boundary is the project itself — the first directory
+    // carrying its own `package.json` or `.git` — and the file *in* that
+    // directory still applies, which is the case anyone writes deliberately.
+    //
+    // The boundary is tested only when the walk is about to climb past this
+    // directory, so the exact-pin fast path (§16.3, one directory, stop) pays
+    // nothing for it and every other run pays one `stat` on a dentry the
+    // manifest read is about to want anyway.
+    // {@link INSIDE_NODE_MODULES_RE} rather than the tail match above: a
+    // dependency's `src` directory is not the project either, and it is not the
+    // project's boundary — the walk keeps looking above it for the *host's* env
+    // file, which is the one that legitimately applies.
+    if (!envSearchOver && !INSIDE_NODE_MODULES_RE.test(currentDir)) {
       const loaded = loadEnvFileFrom(currentDir);
       if (loaded !== null) {
         applyEnvFile(loaded.vars, loaded.path);
         envFilePath = loaded.path;
+        envSearchOver = true;
+      } else if (nextDir === currentDir || isProjectBoundary(currentDir)) {
+        envSearchOver = true;
       }
     }
 

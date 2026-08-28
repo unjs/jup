@@ -177,6 +177,7 @@ describe("parseSpec — §03.4", () => {
       range: "https://example.test/x.tgz",
     });
   });
+
 });
 
 describe("the upward walk — §03.1", () => {
@@ -356,6 +357,82 @@ describe("the upward walk — §03.1", () => {
       expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
     });
 
+    /* §03.2 — the search stops at the project boundary. Without this an
+     * unpinned project (no `packageManager` anywhere, the common case) climbed
+     * to `/`, so a `/tmp/.jup.env` any user can write governed every build run
+     * under `/tmp` by every other user on the host. */
+    it("never reads an env file above a project that declares no pin", () => {
+      write(".jup.env", "COREPACK_NPM_REGISTRY=https://ancestor.test\n");
+      manifest("project", { name: "unpinned" });
+
+      const result = discoverProjectSpec(join(root, "project"));
+      // The manifest walk still climbs — reading a pin from an ancestor is
+      // §03.1's documented monorepo behaviour — and finds nothing here.
+      expect(result.type).toBe("NoSpec");
+      expect(result.envFilePath).toBeUndefined();
+      expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
+    });
+
+    it("stops at a `.git` checkout with no manifest of its own", () => {
+      write(".jup.env", "COREPACK_NPM_REGISTRY=https://ancestor.test\n");
+      dir("checkout/.git");
+      dir("checkout/src");
+
+      const result = discoverProjectSpec(join(root, "checkout", "src"));
+      expect(result.type).toBe("NoProject");
+      expect(result.envFilePath).toBeUndefined();
+      expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
+    });
+
+    it("still applies the boundary directory's own env file, and a nested one", () => {
+      manifest("project", { name: "unpinned" });
+      write("project/.jup.env", "COREPACK_NPM_REGISTRY=https://project.test\n");
+
+      // From the project root itself.
+      discoverProjectSpec(join(root, "project"));
+      expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://project.test");
+
+      // And from a plain subdirectory of it, which is not its own project.
+      delete process.env.COREPACK_NPM_REGISTRY;
+      dir("project/src");
+      expect(discoverProjectSpec(join(root, "project", "src")).envFilePath).toBe(
+        join(root, "project", ".jup.env"),
+      );
+      expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://project.test");
+    });
+
+    it("does not let envOnly climb past the boundary either", () => {
+      write(".jup.env", "COREPACK_NPM_REGISTRY=https://ancestor.test\n");
+      manifest("project", { name: "unpinned" });
+
+      const result = discoverProjectSpec(join(root, "project"), { envOnly: true });
+      expect(result.envFilePath).toBeUndefined();
+      expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
+    });
+
+    // §03.2 — the env file is skipped for *anything* under a `node_modules`,
+    // not just the package directory §03.1's tail match names: a dependency
+    // planting `node_modules/foo/src/.jup.env` supplies a whole environment,
+    // and the host's own file is what must apply instead.
+    it("never reads an env file from a subdirectory of a vendored package", () => {
+      manifest(".", { packageManager: "yarn@1.22.4" });
+      write(".jup.env", "COREPACK_NPM_REGISTRY=https://host.test\n");
+      write("node_modules/foo/src/.jup.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
+
+      const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"));
+      expect(result.envFilePath).toBe(join(root, ".jup.env"));
+      expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://host.test");
+    });
+
+    it("never reads an env file from the node_modules directory itself", () => {
+      manifest(".", { packageManager: "yarn@1.22.4" });
+      write("node_modules/.jup.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
+
+      const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"));
+      expect(result.envFilePath).toBeUndefined();
+      expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
+    });
+
     it("skips env files entirely when COREPACK_ENV_FILE=0", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
       write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
@@ -416,13 +493,22 @@ describe("the upward walk — §03.1", () => {
     });
 
     it("discards a manifest read before a parent env file disabled the spec", () => {
-      // `sub` is read first (no `packageManager`, so the walk continues); the
-      // env file that disables the spec only turns up one directory later.
-      manifest("sub", {});
+      // The vendored subdirectory is read first (no `packageManager`, so the
+      // walk continues); the env file that disables the spec only turns up
+      // three directories later.
+      //
+      // It has to be a vendored one now that §03.2 stops the env-file search at
+      // the project boundary: a directory with its own `package.json` is that
+      // boundary, so the only way a manifest is still read *before* an env file
+      // is found is from inside a `node_modules`, which §03.2 skips for the env
+      // file and §03.1 does not skip for a manifest below the package dir.
+      manifest("node_modules/foo/src", {});
       manifest(".", { packageManager: "pnpm@10.0.0" });
       write(".jup.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
 
-      const result = discoverProjectSpec(join(root, "sub"), { projectSpecFlag: true });
+      const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"), {
+        projectSpecFlag: true,
+      });
       expect(result.type).toBe("NoProject");
     });
 
