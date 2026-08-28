@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { defineBuildConfig } from "obuild/config";
 import { DEFINITIONS, getBinariesFor } from "./src/config/table.ts";
 import { cliEntrySource, PROXY_STUB_NAME, shimSource, stubNameFor } from "./src/commands/shims.ts";
@@ -47,7 +47,6 @@ export default defineBuildConfig({
     },
   },
 });
-
 
 /**
  * The modules a warm proxy invocation **evaluates**, relative to `src/` — §01.3,
@@ -145,4 +144,3 @@ export function writeStubFolder(folder: string): string[] {
 
   return [...sources.keys()];
 }
-

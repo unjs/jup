@@ -346,7 +346,10 @@ describe("the system directory (§15.13 point 8)", () => {
     expect(systemShimDirectory()).toBeUndefined();
   });
 
-  it("is a candidate only for root, and only last", () => {
+  // Two rows rather than one branch: `process.getuid` does not exist on Windows,
+  // so there is nothing to spy on there — `vi.spyOn` throws rather than mocking
+  // a property that is not defined on the object.
+  it.skipIf(IS_WIN32)("is a candidate only for root, and only last", () => {
     const uid = vi.spyOn(process, "getuid");
 
     uid.mockReturnValue(1000);
@@ -354,14 +357,14 @@ describe("the system directory (§15.13 point 8)", () => {
 
     uid.mockReturnValue(0);
     const asRoot = shimDirectoryCandidates();
-    if (IS_WIN32) {
-      // One candidate, no uid to test: point 8 adds nothing there.
-      expect(asRoot).not.toContain(systemDir);
-    } else {
-      // Last: a per-user directory already on `PATH` is still the better answer.
-      expect(asRoot.at(-1)).toBe(systemDir);
-      expect(asRoot[0]).toBe(perUserBin);
-    }
+    // Last: a per-user directory already on `PATH` is still the better answer.
+    expect(asRoot.at(-1)).toBe(systemDir);
+    expect(asRoot[0]).toBe(perUserBin);
+  });
+
+  it.skipIf(!IS_WIN32)("is never a candidate on Windows, whoever is running", () => {
+    // One candidate, and no uid to test: point 8 adds nothing there.
+    expect(shimDirectoryCandidates()).not.toContain(systemDir);
   });
 
   it("--system names it, outranking COREPACK_SHIM_DIRECTORY", () => {

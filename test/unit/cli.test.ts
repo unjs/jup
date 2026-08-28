@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -121,6 +121,16 @@ let routes: Record<string, unknown>;
 let requested: string[];
 let cwdSpy: MockInstance<() => string>;
 
+/**
+ * A throwaway directory, realpathed: macOS puts `$TMPDIR` behind a symlink
+ * (`/var` -> `/private/var`) and §15.43's boundary test resolves `<home>` before
+ * comparing, so a literal `/var/...` spelling would read as outside the very
+ * store it names.
+ */
+async function tempDir(prefix: string): Promise<string> {
+  return realpath(await mkdtemp(join(tmpdir(), prefix)));
+}
+
 beforeEach(async () => {
   savedEnv = process.env;
   saved = {};
@@ -129,8 +139,8 @@ beforeEach(async () => {
     delete process.env[key];
   }
 
-  home = await mkdtemp(join(tmpdir(), "jup-cli-home-"));
-  project = await mkdtemp(join(tmpdir(), "jup-cli-proj-"));
+  home = await tempDir("jup-cli-home-");
+  project = await tempDir("jup-cli-proj-");
   process.env.COREPACK_HOME = home;
 
   stdout = "";
@@ -592,7 +602,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
 
     // A brand-new home, and the network switched off: the archive is the only
     // possible source of these versions.
-    const fresh = await mkdtemp(join(tmpdir(), "jup-cli-home2-"));
+    const fresh = await tempDir("jup-cli-home2-");
     process.env.COREPACK_HOME = fresh;
     process.env.COREPACK_ENABLE_NETWORK = "0";
     stdout = "";
@@ -665,7 +675,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   });
 
   it("rejects a tarball that did not come from pack (test 93)", async () => {
-    const source = await mkdtemp(join(tmpdir(), "jup-cli-other-"));
+    const source = await tempDir("jup-cli-other-");
     await mkdir(join(source, "stuff"), { recursive: true });
     await writeFile(join(source, "stuff", "readme.txt"), "not a store subtree\n");
     const archive = join(project, "other.tgz");
@@ -679,7 +689,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   });
 
   it("rejects an archive whose markers sit too shallow", async () => {
-    const source = await mkdtemp(join(tmpdir(), "jup-cli-short-"));
+    const source = await tempDir("jup-cli-short-");
     await mkdir(join(source, "yarn"), { recursive: true });
     await writeFile(join(source, "yarn", ".jup"), "{}");
     const archive = join(project, "short.tgz");
@@ -722,7 +732,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   });
 
   it("refuses an archive naming a package manager this build doesn't support", async () => {
-    const source = await mkdtemp(join(tmpdir(), "jup-cli-bogus-"));
+    const source = await tempDir("jup-cli-bogus-");
     await mkdir(join(source, "vlt", "1.0.0"), { recursive: true });
     await writeFile(join(source, "vlt", "1.0.0", ".jup"), "{}");
     const archive = join(project, "bogus.tgz");
@@ -1288,7 +1298,7 @@ describe("up (§09.4, tests 111-115)", () => {
 
 describe("hydrate and prepare (§09.10)", () => {
   it("hydrate names 'corepack prepare' in its format error", async () => {
-    const source = await mkdtemp(join(tmpdir(), "jup-cli-hyd-"));
+    const source = await tempDir("jup-cli-hyd-");
     await mkdir(join(source, "stuff"), { recursive: true });
     await writeFile(join(source, "stuff", "readme.txt"), "nope\n");
     const archive = join(project, "legacy.tgz");
@@ -1305,7 +1315,7 @@ describe("hydrate and prepare (§09.10)", () => {
     await cmdPack(["yarn@2.2.2"]);
     const archive = join(project, "jup.tgz");
 
-    const fresh = await mkdtemp(join(tmpdir(), "jup-cli-home3-"));
+    const fresh = await tempDir("jup-cli-home3-");
     process.env.COREPACK_HOME = fresh;
     process.env.COREPACK_ENABLE_NETWORK = "0";
 

@@ -87,6 +87,23 @@ function systemDirWritable(): boolean {
   }
 }
 
+/**
+ * A fingerprint of `/usr/local/bin/<name>`, or `undefined` when it is absent.
+ *
+ * CI images ship their own `yarn` there, so a row asserting that jup installed
+ * nothing into point 8's directory has to compare the entry with what it was
+ * rather than require the path to be empty. A shim is a symlink (§10.2), so the
+ * target answers for one of ours; type, size and mtime answer for anything else.
+ */
+function systemEntry(name: string): string | undefined {
+  const path = join(SYSTEM_DIR, name);
+  const stats = lstatSync(path, { throwIfNoEntry: false });
+  if (stats === undefined) return undefined;
+  return stats.isSymbolicLink()
+    ? `link:${readlinkSync(path)}`
+    : `file:${stats.size}:${stats.mtimeMs}`;
+}
+
 interface ShimFixtureOptions {
   /** Extra directories, in order, before the per-user default on `PATH`. */
   pathPrefix?: string[];
@@ -407,6 +424,7 @@ describe("§15.13 — never require elevation", () => {
     "267: every other user never sees it, whatever PATH says",
     async () => {
       const { shimDir, options } = shimFixture({ offPath: true });
+      const before = systemEntry("yarn");
 
       const result = await run(["enable", "yarn"], {
         ...options,
@@ -419,7 +437,7 @@ describe("§15.13 — never require elevation", () => {
       });
 
       expect(result.exitCode).toBe(0);
-      expect(existsSync(join(SYSTEM_DIR, "yarn"))).toBe(false);
+      expect(systemEntry("yarn")).toBe(before);
       expect(existsSync(join(shimDir, "yarn"))).toBe(true);
       // Row 172's outcome unchanged: no candidate was on `PATH`, so the advisory
       // fires and nothing was preferred over anything.
