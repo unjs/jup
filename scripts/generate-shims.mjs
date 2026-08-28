@@ -15,7 +15,7 @@ import { chmod, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFINITIONS, getBinariesFor } from "../src/config/table.ts";
 import { ENTRY_CANDIDATES } from "../src/utils/self.ts";
-import { PROXY_STUB_NAME, shimSource } from "../src/commands/shims.ts";
+import { PROXY_STUB_NAME, shimSource, stubNameFor } from "../src/commands/shims.ts";
 
 const dist = join(import.meta.dirname, "..", "dist");
 
@@ -38,7 +38,7 @@ async function write(file, source) {
 // only thing that reads them.
 await Promise.all([
   write(join(dist, PROXY_STUB_NAME), shimSource(entry)),
-  ...binNames.map((binName) => write(join(dist, `${binName}.js`), shimSource(entry, binName))),
+  ...binNames.map((binName) => write(join(dist, stubNameFor(binName)), shimSource(entry, binName))),
 ]);
 
 console.log(

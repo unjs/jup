@@ -194,8 +194,8 @@ at all, so what reaches the write is one of our own entries — or any entry, un
 follows the link edits the link's target instead of replacing the shim, and
 fails with `ENOENT` when that target is gone.
 
-Let `<rel>` be the path from the shim directory to `dist/<B>.js`, backslash-separated
-for `.cmd` and forward-slash-separated for the other two.
+Let `<rel>` be the path from the shim directory to `dist/<B>.mjs` (§14.27),
+backslash-separated for `.cmd` and forward-slash-separated for the other two.
 
 Let `<node>` be the **absolute** path of the runtime `enable` is itself running
 under, `realpath`'d — see §10.1's *Baking in the interpreter*. Windows always bakes

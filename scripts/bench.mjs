@@ -65,7 +65,7 @@ if (!Number.isInteger(runs) || runs < 1) {
   process.exit(1);
 }
 
-if (!existsSync(join(DIST, "bin.mjs")) || !existsSync(join(DIST, "shim-proxy.js"))) {
+if (!existsSync(join(DIST, "bin.mjs")) || !existsSync(join(DIST, "shim-proxy.mjs"))) {
   console.error("No build in dist/ — run `pnpm build` first.");
   process.exit(1);
 }
@@ -118,7 +118,7 @@ const kB = (bytes) => `${(bytes / 1000).toFixed(1)} kB`;
 // The stub dispatches into `shim.mjs`, which is the whole of a proxy run. The
 // edge from the stub is a dynamic `import()`, so it is named here rather than
 // discovered; everything below `shim.mjs` is static and gets walked.
-const WARM_ENTRIES = ["shim-proxy.js", "shim.mjs"];
+const WARM_ENTRIES = ["shim-proxy.mjs", "shim.mjs"];
 
 const sizes = [
   { label: "jup, loaded on a warm proxy run", ...weigh(eagerClosure(WARM_ENTRIES)) },
@@ -237,7 +237,7 @@ const timings = [
   measure("jup --version", [join(DIST, "bin.mjs"), "--version"], fixture.home),
   measure(
     `jup ${TOOL} --version (warm proxy)`,
-    [join(DIST, `${TOOL}.js`), "--version"],
+    [join(DIST, `${TOOL}.mjs`), "--version"],
     fixture.home,
   ),
 ];

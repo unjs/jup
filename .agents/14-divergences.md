@@ -271,7 +271,7 @@ The premise corepack declined this on is half true. A runtime does `realpath` th
 module it executes — `import.meta.filename` inside the stub is the stub's real path,
 which is why §14.25 has to resolve the entry through it. But `process.argv[1]` is
 **not** `realpath`'d, and it holds the path as invoked: `/home/u/.jup/bin/yarn`, not
-`…/dist/shim-proxy.js`. Verified on Node 24 under all three ways a shim is reached —
+`…/dist/shim-proxy.mjs`. Verified on Node 24 under all three ways a shim is reached —
 a direct `PATH` execution, `node <shim>`, and `node --preserve-symlinks-main <shim>`,
 which is the one case that resolves the *module* from the link too. So a hosted
 implementation gets the same dispatch a native single binary gets from `argv[0]`.
@@ -563,3 +563,41 @@ chosen once at `enable` time is exactly the property a `PATH` lookup fails to
 give. Re-running `enable` re-bakes it, and the surviving `%~dp0\node.exe` /
 `$basedir/node` branches still make a shim directory that *is* the Node install
 directory relocatable.
+
+## 14.27 The stubs are named `.mjs` — [perf]
+
+**Corepack:** the generated stubs are `dist/<B>.js`, and the package they sit in
+is CommonJS, so `require('./lib/corepack.cjs')` is what the extension resolves
+to.
+
+**Required:** the stub the shims run — §10.2's shared `shim-proxy.mjs` and
+§10.3's per-name `<B>.mjs` — carries an explicit module extension. That name is
+part of §14.16's ownership test on both platforms: a dangling POSIX symlink is
+recognised as ours by the stub name it still points at (§15.14), and a Windows
+wrapper by the stub it invokes, so both compare against `.mjs`.
+
+`.js` is the extension a runtime cannot decide from the name. Node answers it by
+walking up from the file towards the root until a `package.json` answers, and
+reading its `"type"` — before the first line of the stub runs, on every `yarn`,
+`npm` and `pnpm` invocation on the machine, forever. `.mjs` is ESM by definition
+and skips the lookup entirely: `strace -e trace=openat` over the same stub under
+Node 24 counts **7 `package.json` opens as `.js` and 0 as `.mjs`**. Seven is the
+worst case — a stub with no manifest above it — and one is the best, in a `dist/`
+whose own manifest answers immediately; the floor is what a normal install pays. It also stops the stub depending on a
+manifest that must keep saying `"type": "module"` and must keep sitting above it:
+a packaging that relocated `dist/` away from its `package.json`, or that shipped
+a CommonJS one, would break the stub with a `SyntaxError` on its first `import`.
+
+The entry it loads is `shim.mjs` in a build and `shim.ts` from source (§10.4's
+candidate list), so the extension is settled per file rather than assumed — this
+changes only the stub's own name.
+
+**No compatibility spelling is kept for the old name**, and the two ownership
+tests that compare names rather than read the marker are where that shows. A
+POSIX shim pointing at a `.js` stub that is still *there* is recognised as ours
+anyway, because the check follows the link and finds `@jup-shim` in the file; a
+**dangling** one, and a Windows wrapper citing `<B>.js`, are not, so `enable`
+declines them under §14.16 and `--force` replaces them. That is the handling any
+foreign entry gets. The alternative is carrying a second stub name through every
+ownership check for the lifetime of the tool, which is the cost §14.15 spent the
+per-name files to avoid in the first place.

@@ -67,7 +67,7 @@ import {
 } from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
-import { resolveInstallDirectory, SHIM_MARKER, WIN32_WRAPPER_HEADS } from "./shims.ts";
+import { resolveInstallDirectory, SHIM_MARKER, stubNameFor, WIN32_WRAPPER_HEADS } from "./shims.ts";
 import { tlsSettings } from "../net/tls.ts";
 import {
   findInstalledVersion,
@@ -994,12 +994,13 @@ function isOurShim(file: string, binName: string): boolean {
   // §10.3 — on Windows the entry on `PATH` is a `.cmd`/`.ps1`/sh wrapper that
   // *invokes* the marked stub rather than carrying the marker itself, so it is
   // recognised the way `enable` recognises it (§14.16): by the exact head it
-  // begins with, plus the `<binName>.js` stub it names. "Mentions `node` and
+  // begins with, plus the `<binName>.mjs` stub it names. "Mentions `node` and
   // some `.js`" is not that test — it matches npm's own `npm.cmd`, which is
   // exactly what §10.3's wrappers are modelled on, and `info` then reported a
   // Node distribution's npm as a shim of ours.
   return (
-    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) && head.includes(`${binName}.js`)
+    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) &&
+    head.includes(stubNameFor(binName))
   );
 }
 

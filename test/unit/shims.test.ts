@@ -43,6 +43,7 @@ import {
   shimDirectoryNotWritable,
   shimShadowed,
   shimSource,
+  stubNameFor,
   targetBinaries,
   verifyOnPath,
   whichFile,
@@ -53,7 +54,7 @@ const execFileAsync = promisify(execFile);
 /**
  * `dist` stands in for the folder holding this module — `src/` from source,
  * `dist/` from a build. Pointing the tests at a temporary one keeps the
- * generated stubs (`<dist>/yarn.js`, …) out of the repository, and lets the
+ * generated stubs (`<dist>/yarn.mjs`, …) out of the repository, and lets the
  * end-to-end test substitute a fake library entry for `main.ts`, which is
  * another task's file.
  */
@@ -85,7 +86,7 @@ function expectedTarget(from = binDir): string {
 
 /** §10.3 — Windows keeps one stub per name; this is the path its wrappers cite. */
 function expectedWin32Stub(binName: string, from = binDir): string {
-  return relative(from, join(dist, `${binName}.js`));
+  return relative(from, join(dist, stubNameFor(binName)));
 }
 
 function write(file: string, content: string, mode = 0o644): void {
@@ -468,7 +469,7 @@ describe("enable (§10.2)", () => {
   });
 
   // §10.3 is explicit that Windows has no idempotency short-circuit: all three
-  // wrappers are rewritten on every run, and there is no shared `shim-proxy.js`
+  // wrappers are rewritten on every run, and there is no shared `shim-proxy.mjs`
   // for the row to age either. The claim is POSIX's alone.
   it.skipIf(process.platform === "win32")(
     "122: is idempotent — an already-correct symlink is not rewritten",
@@ -522,7 +523,7 @@ describe("enable (§10.2)", () => {
     const staleDist = join(root, "old-dist");
     mkdirSync(staleDist);
     const file = join(binDir, "yarn");
-    symlinkSync(join(staleDist, "yarn.js"), file);
+    symlinkSync(join(staleDist, "yarn.mjs"), file);
     rmSync(staleDist, { recursive: true });
 
     expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
@@ -873,7 +874,7 @@ describe("disable (§10.6, §15.15)", () => {
     expect(warn).not.toHaveBeenCalled();
 
     // The POSIX half of the same fixture is skipped, loudly (§10.2, row 127).
-    symlinkSync(join(switchDist, "yarn.js"), file);
+    symlinkSync(join(switchDist, "yarn.mjs"), file);
     await removePosixLink(binDir, "yarn");
     expect(warn).toHaveBeenCalledWith(messages.yarnSwitchSkip("yarn", file));
     expect(existsSync(file)).toBe(true);
@@ -881,7 +882,7 @@ describe("disable (§10.6, §15.15)", () => {
 
   it("173: removes a dangling shim rather than skipping it (§15.14, #751)", async () => {
     const file = join(binDir, "pnpm");
-    symlinkSync(join(root, "gone", "pnpm.js"), file);
+    symlinkSync(join(root, "gone", "pnpm.mjs"), file);
 
     await removePosixLink(binDir, "pnpm");
 

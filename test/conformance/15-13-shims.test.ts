@@ -338,9 +338,9 @@ describe("§15.13 — never require elevation", () => {
 describe("§15.14 — stale shims", () => {
   it.skipIf(IS_WINDOWS)("173: enable replaces a shim whose target is gone", async () => {
     const { fixture, shimDir, options } = shimFixture();
-    // #751 exactly: Node 25 stopped bundling corepack, so `dist/yarn.js` is no
+    // #751 exactly: Node 25 stopped bundling corepack, so `dist/yarn.mjs` is no
     // longer there while the symlink in the bin directory survives.
-    const gone = join(fixture.root, "removed-dist", "yarn.js");
+    const gone = join(fixture.root, "removed-dist", "yarn.mjs");
     symlinkSync(gone, join(shimDir, "yarn"));
     expect(existsSync(join(shimDir, "yarn"))).toBe(false); // dangling
     expect(lstatSync(join(shimDir, "yarn")).isSymbolicLink()).toBe(true);
@@ -356,7 +356,7 @@ describe("§15.14 — stale shims", () => {
 
   it.skipIf(IS_WINDOWS)("173: disable removes such a shim rather than skipping it", async () => {
     const { fixture, shimDir, options } = shimFixture();
-    const gone = join(fixture.root, "removed-dist", "yarn.js");
+    const gone = join(fixture.root, "removed-dist", "yarn.mjs");
     symlinkSync(gone, join(shimDir, "yarn"));
 
     const result = await run(["disable", "yarn"], options);
@@ -541,8 +541,8 @@ describe("§14.15 — one stub, dispatching on the name it was invoked under", (
     // when the tool is upgraded or removed (§15.14, #751).
     const yarnLink = readlinkSync(join(shimDir, "yarn"));
     expect(readlinkSync(join(shimDir, "pnpm"))).toBe(yarnLink);
-    expect(basename(yarnLink)).not.toBe("yarn.js");
-    expect(basename(yarnLink)).not.toBe("pnpm.js");
+    expect(basename(yarnLink)).not.toBe("yarn.mjs");
+    expect(basename(yarnLink)).not.toBe("pnpm.mjs");
 
     // And the shared stub still tells them apart, because the name comes from
     // `argv[1]` rather than from the file. The yarn shim runs the pinned yarn…

@@ -13,22 +13,22 @@ tsconfig.tsbuildinfo
 #
 # The first is the POSIX one and serves every binary name (§14.15). The per-name
 # list below it is §10.3's, written only when `enable` runs on Windows.
-/src/shim-proxy.js
-/src/npm.js
-/src/npx.js
-/src/pnpm.js
-/src/pnpx.js
-/src/yarn.js
-/src/yarnpkg.js
-/src/bun.js
-/src/bunx.js
-/src/deno.js
-/src/aube.js
-/src/aubr.js
-/src/aubx.js
-/src/nub.js
-/src/nubx.js
-/src/node.js
+/src/shim-proxy.mjs
+/src/npm.mjs
+/src/npx.mjs
+/src/pnpm.mjs
+/src/pnpx.mjs
+/src/yarn.mjs
+/src/yarnpkg.mjs
+/src/bun.mjs
+/src/bunx.mjs
+/src/deno.mjs
+/src/aube.mjs
+/src/aubr.mjs
+/src/aubx.mjs
+/src/nub.mjs
+/src/nubx.mjs
+/src/node.mjs
 
 # Local recording for the ported Corepack suite (NOCK_ENV=record).
 /test/corepack/nocks.db

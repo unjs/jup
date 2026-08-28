@@ -577,13 +577,13 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
 
     // A stub carrying the marker, plus what `enable` puts on the name: §10.2's
     // relative symlink, or §10.3's wrappers, which carry no marker and are
-    // recognised by their shebang plus the `<binName>.js` they invoke.
-    writeFileSync(join(bin, "yarn.js"), `// ${SHIM_MARKER} — generated\n`, { mode: 0o755 });
+    // recognised by their shebang plus the `<binName>.mjs` they invoke.
+    writeFileSync(join(bin, "yarn.mjs"), `// ${SHIM_MARKER} — generated\n`, { mode: 0o755 });
     if (IS_WINDOWS) {
-      writeFileSync(join(bin, "yarn"), `#!/bin/sh\nexec "$basedir/node" "$basedir/yarn.js"\n`);
-      writeFileSync(join(bin, "yarn.cmd"), `@SETLOCAL\n"%~dp0\\node.exe"  "%~dp0\\yarn.js" %*\n`);
+      writeFileSync(join(bin, "yarn"), `#!/bin/sh\nexec "$basedir/node" "$basedir/yarn.mjs"\n`);
+      writeFileSync(join(bin, "yarn.cmd"), `@SETLOCAL\n"%~dp0\\node.exe"  "%~dp0\\yarn.mjs" %*\n`);
     } else {
-      symlinkSync("yarn.js", join(bin, "yarn"));
+      symlinkSync("yarn.mjs", join(bin, "yarn"));
     }
     // Somebody else's yarn, earlier on PATH. `PATHEXT` decides what a Windows
     // lookup finds, and it never contains the empty extension.

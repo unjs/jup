@@ -141,7 +141,7 @@ const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
  *
  * The wrappers cannot carry {@link SHIM_MARKER}: §10.3 fixes their bodies byte
  * for byte and the conformance suite compares them literally. They are
- * recognised instead by their shebang plus the `<binName>.js` stub they invoke,
+ * recognised instead by their shebang plus the `<binName>.mjs` stub they invoke,
  * which no unrelated binary of the same name would contain.
  */
 export const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
@@ -722,7 +722,23 @@ export function shimSource(entryName: string, binName?: string, interpreter?: st
  * table is a bare command (`yarn`, `npm`, `aubx`), and this is the only file in
  * `dist/` with a hyphen in it.
  */
-export const PROXY_STUB_NAME = "shim-proxy.js";
+export const PROXY_STUB_NAME = "shim-proxy.mjs";
+
+/**
+ * §10.3 — the per-name stub a Windows wrapper invokes.
+ *
+ * `.mjs`, like {@link PROXY_STUB_NAME}: an explicit module extension is a format
+ * the runtime knows from the name alone, so it never walks up looking for a
+ * `package.json` to read a `"type"` out of (§14.27). That is at least one
+ * `open`/`read`/parse off every `yarn`, `npm` and `pnpm` invocation on the
+ * machine — measured at 7 `package.json` opens as `.js` against 0 as `.mjs`
+ * where nothing answers the walk — and it makes the stub work unchanged in a
+ * directory whose nearest manifest says `commonjs`, which `dist/` does not but a
+ * relocated install might.
+ */
+export function stubNameFor(binName: string): string {
+  return `${binName}.mjs`;
+}
 
 /** §14.18 — map the read-only install to something the user can act on. */
 async function guardWrites<T>(directory: string, action: () => Promise<T>): Promise<T> {
@@ -782,7 +798,7 @@ async function ensureStub(
   const entry = ENTRY_CANDIDATES.find((candidate) => existsSync(join(distFolder, candidate)));
   if (entry === undefined) throw new UsageError(messages.assertStubFolderMissing());
 
-  const file = join(distFolder, binName === undefined ? PROXY_STUB_NAME : `${binName}.js`);
+  const file = join(distFolder, binName === undefined ? PROXY_STUB_NAME : stubNameFor(binName));
   const source = shimSource(entry, binName, interpreter);
 
   // One byte more than the stub is long, so a longer file cannot compare equal.
@@ -817,8 +833,8 @@ async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
  *
  * * a POSIX symlink whose target carries {@link SHIM_MARKER};
  * * a **dangling** symlink that still names a stub of ours — the shared
- *   {@link PROXY_STUB_NAME}, or a per-name `<binName>.js` from a Windows install
- *   or an older build. This is #751's stale shim, which `enable` must replace and
+ *   {@link PROXY_STUB_NAME}, or a per-name `<binName>.mjs` from a Windows
+ *   install. This is #751's stale shim, which `enable` must replace and
  *   `disable` must remove rather than skip (§15.14);
  * * a regular file carrying the marker, or one of §10.3's three Windows
  *   wrappers, which cannot carry it (see {@link WIN32_WRAPPER_HEADS}).
@@ -835,7 +851,7 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
     // iff it still names our stub (§15.14 / #751).
     if (head !== undefined) return head.includes(SHIM_MARKER);
     const target = basename(link);
-    return target === PROXY_STUB_NAME || target === `${binName}.js`;
+    return target === PROXY_STUB_NAME || target === stubNameFor(binName);
   }
 
   if (!entry.isFile()) return false;
@@ -844,7 +860,8 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
   if (head === undefined) return false;
   if (head.includes(SHIM_MARKER)) return true;
   return (
-    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) && head.includes(`${binName}.js`)
+    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) &&
+    head.includes(stubNameFor(binName))
   );
 }
 
