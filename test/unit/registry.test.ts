@@ -1167,6 +1167,7 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
     const home = join(root, "home");
     mkdirSync(home, { recursive: true });
     const savedHome = process.env.HOME;
+    const savedUserProfile = process.env.USERPROFILE;
     const savedPrefix = process.env.PREFIX;
 
     try {
@@ -1174,7 +1175,11 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
         "/@yarnpkg/cli-dist": { "dist-tags": { stable: "4.9.0" }, versions: { "4.9.0": {} } },
       });
       writeFileSync(join(home, ".npmrc"), `@yarnpkg:registry=${server.origin}\n`);
+      // §15.1's home is `$HOME`, or `%USERPROFILE%` on Windows. Redirect both,
+      // or the row reads the developer's own `.npmrc` — and, having found no
+      // mirror, goes to the real registry over the network.
       process.env.HOME = home;
+      process.env.USERPROFILE = home;
       process.env.PREFIX = join(root, "prefix");
       resetNpmrcCache();
 
@@ -1185,6 +1190,8 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
     } finally {
       if (savedHome === undefined) delete process.env.HOME;
       else process.env.HOME = savedHome;
+      if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = savedUserProfile;
       if (savedPrefix === undefined) delete process.env.PREFIX;
       else process.env.PREFIX = savedPrefix;
       resetNpmrcCache();

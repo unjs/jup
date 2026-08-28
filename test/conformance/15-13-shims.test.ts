@@ -83,7 +83,14 @@ function shimFixture(options: ShimFixtureOptions = {}) {
 afterAll(cleanupFixtures);
 
 describe("§15.13 — never require elevation", () => {
-  it.skipIf(IS_ROOT)(
+  // Skipped on Windows for the same reason it is skipped for root: nothing
+  // here can make the directory unwritable. `chmod` on that platform toggles
+  // the read-only *file* attribute and has no effect on a directory, so
+  // `enable` correctly writes into it and never falls back. Reaching §15.13
+  // point 2 there would mean denying a WRITE_DATA ACE through `icacls`, which
+  // is a different test than this one. §14.18 is unaffected: the refusal it
+  // describes is the same code path, reached from the same probe.
+  it.skipIf(IS_ROOT || IS_WINDOWS)(
     "170: a read-only install directory falls back to the per-user one, and says so",
     async () => {
       const { fixture, shimDir, options } = shimFixture();

@@ -141,19 +141,27 @@ describe("§13.12 execution", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("138: a package manager killed by SIGINT takes the process with it (§08.5)", async () => {
-    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
-    seedPackageManager(fixture.home, "yarn", "1.22.4", {
-      script: `process.kill(process.pid, "SIGINT");\nsetTimeout(() => {}, 1000);\n`,
-    });
+  // §08.5 is POSIX semantics. Windows has no signals: `process.kill(pid,
+  // "SIGINT")` there is `TerminateProcess`, the process exits with a code and
+  // never reports a `signal`, and there is no way for a death-by-signal to
+  // propagate the way this row requires. The claim does not exist on that
+  // platform rather than being unimplemented on it.
+  it.skipIf(process.platform === "win32")(
+    "138: a package manager killed by SIGINT takes the process with it (§08.5)",
+    async () => {
+      const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+      seedPackageManager(fixture.home, "yarn", "1.22.4", {
+        script: `process.kill(process.pid, "SIGINT");\nsetTimeout(() => {}, 1000);\n`,
+      });
 
-    const result = await run(["yarn", "install"], fixture);
+      const result = await run(["yarn", "install"], fixture);
 
-    // Death by signal, not a plain exit code: the handover is in-process, so the
-    // package manager's death *is* the tool's death.
-    expect(result.signal).toBe("SIGINT");
-    expect(result.exitCode).toBeNull();
-  });
+      // Death by signal, not a plain exit code: the handover is in-process, so
+      // the package manager's death *is* the tool's death.
+      expect(result.signal).toBe("SIGINT");
+      expect(result.exitCode).toBeNull();
+    },
+  );
 
   it("139: stdin passes through to the package manager intact", async () => {
     const fixture = createFixture({ packageManager: "npm@6.14.2" });

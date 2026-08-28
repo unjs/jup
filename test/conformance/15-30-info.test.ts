@@ -15,7 +15,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
@@ -27,6 +27,14 @@ import {
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
+
+/**
+ * §15.30 reports the shim a `PATH` lookup actually turns up. On Windows that is
+ * §10.3's `.cmd` wrapper: `PATHEXT` never contains the empty extension, so the
+ * extensionless `<B>` beside it — the one Git Bash runs — is not what `cmd.exe`
+ * or PowerShell would find.
+ */
+const SHIM_ON_PATH = process.platform === "win32" ? ".cmd" : "";
 
 interface Report {
   version: number;
@@ -370,7 +378,7 @@ describe("§15.30 corepack info", () => {
     ).toBe(0);
 
     const report = await info(fixture, {
-      env: { PATH: `${shimDirectory}:${process.env.PATH ?? ""}` },
+      env: { PATH: `${shimDirectory}${delimiter}${process.env.PATH ?? ""}` },
     });
 
     expect(report.shims.entries.map((entry) => entry.binary)).toEqual([
@@ -405,20 +413,20 @@ describe("§15.30 corepack info", () => {
     const bun = report.shims.entries.find((entry) => entry.binary === "bun")!;
     expect(bun.shim).toBeNull();
     const aubx = report.shims.entries.find((entry) => entry.binary === "aubx")!;
-    expect(aubx.shim).toBe(join(shimDirectory, "aubx"));
+    expect(aubx.shim).toBe(join(shimDirectory, `aubx${SHIM_ON_PATH}`));
     const nubx = report.shims.entries.find((entry) => entry.binary === "nubx")!;
     expect(nubx.shim).toBeNull();
 
     const yarn = report.shims.entries.find((entry) => entry.binary === "yarn")!;
-    expect(yarn.shim).toBe(join(shimDirectory, "yarn"));
-    expect(yarn.path).toBe(join(shimDirectory, "yarn"));
+    expect(yarn.shim).toBe(join(shimDirectory, `yarn${SHIM_ON_PATH}`));
+    expect(yarn.path).toBe(join(shimDirectory, `yarn${SHIM_ON_PATH}`));
     expect(yarn.ours).toBe(true);
     expect(yarn.shadowed).toBe(false);
 
     // §15.16 redirected this row: `enable` with no names now shims npm too, so
     // the report must show it. `--exclude npm` is what leaves it absent.
     const npm = report.shims.entries.find((entry) => entry.binary === "npm")!;
-    expect(npm.shim).toBe(join(shimDirectory, "npm"));
+    expect(npm.shim).toBe(join(shimDirectory, `npm${SHIM_ON_PATH}`));
 
     expect(
       (
@@ -429,11 +437,11 @@ describe("§15.30 corepack info", () => {
       ).exitCode,
     ).toBe(0);
     const after = await info(fixture, {
-      env: { PATH: `${shimDirectory}:${process.env.PATH ?? ""}` },
+      env: { PATH: `${shimDirectory}${delimiter}${process.env.PATH ?? ""}` },
     });
     expect(after.shims.entries.find((entry) => entry.binary === "npm")!.shim).toBeNull();
     expect(after.shims.entries.find((entry) => entry.binary === "yarn")!.shim).toBe(
-      join(shimDirectory, "yarn"),
+      join(shimDirectory, `yarn${SHIM_ON_PATH}`),
     );
   });
 

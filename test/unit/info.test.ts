@@ -9,7 +9,7 @@
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 import { DEFINITIONS } from "../../src/config/table.ts";
@@ -31,6 +31,10 @@ import { getRegistryUrl } from "../../src/net/registry.ts";
 import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import { SHIM_MARKER } from "../../src/commands/shims.ts";
 import type { CorepackMarker } from "../../src/types.ts";
+
+const IS_WINDOWS = process.platform === "win32";
+/** What a `PATH` lookup finds: `PATHEXT` never contains the empty extension. */
+const PATH_EXTENSION = IS_WINDOWS ? ".cmd" : "";
 
 const ENV_KEYS = [
   "COREPACK_HOME",
@@ -565,26 +569,35 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     // `jup` beside it.
     process.env.COREPACK_SHIM_DIRECTORY = bin;
 
-    // A stub carrying the marker, plus the relative symlink `enable` writes.
+    // A stub carrying the marker, plus what `enable` puts on the name: §10.2's
+    // relative symlink, or §10.3's wrappers, which carry no marker and are
+    // recognised by their shebang plus the `<binName>.js` they invoke.
     writeFileSync(join(bin, "yarn.js"), `// ${SHIM_MARKER} — generated\n`, { mode: 0o755 });
-    symlinkSync("yarn.js", join(bin, "yarn"));
-    // Somebody else's yarn, earlier on PATH.
+    if (IS_WINDOWS) {
+      writeFileSync(join(bin, "yarn"), `#!/bin/sh\nexec "$basedir/node" "$basedir/yarn.js"\n`);
+      writeFileSync(join(bin, "yarn.cmd"), `@SETLOCAL\n"%~dp0\\node.exe"  "%~dp0\\yarn.js" %*\n`);
+    } else {
+      symlinkSync("yarn.js", join(bin, "yarn"));
+    }
+    // Somebody else's yarn, earlier on PATH. `PATHEXT` decides what a Windows
+    // lookup finds, and it never contains the empty extension.
     const other = join(home, "other");
     mkdirSync(other, { recursive: true });
-    writeFileSync(join(other, "yarn"), `#!/bin/sh\nexec /usr/bin/true\n`, { mode: 0o755 });
+    const rival = join(other, `yarn${PATH_EXTENSION}`);
+    writeFileSync(rival, `#!/bin/sh\nexec /usr/bin/true\n`, { mode: 0o755 });
 
-    process.env.PATH = `${other}:${bin}`;
+    process.env.PATH = `${other}${delimiter}${bin}`;
     const info = buildReport();
     const yarn = info.shims.entries.find((entry) => entry.binary === "yarn")!;
 
     expect(info.shims.directory).toBe(bin);
     expect(yarn.shim).toBe(join(bin, "yarn"));
-    expect(yarn.path).toBe(join(other, "yarn"));
+    expect(yarn.path).toBe(rival);
     expect(yarn.ours).toBe(false);
     // The whole point of #686: a perfectly installed shim that loses on PATH.
     expect(yarn.shadowed).toBe(true);
 
-    process.env.PATH = `${bin}:${other}`;
+    process.env.PATH = `${bin}${delimiter}${other}`;
     const winning = buildReport().shims.entries.find((entry) => entry.binary === "yarn")!;
     expect(winning.ours).toBe(true);
     expect(winning.shadowed).toBe(false);

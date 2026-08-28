@@ -110,33 +110,57 @@ export function cleanEnv(): Record<string, string> {
   return env;
 }
 
+/**
+ * Set — or, with `undefined`, unset — one variable in a child environment.
+ *
+ * Windows environment names are case-insensitive, and Node resolves a collision
+ * when it builds the child's block by keeping the **first** key it sees. The
+ * inherited spelling (`Path`, `TEMP`, `npm_config_prefix`) is copied by
+ * `cleanEnv` before any override is applied, so a plain `env.PATH = …` adds a
+ * second key that the spawn then discards, and the row silently runs with the
+ * runner's value. Every override goes through here, which removes the other
+ * spellings first.
+ */
+function setVar(env: Record<string, string>, key: string, value: string | undefined): void {
+  if (process.platform === "win32") {
+    const upper = key.toUpperCase();
+    for (const existing of Object.keys(env)) {
+      if (existing !== key && existing.toUpperCase() === upper) delete env[existing];
+    }
+  }
+  if (value === undefined) delete env[key];
+  else env[key] = value;
+}
+
 export function run(args: string[], options: RunOptions): Promise<RunResult> {
   const env = cleanEnv();
-  env.COREPACK_HOME = options.home;
-  env.COREPACK_DEFAULT_TO_LATEST = "0";
+  setVar(env, "COREPACK_HOME", options.home);
+  setVar(env, "COREPACK_DEFAULT_TO_LATEST", "0");
   // §15.1 makes `$HOME/.npmrc` a real input, so the developer's own — with the
   // registry and token their day job needs — would otherwise leak into every
   // row. Point `HOME` at the fresh, empty store directory instead. Rows that
   // care about the home directory (the shim ones) set it themselves in
   // `options.env`, which is applied below and wins.
-  env.HOME = options.home;
-  env.USERPROFILE = options.home;
+  setVar(env, "HOME", options.home);
+  setVar(env, "USERPROFILE", options.home);
   // Same reasoning for §15.1's global tier, `<prefix>/etc/npmrc`: `PREFIX` is
   // npm's own override for it, and pointing it at the fixture keeps a machine
   // with a system-wide npm configuration from changing what the rows observe.
-  env.PREFIX = options.home;
-  env.npm_config_prefix = options.home;
+  setVar(env, "PREFIX", options.home);
+  setVar(env, "npm_config_prefix", options.home);
 
   const nodeArgs: string[] = [];
   if (options.registry !== undefined) {
-    env.JUP_MOCK_ORIGIN =
-      typeof options.registry === "string" ? options.registry : options.registry.origin;
+    setVar(
+      env,
+      "JUP_MOCK_ORIGIN",
+      typeof options.registry === "string" ? options.registry : options.registry.origin,
+    );
     nodeArgs.push("--import", INTERCEPT);
   }
 
   for (const [key, value] of Object.entries(options.env ?? {})) {
-    if (value === undefined) delete env[key];
-    else env[key] = value;
+    setVar(env, key, value);
   }
 
   const child = spawn(process.execPath, [...nodeArgs, options.bin ?? BIN, ...args], {

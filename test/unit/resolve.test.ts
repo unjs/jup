@@ -737,25 +737,33 @@ describe("getDefaultVersion (§04.5)", () => {
     });
   });
 
-  it("heals in memory even when the file cannot be rewritten", async () => {
-    const { npm, berry } = await startYarnServers();
-    seedLastKnownGood({ deno: "2.9.5+sha512.wrong" });
+  // Windows cannot reach the state this row is about: `chmod` there toggles the
+  // read-only *file* attribute and does nothing at all to a directory, so the
+  // repair's write lands and the last-known-good file heals. §07.8's claim —
+  // the run must not depend on the rewrite — is the same code path either way;
+  // what is missing is a way to make the rewrite fail.
+  it.skipIf(process.platform === "win32")(
+    "heals in memory even when the file cannot be rewritten",
+    async () => {
+      const { npm, berry } = await startYarnServers();
+      seedLastKnownGood({ deno: "2.9.5+sha512.wrong" });
 
-    // §07.8 — an unwritable store must still be able to *run*. A read-only home
-    // lets the entry be read and makes the repair's write fail, which is the
-    // ordering that matters: the run must not depend on the rewrite landing.
-    chmodSync(home, 0o555);
-    try {
-      await expect(getDefaultVersion("deno")).resolves.toBe("2.9.5");
-      expect([...npm.requests, ...berry.requests]).toEqual([]);
-    } finally {
-      chmodSync(home, 0o755);
-    }
+      // §07.8 — an unwritable store must still be able to *run*. A read-only
+      // home lets the entry be read and makes the repair's write fail, which is
+      // the ordering that matters: the run must not depend on the rewrite.
+      chmodSync(home, 0o555);
+      try {
+        await expect(getDefaultVersion("deno")).resolves.toBe("2.9.5");
+        expect([...npm.requests, ...berry.requests]).toEqual([]);
+      } finally {
+        chmodSync(home, 0o755);
+      }
 
-    // The file kept the bad value, and the next run will heal it again — one
-    // wasted repair per run is the correct price for a read-only checkout.
-    expect(readLastKnownGoodFile()).toEqual({ deno: "2.9.5+sha512.wrong" });
-  });
+      // The file kept the bad value, and the next run will heal it again — one
+      // wasted repair per run is the correct price for a read-only checkout.
+      expect(readLastKnownGoodFile()).toEqual({ deno: "2.9.5+sha512.wrong" });
+    },
+  );
 });
 
 /* ------------------------------------------------------------------ *

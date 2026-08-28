@@ -41,6 +41,21 @@ const TOOL = copyTool();
 const IS_WINDOWS = process.platform === "win32";
 
 /**
+ * `enable` installed the name — whatever shape this platform's `enable` uses.
+ * §10.2 leaves one symlink; §10.3 leaves three regular files, and `readlink`
+ * or `isSymbolicLink()` on those says nothing about the claim under test.
+ */
+function expectInstalled(directory: string, binName: string): void {
+  if (IS_WINDOWS) {
+    for (const extension of ["", ".cmd", ".ps1"]) {
+      expect(lstatSync(join(directory, `${binName}${extension}`)).isFile()).toBe(true);
+    }
+    return;
+  }
+  expect(lstatSync(join(directory, binName)).isSymbolicLink()).toBe(true);
+}
+
+/**
  * A fixture whose per-user shim directory (§15.13) is inside the fixture, with
  * both it and a second candidate directory on `PATH` — so §15.29's verification
  * is satisfied and a clean `enable` really does print nothing.
@@ -87,7 +102,7 @@ describe("§13.11 enable / disable", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("");
     for (const name of ["npm", "npx", "pnpm", "pnpx", "yarn", "yarnpkg"]) {
-      expect(lstatSync(join(shimDir, name)).isSymbolicLink()).toBe(true);
+      expectInstalled(shimDir, name);
     }
   });
 
@@ -98,8 +113,8 @@ describe("§13.11 enable / disable", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(lstatSync(join(binDir, "yarn")).isSymbolicLink()).toBe(true);
-    expect(lstatSync(join(binDir, "pnpm")).isSymbolicLink()).toBe(true);
+    expectInstalled(binDir, "yarn");
+    expectInstalled(binDir, "pnpm");
   });
 
   it("119: enable --install-directory=<dir> yarn installs yarn and yarnpkg only", async () => {
@@ -110,8 +125,8 @@ describe("§13.11 enable / disable", () => {
     const result = await run(["enable", `--install-directory=${target}`, "yarn"], options);
 
     expect(result.exitCode).toBe(0);
-    expect(lstatSync(join(target, "yarn")).isSymbolicLink()).toBe(true);
-    expect(lstatSync(join(target, "yarnpkg")).isSymbolicLink()).toBe(true);
+    expectInstalled(target, "yarn");
+    expectInstalled(target, "yarnpkg");
     expect(() => lstatSync(join(target, "pnpm"))).toThrow();
   });
 
@@ -232,7 +247,7 @@ describe("§13.11 enable / disable", () => {
     expect(result.exitCode).toBe(0);
     expect(() => lstatSync(join(target, "yarn"))).toThrow();
     expect(() => lstatSync(join(target, "yarnpkg"))).toThrow();
-    expect(lstatSync(join(target, "pnpm")).isSymbolicLink()).toBe(true);
+    expectInstalled(target, "pnpm");
   });
 
   it.skipIf(IS_WINDOWS)(

@@ -1019,9 +1019,11 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
   let home: string;
   let project: string;
   let savedHome: string | undefined;
+  let savedUserProfile: string | undefined;
 
   beforeEach(() => {
     savedHome = process.env.HOME;
+    savedUserProfile = process.env.USERPROFILE;
     const root = mkdtempSync(join(tmpdir(), "jup-http-npmrc-"));
     roots.push(root);
     home = join(root, "home");
@@ -1029,7 +1031,11 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
     mkdirSync(home, { recursive: true });
     mkdirSync(project, { recursive: true });
     writeFileSync(join(project, "package.json"), `{"packageManager":"pnpm@11.1.2"}\n`);
+    // §15.1's home directory is `$HOME`, or `%USERPROFILE%` on Windows. Both
+    // spellings are redirected, so the row reads the fixture's `.npmrc` on
+    // every platform rather than the developer's own.
     process.env.HOME = home;
+    process.env.USERPROFILE = home;
     process.env.PREFIX = join(root, "prefix");
     resetNpmrcCache();
   });
@@ -1037,6 +1043,8 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
   afterEach(() => {
     if (savedHome === undefined) delete process.env.HOME;
     else process.env.HOME = savedHome;
+    if (savedUserProfile === undefined) delete process.env.USERPROFILE;
+    else process.env.USERPROFILE = savedUserProfile;
     delete process.env.PREFIX;
     resetNpmrcCache();
     while (roots.length > 0) rmSync(roots.pop()!, { recursive: true, force: true });

@@ -378,7 +378,9 @@ describe("§13.5 environment variables", () => {
     const result = await run(["npm", "run", "env"], fixture);
 
     expect(result.exitCode).toBe(0);
-    const root = REPO_ROOT.replace(/\/$/, "");
+    // `REPO_ROOT` comes from `fileURLToPath`, so its trailing separator is
+    // whatever the platform uses.
+    const root = REPO_ROOT.replace(/[\\/]$/, "");
     expect(result.stdout).toContain(`COREPACK_ROOT=${root}\n`);
     // §11.3 / §14.22 — a corepack-aware package manager looks for the first; one
     // that has learnt this tool's name finds the second.

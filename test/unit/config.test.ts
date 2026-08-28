@@ -436,6 +436,14 @@ function pretendHost(platform: string, arch: string): void {
 const REAL_PLATFORM = process.platform;
 const REAL_ARCH = process.arch;
 
+/**
+ * What `{exe}` expands to. The table reads `process.platform` once, when it is
+ * loaded, so `pretendHost` cannot move it — see the note on the `nub` row
+ * below. The rows that pretend to be Linux are about the *identity* of the
+ * paths, not about the suffix, so they take the suffix from the real host.
+ */
+const EXE = REAL_PLATFORM === "win32" ? ".exe" : "";
+
 describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
@@ -608,10 +616,10 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
     // the `.exe` can come from.
     pretendHost("linux", "x64");
     expect(resolveSpecBin(getSpecFor("bun", "1.4.0"))).toEqual({
-      bun: "./bin/bun",
-      bunx: "./bin/bun",
+      bun: `./bin/bun${EXE}`,
+      bunx: `./bin/bun${EXE}`,
     });
-    expect(resolveSpecBin(getSpecFor("deno", "2.9.5"))).toEqual({ deno: "./deno" });
+    expect(resolveSpecBin(getSpecFor("deno", "2.9.5"))).toEqual({ deno: `./deno${EXE}` });
   });
 
   it("makes `bun` and `bunx` one file, which is what argv[0] dispatch needs", () => {
@@ -713,7 +721,11 @@ describe("aube — §15.21's third per-host entry", () => {
     // Unlike bun's two, these are three *different* paths in the tarball — the
     // publisher hardlinks one executable to three names — so the dispatch is
     // aube's own, and the table only has to name them.
-    expect(bin).toEqual({ aube: "./bin/aube", aubr: "./bin/aubr", aubx: "./bin/aubx" });
+    expect(bin).toEqual({
+      aube: `./bin/aube${EXE}`,
+      aubr: `./bin/aubr${EXE}`,
+      aubx: `./bin/aubx${EXE}`,
+    });
     expect(getBinariesFor("aube")).toEqual(["aube", "aubr", "aubx"]);
     for (const name of ["aube", "aubr", "aubx"]) {
       expect(getPackageManagerFor(name)).toBe("aube");
@@ -828,7 +840,7 @@ describe("nub — §15.21's fourth per-host entry", () => {
     // The per-host packages shipped a byte-identical `bin/nubx` until 0.7.0 and
     // dropped it because it doubled every artifact. `bin/nub` is the path that
     // has been in all of them, so it is the one the table names — for both.
-    expect(bin).toEqual({ nub: "./bin/nub", nubx: "./bin/nub" });
+    expect(bin).toEqual({ nub: `./bin/nub${EXE}`, nubx: `./bin/nub${EXE}` });
     // The identity is the assertion; the `.exe` half of `{exe}` is read once
     // from the real host (`EXE`) and `15-28-native.test.ts` is where it is
     // exercised, so pretending to be Windows here would prove nothing.

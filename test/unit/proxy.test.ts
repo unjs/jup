@@ -419,7 +419,11 @@ describe("no second opt-in (§14.8, rows 72 and 156)", () => {
  * ------------------------------------------------------------------ */
 
 describe("variable precedence (§05.1)", () => {
-  it("prefers lowercase http_proxy over HTTP_PROXY", () => {
+  // Windows environment names are case-insensitive: `http_proxy` and
+  // `HTTP_PROXY` are one variable there, the second assignment below overwrites
+  // the first, and there is no precedence to observe. §05.1's rule is not
+  // violated on that platform — it is unreachable.
+  it.skipIf(process.platform === "win32")("prefers lowercase http_proxy over HTTP_PROXY", () => {
     process.env.http_proxy = "http://lower.example:1";
     process.env.HTTP_PROXY = "http://upper.example:2";
 
