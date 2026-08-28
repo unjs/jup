@@ -13,7 +13,16 @@
  * command surface is already cold.
  */
 
-import { readFileSync, writeFileSync } from "node:fs";
+import {
+  lstatSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { messages } from "../errors-cold.ts";
 import {
   detectFormat,
@@ -217,13 +226,61 @@ export function writePin(
   }
 
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
-  writeFileSync(target, updated);
+  writeManifest(target, updated);
 
   // `target` goes back to the caller because §15.23's `.jup.lock` lives
   // beside *this* file, not beside the cwd — in a monorepo those differ, and a
   // resolution recorded next to the wrong manifest would never be found again.
   // §15.27 also requires it to be *printed*, and printing is the caller's job.
   return { previousPackageManager, target, written };
+}
+
+/**
+ * Write the manifest back **atomically**, the way `lockfile.ts` writes the file
+ * it derives (§14.3).
+ *
+ * A plain `writeFileSync` truncates first and writes second, so an interrupt in
+ * between — Ctrl-C, an OOM kill, a full disk, or two `jup use` runs racing in a
+ * monorepo — leaves the user's `package.json` empty and the original gone. That
+ * is somebody's source file, not a cache entry we can rebuild: it deserves at
+ * least the care the derived lockfile already gets. Temp-then-rename makes the
+ * replacement a single step, so a reader sees either the old file or the new one.
+ *
+ * The temp file is opened `wx` (`O_CREAT | O_EXCL`) under an unguessable name,
+ * so a symlink planted beside the manifest is not something we write through;
+ * and a symlinked `package.json` — legal, if rare, in a workspace — is resolved
+ * first so the rename replaces the file rather than the link. The mode is
+ * carried across, or a manifest the user had made read-only-ish would come back
+ * as whatever the umask says.
+ */
+function writeManifest(target: string, content: string): void {
+  const link = lstatSync(target, { throwIfNoEntry: false });
+  // Absent: nothing to replace and no link to resolve — §03.7 step 9 creates it.
+  if (link === undefined) {
+    writeFileSync(target, content);
+    return;
+  }
+
+  // A symlinked `package.json` is legal, if rare, in a workspace; resolve it so
+  // the rename replaces the file it names rather than the link itself.
+  const file = link.isSymbolicLink() ? realpathSync(target) : target;
+  const stats = link.isSymbolicLink() ? statSync(file, { throwIfNoEntry: false }) : link;
+  // Not a regular file — a directory, a fifo, a dangling link. Let the write
+  // fail exactly as it did before rather than renaming something over it.
+  if (stats === undefined || !stats.isFile()) {
+    writeFileSync(target, content);
+    return;
+  }
+
+  const suffix = process.getBuiltinModule("node:crypto").randomBytes(6).toString("hex");
+  const tmp = join(dirname(file), `.${basename(file)}.${suffix}.tmp`);
+  try {
+    writeFileSync(tmp, content, { flag: "wx", mode: stats.mode & 0o777 });
+    renameSync(tmp, file);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
 }
 
 /**
