@@ -835,7 +835,8 @@ export function isOutsideProject(manifestPath: string): boolean {
 
   const dir = dirname(resolve(manifestPath));
   const target = resolve(home);
-  return target === dir || target.startsWith(dir + sep);
+  // `dir + sep` doubles the separator at the root, where `dir` is already `/`.
+  return target === dir || target.startsWith(dir.endsWith(sep) ? dir : dir + sep);
 }
 
 /** §03.5 — reconcile the discovered spec with the requested binary. */

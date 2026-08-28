@@ -114,15 +114,15 @@ export const SHIM_MARKER = "@jup-shim";
 /**
  * §10.2 — the shared stub every POSIX shim links to. It carries no binary name,
  * so it cannot collide with one: every table name is a bare command, and this is
- * the only file in `dist/` with a hyphen. Here because the ownership test names it.
+ * the only file in `dist/` with a hyphen.
  */
 export const PROXY_STUB_NAME = "shim-proxy.mjs";
 
 /**
  * §10.3 — the per-name stub a Windows wrapper invokes. `.mjs` so the runtime
  * knows the format from the name and never walks up for a `package.json`
- * `"type"` (§14.27). Here, not in `shims.ts`, for the reason `SHIM_MARKER` is:
- * §14.16's ownership test reads it on every invocation.
+ * `"type"` (§14.27). Here for the reason `SHIM_MARKER` is: §14.16's ownership
+ * test reads it on every invocation.
  */
 export function stubNameFor(binName: string): string {
   return `${binName}.mjs`;
@@ -157,8 +157,8 @@ export function isOurShim(file: string, binName: string): boolean {
   if (head === undefined) {
     // The open follows the link, so this also covers #751's stale shim, whose
     // stub has moved away: §15.14 has `disable` remove it, which needs this
-    // lookup to find the directory. Dangling is ours iff it still names our stub
-    // — `isOurEntry`'s rule. Only reached once the read failed.
+    // lookup to find the directory. Dangling is ours iff it still names our
+    // stub — `isOurEntry`'s rule. Only reached once the read failed.
     let link: string;
     try {
       link = readlinkSync(file);
@@ -284,10 +284,9 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
   }
 
   // Not `binPath` for a relative value: §08.1 joins naively, and `./bin/yarn.js`
-  // must stay `<location>/bin/yarn.js` in `process.argv[1]` rather than being
-  // rewritten by `resolve`'s normalisation of the location. An absolute value has
-  // nothing to prepend, and joining one yielded `<location>` concatenated onto
-  // itself — neither what was declared nor what was checked.
+  // must stay `<location>/bin/yarn.js` in `process.argv[1]`. An absolute value
+  // has nothing to prepend, and joining one yielded `<location>` concatenated
+  // onto itself — neither what was declared nor what was checked.
   return isAbsolute(declared) ? binPath : join(spec.location, declared);
 }
 

@@ -173,7 +173,7 @@ export const messages = {
 
   /** §07.5 — the rename lost to something that is not a completed install. */
   occupiedInstallDir: (target: string) =>
-    `Refusing to use ${target}: a directory is already there but carries no ${"`"}.jup${"`"} marker, so it is not a complete install. Remove it and run again.`,
+    `Refusing to use ${target}: a directory is already there with no ${"`"}.jup${"`"} marker, so it is not a complete install. Remove it and run again.`,
 
   /* §12.10 — informational output ----------------------------------------- */
 

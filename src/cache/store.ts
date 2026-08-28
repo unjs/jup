@@ -237,9 +237,14 @@ export function resolveInstallTarget(locator: Locator): {
   };
 }
 
-/** `<algo>.<hex>`, the serialized form §07.2 stores in the marker. */
+/**
+ * `<algo>.<hex>`, the serialized form §07.2 stores in the marker. Encoded
+ * because it becomes a path segment: a URL reference takes its digest from
+ * `new URL(ref).hash`, which may hold `/` and `..`. `versionDirFor` encodes for
+ * the same reason.
+ */
 function serializePin(pin: HashPin): string {
-  return `${pin.algo.toLowerCase()}.${pin.digest ?? ""}`;
+  return encodeURIComponent(`${pin.algo.toLowerCase()}.${pin.digest ?? ""}`);
 }
 
 /**
@@ -392,8 +397,8 @@ function isDirectory(path: string): boolean {
 /**
  * §07.5 — the rename is the commit point. `true` when this call published `tmp`;
  * `false` when another process won, leaving `tmp` for the caller to dispose of
- * once it knows whether the winner is the artifact it wanted. An occupied `dest`
- * with no marker is neither, and throws. Windows retries 5x, `100 * 2^i` ms.
+ * once it knows whether the winner is what it wanted. An occupied `dest` with no
+ * marker is neither, and throws. Windows retries 5x, `100 * 2^i` ms.
  */
 export function promote(tmp: string, dest: string): boolean {
   ensureDir(dirname(dest), getInstallFolder());
@@ -417,19 +422,18 @@ export function promote(tmp: string, dest: string): boolean {
       const code = errorCode(error);
 
       // Occupied. A benign lost race *only* if it proves to be a completed
-      // install: the marker goes into the staging tree before the rename, so a
-      // winner always carries one. Without it this is a foreign or half-copied
-      // tree, and adopting it hands the caller unverified bytes plus an entry
-      // that never stops re-downloading.
+      // install: the marker goes in before the rename, so a winner always has
+      // one. Without it this is a foreign or half-copied tree, and adopting it
+      // hands the caller unverified bytes plus an entry that re-downloads for
+      // ever.
       if (
         code === "EEXIST" ||
         code === "ENOTEMPTY" ||
         (isWindows && code === "EPERM" && isDirectory(dest))
       ) {
         if (readMarker(dest) === null) throw new UsageError(messages.occupiedInstallDir(dest));
-        // `tmp` is left for the caller: whether those bytes are still wanted
-        // depends on what the winner turned out to be, which is a question this
-        // function cannot answer.
+        // `tmp` is the caller's: whether those bytes are still wanted depends
+        // on what the winner turned out to be, which this cannot answer.
         return false;
       }
 
@@ -443,8 +447,7 @@ export function promote(tmp: string, dest: string): boolean {
     }
   }
 
-  // Unreachable: the retry branch is gated on `i < attempts - 1`, so the last
-  // iteration always returns or rethrows. Stated for the return type.
+  // Unreachable: the retry branch is gated on `i < attempts - 1`. For the type.
   /* v8 ignore next */
   throw new Error(messages.occupiedInstallDir(dest));
 }

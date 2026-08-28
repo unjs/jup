@@ -591,7 +591,9 @@ export function resolveBin(
   const named = typeof packageBin === "string" && typeof manifest?.name === "string";
 
   if (named || isValidBinSpec(packageBin)) {
-    const bin = named ? { [manifest.name as string]: packageBin as string } : (packageBin as BinSpec);
+    const bin = named
+      ? { [manifest.name as string]: packageBin as string }
+      : (packageBin as BinSpec);
     // §15.17 point 3 — the two maintenance signals, both debug-level because
     // neither changes the outcome of this run (§16.9).
     if (known && !banded) {

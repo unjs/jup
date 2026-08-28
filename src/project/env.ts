@@ -196,8 +196,8 @@ export function parseEnvFile(content: string): Record<string, string> {
 
   let i = 0;
   // `parseEnv` reads an *indented* `#` as a key when the line before it was a
-  // comment (`#c\n\n\t#K=2` -> `#K`) and as a comment otherwise; re-testing for
-  // a comment after the blank-line skip lost the first case.
+  // comment (`#c\n\n\t#K=2` -> `#K`) and as a comment otherwise; re-testing
+  // after the blank-line skip lost the first case.
   let afterComment = false;
   let indented = false;
   while (i < text.length) {
