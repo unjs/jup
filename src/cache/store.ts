@@ -128,7 +128,8 @@ function versionDirFor(locator: Locator, parsed: SemVer | null): string {
 /**
  * §07.2 — read the `.jup` marker. Its presence is the "this install is
  * complete and valid" signal, and reading it is the entire warm path: `ENOENT`
- * proceeds to download, any other error propagates.
+ * proceeds to download, any other error propagates, and a marker whose shape is
+ * wrong reads as absent.
  */
 export function readMarker(dir: string): CorepackMarker | null {
   let text: string;
@@ -141,7 +142,22 @@ export function readMarker(dir: string): CorepackMarker | null {
 
   // A truncated or corrupt marker is a broken install, not a cache miss:
   // propagate rather than silently re-downloading over it.
-  return JSON.parse(text) as CorepackMarker;
+  const marker: unknown = JSON.parse(text);
+
+  // A marker of the wrong *shape*, though, is not a marker — and not everything
+  // that writes one is this tool (§07.10). `hash` is re-attached to the locator
+  // by `referenceWithHash` and lands in the **committed** `packageManager`
+  // field; `bin` names paths §08 executes. Both are checked, and anything else
+  // is the missing marker every caller already handles (§07.2).
+  const hash: unknown = (marker as { hash?: unknown } | null)?.hash;
+  if (typeof hash !== "string" || !/^[a-z0-9]{1,32}\.[0-9a-z]{1,128}$/.test(hash)) return null;
+  // §08.1 — `bin` is optional; §02.4's `{name: path}` map or its `[name, …]`.
+  const bin: unknown = (marker as { bin?: unknown }).bin;
+  if (bin !== undefined) {
+    if (typeof bin !== "object" || bin === null) return null;
+    if (!Object.values(bin).every((entry) => typeof entry === "string")) return null;
+  }
+  return marker as CorepackMarker;
 }
 
 /**

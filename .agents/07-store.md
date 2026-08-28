@@ -78,6 +78,29 @@ catch other  → propagate
 Note `hash` in the marker is the **serialized** form `<algo>.<hexdigest>`, which the
 caller re-attaches to the locator as its build suffix (§07.6).
 
+#### Shape validation — NORMATIVE
+
+A marker is a file on disk, and not everything that writes one is this tool:
+`install -g <archive>.tgz` promotes markers that arrived inside a tarball (§07.10),
+and a store directory is a directory like any other. Two of its fields are then
+used as more than data — `hash` is re-attached to the locator and lands in the
+**committed** `packageManager` field of the user's `package.json`, and `bin` names
+paths §08 resolves and executes.
+
+An implementation therefore **MUST** validate the parsed marker before returning it:
+
+* `hash` is a string of the form `<algo>.<digest>`, both parts restricted to a
+  narrow character class (`[a-z0-9]`) and to a sane length. Every digest this tool
+  writes is lowercase hex (§06.2); the requirement is that nothing outside that
+  grammar — whitespace, quotes, newlines, `@`, `+` — can reach a manifest field.
+* `bin`, when present, is §02.4's `{name: path}` map or `[name, …]` list, with
+  string values throughout. It is optional (§08.1).
+
+A marker that fails either check **MUST** be treated exactly as a missing one — the
+`catch ENOENT` branch above — so the install is redone and the bad file written
+over. A marker that is not parseable JSON still propagates: that is a broken
+install, not an untrusted one.
+
 ## 7.3 Choosing the URL
 
 ```
