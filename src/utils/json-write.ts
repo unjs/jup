@@ -62,7 +62,14 @@ export function detectFormat(text: string): ManifestFormat {
   return { indent, eol, hasBom: text.startsWith(BOM) };
 }
 
-/** Byte span of a top-level key's *value*, or null when the key is absent. */
+/**
+ * Byte span of a top-level key's *value*, or null when the key is absent.
+ *
+ * Duplicate keys are legal JSON, and both `JSON.parse` and `scanTopLevelFields`
+ * resolve them **last-wins**. So the scan does not stop at the first match: it
+ * keeps walking and returns the last one, or it would rewrite an occurrence no
+ * reader ever consults and report a change that never took effect.
+ */
 export function scanTopLevelKey(text: string, key: string): { start: number; end: number } | null {
   let i = text.startsWith(BOM) ? BOM.length : 0;
   i = skipWhitespace(text, i);
@@ -71,9 +78,11 @@ export function scanTopLevelKey(text: string, key: string): { start: number; end
   }
   i = skipWhitespace(text, i + 1);
 
+  let found: { start: number; end: number } | null = null;
+
   while (i < text.length) {
     if (text.charCodeAt(i) === CH_RBRACE) {
-      return null; // End of the object; key absent.
+      return found; // End of the object.
     }
     if (text.charCodeAt(i) !== CH_QUOTE) {
       return null; // Malformed — refuse to guess.
@@ -98,7 +107,7 @@ export function scanTopLevelKey(text: string, key: string): { start: number; end
       return null;
     }
     if (name === key) {
-      return { start: valueStart, end: valueEnd };
+      found = { start: valueStart, end: valueEnd };
     }
 
     i = skipWhitespace(text, valueEnd);
@@ -106,9 +115,9 @@ export function scanTopLevelKey(text: string, key: string): { start: number; end
       i = skipWhitespace(text, i + 1);
       continue;
     }
-    return null; // `}` or garbage — either way the key is not here.
+    return found; // `}` or garbage — nothing further to find either way.
   }
-  return null;
+  return found;
 }
 
 /**
