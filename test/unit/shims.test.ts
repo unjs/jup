@@ -48,6 +48,7 @@ import {
   shimSource,
   SHIM_MARKER,
   stubNameFor,
+  stubNotExecutable,
   stubNotWritable,
   targetBinaries,
   verifyOnPath,
@@ -496,6 +497,53 @@ describe("enable (§10.2)", () => {
       expect(after.ino).toBe(before.ino);
       // The stub itself is left alone too, so a read-only dist folder still works.
       expect(lstatSync(stub).mtime.getTime()).toBe(past.getTime());
+    },
+  );
+
+  // §15.45 — the execute bit that decides whether the name runs is on the stub,
+  // because §10.2's shim is a symlink and a symlink has no mode of its own. `npm
+  // pack` re-applies that bit to the package's `bin` targets alone, so every
+  // stub in a published tarball arrives `0o644` — and the comparison above,
+  // which is right about the *content*, used to leave it there.
+  it.skipIf(process.platform === "win32")(
+    "254: chmods a stub that arrived without the execute bit, without rewriting it",
+    async () => {
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+      const stub = join(dist, PROXY_STUB_NAME);
+      // The published shape. The mtime goes back far enough that a rewrite —
+      // rather than the chmod §10.2 property 5 asks for — would show below.
+      chmodSync(stub, 0o644);
+      const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
+      utimesSync(stub, past, past);
+
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+      expectMode(stub, 0o755);
+      expect(statSync(stub).mtime.getTime()).toBe(past.getTime());
+      // And the shim still points at it, so what was repaired is the file the
+      // kernel checks when the name is executed.
+      expect(readlinkSync(join(binDir, "yarn"))).toBe(expectedTarget());
+      expect(warn).not.toHaveBeenCalled();
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "254: leaves an already-executable stub alone, the chmod included",
+    async () => {
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+      const stub = join(dist, PROXY_STUB_NAME);
+      chmodSync(stub, 0o755);
+      // `ctime` is what a chmod moves, and the only thing it moves when the mode
+      // it writes is the mode already there. §10.2 property 4 and §10.7 both
+      // want a warm `enable` over a correct installation to write nothing at
+      // all, which is why the mode is compared before it is set.
+      const before = statSync(stub).ctimeMs;
+
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+      expect(statSync(stub).ctimeMs).toBe(before);
     },
   );
 
@@ -1230,6 +1278,28 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
       }
     },
   );
+
+  /**
+   * §15.45's message, which is the third read-only shape and shares neither
+   * remedy with the two above.
+   *
+   * Only the text is asserted: a `chmod` fails on ownership, not on directory
+   * permissions, so a fixture the test user owns cannot be put into the state
+   * that provokes the refusal — it takes a read-only mount or a root-owned
+   * install. What the row pins is that the message the refusal carries is the
+   * one that would help there.
+   */
+  it("254: the not-executable message names the stub and a remedy that reaches it", () => {
+    const message = stubNotExecutable(join(dist, PROXY_STUB_NAME));
+
+    expect(message).toContain(join(dist, PROXY_STUB_NAME));
+    expect(message).toContain("chmod +x");
+    // Not §15.43's: neither of those moves this file, and "without node" is
+    // wrong advice here — the bit is needed whichever names are enabled.
+    expect(message).not.toContain("--install-directory");
+    expect(message).not.toContain("JUP_SHIM_DIRECTORY");
+    expect(message).not.toContain("without node");
+  });
 });
 
 describe("Windows shims (§10.3)", () => {

@@ -1469,6 +1469,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 251 | The same, with no runtime outside `<home>` reachable by either route; then `enable node` with the tool's own package directory read-only | the first fails, naming the cache and `cache clean`, and writes nothing — no `#!/usr/bin/env node` and no store path. The second names the **stub** it could not rewrite, not the shim directory, while `enable pnpm` in the same tree still exits 0 in silence (§10.1, §10.7, §15.43) |
 | 252 | A stub whose shebang names `<home>/v1/node/<v>/bin/node` — what an older `enable` left — beside three other cached versions, then `cache clean` | `node@<v>` survives, the other three are gone, the count on stdout is `3`, and one line on stderr names what was kept, why, and the re-`enable` that clears it (§15.44, §15.35l) |
 | 253 | The same tree with `cache clean --all`, and then a correctly pinned stub (interpreter outside `<home>`) with a plain `cache clean` | `--all` removes the interpreter too, warning on stderr *before* it does; the pinned tree prints exactly `Removed <n> cached version(s) from <path>` with an empty stderr and nothing spared (§15.44, §15.43) |
+| 254 | A published-shaped install — the stub back to `0o644`, as `npm pack` leaves it — then `enable`, then the installed shim run through `execve`; then a warm `enable` over the repaired stub | the first exits 0, the stub the shim points at carries the execute bit, and running the shim by path works; the second changes nothing at all, `chmod` included (§15.45, §10.2 properties 4 and 5) |
 
 ## 15.39 Tools, not only package managers — [required]
 
@@ -1834,3 +1835,55 @@ cannot help an install that was written before the guard existed.
   per-version work. An implementation SHOULD skip the lookup entirely when the
   store holds no versions, which is sound because a runtime `enable` could have
   named was installed by this tool and therefore carries a §07.2 marker.
+
+## 15.45 `enable` guarantees the stub it links to is executable — [required, bug]
+
+> Not from an issue: from §10.2 meeting the way npm publishes a package. Every
+> POSIX shim on a stock `npm i -g jup && jup enable` is installed non-executable,
+> and nothing says so — the `PATH` lookup passes over a file it cannot execute and
+> keeps looking, so the user sees "command not found", or somebody else's copy.
+
+**The problem, concretely.** §10.2's shim is a symlink to the shared stub, so the
+execute bit that decides whether the name runs is on the **stub**. A build script
+can `chmod 0o755` the stubs it generates, but that mode does not survive
+publication: npm re-applies the execute bit on pack to the package's `bin` targets
+and to nothing else. In jup's own 0.0.2 tarball, `dist/bin.mjs` is `0o755` and all
+sixteen stubs — `dist/shim-proxy.mjs` included — are `0o644`.
+
+`enable` does not repair it, because §10.2 property 4 is written in terms of
+content: the stub is compared and, being byte-identical, left alone. That
+short-circuit is load-bearing (§10.7's read-only installation, and property 3's
+idempotency), so the repair cannot be "write it again".
+
+The failure hides well. A dev checkout runs the build script's `chmod` and never
+sees it; so does any run that happens to rewrite the stub, such as §10.1 pinning
+the interpreter for `enable node`. It bites the packaged, unpinned, ordinary case
+alone.
+
+**Required.**
+
+* `enable` MUST guarantee that the stub each shim it writes points at is
+  executable, whether or not it rewrote that stub. This is §10.2 property 5.
+* It MUST establish that by testing the mode first and `chmod`ing `0755` **only**
+  when the execute bits are missing. An unconditional `chmod` is a write, and
+  §10.2 property 4 and §10.7 both require a warm `enable` over a correct
+  installation to write nothing at all — the `stat` is what keeps "already
+  correct" free.
+* When the stub is not executable and the `chmod` is itself refused —
+  `EROFS`/`EACCES`/`EPERM`, the read-only image or the root-owned global install —
+  `enable` MUST **fail**. It MUST NOT warn and exit 0: no working shim can be
+  produced from that stub, and a shim that is silently inert is the failure this
+  section exists to remove. §14.18's tolerance does not extend here; §10.7 states
+  the boundary. The check precedes the shim it protects, so the refusal leaves the
+  shim directory as it found it.
+* The message names the stub, says that the shims are symlinks to it and so it is
+  the file that must carry the bit, and gives the two remedies that reach it —
+  `chmod +x <stub>` as its owner, or installing the tool somewhere writable. It
+  MUST NOT reuse §15.43's stub message, whose remedy ("re-run `enable` without
+  `node`") does not apply: the bit is needed whichever names are enabled.
+* Windows is out of scope and MUST NOT pay for it: §10.3's wrappers are regular
+  files, written and `chmod`ed on every `enable`, and NTFS mode bits do not mean
+  this.
+* An implementation MAY keep a build-time `chmod` on the generated stubs — a
+  checkout, and a tarball unpacked by other means, both benefit — but MUST NOT
+  treat it as the guarantee. The guarantee is in `enable`.

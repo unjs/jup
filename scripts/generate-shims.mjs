@@ -8,6 +8,13 @@
  *
  * The stub bodies come from `shimSource`, so there is exactly one definition of
  * what a shim is; this script only decides where they land.
+ *
+ * The `0o755` below is a convenience, not the guarantee: `npm pack` re-applies
+ * the execute bit to `bin` targets alone, so these stubs reach a published
+ * install `0o644` however this script left them. What guarantees an executable
+ * stub is `enable` itself, which chmods one that arrives without the bit
+ * (§15.45). The chmod stays because a dev checkout and a tarball unpacked by
+ * other means both run the stubs straight out of `dist/`.
  */
 
 import { existsSync } from "node:fs";

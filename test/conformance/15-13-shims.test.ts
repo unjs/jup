@@ -14,6 +14,7 @@
  * | 175 | §15.16 | #138 — npm is not shimmed, so `npm install` bypasses the pin |
  * | 195 | §15.29 | #507 (12👍) — `enable` exits 0 and nothing changed |
  * | 246–249 | §15.13 | the per-user default is not on macOS's `PATH` at all, and is on Debian's only after the next login |
+ * | 254 | §15.45 | the stubs `npm pack` ships are not executable, so every shim is inert |
  *
  * Every row runs the real entry point through a throwaway copy of the tool
  * (`copyTool`) with `HOME` redirected into the fixture, because §15.13's default
@@ -21,6 +22,7 @@
  * into the developer's own `PATH`.
  */
 
+import { execFile } from "node:child_process";
 import {
   chmodSync,
   existsSync,
@@ -29,11 +31,13 @@ import {
   readFileSync,
   readlinkSync,
   realpathSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { chmod } from "node:fs/promises";
 import { basename, delimiter, dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   alternateShims,
@@ -706,3 +710,81 @@ describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
     );
   },
 );
+
+/* ------------------------------------------------------------------ *
+ * §15.45 — row 254
+ *
+ * §10.2's shim is a symlink, so the execute bit the kernel checks
+ * before running the name is the **stub's**. `scripts/generate-shims.mjs`
+ * chmods the stubs `0o755` at build time and `npm pack` undoes it: it
+ * re-applies the bit to the package's `bin` targets and to nothing
+ * else, so a published install has `dist/bin.mjs` executable and every
+ * stub at `0o644`. `enable` compared the stub's *content*, found it
+ * already correct, and left the mode alone — which is right for §10.7
+ * and wrong for the shim, since a `PATH` lookup passes over a file it
+ * cannot execute without a word.
+ *
+ * The row runs the shim through a real `execve` rather than
+ * `node <shim>`, because `node <shim>` is precisely the spelling that
+ * never looks at the bit.
+ * ------------------------------------------------------------------ */
+
+const execFileAsync = promisify(execFile);
+
+describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable", () => {
+  /** Its own copy: this row rewrites the mode of the shared stub inside it. */
+  const PUBLISHED = copyTool();
+
+  /** The stub `<shimDir>/<binName>` points at — §10.2's relative symlink. */
+  function stubOf(shimDir: string, binName: string): string {
+    return resolve(shimDir, readlinkSync(join(shimDir, binName)));
+  }
+
+  it("254: enable repairs a stub that arrived without the execute bit", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+    const env = { ...options.env, COREPACK_HOME: fixture.home, COREPACK_ENABLE_NETWORK: "0" };
+
+    // Put the copy into the shape npm publishes: the stub is written once, then
+    // its mode is put back to the `0o644` a packed tarball carries.
+    expect((await run(["enable", "yarn"], { ...options, bin: PUBLISHED })).exitCode).toBe(0);
+    const stub = stubOf(shimDir, "yarn");
+    await chmod(stub, 0o644);
+
+    const enabled = await run(["enable", "yarn"], { ...options, bin: PUBLISHED });
+
+    expect(enabled.exitCode).toBe(0);
+    expect(enabled.stderr).toBe("");
+    expect(statSync(stub).mode & 0o111).toBe(0o111);
+
+    // The property the mode is a proxy for: the name on `PATH` is executable,
+    // through the symlink, by the kernel rather than by an explicit `node`.
+    const { stdout } = await execFileAsync(join(shimDir, "yarn"), ["--version"], {
+      cwd: fixture.cwd,
+      env: env as NodeJS.ProcessEnv,
+    });
+    expect(stdout).toBe("1.22.4\n");
+  });
+
+  it("254: and changes nothing at all when it is already executable", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+
+    expect((await run(["enable", "yarn"], { ...options, bin: PUBLISHED })).exitCode).toBe(0);
+    const stub = stubOf(shimDir, "yarn");
+    // Stated rather than inherited from the row above, which shares this copy.
+    await chmod(stub, 0o755);
+    // `ctime` moves for a chmod even when the mode it writes is the mode already
+    // there, so this is what an unconditional one would show. §10.2 property 4
+    // and §10.7 both want this run to write nothing.
+    const before = statSync(stub).ctimeMs;
+
+    const again = await run(["enable", "yarn"], { ...options, bin: PUBLISHED });
+
+    expect(again.exitCode).toBe(0);
+    expect(again.stdout).toBe("");
+    expect(again.stderr).toBe("");
+    expect(statSync(stub).ctimeMs).toBe(before);
+  });
+});

@@ -56,6 +56,7 @@ import {
   readlink,
   realpath,
   rename,
+  stat,
   symlink,
   unlink,
   writeFile,
@@ -344,6 +345,23 @@ export const shimDirectoryNotWritable = (directory: string) =>
  */
 export const stubNotWritable = (stub: string) =>
   `Unable to update ${stub}: the shim stub has to be rewritten — shimming ${INTERPRETER_NAME} pins the interpreter into it — and the directory holding ${TOOL_NAME}'s own files is not writable. --install-directory and JUP_SHIM_DIRECTORY move the shims, not this file, so neither helps: install ${TOOL_NAME} somewhere writable, or run \`${TOOL_NAME} enable\` without ${INTERPRETER_NAME}, which leaves the stub untouched.`;
+
+/**
+ * §15.45 — the stub is byte-correct but not executable, and cannot be fixed.
+ *
+ * A POSIX shim is a symlink (§10.2), so the execute bit the kernel checks lives
+ * on the stub, not on the name. Without it `execve` skips the shim and the
+ * `PATH` lookup falls through in silence — no error, the shim simply never
+ * runs — which is why this is a failure rather than an advisory even though
+ * §14.18 lets a read-only installation through elsewhere: there, nothing needed
+ * writing; here, every shim `enable` is about to write is dead on arrival.
+ *
+ * The remedies are the two that reach the file itself. {@link stubNotWritable}'s
+ * "run `enable` without ${INTERPRETER_NAME}" is not among them — the bit is
+ * needed whichever names are enabled.
+ */
+export const stubNotExecutable = (stub: string) =>
+  `Unable to make ${stub} executable: the shims are symlinks to that file, so it is the one that has to carry the execute bit, and the mode could not be changed — ${TOOL_NAME}'s own files are read-only or owned by another user. Shims installed against it would be passed over in silence. Run \`chmod +x ${stub}\` as the owner of that file, or install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`.`;
 
 /**
  * §15.43 — every runtime `enable` can see lives in the store, so there is
@@ -947,10 +965,47 @@ async function readHead(file: string, length: number): Promise<string | undefine
 }
 
 /**
+ * §15.45 — make sure the stub carries the execute bit, without writing when it
+ * already does.
+ *
+ * The shipped stubs are `chmod 0o755` by `scripts/generate-shims.mjs`, but that
+ * mode does not survive publication: npm re-applies the execute bit on pack to
+ * `bin` targets only, so every stub in the tarball arrives `0o644` while
+ * `dist/bin.mjs` arrives `0o755`. A symlink has no mode of its own (§10.2), so
+ * those shims are the ones the kernel refuses — silently, since a `PATH` lookup
+ * that finds a non-executable file just keeps looking.
+ *
+ * `stat` first and chmod only what needs it: a no-op chmod is still a write, and
+ * §10.2 property 4 and §10.7 both want a warm `enable` against a read-only
+ * installation to touch nothing. Windows returns immediately — its wrappers are
+ * regular files chmod'd as they are written (§10.3), and its mode bits do not
+ * mean this anyway.
+ */
+async function ensureExecutable(file: string, distFolder: string): Promise<void> {
+  if (process.platform === "win32") return;
+
+  const mode = (await stat(file).catch(() => undefined))?.mode;
+  // Unreadable is not this function's failure to report: the caller has just
+  // compared the file's contents, so anything that hides it now is a race, and
+  // the shim it writes will fail loudly rather than silently.
+  if (mode === undefined || (mode & 0o111) === 0o111) return;
+
+  // `0o755`, the mode §10.1 states and every other write here uses, rather than
+  // `mode | 0o111`: the point is to leave the file in the one shape the spec
+  // describes, whatever partial mode it arrived with.
+  await guardWrites(
+    distFolder,
+    () => chmod(file, 0o755),
+    () => stubNotExecutable(file),
+  );
+}
+
+/**
  * Make sure the stub exists and is current, and hand back its path. It is
  * rewritten only when the content differs, so a warm `enable` writes nothing at
  * all — which is what lets §10.2's idempotency hold even when the dist folder is
- * read-only.
+ * read-only. {@link ensureExecutable} is the one exception, and only for a stub
+ * that arrived without the execute bit (§15.45).
  *
  * `binName` is Windows's: §10.3 needs one stub per name because its wrappers
  * cannot carry the invocation name. POSIX omits it and gets
@@ -975,7 +1030,12 @@ async function ensureStub(
 
   // One byte more than the stub is long, so a longer file cannot compare equal.
   // `byteLength`, not `length`: the banner is not ASCII.
-  if ((await readHead(file, Buffer.byteLength(source) + 1)) === source) return file;
+  if ((await readHead(file, Buffer.byteLength(source) + 1)) === source) {
+    // Current content is not the whole of "current": §15.45's execute bit is the
+    // other half, and it is the half a published tarball loses.
+    await ensureExecutable(file, distFolder);
+    return file;
+  }
 
   await guardWrites(
     distFolder,

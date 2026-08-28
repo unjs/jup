@@ -176,6 +176,13 @@ Four properties this MUST have:
 4. **The stub is written at most once per `enable`**, whatever the number of names,
    and not at all when it is already current — so `enable` still succeeds against a
    read-only `distFolder` that shipped it (§10.7, §14.18).
+5. **The stub is executable when `enable` returns.** A symlink carries no mode of
+   its own, so the bit the kernel checks is the stub's; a shim pointing at a
+   non-executable stub is skipped by the `PATH` lookup without a word. `enable`
+   therefore `stat`s the stub it links to and `chmod`s it `0755` when the execute
+   bits are missing — **only** then, so property 4's "writes nothing" still holds
+   for the ordinary warm run. §15.45 has the case this exists for and what happens
+   when the `chmod` itself is refused.
 
 Anything else occupying the name — a plain file, a wrong symlink, a real binary — is
 **unlinked and replaced without warning**. The only exception is the Yarn Switch
@@ -431,3 +438,19 @@ implementation documents shell aliases as the workaround.
 > `--install-directory <a writable dir on PATH>`, or shell aliases — rather than a raw
 > errno. It MAY offer a `--print-shell-init` subcommand emitting shell functions for
 > the current shell, which sidesteps the filesystem entirely.
+
+A read-only directory *holding the tool itself* is the other half of this, and it is
+the common one: a global npm install, a container image, an OS package. `enable`
+succeeds there because it has nothing to write — §10.2 property 4 compares the stub
+before rewriting it, and the shipped stub is already current. Two things break that
+truce, and both fail rather than warn, because in each the shims `enable` is about to
+write could not work:
+
+* shimming the runtime rewrites the stub to pin the interpreter (§10.1), and the
+  message names the **stub**, not the shim directory, whose remedies do not move it;
+* the stub is current but not executable, and the `chmod` §10.2 property 5 requires
+  is itself refused (§15.45).
+
+Neither is the case §14.18 protects. There, nothing needed writing and the install
+worked; here the write is load-bearing, and an `enable` that exited 0 would leave the
+user with shims that are silently inert.
