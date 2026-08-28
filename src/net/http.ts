@@ -316,7 +316,7 @@ export function credentialsFor(
   // message below interpolates this URL. Stripping is unconditional, so
   // userinfo never reaches the wire or a message as part of the URL.
   if (url.username !== "" || url.password !== "") {
-    const authorization = basic(url.username, url.password);
+    const authorization = basicFromUrl(url);
     const stripped = new URL(url.href);
     stripped.username = "";
     stripped.password = "";
@@ -389,7 +389,7 @@ function userinfoOf(registryUrl: string | undefined): string | undefined {
   try {
     const parsed = new URL(registryUrl);
     if (parsed.username === "" && parsed.password === "") return undefined;
-    return basic(parsed.username, parsed.password);
+    return basicFromUrl(parsed);
   } catch {
     return undefined;
   }
@@ -707,6 +707,32 @@ export async function httpGetJson<T = unknown>(url: string, options?: HttpOption
 
 function basic(username: string, password: string): string {
   return `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+}
+
+/**
+ * The `Basic` header a URL's own `user:pass@` implies.
+ *
+ * `URL.username`/`URL.password` hand back the **percent-encoded** userinfo,
+ * which is the only legal way to write a password containing `@`, `:`, `/`, `#`
+ * or `?`. The credential is the decoded form, so the encoding has to come off
+ * before it goes on the wire — `proxy.ts` does the same for `Proxy-Authorization`.
+ *
+ * Not folded into {@link basic}: its other caller passes `COREPACK_NPM_USERNAME`
+ * and `COREPACK_NPM_PASSWORD`, which are literal values, and a `%` in one of
+ * those means a `%`.
+ */
+function basicFromUrl(url: URL): string {
+  return basic(decodeUserinfo(url.username), decodeUserinfo(url.password));
+}
+
+function decodeUserinfo(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    // A stray `%` that is not an escape. npm sends such userinfo through as
+    // written rather than refusing the request, and so do we.
+    return value;
+  }
 }
 
 /** `undefined` when the registry is unusable as an origin, which means "no credentials". */
