@@ -1049,6 +1049,12 @@ one command.
 * for each supported binary name: whether a shim is installed, and what that name
   currently resolves to on `PATH`.
 
+"A shim is installed" means one of **ours**, decided by §14.16's test and no weaker
+one. §10.3's wrappers carry no marker, and a looser rule — "invokes a runtime and
+some `.js`" — matches the `cmd-shim` output every npm install writes, which those
+wrappers are modelled on. Reporting a Node distribution's own `npm.cmd` as our shim
+turns the one command #686 asked for into a wrong answer.
+
 `info` MUST NOT perform any network request and MUST NOT fail when the project spec is
 invalid — reporting *why* it is invalid is the point. `--json` output is stable and
 documented; this is the tool's supportability surface.

@@ -67,7 +67,7 @@ import {
 } from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
-import { resolveInstallDirectory, SHIM_MARKER } from "./shims.ts";
+import { resolveInstallDirectory, SHIM_MARKER, WIN32_WRAPPER_HEADS } from "./shims.ts";
 import { tlsSettings } from "../net/tls.ts";
 import {
   findInstalledVersion,
@@ -939,7 +939,7 @@ function describeShims(): InfoReport["shims"] {
   for (const name of SUPPORTED_NAMES) {
     for (const binary of getBinariesFor(name)) {
       const onPath = lookupOnPath(binary);
-      const ours = onPath !== null && isOurShim(onPath);
+      const ours = onPath !== null && isOurShim(onPath, binary);
 
       // `PATH` first, because `enable --install-directory` puts shims somewhere
       // `resolveInstallDirectory` will never guess — and a shim that is on
@@ -947,7 +947,11 @@ function describeShims(): InfoReport["shims"] {
       // default directory is the fallback, and it is what turns up the case
       // that matters: a shim that exists and is being shadowed.
       const candidate = directory === null ? null : join(directory, binary);
-      const shim = ours ? onPath : candidate !== null && isOurShim(candidate) ? candidate : null;
+      const shim = ours
+        ? onPath
+        : candidate !== null && isOurShim(candidate, binary)
+          ? candidate
+          : null;
 
       entries.push({
         binary,
@@ -981,13 +985,20 @@ function samePath(left: string, right: string): boolean {
  * marker lives in the stub. Only the head is read, because the same question
  * gets asked of whatever `PATH` turned up — which may be a large native binary.
  */
-function isOurShim(file: string): boolean {
+function isOurShim(file: string, binName: string): boolean {
   const head = readHead(file, 1024);
   if (head === undefined) return false;
   if (head.includes(SHIM_MARKER)) return true;
-  // §10.3 — on Windows the entry on PATH is a `.cmd`/`.ps1`/sh wrapper that
-  // *invokes* the marked stub rather than carrying the marker itself.
-  return process.platform === "win32" && head.includes("node") && /[\w-]+\.js/.test(head);
+  // §10.3 — on Windows the entry on `PATH` is a `.cmd`/`.ps1`/sh wrapper that
+  // *invokes* the marked stub rather than carrying the marker itself, so it is
+  // recognised the way `enable` recognises it (§14.16): by the exact head it
+  // begins with, plus the `<binName>.js` stub it names. "Mentions `node` and
+  // some `.js`" is not that test — it matches npm's own `npm.cmd`, which is
+  // exactly what §10.3's wrappers are modelled on, and `info` then reported a
+  // Node distribution's npm as a shim of ours.
+  return (
+    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) && head.includes(`${binName}.js`)
+  );
 }
 
 function readHead(file: string, length: number): string | undefined {

@@ -136,7 +136,7 @@ const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
  * recognised instead by their shebang plus the `<binName>.js` stub they invoke,
  * which no unrelated binary of the same name would contain.
  */
-const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
+export const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
 
 /** `0` where the platform has no `O_NOFOLLOW` (Windows), exactly as `tar.ts` does it. */
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
