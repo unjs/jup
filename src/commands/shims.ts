@@ -951,7 +951,7 @@ function realpathOr(directory: string): string {
  * observable contract either way. It is asked for before the `import()` so the
  * entry module is covered too, and it is measured rather than assumed: on the
  * warm proxy path it is worth roughly 0.6 ms of a ~33 ms run, because that path
- * only ever compiles the ~86 kB warm chunk. `bin.ts` gains more (~2 ms) for the
+ * only ever compiles the ~52 kB warm chunk. `bin.ts` gains more (~2 ms) for the
  * same reason in reverse. A runtime whose cache directory is not writable gets a
  * documented no-op — the call reports failure through its return value rather
  * than throwing, and nothing here reads it.

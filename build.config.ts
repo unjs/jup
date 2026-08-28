@@ -122,6 +122,7 @@ export default defineBuildConfig({
     {
       type: "bundle",
       input: ["./src/index.ts", "./src/bin.ts", "./src/shim.ts"],
+      minify: true,
       // `utils/self.ts` reads this instead of locating and parsing our own
       // manifest at runtime. A build cannot then be wrong about its own version
       // the way a filesystem walk can (see `getOwnVersion`), and `--version`,
