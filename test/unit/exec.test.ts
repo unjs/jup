@@ -5,7 +5,7 @@ import { delimiter, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { messages } from "../../src/errors.ts";
-import { pathWith, resolveBinPath } from "../../src/run/exec.ts";
+import { pathWith, resolveBinPath, SHIM_MARKER } from "../../src/run/exec.ts";
 import type { BinSpec, LegacyBinList } from "../../src/types.ts";
 
 /**
@@ -366,13 +366,23 @@ describe("§15.32 — PATH", () => {
     });
   });
 
-  /** A shim directory holding a stub named `binName`, plus a decoy directory. */
+  /**
+   * A shim directory holding a stub named `binName`, plus a decoy directory.
+   *
+   * The stubs carry {@link SHIM_MARKER}, because that banner — not the name — is
+   * what §15.32's promotion recognises: the decoy's `yarn` is a file of exactly
+   * the right name written by somebody else, and must not move its directory.
+   */
   function pathFixture(name: string, binNames: string[]): { shims: string; decoy: string } {
     const shims = join(root, name, "shims");
     const decoy = join(root, name, "decoy");
     mkdirSync(shims, { recursive: true });
     mkdirSync(decoy, { recursive: true });
-    for (const binName of binNames) writeFileSync(join(shims, binName), "");
+    for (const binName of binNames) {
+      writeFileSync(join(shims, binName), `#!/usr/bin/env node\n// ${SHIM_MARKER} — generated\n`, {
+        mode: 0o755,
+      });
+    }
     writeFileSync(join(decoy, "yarn"), "");
     return { shims, decoy };
   }
