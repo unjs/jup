@@ -10,6 +10,7 @@ import {
   hasRangeBand,
   hostTarget,
   isPerHost,
+  isPerHostSpec,
   devEnginesFieldFor,
   isRuntime,
   isSupportedPackageManager,
@@ -92,14 +93,23 @@ describe("registry table — shape (§02.5)", () => {
    */
   it("hash-pins every compiled-in default (§02.5)", () => {
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
-      // §15.28 — a per-host entry's artifact differs from machine to machine, so
-      // there is no one digest to compile in. What clears §15.11's tier for it is
-      // npm's signature over the host's own artifact, checked on every install;
-      // the default is therefore a bare version, and asserting that it *is* bare
-      // is what stops a well-meant edit from pinning one host's digest for all.
-      const perHost = definition.ranges.some(([, spec]) => spec.artifactRegistry !== undefined);
       for (const reference of [definition.default, definition.transparent.default]) {
         if (reference === undefined) continue;
+        // §15.28 — a per-host entry's artifact differs from machine to machine,
+        // so there is no one digest to compile in. What clears §15.11's tier for
+        // it is npm's signature over the host's own artifact, checked on every
+        // install; the default is therefore a bare version, and asserting that it
+        // *is* bare is what stops a well-meant edit from pinning one host's
+        // digest for all.
+        //
+        // Asked of the **band the default's own version falls in**, not of the
+        // entry: pnpm ships JavaScript through 11 and a native per-host artifact
+        // from 12, so it is the first entry where the two answers differ, and an
+        // entry-wide question would take pnpm's digest off a tarball that has
+        // one. The predicate follows `isPerHost`, which is per-locator for the
+        // same reason.
+        const version = parse(reference)?.version ?? reference;
+        const perHost = isPerHostSpec(getSpecFor(name, version));
         expect(reference, name).toMatch(
           perHost ? /^\d+\.\d+\.\d+$/ : /^\d+\.\d+\.\d+\+sha\d+\.[\da-f]+$/,
         );
@@ -140,6 +150,7 @@ describe("registry table — shape (§02.5)", () => {
       "<6.0.0",
       "6.x || 7.x || 8.x || 9.x || 10.x",
       ">=11.0.0",
+      ">=12.0.0",
     ]);
     expect(DEFINITIONS.yarn!.ranges.map(([range]) => range)).toEqual(["<2.0.0", ">=2.0.0"]);
     expect(DEFINITIONS.npm!.ranges.map(([range]) => range)).toEqual(["*"]);
@@ -249,36 +260,50 @@ describe("getSpecFor / hasRangeBand — no matching band (§15.17)", () => {
     DEFINITIONS.pnpm!.ranges = original;
   });
 
-  /** pnpm's table with its newest band closed, i.e. the table on the day 12 ships. */
+  /**
+   * pnpm's table with every open-ended band closed, i.e. the table on the day 13
+   * ships. Both are closed, not just the newest: they are open at the same end,
+   * so a version past the top band still lands in `>=11.0.0` while that one is
+   * open, and the row below would be testing a *banded* lookup.
+   */
   function closeTopBand(): void {
+    const closed: Record<string, string> = {
+      ">=11.0.0": ">=11.0.0 <12.0.0",
+      ">=12.0.0": ">=12.0.0 <13.0.0",
+    };
     DEFINITIONS.pnpm!.ranges = original.map(([range, spec]) =>
-      range === ">=11.0.0" ? ([">=11.0.0 <12.0.0", spec] as const) : ([range, spec] as const),
+      range in closed ? ([closed[range]!, spec] as const) : ([range, spec] as const),
     ) as typeof original;
   }
 
   it("reports honestly whether a declared band covers the version", () => {
     expect(hasRangeBand("pnpm", "11.1.2")).toBe(true);
     expect(hasRangeBand("pnpm", "5.9.0")).toBe(true);
+    expect(hasRangeBand("pnpm", "12.0.0")).toBe(true);
     expect(hasRangeBand("vlt", "1.0.0")).toBe(false);
 
     closeTopBand();
-    expect(hasRangeBand("pnpm", "12.0.0")).toBe(false);
+    expect(hasRangeBand("pnpm", "13.0.0")).toBe(false);
     // …and the versions that *are* declared still are, so the answer is about
     // this version rather than about the edit.
     expect(hasRangeBand("pnpm", "11.1.2")).toBe(true);
+    expect(hasRangeBand("pnpm", "12.0.0")).toBe(true);
   });
 
   it("falls forward to the newest band rather than throwing", () => {
     closeTopBand();
 
     // §04.1 already resolves dist-tags against the newest band, so its registry
-    // and URL template are the right guess for a version beyond the table.
-    const spec = getSpecFor("pnpm", "12.0.0");
-    expect(spec.url).toBe("https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz");
+    // and URL template are the right guess for a version beyond the table. Since
+    // pnpm 12 that band is the native one, so a pnpm beyond the table is guessed
+    // to be native too — which is the right guess for exactly as long as the
+    // guess is worth making: a tool does not un-rewrite itself in Rust.
+    const spec = getSpecFor("pnpm", "13.0.0");
+    expect(spec.url).toBe("https://registry.npmjs.org/@pnpm/exe.{target}/-/exe.{target}-{}.tgz");
     expect(spec.registry).toEqual({ type: "npm", package: "pnpm" });
     // The `bin` is inherited too — and it is exactly the value `resolveBin`
     // must *not* use, which is what `hasRangeBand` is for.
-    expect(spec.bin).toEqual({ pnpm: "./bin/pnpm.mjs", pnpx: "./bin/pnpx.mjs" });
+    expect(spec.bin).toEqual({ pnpm: "./pnpm{exe}", pnpx: "./pnpm{exe}" });
   });
 });
 

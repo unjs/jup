@@ -779,6 +779,11 @@ async function applyToProject(
     // §15.28 — `{exe}`-substituted, per `resolveSpecBin`.
     tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,
+    // §15.28 — no band names its own `commands.use` under an aliased bin, so
+    // this is `undefined` for every entry in the table today; it is passed for
+    // the same reason the two above are, so that one handover cannot drift from
+    // the other.
+    tableSpec?.binArgs?.[useCommand[0]!],
   );
 }
 

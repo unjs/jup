@@ -347,8 +347,16 @@ export function execPackageManager(
   args: string[],
   fallbackBin?: BinSpec,
   execMode?: "js" | "native",
+  binArgs?: readonly string[],
 ): number | Promise<number> {
   const binPath = resolveBinPath(binName, spec, fallbackBin);
+
+  // §15.28 — the band's argv for *this* name, in front of the user's own. It is
+  // how `pnpx` reaches pnpm 12: one binary, and one of the two names it answers
+  // to is spelled as a subcommand rather than as an `argv[0]` it can read. The
+  // words are prepended and nothing else — this is not a place to rewrite what
+  // the user typed.
+  const argv = binArgs === undefined || binArgs.length === 0 ? args : [...binArgs, ...args];
 
   // §08.7 — the only variable we add, and it is added the same way for both
   // models: a native child inherits `process.env` wholesale. Package managers
@@ -369,7 +377,7 @@ export function execPackageManager(
     // module graph of a JavaScript cache hit (§01.3, §16.3).
     // `binName`, not `binPath`: §15.28's artifacts dispatch on `argv[0]`, and
     // `bunx` and `bun` are the same file.
-    return import("./native.ts").then((native) => native.execNative(binPath, args, env, binName));
+    return import("./native.ts").then((native) => native.execNative(binPath, argv, env, binName));
   }
 
   // §15.32 — the JavaScript path hands over **in process**, so there is no child
@@ -385,7 +393,7 @@ export function execPackageManager(
     if (path !== undefined) process.env[SYSTEM_ENV.PATH] = path;
   }
 
-  process.argv = [process.execPath, binPath, ...args];
+  process.argv = [process.execPath, binPath, ...argv];
   process.execArgv = [];
   // `require.main` is a live view of `process.mainModule`, and the two lines below
   // are one statement about it. Cleared first, so that whatever started *us* — a

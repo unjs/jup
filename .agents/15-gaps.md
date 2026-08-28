@@ -1211,6 +1211,16 @@ This assumption is load-bearing across corepack: one URL template per version
   that spelling mean the same thing for a native artifact as for a JavaScript one.
   (§08.2's `[execPath, binPath, …]` rewrite exists only because the JS path runs an
   interpreter.)
+* A band MAY declare `binArgs`, a map from a **bin name** to argv words the
+  implementation MUST place in front of the user's own when the tool is invoked
+  under that name. It is for the case the rule above does not reach: an artifact
+  that distinguishes its names by its own **file name** rather than by `argv[0]`.
+  pnpm 12 is that case — its binary reads `current_exe()`, so its installer
+  hardlinks a second file called `pnpx` on Windows and its POSIX package ships a
+  `pnpx` script running `pnpm dlx "$@"`, and a spawn can reproduce neither. The
+  words are prepended and nothing else: `binArgs` MUST NOT rewrite, reorder or
+  drop what the user typed, and a band MUST NOT declare one where `argv[0]`
+  already carries the distinction.
 * The extractor MUST preserve the executable bit for native `bin` targets (§07.4
   rule 6 already permits exactly this).
 * A band MAY declare `artifactRegistry`, an npm registry spec naming the package the
@@ -1257,6 +1267,14 @@ implementation MUST NOT let a digest taken on one host escape onto another:
   rather than by a compiled-in claim. This is *stronger* than a stale pin, not weaker.
 * The store marker still records the hash it saw. The store is host-local, so there it
   is exactly the right fact, and §07.2's fast path keeps working unchanged.
+* A band MAY *become* per-host in a later release — pnpm's `>=12.0.0` did, and any
+  entry whose tool rewrites itself may — so a recorded `jup.lock` digest for such a
+  version can be a **bare** one written before the change, describing a tarball this
+  build no longer fetches. It MUST be dropped on read, the version kept, on the same
+  reasoning as the last-known-good repair above: the file is committed, so reading it
+  back as a pin would fail every machine that had run the earlier release, and npm's
+  signature over the host's own artifact verifies the bytes either way. The next
+  `use` or `up` records the host map.
 
 > **On consent.** Bun's maintainers reportedly asked not to be added to corepack, and
 > the issue remains unresolved partly for that reason. Technical capability is not
@@ -1612,6 +1630,8 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 261 | An expired memo with `JUP_ENABLE_NETWORK=0` | the run fails with §15.19's diagnostic; the memo does **not** answer (§15.23) |
 | 262 | An expired memo while the registry answers 401 | the run fails naming the status; the memo does **not** answer — an authentication failure is not an outage (§15.23) |
 | 263 | An expired memo while the registry is unreachable | the memo answers, an advisory `!` line names the version and the reason, the stamp is unchanged, and `JUP_QUIET_ADVISORIES=1` mutes only the line (§15.23, §11.5) |
+| 264 | `packageManager: "pnpm@12.<v>"` | the host's `@pnpm/exe.<host>` tarball is fetched and executed directly; the `pnpm` package — a wrapper whose `bin` names placeholders its `preinstall` overwrites — is never downloaded, and the marker's `bin` comes from the table, because that package declares none (§02.5, §07.7, §15.28) |
+| 265 | `pnpx <args>` against that same install | it reaches the one cached executable with `dlx` in front of the user's arguments, because that artifact reads its own file name rather than `argv[0]` — the band's `binArgs`, which is what pnpm's own POSIX `pnpx` script does (§15.28) |
 
 ## 15.39 Tools, not only package managers — [required]
 

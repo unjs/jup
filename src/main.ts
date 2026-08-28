@@ -288,6 +288,9 @@ export async function runProxy(
     // §15.28 — `{exe}`-substituted, so a Windows fallback names `bin\\bun.exe`.
     tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,
+    // §15.28 — the argv this name needs in front of the user's, where the
+    // artifact cannot recover the name it was invoked under (`pnpx` → `dlx`).
+    tableSpec?.binArgs?.[binaryName],
   );
 }
 

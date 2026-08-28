@@ -202,6 +202,8 @@ band was `https://repo.yarnpkg.com/tags`, so the two differed in protocol as wel
   artifactRegistry?: NpmRegistrySpec, // where the BYTES come from, when that is not
                                       // the package `registry` answers about
   exec?: "js" | "native",       // absent/"js" is §08.2's in-process handover
+  binArgs?: Record<string, string[]>, // argv prepended for one bin NAME, where the
+                                      // artifact cannot read that name off argv[0]
 }
 ```
 
@@ -264,6 +266,12 @@ Consequences a conforming implementation MUST follow, all of them following from
 
 **`bin` has one shape:** `BinSpec` = `{ [binaryName]: relativePathInPackage }`,
 e.g. `{"pnpm": "./bin/pnpm.mjs", "pnpx": "./bin/pnpx.mjs"}`.
+
+`binArgs` is keyed by the same **names**, and its values are argv words placed in
+front of the user's own (§15.28). It exists for the one case two names on one path
+does not cover: an artifact that distinguishes them by its own file name rather than
+by `argv[0]`, which a spawn cannot set. Only pnpm's `>=12.0.0` band declares one,
+`{"pnpx": ["dlx"]}`, which is what pnpm's own POSIX `pnpx` script does.
 
 Corepack has a second, `BinList` = `[binaryName, …]`, for a download that is a
 single `.js` file: the file lands at `<location>/<basename of url path>` and every
@@ -332,14 +340,39 @@ Ranges, **in declaration order** (remember: matched in reverse):
 | `<6.0.0` | `https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz` | `{pnpm: ./bin/pnpm.js, pnpx: ./bin/pnpx.js}` |
 | `6.x \|\| 7.x \|\| 8.x \|\| 9.x \|\| 10.x` | same | `{pnpm: ./bin/pnpm.cjs, pnpx: ./bin/pnpx.cjs}` |
 | `>=11.0.0` | same | `{pnpm: ./bin/pnpm.mjs, pnpx: ./bin/pnpx.mjs}` |
+| `>=12.0.0` | `https://registry.npmjs.org/@pnpm/exe.{target}/-/exe.{target}-{}.tgz` | `{pnpm: ./pnpm{exe}, pnpx: ./pnpm{exe}}` |
 
-All three: `registry` = `{type: npm, package: pnpm}`, `commands.use` =
+All four: `registry` = `{type: npm, package: pnpm}`, `commands.use` =
 `["pnpm", "install"]`.
 
-> The bands are contiguous and exhaustive: reversed, `>=11.0.0` is tested first,
-> then `6.x || … || 10.x`, then `<6.0.0`. Prereleases are covered because
-> satisfaction strips the prerelease tag before testing (§04.2), so `10.5.0-rc.1`
-> matches `10.x` and lands in the `.cjs` band.
+The `>=12.0.0` band additionally declares, per §15.28:
+
+* `artifactRegistry` = `{type: npm, package: "@pnpm/exe.{target}"}`
+* `targets` = the identity over `darwin-arm64`, `darwin-x64`, `linux-arm64`,
+  `linux-arm64-musl`, `linux-x64`, `linux-x64-musl`, `win32-arm64`, `win32-x64`
+* `exec` = `"native"`
+* `binArgs` = `{pnpx: ["dlx"]}`
+
+> pnpm went native in 12.0.0, so it is the entry where `exec` is per **band**
+> rather than per tool (§15.28), and the entry that shows why it has to be. The
+> `pnpm` package on npm is now a wrapper whose `preinstall` hardlinks the host's
+> binary over four placeholder files its own `bin` points at; jup runs no
+> lifecycle scripts, so it fetches `@pnpm/exe.<host>` — an ordinary signed npm
+> tarball carrying one executable — exactly as it does for bun, deno, aube, nub
+> and node. The wrapper's `bin/pnpm.mjs`, which downloads that binary itself on
+> first use, is corepack's path and not jup's: it would put a network request
+> behind a cache hit (§01) and leave §15.19's seeded store unable to run offline.
+>
+> `binArgs` is there because pnpm's binary decides between `pnpm` and `pnpx` on
+> its **own file name** rather than on `argv[0]`, so §15.28's two-names-one-file
+> spelling does not reach it. pnpm's own POSIX package answers that with a `pnpx`
+> script that runs `pnpm dlx "$@"`; the band says the same thing.
+
+> The bands are contiguous and exhaustive: reversed, `>=12.0.0` is tested first,
+> then `>=11.0.0`, then `6.x || … || 10.x`, then `<6.0.0`. Prereleases are covered
+> because satisfaction strips the prerelease tag before testing (§04.2), so
+> `10.5.0-rc.1` matches `10.x` and lands in the `.cjs` band — and `12.0.0-rc.11`
+> lands in the native one.
 
 ### yarn
 

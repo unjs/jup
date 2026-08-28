@@ -421,6 +421,35 @@ describe("per-host resolutions — §15.28 within §15.23", () => {
     writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
     expect(typeof readLockfile(dir)!.resolutions[resolutionKey(RANGE)]!.integrity).toBe("string");
   });
+
+  it("drops a flat digest recorded before the band became per-host", () => {
+    // pnpm 11 is a tarball with one digest; pnpm 12 is one artifact per host.
+    // A file written by a build whose table stopped at 11 therefore carries a
+    // flat digest for a 12 — of the wrapper package, which is not what this
+    // build downloads. Reading it back as a pin would fail every machine that
+    // had run that build, on a file the user committed, so the version stands
+    // and the digest does not (§15.28). npm's signature over the host's own
+    // artifact is what verifies the bytes instead (§06.3).
+    const range = { name: "pnpm", range: "12" };
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@12": { resolved: "12.0.0", integrity: `sha512-${"ab".repeat(43)}=` } },
+      })}\n`,
+    );
+
+    expect(readResolution(dir, range)).toEqual({ name: "pnpm", reference: "12.0.0" });
+
+    // The same file, one major down, is a flat digest that *is* this host's
+    // fact — so the guard is about the band and not about the shape.
+    write(
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", integrity: integrityFromHash(HASH) } },
+      })}\n`,
+    );
+    expect(readResolution(dir, RANGE)).toEqual({ name: "pnpm", reference: `11.1.2+${HASH}` });
+  });
 });
 
 describe("the resolution cache — §15.23", () => {

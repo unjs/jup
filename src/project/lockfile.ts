@@ -42,7 +42,7 @@ import {
   parse,
   satisfiesWithPrereleases,
 } from "../version/semver.ts";
-import { hostTarget } from "../config/table.ts";
+import { hostTarget, isPerHost } from "../config/table.ts";
 import type { Descriptor, Locator } from "../types.ts";
 
 /**
@@ -511,9 +511,25 @@ export function readEntry(dir: string, descriptor: Descriptor): Resolution | nul
  * The locator one entry stands for. The recorded digest becomes a build suffix,
  * which is what makes it *used* rather than merely stored: §06.1 row 1 treats a
  * reference-borne hash as an explicit pin and checks the bytes against it.
+ *
+ * §15.28 — a **bare** digest recorded for a tool whose artifact is per-host is
+ * not this host's fact and is not treated as one. Nothing writes such an entry:
+ * {@link writeEntry} takes that branch on `perHost` and records a map keyed by
+ * host. What produces one is a table that has *changed its mind* — a band that
+ * moved to a per-host artifact in a later release, which is what pnpm 12 did —
+ * and there the recorded string describes a tarball this build will never
+ * fetch. Reading it back would turn the correct artifact into a hash mismatch on
+ * every machine that had run the previous release, and would do it to a file the
+ * user committed. So the digest is dropped and the version kept, exactly as
+ * §15.28 has the last-known-good repaired on read; the bytes are still verified,
+ * by npm's signature over them (§06.3), and the next `use` or `up` records the
+ * host map.
  */
 function locatorFor(descriptor: Descriptor, entry: Resolution): Locator {
-  const integrity = integrityForHost(entry);
+  const stale =
+    typeof entry.integrity === "string" &&
+    isPerHost({ name: descriptor.name, reference: entry.resolved });
+  const integrity = stale ? undefined : integrityForHost(entry);
   const hash = integrity === undefined ? undefined : hashFromIntegrity(integrity);
   return {
     name: descriptor.name,

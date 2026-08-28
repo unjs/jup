@@ -211,6 +211,42 @@ const NODE_TARGETS = {
   "win32-x64": "win-x64",
 } as const;
 
+/**
+ * §15.28 — pnpm 12's hosts, and the fifth launcher/artifact split in this table.
+ *
+ * pnpm went native in 12.0.0 and took the shape bun, deno, aube, nub and node
+ * already have: the `pnpm` package on npm is now a wrapper whose `preinstall`
+ * hardlinks the binary out of an `optionalDependencies` entry named after the
+ * host, over four placeholder files its own `bin` points at. jup runs no
+ * lifecycle scripts, so what it would cache from that package is the
+ * placeholder — the file whose contents are the sentence *"This is a
+ * placeholder. pnpm's native binary replaces this file during installation"* —
+ * and §07.7 reads a package's own `bin` first, so it would find it and run it.
+ *
+ * The wrapper does keep a corepack door open, `bin/pnpm.mjs`, which downloads
+ * the binary from npm itself on first use. That is the path corepack takes and
+ * it is not this one: it puts a download *behind* a cache hit, which §01's
+ * budget forbids and §15.19's airgap seeding cannot reach at all — `jup pack`
+ * would ship a tarball whose first run needs the network. The per-host packages
+ * are ordinary signed npm tarballs (§06.3), so asking for one directly keeps the
+ * artifact inside §15.11's tier and inside the store.
+ *
+ * The names are `@pnpm/exe.<platform>-<arch>[-musl]` — a dot, not a dash, after
+ * the scope — and they are {@link hostTarget}'s own spelling, so the map is an
+ * identity over the full vocabulary, as nub's is. It is written out for the same
+ * reason: it is where a host leaving the set would be said.
+ */
+const PNPM_EXE_TARGETS = {
+  "darwin-arm64": "darwin-arm64",
+  "darwin-x64": "darwin-x64",
+  "linux-arm64": "linux-arm64",
+  "linux-arm64-musl": "linux-arm64-musl",
+  "linux-x64": "linux-x64",
+  "linux-x64-musl": "linux-x64-musl",
+  "win32-arm64": "win32-arm64",
+  "win32-x64": "win32-x64",
+} as const;
+
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default: "12.0.2+sha1.788d93dc8869000b1078e0395c60748a0aadc4f1",
@@ -262,6 +298,31 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz",
           bin: { pnpm: "./bin/pnpm.mjs", pnpx: "./bin/pnpx.mjs" },
           registry: { type: "npm", package: "pnpm" },
+          commands: { use: ["pnpm", "install"] },
+        },
+      ],
+      // §15.28 — pnpm is native from 12.0.0, and the first entry in this table
+      // to cross that line rather than to have been born on one side of it. The
+      // version line and the dist-tags stay on `pnpm`; the bytes come from
+      // `@pnpm/exe.<host>` (see {@link PNPM_EXE_TARGETS}).
+      //
+      // `pnpx` is the one thing the per-host package cannot express by itself.
+      // Its binary dispatches on `current_exe()` rather than `argv[0]`, so the
+      // name jup invokes it under does not reach the decision — pnpm's own
+      // installer answers that by hardlinking a second file called `pnpx`, and
+      // its POSIX package ships `exec pnpm dlx "$@"` instead. `binArgs` is that
+      // shell script, which is also exactly what `bin/pnpx.mjs` did for corepack
+      // in the band above.
+      [
+        ">=12.0.0",
+        {
+          url: "https://registry.npmjs.org/@pnpm/exe.{target}/-/exe.{target}-{}.tgz",
+          bin: { pnpm: "./pnpm{exe}", pnpx: "./pnpm{exe}" },
+          binArgs: { pnpx: ["dlx"] },
+          registry: { type: "npm", package: "pnpm" },
+          artifactRegistry: { type: "npm", package: "@pnpm/exe.{target}" },
+          targets: PNPM_EXE_TARGETS,
+          exec: "native",
           commands: { use: ["pnpm", "install"] },
         },
       ],

@@ -1470,6 +1470,29 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * headroom. And the lowering owed since the `errors.ts` split is now owed
    * three times over: `config/table.ts` at 42,665 is still the largest resident,
    * most of it data a `yarn --version` never reads past one entry of.
+   *
+   * And **up, 278,000 -> 283,000**, for pnpm 12 going native. 277,687 ->
+   * 282,592, **+4,905 or +1.77%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | §15.28's `@pnpm/exe.<host>` band, its `targets` map, and why the wrapper is not the artifact | `config/table.ts` | +3,172 |
+   * | §15.28's bare digest, recorded before the band was per-host, dropped on read | `project/lockfile.ts` | +1,063 |
+   * | §15.28's `binArgs` prepended, for a `pnpx` its binary cannot read off `argv[0]` | `run/exec.ts` | +473 |
+   * | the same, threaded from the band to the handover | `main.ts` | +197 |
+   *
+   * Measured, `_warm.mjs` went 51,064 -> 51,741, **+677 bytes or +1.33%** —
+   * measured on the **minified** chunk this build now emits, so the absolute
+   * figures are not comparable with the entries above, though the ratios still
+   * are. Source grew 1.77% and the chunk 1.33%, the usual signature of an entry
+   * that is mostly prose: the executable part of it is one table row, one
+   * `typeof` on the read path, and a two-line array spread.
+   *
+   * None of it can move off the warm path — the table row *is* the fetch, and
+   * the other two are on the range fast path and the handover. What is owed is
+   * unchanged and now owed a fourth time: `config/table.ts` at 45,837 is the
+   * largest resident by a wider margin than before, and a `yarn --version` still
+   * reads past every pnpm band to reach it.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1481,6 +1504,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(278_000);
+    ).toBeLessThanOrEqual(283_000);
   });
 });

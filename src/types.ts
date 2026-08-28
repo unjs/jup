@@ -207,6 +207,27 @@ export interface ToolSpec {
    * thread describes, and a per-band flag expresses it without a code change.
    */
   exec?: "js" | "native";
+  /**
+   * §15.28 — argv this band's artifact needs in front of the user's, keyed by
+   * the `bin` name that was invoked.
+   *
+   * The mechanism §15.28 reaches for first is `argv[0]`: two `bin` names, one
+   * path, and the artifact tells them apart by the word the shell used. That is
+   * how `bun`/`bunx`, `nub`/`nubx` and `aube`/`aubr`/`aubx` are spelled, and it
+   * costs nothing.
+   *
+   * pnpm 12 is the case it does not cover. Its binary reads its **own file
+   * name** — `current_exe()`, not `argv[0]` — so `pnpx` is a *second file*
+   * there: a hardlink its installer makes on Windows, and a `exec pnpm dlx "$@"`
+   * shell script on POSIX. The per-host package ships neither, so the only
+   * honest reading of `pnpx` is the one pnpm's own POSIX script gives it, and
+   * this field is that script: `{pnpx: ["dlx"]}`.
+   *
+   * It is deliberately not a general command-rewriting facility. The values are
+   * literal argv words, they are prepended and nothing else, and a band declares
+   * one only where its artifact cannot recover the invoked name by itself.
+   */
+  binArgs?: Record<string, readonly string[]>;
 }
 
 /**

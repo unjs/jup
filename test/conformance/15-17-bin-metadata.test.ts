@@ -13,12 +13,19 @@
  * paths it yields to the install directory.
  *
  * **The band does not get a veto.** Every band in the shipped table is
- * open-ended at one end, so a restructured major lands *inside* a band rather
- * than outside every one — pnpm 12 satisfies `>=11.0.0` today. A rule that only
- * consulted the package for uncovered versions would therefore never fire on
- * the case #775 is about, which is why the rows below run against the shipped
- * table. `restructured()` still copies the tool with pnpm's top band closed at
- * `<12.0.0`, for the one row that needs a version no band covers at all.
+ * open-ended at one end, so a restructured release lands *inside* a band rather
+ * than outside every one — an 11.9.x that moved its entry point satisfies
+ * `>=11.0.0` all the same. A rule that only consulted the package for uncovered
+ * versions would therefore never fire on the case #775 is about, which is why
+ * the rows below run against the shipped table.
+ *
+ * The version doing the restructuring here is a pnpm 11 and not the pnpm 12 the
+ * issue named, because 12 restructured further than #775 imagined: it is a
+ * native binary now, and §15.28's band fetches it from `@pnpm/exe.<host>`, a
+ * package with no `bin` for §15.17 to read. Nothing about the rule changed —
+ * what changed is which of pnpm's bands can demonstrate it. The uncovered-version
+ * rows use `npm` for a related reason: pnpm's newest band is per-host, and it is
+ * the band a version past the table falls forward onto.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -37,23 +44,37 @@ import {
 
 const registry = new MockRegistry();
 
-/** A tool whose table stops at pnpm 11, so `pnpm@12` matches no declared band. */
+/** A tool whose table stops below npm 12, so `npm@12` matches no declared band. */
 let unbanded: string;
 
 /**
- * pnpm 12 as a restructured package would ship it: the entry point has moved to
- * `dist/`, so the band's `./bin/pnpm.mjs` does not exist in the tarball at all.
- * An implementation that trusted the band cannot run this, which is what makes
- * the row discriminating rather than decorative.
+ * A pnpm inside the `>=11.0.0` band that has moved its entry point to `dist/`,
+ * so the band's `./bin/pnpm.mjs` does not exist in the tarball at all. An
+ * implementation that trusted the band cannot run this, which is what makes the
+ * row discriminating rather than decorative.
  */
 const MOVED = npmTarball({
   "package.json": `${JSON.stringify({
     name: "pnpm",
-    version: "12.0.0",
+    version: "11.9.9",
     bin: { pnpm: "./dist/pnpm.mjs", pnpx: "./dist/pnpx.mjs" },
   })}\n`,
-  "dist/pnpm.mjs": pmScript("pnpm", "12.0.0"),
-  "dist/pnpx.mjs": pmScript("pnpx", "12.0.0"),
+  "dist/pnpm.mjs": pmScript("pnpm", "11.9.9"),
+  "dist/pnpx.mjs": pmScript("pnpx", "11.9.9"),
+});
+
+/**
+ * The same restructuring on the tool the uncovered-version rows use: an `npm`
+ * past the closed band below, whose entry point is not where the band says.
+ */
+const UNCOVERED = npmTarball({
+  "package.json": `${JSON.stringify({
+    name: "npm",
+    version: "12.0.0",
+    bin: { npm: "./dist/npm-cli.js", npx: "./dist/npx-cli.js" },
+  })}\n`,
+  "dist/npm-cli.js": pmScript("npm", "12.0.0"),
+  "dist/npx-cli.js": pmScript("npx", "12.0.0"),
 });
 
 /** A package that declares nothing: the band is the fallback (§15.17 point 2). */
@@ -67,26 +88,30 @@ const SILENT = npmTarball({
 const ESCAPING = npmTarball({
   "package.json": `${JSON.stringify({
     name: "pnpm",
-    version: "12.0.1",
+    version: "11.9.7",
     bin: { pnpm: "../../../../evil.mjs" },
   })}\n`,
-  "dist/pnpm.mjs": pmScript("pnpm", "12.0.1"),
+  "dist/pnpm.mjs": pmScript("pnpm", "11.9.7"),
 });
 
 beforeAll(async () => {
   await registry.start();
   registry.publish("pnpm", "11.9.8", SILENT);
-  registry.publish("pnpm", "12.0.0", MOVED);
-  registry.publish("pnpm", "12.0.1", ESCAPING);
+  registry.publish("pnpm", "11.9.9", MOVED);
+  registry.publish("pnpm", "11.9.7", ESCAPING);
+  registry.publish("npm", "12.0.0", UNCOVERED);
 
   unbanded = copyTool();
   const table = join(dirname(unbanded), "config", "table.ts");
   const source = readFileSync(table, "utf8");
-  // One character of surgery: close pnpm's newest band. Asserted, so a table
-  // edit that renamed the band fails this file loudly instead of quietly
-  // turning the row below into a banded lookup that proves nothing.
-  expect(source).toContain(`">=11.0.0"`);
-  writeFileSync(table, source.replace(`">=11.0.0"`, `">=11.0.0 <12.0.0"`));
+  // One line of surgery: close npm's only band, which is `*`. Anchored on the
+  // URL beneath it, because `"*"` on its own is a range three other entries also
+  // declare — and asserted, so a table edit that moves it fails this file loudly
+  // instead of quietly turning the rows below into banded lookups that prove
+  // nothing.
+  const band = `"*",\n        {\n          url: "https://registry.npmjs.org/npm/-/npm-{}.tgz",`;
+  expect(source).toContain(band);
+  writeFileSync(table, source.replace(band, band.replace(`"*"`, `"<12.0.0"`)));
 });
 
 afterAll(async () => {
@@ -97,18 +122,18 @@ afterAll(async () => {
 beforeEach(() => registry.reset());
 
 describe("§15.17 — `bin` comes from the verified package", () => {
-  it("176: pnpm@12 runs from the entry point its own package.json declares", async () => {
+  it("176: a restructured pnpm runs from the entry point its own package.json declares", async () => {
     // The shipped table: `>=11.0.0` covers this version and points at
     // `./bin/pnpm.mjs`, which this package does not contain. The band loses.
-    const fixture = createFixture({ packageManager: `pnpm@12.0.0+sha512.${hashOf(MOVED)}` });
+    const fixture = createFixture({ packageManager: `pnpm@11.9.9+sha512.${hashOf(MOVED)}` });
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("12.0.0\n");
+    expect(result.stdout).toBe("11.9.9\n");
     expect(result.stderr).toBe("");
     // The path really is the package's: the band's is absent from the install.
-    const location = join(fixture.home, "v1", "pnpm", "12.0.0");
+    const location = join(fixture.home, "v1", "pnpm", "11.9.9");
     expect(existsSync(join(location, "dist", "pnpm.mjs"))).toBe(true);
     expect(existsSync(join(location, "bin", "pnpm.mjs"))).toBe(false);
     // And it is the *marker* that says so, which is what every later cache hit
@@ -133,7 +158,7 @@ describe("§15.17 — `bin` comes from the verified package", () => {
   it("176: DEBUG=corepack reports the band the package disagreed with", async () => {
     // §15.17 point 3, second bullet. The run succeeds either way; without this
     // note nothing would ever say the band has rotted (§16.9).
-    const fixture = createFixture({ packageManager: `pnpm@12.0.0+sha512.${hashOf(MOVED)}` });
+    const fixture = createFixture({ packageManager: `pnpm@11.9.9+sha512.${hashOf(MOVED)}` });
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
@@ -143,15 +168,15 @@ describe("§15.17 — `bin` comes from the verified package", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain(
-      `! pnpm@12.0.0 declares "bin" {"pnpm":"./dist/pnpm.mjs","pnpx":"./dist/pnpx.mjs"}, but its range band says {"pnpm":"./bin/pnpm.mjs","pnpx":"./bin/pnpx.mjs"}. The package won; update the range band.`,
+      `! pnpm@11.9.9 declares "bin" {"pnpm":"./dist/pnpm.mjs","pnpx":"./dist/pnpx.mjs"}, but its range band says {"pnpm":"./bin/pnpm.mjs","pnpx":"./bin/pnpx.mjs"}. The package won; update the range band.`,
     );
   });
 
   it("176: DEBUG=corepack notes a version no band covers, so it is not lost", async () => {
-    // §15.17 point 3, first bullet — the tool whose table stops at pnpm 11.
-    const fixture = createFixture({ packageManager: `pnpm@12.0.0+sha512.${hashOf(MOVED)}` });
+    // §15.17 point 3, first bullet — the tool whose table stops below npm 12.
+    const fixture = createFixture({ packageManager: `npm@12.0.0+sha512.${hashOf(UNCOVERED)}` });
 
-    const result = await run(["pnpm", "--version"], {
+    const result = await run(["npm", "--version"], {
       ...fixture,
       registry,
       bin: unbanded,
@@ -161,14 +186,14 @@ describe("§15.17 — `bin` comes from the verified package", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("12.0.0\n");
     expect(result.stderr).toContain(
-      `! pnpm@12.0.0 matches no declared range band; reading "bin" from the verified package.`,
+      `! npm@12.0.0 matches no declared range band; reading "bin" from the verified package.`,
     );
   });
 
   it("176: and says nothing without DEBUG", async () => {
-    const fixture = createFixture({ packageManager: `pnpm@12.0.0+sha512.${hashOf(MOVED)}` });
+    const fixture = createFixture({ packageManager: `npm@12.0.0+sha512.${hashOf(UNCOVERED)}` });
 
-    const result = await run(["pnpm", "--version"], { ...fixture, registry, bin: unbanded });
+    const result = await run(["npm", "--version"], { ...fixture, registry, bin: unbanded });
 
     expect(result.stderr).toBe("");
   });
@@ -177,15 +202,15 @@ describe("§15.17 — `bin` comes from the verified package", () => {
     // The security-critical half. The package is verified, so its metadata is
     // "trusted" in the only sense §15.17 claims; that is not a licence to write
     // the handover target wherever the package says.
-    const fixture = createFixture({ packageManager: `pnpm@12.0.1+sha512.${hashOf(ESCAPING)}` });
+    const fixture = createFixture({ packageManager: `pnpm@11.9.7+sha512.${hashOf(ESCAPING)}` });
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      `The bin path '../../../../evil.mjs' declared by pnpm@12.0.1 escapes its installation directory`,
+      `The bin path '../../../../evil.mjs' declared by pnpm@11.9.7 escapes its installation directory`,
     );
     // Refused before promotion: nothing escaping ever reached the store (§07.5).
-    expect(existsSync(join(fixture.home, "v1", "pnpm", "12.0.1"))).toBe(false);
+    expect(existsSync(join(fixture.home, "v1", "pnpm", "11.9.7"))).toBe(false);
   });
 });

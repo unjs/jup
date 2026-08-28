@@ -28,6 +28,14 @@
  * file, as bun's are, and its per-host packages declare no `bin`, as bun's and
  * deno's do not.
  *
+ * pnpm 12 is the fifth (rows 264 and 265), and the only one that was not born
+ * native: it shipped JavaScript through 11 and a Rust binary from 12, so it is
+ * the entry where §02.3's per-band `exec` earns its keep rather than describing
+ * a whole tool. It also has the one thing the four above do not — a second name
+ * its artifact cannot recognise. `bunx`, `aubx` and `nubx` read `argv[0]`;
+ * pnpm's binary reads its own **file name**, which a spawn cannot set, so `pnpx`
+ * is §15.28's `binArgs` instead: the `dlx` its own POSIX `pnpx` script injects.
+ *
  * The mock publishes under `hostTarget()`, so the suite asserts about whatever
  * host it is running on rather than about Linux.
  *
@@ -77,6 +85,7 @@ const DENO_TARGETS: Record<string, string> = {
 
 const AUBE_VERSION = "2.2.0";
 const NUB_VERSION = "0.7.5";
+const PNPM_VERSION = "12.0.0";
 
 const BUN_PACKAGE = `@oven/bun-${BUN_TARGETS[hostTarget()]}`;
 const DENO_PACKAGE = `@deno/${DENO_TARGETS[hostTarget()]}`;
@@ -88,6 +97,11 @@ const AUBE_PACKAGE = `@endevco/aube-${hostTarget()}`;
  * which is `hostTarget()`'s own rule.
  */
 const NUB_PACKAGE = `@nubjs/nub-${hostTarget()}`;
+/**
+ * pnpm's per-host packages are `hostTarget()` verbatim as well, behind a dot
+ * rather than a dash: `@pnpm/exe.linux-x64-musl`, not `@pnpm/exe-linux-x64-musl`.
+ */
+const PNPM_PACKAGE = `@pnpm/exe.${hostTarget()}`;
 
 /**
  * A stand-in for the real binary: it reports the name it was invoked under and
@@ -160,6 +174,9 @@ const AUBE_TARBALL = makeTarball([
  * rule 6 — which takes the executable bit *from the tar header* — would cache a
  * file that cannot be executed. Row 227 is where that is not allowed to happen.
  */
+/** pnpm's binary sits at the package root, as deno's does, and declares no `bin`. */
+const PNPM_TARBALL = artifact(PNPM_PACKAGE, PNPM_VERSION, "pnpm");
+
 const NUB_TARBALL = makeTarball([
   {
     path: "package/package.json",
@@ -186,12 +203,30 @@ beforeAll(async () => {
   registry.publish("@nubjs/nub", NUB_VERSION, npmTarball({ "package.json": "{}\n" }), {
     distTags: { latest: NUB_VERSION },
   });
+  // pnpm's launcher is a wrapper package rather than a stub — it carries a
+  // `bin` of four placeholder files its `preinstall` overwrites — so it is
+  // published here with the `bin` the real one has, to make row 264's assertion
+  // that nothing reads it mean something.
+  registry.publish(
+    "pnpm",
+    PNPM_VERSION,
+    npmTarball({
+      "package.json": `${JSON.stringify({
+        name: "pnpm",
+        version: PNPM_VERSION,
+        bin: { pnpm: "pnpm", pn: "pn", pnpx: "pnpx", pnx: "pnx" },
+      })}\n`,
+      pnpm: "This is a placeholder.\n",
+    }),
+    { distTags: { latest: PNPM_VERSION } },
+  );
 
   // The artifacts, which is where §06 asks what the bytes should be.
   registry.publish(BUN_PACKAGE, BUN_VERSION, BUN_TARBALL);
   registry.publish(DENO_PACKAGE, DENO_VERSION, DENO_TARBALL);
   registry.publish(AUBE_PACKAGE, AUBE_VERSION, AUBE_TARBALL);
   registry.publish(NUB_PACKAGE, NUB_VERSION, NUB_TARBALL);
+  registry.publish(PNPM_PACKAGE, PNPM_VERSION, PNPM_TARBALL);
 });
 
 afterAll(async () => {
@@ -199,7 +234,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
+describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
   function options(fixture: Fixture, env?: Record<string, string | undefined>) {
     return {
       cwd: fixture.cwd,
@@ -569,6 +604,46 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
       0,
     );
     expect(exists(join(shims, "nub"))).toBe(false);
+  });
+
+  it("264: pnpm 12 comes from `@pnpm/exe.<host>`, never from the wrapper it publishes", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM_VERSION}` });
+    registry.reset();
+
+    const result = await run(["pnpm", "install", "--frozen-lockfile"], options(fixture));
+
+    expect(result.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toBe("ran=pnpm args=install --frozen-lockfile");
+
+    // The `pnpm` package is fetched for its versions and never for its bytes.
+    // What it ships under its own `bin` is a placeholder its `preinstall`
+    // overwrites, and jup runs no lifecycle scripts: installing it would cache
+    // the sentence "This is a placeholder" and hand it to the runtime.
+    const fetched = registry.requests.map((request) => request.path);
+    expect(fetched.some((path) => path.includes(`${PNPM_PACKAGE}/-/`))).toBe(true);
+    expect(fetched.some((path) => path.includes("/pnpm/-/"))).toBe(false);
+
+    // The marker records the table's `bin`, because the artifact declares none —
+    // and both names point at the one executable the package ships.
+    expect(JSON.parse(readMarker(fixture, "pnpm", PNPM_VERSION)).bin).toEqual({
+      pnpm: "./pnpm",
+      pnpx: "./pnpm",
+    });
+  });
+
+  it("265: `pnpx` reaches that same binary with `dlx` in front (§15.28 `binArgs`)", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM_VERSION}` });
+
+    const result = await run(["pnpx", "cowsay", "moo"], options(fixture));
+
+    expect(result.exitCode).toBe(0);
+    // `bunx` and `nubx` get this from `argv[0]`; pnpm's binary reads its own file
+    // name instead, which is why its own installer hardlinks a second file on
+    // Windows and ships `exec pnpm dlx "$@"` on POSIX. The band says the same
+    // thing in the table, so the subcommand arrives in the argv and the probe
+    // reports the one file it was.
+    expect(result.stdout.trim()).toBe("ran=pnpm args=dlx cowsay moo");
   });
 });
 
