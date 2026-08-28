@@ -148,10 +148,9 @@ function readHeadSync(file: string, length: number): string | undefined {
  * to wear the name?
  *
  * A POSIX shim is a symlink to the shared stub (§10.2), so the open follows it
- * and reads the stub's banner — which is the point: a link is ours exactly when
- * what it points at is. §10.3's Windows wrappers cannot carry the marker (their
- * bodies are byte-exact), so there they are recognised by shebang plus the
- * {@link stubNameFor} stub they invoke.
+ * and reads the stub's banner: a link is ours exactly when what it points at is.
+ * §10.3's Windows wrappers cannot carry the marker (their bodies are byte-exact)
+ * and are recognised by shebang plus the {@link stubNameFor} stub they invoke.
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);

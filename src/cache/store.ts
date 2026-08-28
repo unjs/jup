@@ -419,8 +419,8 @@ export function promote(tmp: string, dest: string): boolean {
       // Occupied. A benign lost race *only* if it proves to be a completed
       // install: the marker goes into the staging tree before the rename, so a
       // winner always carries one. Without it this is a foreign or half-copied
-      // tree (an rsync that filtered dotfiles), and adopting it would hand the
-      // caller unverified bytes plus an entry that never stops re-downloading.
+      // tree, and adopting it hands the caller unverified bytes plus an entry
+      // that never stops re-downloading.
       if (
         code === "EEXIST" ||
         code === "ENOTEMPTY" ||

@@ -195,19 +195,30 @@ export function parseEnvFile(content: string): Record<string, string> {
   const text = trimDocument(content.includes("\r") ? content.replaceAll("\r", "") : content);
 
   let i = 0;
+  // `parseEnv` reads an *indented* `#` as a key when the line before it was a
+  // comment (`#c\n\n\t#K=2` -> `#K`) and as a comment otherwise; re-testing for
+  // a comment after the blank-line skip lost the first case.
+  let afterComment = false;
+  let indented = false;
   while (i < text.length) {
     const code = text.charCodeAt(i);
-    // A blank line, and with it the blanks opening the next one — which is how
+    // A blank line, and with it the blanks opening the next one: how
     // `A=1\n\t#=2` is a comment while `#c\n\t#=2` is the key `#`.
     if (code === CH_LF) {
-      i = skipBlanks(text, i + 1);
+      const next = skipBlanks(text, i + 1);
+      indented = next !== i + 1;
+      i = next;
       continue;
     }
     // A comment line: everything up to the break, and no more.
-    if (code === CH_HASH) {
+    if (code === CH_HASH && !(indented && afterComment)) {
       i = endOfLine(text, i) + 1;
+      afterComment = true;
+      indented = false;
       continue;
     }
+    afterComment = false;
+    indented = false;
 
     // A line with no `=` on it is skipped, blanks and all. The search stops at
     // the line break rather than running to the next `=` anywhere in the file,
