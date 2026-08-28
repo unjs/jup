@@ -506,12 +506,22 @@ const UMASK = process.umask();
 /* §07.7, §15.17 — what goes in the marker's `bin`                             */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * §02.4's one `bin` shape: a non-empty `{name: path}` map of strings.
+ *
+ * The values are checked, not just the container. `readMarker` already refuses a
+ * map whose entries are not strings, so accepting one here would write a marker
+ * that cannot be read back — and `confine` reaches `resolve()` first anyway,
+ * where a number turns into a `TypeError` from `node:path` in place of the
+ * documented fall-through to the table band.
+ */
 function isValidBinSpec(value: unknown): value is BinSpec {
   return (
     typeof value === "object" &&
     value !== null &&
     !Array.isArray(value) &&
-    Object.keys(value).length > 0
+    Object.keys(value).length > 0 &&
+    Object.values(value).every((entry) => typeof entry === "string")
   );
 }
 
@@ -574,9 +584,14 @@ export function resolveBin(
   const manifest = readManifest(tmpDir);
   const packageBin = manifest?.bin;
 
-  if (typeof packageBin === "string" || isValidBinSpec(packageBin)) {
-    const bin =
-      typeof packageBin === "string" ? { [String(manifest?.name)]: packageBin } : packageBin;
+  // A string `bin` is shorthand for `{ <package name>: <path> }`, so it says
+  // nothing usable without a name to key it by: `String(undefined)` would key it
+  // `"undefined"`, which installs and marks up cleanly and then fails on every
+  // later run, because §08.1 looks the entry up by *command* name.
+  const named = typeof packageBin === "string" && typeof manifest?.name === "string";
+
+  if (named || isValidBinSpec(packageBin)) {
+    const bin = named ? { [manifest.name as string]: packageBin as string } : (packageBin as BinSpec);
     // §15.17 point 3 — the two maintenance signals, both debug-level because
     // neither changes the outcome of this run (§16.9).
     if (known && !banded) {
