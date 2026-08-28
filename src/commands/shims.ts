@@ -78,6 +78,7 @@ import {
   perUserShimDirectory as perUserDefault,
   shimDirectoryCandidates,
   SHIM_MARKER,
+  stubNameFor,
 } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder } from "../cache/store.ts";
@@ -93,7 +94,7 @@ const TOOL_NAME = "jup";
  * invocation and this module imports that one, not the other way round;
  * re-exported here because this is where the concept belongs.
  */
-export { SHIM_MARKER } from "../run/exec.ts";
+export { SHIM_MARKER, stubNameFor } from "../run/exec.ts";
 
 /**
  * §10.1 — the interpreter the generic shebang names.
@@ -724,22 +725,6 @@ export function shimSource(entryName: string, binName?: string, interpreter?: st
  */
 export const PROXY_STUB_NAME = "shim-proxy.mjs";
 
-/**
- * §10.3 — the per-name stub a Windows wrapper invokes.
- *
- * `.mjs`, like {@link PROXY_STUB_NAME}: an explicit module extension is a format
- * the runtime knows from the name alone, so it never walks up looking for a
- * `package.json` to read a `"type"` out of (§14.27). In the shipped layout that
- * is two `openat` calls, a `read` and a parse off every `yarn`, `npm` and `pnpm`
- * invocation on the machine — **not** a measurable speed-up, since against a
- * ~32 ms warm run the two spellings differ by 0.02 ms at p50. The reason to
- * prefer it is that the stub then depends on no manifest at all: a packaging
- * that relocated `dist/` away from its `package.json`, or shipped a CommonJS
- * one, would break a `.js` stub on its first `import`.
- */
-export function stubNameFor(binName: string): string {
-  return `${binName}.mjs`;
-}
 
 /** §14.18 — map the read-only install to something the user can act on. */
 async function guardWrites<T>(directory: string, action: () => Promise<T>): Promise<T> {

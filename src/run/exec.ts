@@ -111,6 +111,27 @@ export function shimDirectoryCandidates(): string[] {
  */
 export const SHIM_MARKER = "@jup-shim";
 
+/**
+ * §10.3 — the per-name stub a Windows wrapper invokes.
+ *
+ * `.mjs`, like `PROXY_STUB_NAME`: an explicit module extension is a format the
+ * runtime knows from the name alone, so it never walks up looking for a
+ * `package.json` to read a `"type"` out of (§14.27). In the shipped layout that
+ * is two `openat` calls, a `read` and a parse off every `yarn`, `npm` and `pnpm`
+ * invocation on the machine — **not** a measurable speed-up, since against a
+ * ~32 ms warm run the two spellings differ by 0.02 ms at p50. The reason to
+ * prefer it is that the stub then depends on no manifest at all: a packaging
+ * that relocated `dist/` away from its `package.json`, or shipped a CommonJS
+ * one, would break a `.js` stub on its first `import`.
+ *
+ * Declared here rather than in `shims.ts` for the same reason `SHIM_MARKER` is:
+ * §14.16's ownership test reads it on every invocation, and that module imports
+ * this one, not the other way round.
+ */
+export function stubNameFor(binName: string): string {
+  return `${binName}.mjs`;
+}
+
 /** First `length` bytes of a file as UTF-8, or `undefined` if it cannot be read. */
 function readHeadSync(file: string, length: number): string | undefined {
   let handle: number | undefined;
@@ -134,14 +155,16 @@ function readHeadSync(file: string, length: number): string | undefined {
  * and reads the stub's banner — which is the point: a link is ours exactly when
  * what it points at is. §10.3's Windows wrappers cannot carry the marker (their
  * bodies are byte-exact), so there they are recognised the way `shims.ts`
- * recognises them, by shebang plus the `<binName>.js` stub they invoke.
+ * recognises them, by shebang plus the `stubNameFor` stub they invoke.
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
   if (head === undefined) return false;
   if (head.includes(SHIM_MARKER)) return true;
   return (
-    process.platform === "win32" && head.startsWith("#!/bin/sh") && head.includes(`${binName}.js`)
+    process.platform === "win32" &&
+    head.startsWith("#!/bin/sh") &&
+    head.includes(stubNameFor(binName))
   );
 }
 
