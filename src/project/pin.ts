@@ -196,9 +196,14 @@ export function writePin(
   let updated = content;
   let wroteDevEngines = false;
   if (devEnginesTarget.write || sidecar) {
-    const next = sidecar
-      ? writeSidecarPin(updated, data, info, field)
-      : writeIntoDevEngines(updated, data, info, field);
+    // The sidecar form needs a digest to move out of the version string, and a
+    // per-host tool has none to move (§15.23) - every runtime included. That is
+    // not a reason to write no pin at all, so the ordinary member write is the
+    // fallback: it lands the same clean version, just without an `integrity`
+    // line there is no hash for.
+    const next =
+      (sidecar ? writeSidecarPin(updated, data, info, field) : null) ??
+      writeIntoDevEngines(updated, data, info, field);
     if (next !== null) {
       updated = next;
       wroteDevEngines = true;
