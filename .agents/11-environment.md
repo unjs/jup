@@ -67,6 +67,7 @@ always wins over the file.
 |---|---|---|---|
 | `COREPACK_NODE_EXECPATH` | path | Path to the JavaScript runtime used to execute package managers. Only meaningful for a native implementation (§08.3.1). Falls back to a sibling runtime, then `PATH`. | **no** (§14.5) |
 | `COREPACK_QUIET_ADVISORIES` | `1` | Silence the advisory `!` lines this spec adds on top of corepack's own (§14.23). The six inherited from corepack — the download notice and its prompt, the auto-pin notice, the three `devEngines` warnings, and `enable`/`disable`'s Yarn Switch skip — are unaffected, as is every error. | **no** (§14.5) |
+| `COREPACK_HOST_RUNTIME` | path | Absolute `realpath` of the JavaScript runtime hosting the current chain of invocations, from outside `<home>`. **Set by the tool** into the environment of every native child it spawns (§08.3, §15.28), and read back by `enable` when its own `process.execPath` is inside `<home>` (§10.1, §15.43). Ignored unless it names an executable outside `<home>` that is not one of the tool's own shims. | **no** (§14.5) |
 
 ## 11.6 Precedence
 

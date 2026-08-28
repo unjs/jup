@@ -82,7 +82,7 @@ import {
   stubNameFor,
 } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
-import { getHomeFolder } from "../cache/store.ts";
+import { getHomeFolder, isInsideHome } from "../cache/store.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
 const TOOL_NAME = "jup";
@@ -109,27 +109,95 @@ export { SHIM_MARKER, PROXY_STUB_NAME, stubNameFor } from "../run/exec.ts";
 const INTERPRETER_NAME = "node";
 
 /**
- * §10.1 — the absolute path of the runtime executing `enable`, for a shebang or
- * a Windows wrapper that must not go through a `PATH` lookup.
+ * §10.1 — the absolute path of the runtime to bake into a shebang or a Windows
+ * wrapper, so that no `PATH` lookup happens at invocation time. `undefined` when
+ * there is no such runtime, which §15.43 makes a refusal rather than a fallback.
  *
- * `realpath`, because `process.execPath` is frequently a symlink (`/usr/bin/node`
- * into a version manager's store) and the point of baking a path in is that it
- * names one file rather than whatever a lookup would answer later.
+ * `realpath` throughout, because `process.execPath` is frequently a symlink
+ * (`/usr/bin/node` into a version manager's store) and the point of baking a
+ * path in is that it names one file rather than whatever a lookup would answer
+ * later.
+ *
+ * **The runtime running `enable` is not always usable.** §15.39 makes `node` a
+ * table entry, so `enable node` puts a shim of ours on that name and §15.32 asks
+ * for the shim directory to go *first* on `PATH`; from then on anything that
+ * starts `#!/usr/bin/env node` — our own `bin.mjs` included — resolves through
+ * that shim, which downloads the project's runtime and spawns it. `enable` run
+ * from inside that chain has a `process.execPath` under `<home>`, and baking it
+ * in would tie every shim on the machine to a file `jup cache clean` exists to
+ * delete: the next clean leaves every shim dying with `bad interpreter` (exit
+ * 126), and `enable` cannot repair them because `env node` now finds only the
+ * broken `node` shim (exit 127). §15.43 has the three tiers below instead.
  *
  * Resolved at `enable` time, not at build time: the shipped stubs
  * (`scripts/generate-shims.mjs`) keep `#!/usr/bin/env node` because they are
  * published from somebody else's machine and must stay relocatable.
+ *
+ * Deliberately uncached. It is called once per `enable`, so a cache buys
+ * nothing, and the answer now depends on the environment and on `PATH` — which
+ * is exactly what a module-level cache would freeze across the runs a test makes
+ * in one process.
  */
-let cachedInterpreter: string | undefined;
-export function interpreterPath(): string {
-  if (cachedInterpreter === undefined) {
-    try {
-      cachedInterpreter = realpathSync(process.execPath);
-    } catch {
-      cachedInterpreter = process.execPath;
+export function interpreterPath(): string | undefined {
+  const own = realpathOr(process.execPath);
+  // Tier 0 — the ordinary case: whatever is running `enable` is outside the
+  // store, so it is the runtime the user chose and the one to name.
+  if (!isInsideHome(own)) return own;
+
+  // Tier 1 — the forwarded host runtime. Whichever process in this chain was
+  // last running outside the store recorded itself there (§15.43,
+  // `forwardHostRuntime`), so this is the runtime that would have been baked in
+  // had the user typed `enable` one level up.
+  const forwarded = readEnv(ENV.HOST_RUNTIME);
+  if (forwarded !== undefined && forwarded !== "" && isAbsolute(forwarded)) {
+    // Validated rather than trusted: it survives an env-file refusal (§14.5) but
+    // it is still a string, and a value naming one of our own shims would
+    // reintroduce §14.26's exec loop.
+    if (isExecutableFile(forwarded) && !isOurShim(forwarded, INTERPRETER_NAME)) {
+      const resolved = realpathOr(forwarded);
+      if (!isInsideHome(resolved)) return resolved;
     }
   }
-  return cachedInterpreter;
+
+  // Tier 2 — walk `PATH` for a runtime that is neither one of our shims nor in
+  // the store. This is the `enable` invoked directly under a store runtime, with
+  // nothing forwarded: the user's own Node is still installed, it has merely
+  // been displaced on `PATH` by the shim directory.
+  return hostRuntimeOnPath();
+}
+
+/**
+ * §15.43 tier 2 — the first `node` on `PATH` that `enable` may name.
+ *
+ * Both exclusions are load-bearing and neither is redundant. A shim of ours is
+ * refused because naming it is §14.26's exec loop written by hand; a runtime
+ * inside `<home>` is refused because that is the whole of §15.43. The ownership
+ * test is the same one `enable` uses to decide what it may overwrite, so a
+ * directory holding *someone else's* `node` still answers.
+ */
+function hostRuntimeOnPath(): string | undefined {
+  for (const candidate of whichAll(INTERPRETER_NAME)) {
+    if (isOurShim(candidate, INTERPRETER_NAME)) continue;
+    const resolved = realpathOr(candidate);
+    if (isInsideHome(resolved)) continue;
+    return resolved;
+  }
+  return undefined;
+}
+
+/**
+ * {@link interpreterPath}, with §15.43's tier 3 — the refusal — applied.
+ *
+ * Every caller that is about to *write* a baked-in interpreter goes through
+ * this, so the "no usable runtime" case cannot reach a shebang as `undefined`
+ * and silently become `#!/usr/bin/env node` again.
+ */
+function requireInterpreterPath(): string {
+  const interpreter = interpreterPath();
+  if (interpreter === undefined) {
+    throw new UsageError(interpreterOnlyInStore(realpathOr(process.execPath), getHomeFolder()));
+  }
+  return interpreter;
 }
 
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
@@ -181,6 +249,33 @@ export interface ShimOptions {
  */
 export const shimDirectoryNotWritable = (directory: string) =>
   `Unable to write shims to ${directory}: the directory is not writable. Either re-run with --install-directory <a writable directory on your PATH>, set JUP_SHIM_DIRECTORY, or define shell aliases instead (e.g. alias yarn="${TOOL_NAME} yarn")`;
+
+/**
+ * §10.7 + §15.43 — the *other* read-only directory, and a different failure.
+ *
+ * `guardWrites` covers the shim directory and the package directory alike, and
+ * the message above names neither: it says "shims", and its two remedies
+ * (`--install-directory`, `JUP_SHIM_DIRECTORY`) both move where the shims land,
+ * which is not what failed. What failed is the shared stub inside jup's own
+ * installation, which §10.1 rewrites to pin the interpreter — so the shim
+ * directory is irrelevant and saying so is most of the value here. `enable`
+ * without ${INTERPRETER_NAME} never reaches this: `ensureStub` compares before it
+ * writes, so a stub that is already correct is left alone (§10.7).
+ */
+export const stubNotWritable = (stub: string) =>
+  `Unable to update ${stub}: the shim stub has to be rewritten — shimming ${INTERPRETER_NAME} pins the interpreter into it — and the directory holding ${TOOL_NAME}'s own files is not writable. --install-directory and JUP_SHIM_DIRECTORY move the shims, not this file, so neither helps: install ${TOOL_NAME} somewhere writable, or run \`${TOOL_NAME} enable\` without ${INTERPRETER_NAME}, which leaves the stub untouched.`;
+
+/**
+ * §15.43 — every runtime `enable` can see lives in the store, so there is
+ * nothing safe to bake in.
+ *
+ * Refusing is the only correct answer. `#!/usr/bin/env node` is §14.26's exec
+ * loop once the shim directory is first on `PATH`, and the store path is the
+ * bug this whole section exists to close, so neither is a fallback — the user
+ * has to name a runtime that will outlive `${TOOL_NAME} cache clean`.
+ */
+export const interpreterOnlyInStore = (interpreter: string, home: string) =>
+  `Unable to bake an interpreter into the shims: the only ${INTERPRETER_NAME} available (${interpreter}) is inside ${home}, ${TOOL_NAME}'s own cache. Baking it into the shims would break every one of them the next time \`${TOOL_NAME} cache clean\` runs. Re-run \`${TOOL_NAME} enable\` under a ${INTERPRETER_NAME} installed outside ${home}.`;
 
 /** §15.13 point 2 — verbatim. */
 export const shimDirectoryFallback = (directory: string, fallback: string) =>
@@ -347,8 +442,14 @@ function isExecutableFile(file: string): boolean {
   }
 }
 
-/** `which(name)` — the full path of the first executable of that name on `PATH`. */
-export function whichFile(name: string): string | undefined {
+/**
+ * `which -a name` — every executable of that name on `PATH`, in lookup order.
+ *
+ * A generator rather than an array because both callers stop early: §15.29's
+ * verification wants the first hit, and §15.43's tier 2 wants the first hit that
+ * passes two further tests. Neither should stat the tail of `PATH` to get it.
+ */
+function* whichAll(name: string): Generator<string> {
   const pathValue = process.env[SYSTEM_ENV.PATH] ?? "";
   const extensions =
     process.platform === "win32"
@@ -359,10 +460,14 @@ export function whichFile(name: string): string | undefined {
     if (entry === "") continue;
     for (const extension of extensions) {
       const candidate = join(entry, `${name}${extension}`);
-      if (isExecutableFile(candidate)) return candidate;
+      if (isExecutableFile(candidate)) yield candidate;
     }
   }
+}
 
+/** `which(name)` — the full path of the first executable of that name on `PATH`. */
+export function whichFile(name: string): string | undefined {
+  for (const file of whichAll(name)) return file;
   return undefined;
 }
 
@@ -717,14 +822,24 @@ export function shimSource(entryName: string, binName?: string, interpreter?: st
   ].join("\n");
 }
 
-/** §14.18 — map the read-only install to something the user can act on. */
-async function guardWrites<T>(directory: string, action: () => Promise<T>): Promise<T> {
+/**
+ * §14.18 — map the read-only install to something the user can act on.
+ *
+ * `message` exists because this guard covers two different directories: the shim
+ * directory, whose remedies are the default's, and jup's own package directory
+ * (§10.7), whose remedies are nothing like them — see {@link stubNotWritable}.
+ */
+async function guardWrites<T>(
+  directory: string,
+  action: () => Promise<T>,
+  message: (directory: string) => string = shimDirectoryNotWritable,
+): Promise<T> {
   try {
     return await action();
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     if (NOT_WRITABLE.has(code ?? "")) {
-      throw new UsageError(shimDirectoryNotWritable(directory));
+      throw new UsageError(message(directory));
     }
     throw error;
   }
@@ -782,10 +897,14 @@ async function ensureStub(
   // `byteLength`, not `length`: the banner is not ASCII.
   if ((await readHead(file, Buffer.byteLength(source) + 1)) === source) return file;
 
-  await guardWrites(distFolder, async () => {
-    await writeFile(file, source);
-    await chmod(file, 0o755);
-  });
+  await guardWrites(
+    distFolder,
+    async () => {
+      await writeFile(file, source);
+      await chmod(file, 0o755);
+    },
+    () => stubNotWritable(file),
+  );
 
   return file;
 }
@@ -1298,7 +1417,7 @@ export async function generateWin32Link(
   distFolder: string,
   binName: string,
   options: ShimOptions = {},
-  interpreter: string = interpreterPath(),
+  interpreter: string = requireInterpreterPath(),
 ): Promise<string | undefined> {
   // The stub's own shebang is dead weight on Windows — every one of the three
   // wrappers names an interpreter itself — so it is left generic and the
@@ -1522,9 +1641,14 @@ export async function cmdEnable(
   // when this directory claims the interpreter's own name, and paying for it
   // otherwise would rewrite the shipped stub and break §10.7's read-only
   // `distFolder`.
+  //
+  // §15.43 — `requireInterpreterPath` refuses rather than falling back when the
+  // only runtime in sight is one of ours. Nothing is written yet, so the failure
+  // leaves both directories exactly as they were; the alternatives would be a
+  // shebang that execs itself (§14.26) or one `cache clean` invalidates.
   const interpreter =
     process.platform === "win32" || (await claimsInterpreter(installDirectory, binaries))
-      ? interpreterPath()
+      ? requireInterpreterPath()
       : undefined;
 
   // §10.5 — all binaries are processed concurrently.

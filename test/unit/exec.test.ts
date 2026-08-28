@@ -10,11 +10,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, sep } from "node:path";
+import { delimiter, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors.ts";
 import { pathWith, resolveBinPath, SHIM_MARKER } from "../../src/run/exec.ts";
+import { execNative } from "../../src/run/native.ts";
 import type { BinSpec } from "../../src/types.ts";
 
 /**
@@ -303,6 +304,69 @@ describe("resolveBinPath — §14.13 confinement", () => {
       hash: "",
     };
     expect(resolveBinPath("yarn", spec)).toBe(join(spec.location, "bin", "..", "bin", "yarn.js"));
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.43 — the forwarded host runtime
+ *
+ * `node` is a table entry (§15.39), so a native handover can be *the
+ * runtime itself*: our `node` shim resolves the project's version and
+ * spawns it, and everything below that point — a nested `jup enable`
+ * most of all — has a `process.execPath` inside the store. `enable`
+ * must not bake that into a shebang, so the last process outside the
+ * store leaves its realpath in the child's environment for it.
+ *
+ * `execNative` inherits stdio, so the probe writes what it saw to a
+ * file rather than to a pipe.
+ * ------------------------------------------------------------------ */
+
+describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME", () => {
+  /** Both spellings (§11.6), one per line, into the file named as `$1`. */
+  function probe(): string {
+    const file = join(root, "probe.sh");
+    writeFileSync(
+      file,
+      `#!/bin/sh\nprintf '%s\\n%s\\n' "$COREPACK_HOST_RUNTIME" "$JUP_HOST_RUNTIME" > "$1"\n`,
+    );
+    chmodSync(file, 0o755);
+    return file;
+  }
+
+  async function observed(env: NodeJS.ProcessEnv): Promise<[string, string]> {
+    const out = join(root, `host-runtime-${Math.random().toString(16).slice(2)}`);
+    expect(await execNative(probe(), [out], env)).toBe(0);
+    const [corepack, jup] = readFileSync(out, "utf8").split("\n");
+    return [corepack!, jup!];
+  }
+
+  it("writes the realpath of the runtime spawning the child, under both spellings", async () => {
+    expect(await observed({ ...process.env })).toEqual([
+      realpathSync(process.execPath),
+      realpathSync(process.execPath),
+    ]);
+  });
+
+  it("passes an inherited value through when our own runtime is in the store", async () => {
+    // The position a store runtime is in, without a 126 MB copy of one: move
+    // `<home>` over the runtime this test is running under, and the boundary
+    // test answers exactly as it would for `<home>/v1/node/…`.
+    vi.stubEnv("COREPACK_HOME", dirname(dirname(realpathSync(process.execPath))));
+
+    const inherited = "/opt/hostnode/bin/node";
+    expect(
+      await observed({
+        ...process.env,
+        COREPACK_HOST_RUNTIME: inherited,
+        JUP_HOST_RUNTIME: inherited,
+      }),
+    ).toEqual([inherited, inherited]);
+
+    // And it is not invented either: a chain that started inside the store has
+    // nothing to forward, and `enable` falls through to its `PATH` walk.
+    expect(await observed({ ...process.env })).toEqual(["", ""]);
+
+    vi.unstubAllEnvs();
   });
 });
 

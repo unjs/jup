@@ -1222,6 +1222,34 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * Held at 256,000 rather than the 253,712 this leaves, on the same terms as
    * every raise above.
+   *
+   * And then **up, 256,000 -> 260,000**, for one change: §15.43's rule that a
+   * shim never names an interpreter living inside the store. 255,986 -> 258,173,
+   * **+2,187 or +0.9%** — the ceiling had 14 bytes of headroom left, so a change
+   * this size could not have been absorbed at any wording.
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | §15.43's store-boundary test, `isInsideHome` | `cache/store.ts` | +1,158 |
+   * | §15.43's `COREPACK_HOST_RUNTIME`, and `writeEnvInto` to set it on a child | `config/env-vars.ts` | +570 |
+   * | §14.5's deny-list entry for that variable | `project/env.ts` | +337 |
+   * | a pointer to where the child's environment is finished | `run/exec.ts` | +122 |
+   *
+   * The forwarding *itself* — the code that computes and writes the variable —
+   * is deliberately absent from that table, and it is why the entry is 2 kB
+   * rather than 4: it lives in `run/native.ts`, reached only through `exec.ts`'s
+   * `import()`, so a `yarn --version` never parses a byte of it. Two halves
+   * could not follow it there. The boundary test is `store.ts`'s to answer,
+   * because `<home>` is, and every other module that needs it is cold; and a
+   * variable's name and env-file eligibility belong with the other forty, where
+   * §11.6's two spellings are resolved once (`env-vars.ts`) and §14.5's
+   * deny-list is one list (`env.ts`) rather than a predicate scattered per
+   * variable. Both are the shape this codebase already argues for elsewhere, so
+   * neither is worth undoing to buy back a kilobyte.
+   *
+   * Held at 260,000 rather than the 258,173 this leaves, on the same terms as
+   * every raise above — and the lowering the previous entry says is owed is
+   * still owed.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1233,6 +1261,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(256_000);
+    ).toBeLessThanOrEqual(260_000);
   });
 });

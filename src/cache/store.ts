@@ -11,13 +11,14 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled } from "../project/env.ts";
@@ -94,6 +95,31 @@ export function getHomeFolder(): string {
 /** `<home>/v1` — a layout-version segment. Incrementing it abandons old caches wholesale. */
 export function getInstallFolder(): string {
   return join(getHomeFolder(), LAYOUT_VERSION);
+}
+
+/**
+ * §15.43 — does `file` live under the directory this tool owns?
+ *
+ * The question is "would `cache clean` delete it?", so the answer has to be a
+ * path-boundary test rather than a `startsWith` on the two strings: a `<home>`
+ * of `~/.cache/jup` would otherwise swallow `~/.cache/jupiter/node`. `relative`
+ * gives the boundary — empty or `..`-leading means "not below" — and handles
+ * Windows's case-insensitive comparison on the way.
+ *
+ * `file` is expected to be a realpath already; `<home>` is resolved here, and
+ * falls back to its literal spelling when it does not exist yet, which cannot
+ * answer wrongly since nothing is inside a directory that is not there.
+ */
+export function isInsideHome(file: string): boolean {
+  let home = getHomeFolder();
+  try {
+    home = realpathSync(home);
+  } catch {
+    // Not created yet, or not readable: the literal spelling is the best there is.
+  }
+  // `..hidden` is a legal name, so the escape test compares whole segments.
+  const rel = relative(home, file);
+  return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
 /**

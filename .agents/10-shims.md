@@ -113,6 +113,31 @@ Both `chmod 0o755`.
 > they are what keeps a shim directory that *is* the Node install directory
 > relocatable.
 
+> **Which runtime (§15.43).** "The runtime executing `enable`" is not always a
+> runtime `enable` may name. `node` is a table entry (§15.39), so once `enable node`
+> has claimed that name on the `PATH` §15.32 asks the user to prepend, the tool's own
+> entry point resolves through the shim, downloads the project's runtime and runs
+> under it — and `process.execPath` is then a path inside `<home>`, which
+> `cache clean` (§09.7) exists to delete. An implementation MUST NOT bake in an
+> interpreter that lies inside its own home directory. It selects one in this order:
+>
+> 1. `realpath(process.execPath)`, when that is **not** inside `<home>`.
+> 2. The forwarded host runtime — the value of `COREPACK_HOST_RUNTIME` (§11.5),
+>    which a run outside `<home>` writes into the environment of every native child
+>    it spawns (§08.3, §15.28). It is used only when it names an executable file
+>    that is neither inside `<home>` nor a shim of this tool's own.
+> 3. The first `node` on `PATH` that is neither inside `<home>` nor one of this
+>    tool's shims, resolved through `realpath`.
+>
+> If none of the three yields a runtime, `enable` MUST **fail** and write nothing.
+> The message names the runtime it found, names `<home>`, and says that baking it
+> in would break every shim at the next `cache clean`. It MUST NOT fall back to
+> `#!/usr/bin/env node`, which is the exec loop above, and it MUST NOT bake the
+> store path, which is the failure this rule exists to prevent.
+>
+> The "is inside `<home>`" test is a path-boundary test on resolved paths, not a
+> string prefix: a `<home>` of `~/.cache/jup` does not contain `~/.cache/jupiter`.
+
 ## 10.2 POSIX shim creation
 
 ```

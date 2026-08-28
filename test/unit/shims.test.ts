@@ -27,6 +27,8 @@ import {
   type DisplacedEntry,
   generatePosixLink,
   generateWin32Link,
+  interpreterOnlyInStore,
+  interpreterPath,
   pathExportLine,
   perUserShimDirectory,
   PROXY_STUB_NAME,
@@ -43,7 +45,9 @@ import {
   shimDirectoryNotWritable,
   shimShadowed,
   shimSource,
+  SHIM_MARKER,
   stubNameFor,
+  stubNotWritable,
   targetBinaries,
   verifyOnPath,
   whichFile,
@@ -1011,6 +1015,191 @@ describe("restoring what enable displaced (§15.15)", () => {
     expect(left).toHaveLength(1);
     expect(left[0]?.path).toBe(join(other, "pnpm"));
   });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.43 — `enable` never bakes in an interpreter from the store
+ *
+ * §14.26 bakes `realpath(process.execPath)` into the shebang whenever
+ * the shim directory claims the name `node`, and §15.39 makes `node` a
+ * name it *can* claim. Once it has, §15.32's advice puts the shim ahead
+ * of the real runtime on `PATH`, so the tool's own `#!/usr/bin/env node`
+ * resolves through the shim, downloads the project's runtime and runs
+ * under it — and the path §14.26 then bakes in is one `cache clean`
+ * deletes. Every row below starts from that state.
+ *
+ * `process.execPath` is a writable, configurable property, so pointing
+ * it at a file inside the fixture's `COREPACK_HOME` reproduces the
+ * position exactly, with no 126 MB copy of the runtime involved.
+ * ------------------------------------------------------------------ */
+
+describe.skipIf(process.platform === "win32")("§15.43 — the baked-in interpreter", () => {
+  /**
+   * A `node` under `COREPACK_HOME` that `process.execPath` then names — the
+   * runtime a chain through our own `node` shim would be running under.
+   */
+  function runFromStore(): string {
+    const store = join(corepackHome, "v1", "node", "22.14.0", "bin", "node");
+    mkdirSync(dirname(store), { recursive: true });
+    write(store, "#!/bin/sh\nexit 0\n", 0o755);
+    process.execPath = store;
+    return store;
+  }
+
+  /** An executable `node` in a directory of its own, outside the store. */
+  function hostNode(name: string): string {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "node");
+    write(file, "#!/bin/sh\nexit 0\n", 0o755);
+    return file;
+  }
+
+  /** A file that answers `isOurShim` — what an earlier `enable node` leaves. */
+  function ourNodeShim(name: string): string {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, "node");
+    write(file, `#!/usr/bin/env node\n// ${SHIM_MARKER}\n`, 0o755);
+    return file;
+  }
+
+  const realExecPath = process.execPath;
+  afterEach(() => {
+    process.execPath = realExecPath;
+  });
+
+  it("tier 0: names the runtime running `enable`, when that is outside the store", () => {
+    expect(interpreterPath()).toBe(realpathSync(process.execPath));
+  });
+
+  it("tier 1: prefers the forwarded host runtime to an execPath inside the store", () => {
+    const store = runFromStore();
+    const host = hostNode("host");
+    vi.stubEnv("JUP_HOST_RUNTIME", host);
+
+    expect(interpreterPath()).toBe(host);
+    expect(interpreterPath()).not.toBe(store);
+  });
+
+  it("tier 1: refuses a forwarded value that is itself in the store, or one of our shims", () => {
+    runFromStore();
+    const host = hostNode("host");
+    // The only `node` on `PATH` is the acceptable one, so a forwarded value that
+    // is refused is visible as a fall through to it rather than as a failure.
+    vi.stubEnv("PATH", dirname(host));
+
+    // Inside the store: this is the value a chain would have carried if a level
+    // of it had overwritten rather than passed through.
+    vi.stubEnv("JUP_HOST_RUNTIME", join(corepackHome, "v1", "node", "22.14.0", "bin", "node"));
+    expect(interpreterPath()).toBe(host);
+
+    // One of our own shims: baking it in is §14.26's exec loop written by hand.
+    vi.stubEnv("JUP_HOST_RUNTIME", ourNodeShim("stale"));
+    expect(interpreterPath()).toBe(host);
+
+    // A path that is not there at all.
+    vi.stubEnv("JUP_HOST_RUNTIME", join(root, "gone", "node"));
+    expect(interpreterPath()).toBe(host);
+  });
+
+  it("tier 2: walks PATH, skipping our own shims and anything in the store", () => {
+    const store = runFromStore();
+    const shim = ourNodeShim("shims");
+    const host = hostNode("host");
+    // Exactly the order §15.32 asks the user to create: the shim directory
+    // first, the store's own `bin` next, the real runtime last.
+    vi.stubEnv("PATH", [dirname(shim), dirname(store), dirname(host)].join(delimiter));
+
+    expect(interpreterPath()).toBe(host);
+  });
+
+  it("tier 3: answers `undefined` when every runtime in sight is ours", () => {
+    const store = runFromStore();
+    vi.stubEnv("PATH", [dirname(ourNodeShim("shims")), dirname(store)].join(delimiter));
+
+    expect(interpreterPath()).toBeUndefined();
+  });
+
+  it("bakes the forwarded runtime into the shebang, not the store path", async () => {
+    const store = runFromStore();
+    const host = hostNode("host");
+    vi.stubEnv("JUP_HOST_RUNTIME", host);
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+
+    const stub = readFileSync(join(dist, PROXY_STUB_NAME), "utf8");
+    expect(stub.split("\n")[0]).toBe(`#!${host}`);
+    // The property, stated the way the bug is: nothing `cache clean` removes.
+    expect(stub).not.toContain(store);
+    expect(stub).not.toContain(corepackHome);
+  });
+
+  it("refuses rather than baking a store path, and writes nothing", async () => {
+    const store = runFromStore();
+    vi.stubEnv("PATH", [dirname(ourNodeShim("shims")), dirname(store)].join(delimiter));
+
+    await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
+      interpreterOnlyInStore(store, corepackHome),
+    );
+    await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
+      UsageError,
+    );
+
+    // Not a partial install: the name is untaken and the shipped stub — which a
+    // `#!/usr/bin/env node` fallback would have left in place — was never written.
+    expect(existsSync(join(binDir, "node"))).toBe(false);
+    expect(existsSync(join(dist, PROXY_STUB_NAME))).toBe(false);
+  });
+
+  /**
+   * §10.5 — the refusal is scoped to the `node` shim. Every other name goes
+   * through the shipped `#!/usr/bin/env node` stub, which is what keeps a
+   * machine with no runtime outside the store still able to install `pnpm`.
+   */
+  it("does not refuse an `enable` that never claims the interpreter's name", async () => {
+    const store = runFromStore();
+    vi.stubEnv("PATH", [dirname(ourNodeShim("shims")), dirname(store)].join(delimiter));
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+    expect(readFileSync(join(dist, PROXY_STUB_NAME), "utf8").split("\n")[0]).toBe(
+      "#!/usr/bin/env node",
+    );
+  });
+
+  /**
+   * §15.43's adjacent message. `guardWrites` covers the shim directory and jup's
+   * own package directory alike, and the shim directory's message — the one
+   * naming `--install-directory` and `JUP_SHIM_DIRECTORY` — is wrong for the
+   * second: neither option moves the stub, which lives with the tool.
+   */
+  it.skipIf(process.getuid?.() === 0)(
+    "names the stub, not the shim directory, when the package directory is read-only",
+    async () => {
+      // The stub has to exist first, or the failure would be "no stub yet"
+      // rather than "the stub needs rewriting".
+      expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+      // The file *and* the directory: a read-only directory alone still permits
+      // a write to a file already in it, and what a system package install
+      // actually leaves behind is root-owned files the user cannot open for
+      // writing. Both are what §10.7 means by "read-only".
+      chmodSync(join(dist, PROXY_STUB_NAME), 0o555);
+      chmodSync(dist, 0o555);
+
+      try {
+        await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
+          stubNotWritable(join(dist, PROXY_STUB_NAME)),
+        );
+        // §10.7 — and the case that must keep working: a warm `enable` of
+        // anything else compares before it writes, so it never touches `dist`.
+        expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+        expect(warn).not.toHaveBeenCalled();
+      } finally {
+        chmodSync(dist, 0o755);
+        chmodSync(join(dist, PROXY_STUB_NAME), 0o755);
+      }
+    },
+  );
 });
 
 describe("Windows shims (§10.3)", () => {

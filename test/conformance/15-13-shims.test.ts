@@ -22,16 +22,18 @@
  */
 
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { chmod } from "node:fs/promises";
-import { basename, delimiter, join } from "node:path";
+import { basename, delimiter, dirname, join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   alternateShims,
@@ -557,3 +559,150 @@ describe("§14.15 — one stub, dispatching on the name it was invoked under", (
     expect(asPnpm.stderr).toContain("This project is configured to use yarn");
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * §15.43 — rows 250 and 251
+ *
+ * §14.26 has `enable` bake `realpath(process.execPath)` into the shim
+ * stub's shebang whenever the shim directory claims the name `node`,
+ * and §15.39 makes `node` a name it can claim. Once it has, §15.32's
+ * advice puts the shim ahead of the real runtime on `PATH`, the tool's
+ * own `#!/usr/bin/env node` resolves through it, and `enable` ends up
+ * running under a runtime out of `<home>` — baking in a path the next
+ * `jup cache clean` deletes.
+ *
+ * Both rows put the tool in that position by moving `<home>` **over**
+ * the runtime the suite is running under, rather than by copying a
+ * 126 MB binary into the fixture. `JUP_HOME` is the user's to set, the
+ * boundary test is the same one either way, and `enable` writes nothing
+ * under `<home>` — so nothing here depends on that directory being ours.
+ * ------------------------------------------------------------------ */
+
+/** The runtime running this suite, and a `<home>` that would contain it. */
+const HOST_RUNTIME = realpathSync(process.execPath);
+const HOME_OVER_HOST = dirname(HOST_RUNTIME);
+
+describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
+  "§15.43 — the interpreter a shim names",
+  () => {
+    /**
+     * Two tool copies of their own. These rows rewrite the shared stub's
+     * shebang and make one of them read-only, and `TOOL` above is a directory
+     * every other row in this file reads.
+     */
+    const PINNED = copyTool();
+    const READ_ONLY = copyTool();
+
+    /** The stub `<shimDir>/<binName>` points at — §10.2's relative symlink. */
+    function stubFor(shimDir: string, binName: string): string {
+      return resolve(shimDir, readlinkSync(join(shimDir, binName)));
+    }
+
+    function shebangOf(file: string): string {
+      return readFileSync(file, "utf8").split("\n")[0]!;
+    }
+
+    /** An ordinary `node` outside `<home>`: a wrapper around the real one. */
+    function decoyNode(root: string, name: string): string {
+      const dir = join(root, name);
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, "node");
+      writeFileSync(file, `#!/bin/sh\nexec ${HOST_RUNTIME} "$@"\n`);
+      chmodSync(file, 0o755);
+      return file;
+    }
+
+    it("250: the forwarded host runtime first, then one from PATH, never one from <home>", async () => {
+      const { fixture, shimDir, options } = shimFixture();
+      const forwarded = decoyNode(fixture.root, "forwarded");
+      const onPath = decoyNode(fixture.root, "on-path");
+      const inStore = { ...options.env, COREPACK_HOME: HOME_OVER_HOST };
+
+      // Tier 1. Nothing usable on `PATH` at all, so a run that ignored the
+      // forwarded value would refuse rather than quietly pick something else.
+      const first = await run(["enable", "node"], {
+        ...options,
+        bin: PINNED,
+        env: { ...inStore, JUP_HOST_RUNTIME: forwarded, PATH: shimDir },
+      });
+
+      expect(first.exitCode).toBe(0);
+      expect(first.stderr).toBe("");
+      expect(shebangOf(stubFor(shimDir, "node"))).toBe(`#!${forwarded}`);
+
+      // Tier 2. Nothing forwarded now, and the first `node` on `PATH` is the
+      // shim the run above installed — which is skipped, or this would be a
+      // shebang naming a file that execs itself (§14.26).
+      const second = await run(["enable", "node"], {
+        ...options,
+        bin: PINNED,
+        env: { ...inStore, PATH: [shimDir, dirname(onPath)].join(delimiter) },
+      });
+
+      expect(second.exitCode).toBe(0);
+      expect(shebangOf(stubFor(shimDir, "node"))).toBe(`#!${onPath}`);
+
+      // The property both cases are for: what the shebang names is outside the
+      // directory `cache clean` empties, so a clean cannot invalidate it.
+      const baked = shebangOf(stubFor(shimDir, "node")).slice(2);
+      expect(baked.startsWith(HOME_OVER_HOST)).toBe(false);
+      expect(existsSync(baked)).toBe(true);
+    });
+
+    it.skipIf(IS_ROOT)(
+      "251: refuses rather than baking one in, and names the stub it could not rewrite",
+      async () => {
+        const { shimDir, options } = shimFixture();
+
+        // No runtime outside `<home>` by either route: nothing forwarded, and the
+        // only entry on `PATH` is the shim directory, which holds no `node` yet.
+        const refused = await run(["enable", "node"], {
+          ...options,
+          bin: PINNED,
+          env: { ...options.env, COREPACK_HOME: HOME_OVER_HOST, PATH: shimDir },
+        });
+
+        // §12 — a `UsageError` is reported on stdout, with the usage line after it.
+        expect(refused.exitCode).toBe(1);
+        expect(refused.stdout).toContain(HOME_OVER_HOST);
+        expect(refused.stdout).toContain("cache clean");
+        // Neither fallback was taken, and the name is still free.
+        expect(refused.stdout).not.toContain("/usr/bin/env");
+        expect(existsSync(join(shimDir, "node"))).toBe(false);
+
+        // The adjacent message: the package directory is read-only, so the stub
+        // cannot be rewritten to carry the pin. Seed it first, or the failure
+        // would be "no stub yet" rather than "the stub needs rewriting".
+        expect((await run(["enable", "pnpm"], { ...options, bin: READ_ONLY })).exitCode).toBe(0);
+        const stub = stubFor(shimDir, "pnpm");
+        // The file *and* the directory: a read-only directory alone still permits
+        // a write to a file already inside it, and a system package install
+        // leaves behind files the user cannot open for writing.
+        await chmod(stub, 0o555);
+        await chmod(dirname(stub), 0o555);
+
+        try {
+          const unwritable = await run(["enable", "node"], { ...options, bin: READ_ONLY });
+
+          expect(unwritable.exitCode).toBe(1);
+          expect(unwritable.stdout).toContain(stub);
+          // The two remedies that move the *shims* are not offered, because
+          // neither of them moves this file.
+          expect(unwritable.stdout).not.toContain("--install-directory <a writable");
+          expect(unwritable.stdout).not.toContain("set JUP_SHIM_DIRECTORY");
+
+          // §10.7 — and the case that must keep working: `enable` of anything but
+          // the interpreter compares the stub before writing it, so it never
+          // touches the package directory at all.
+          const again = await run(["enable", "pnpm"], { ...options, bin: READ_ONLY });
+          expect(again.exitCode).toBe(0);
+          expect(again.stdout).toBe("");
+          expect(again.stderr).toBe("");
+        } finally {
+          await chmod(dirname(stub), 0o755);
+          await chmod(stub, 0o755);
+        }
+      },
+    );
+  },
+);

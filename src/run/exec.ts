@@ -318,7 +318,8 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
  * lookup is skipped entirely, which makes this the *cheaper* of the two paths
  * rather than the more expensive one. The returned promise then settles with the
  * child's exit code; see `native.ts` for how §08.4's and §08.5's observables are
- * preserved across the process boundary.
+ * preserved across the process boundary, and for §15.43's one further entry in
+ * the child's environment — the child may itself be a runtime out of the store.
  *
  * The return value is `0` on the JavaScript path because the package manager
  * sets the real exit code from its own module body, which runs strictly after

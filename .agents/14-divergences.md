@@ -564,6 +564,17 @@ give. Re-running `enable` re-bakes it, and the surviving `%~dp0\node.exe` /
 `$basedir/node` branches still make a shim directory that *is* the Node install
 directory relocatable.
 
+**What this rule did not anticipate is that the runtime executing `enable` can
+itself be one this tool downloaded.** Consequence 2 above is what makes it
+happen: once `enable node` has put our shim first on `PATH`, the tool's own entry
+point resolves through it, so `jup enable pnpm` in a project pinning a runtime
+runs under `<home>/v1/node/<version>/bin/node` and bakes *that* into the shebang.
+The next `jup cache clean` deletes it, every shim on the machine dies with `bad
+interpreter` (exit 126), and `enable` cannot repair them because `env node` now
+finds only the broken `node` shim (exit 127). §15.43 adds the missing half of
+this divergence: which runtime may be named, in what order it is looked for, and
+that `enable` refuses rather than falling back when the answer is none.
+
 ## 14.27 The stubs are named `.mjs` — [correct/perf]
 
 **Corepack:** the generated stubs are `dist/<B>.js`, and the package they sit in

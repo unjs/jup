@@ -76,6 +76,10 @@ export const ENV = {
   ROOT: "COREPACK_ROOT",
   MIGRATE_FROM: "COREPACK_MIGRATE_FROM",
 
+  // §15.43 — set by the tool, read by *the tool*, one process further down: the
+  // realpath of the runtime hosting a chain that has since entered the store.
+  HOST_RUNTIME: "COREPACK_HOST_RUNTIME",
+
   // §11.5 / §15 — new in this spec.
   NODE_EXECPATH: "COREPACK_NODE_EXECPATH",
   CAFILE: "COREPACK_CAFILE",
@@ -221,8 +225,17 @@ export function envEntry<N extends string>(
  * tool that has learnt the new name finds it too.
  */
 export function writeEnv(name: string, value: string): void {
-  process.env[name] = value;
-  process.env[jupSpelling(name)] = value;
+  writeEnvInto(process.env, name, value);
+}
+
+/**
+ * As {@link writeEnv}, but into a **child** environment block rather than our own:
+ * §15.32's native handover builds one by hand so its edits cannot leak back into
+ * this process, and §15.43's forwarded runtime travels the same way.
+ */
+export function writeEnvInto(env: NodeJS.ProcessEnv, name: string, value: string): void {
+  env[name] = value;
+  env[jupSpelling(name)] = value;
 }
 
 /**

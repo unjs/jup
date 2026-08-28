@@ -64,6 +64,7 @@ export const ENV_FILE_INELIGIBLE = new Set<string>([
   ENV.HOME,
   ENV.SHIM_DIRECTORY,
   ENV.NODE_EXECPATH,
+  ENV.HOST_RUNTIME,
 ]);
 
 /**
@@ -134,6 +135,11 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // runs on `git clone && yarn`. Choosing the interpreter is choosing what
   // executes; it can never come from the project.
   ENV.NODE_EXECPATH,
+  // §15.43 — the runtime `enable` bakes into the shim shebang when its own
+  // `process.execPath` is in the store. A project able to supply it would name
+  // the interpreter every shimmed `npm`, `yarn` and `pnpm` runs under from then
+  // on: `COREPACK_NODE_EXECPATH`'s decision, persisted.
+  ENV.HOST_RUNTIME,
 ]);
 
 /**

@@ -1348,6 +1348,7 @@ Introduced by this section. All follow §11.6's precedence.
 | `COREPACK_ENABLE_PRERELEASES` | `1` | Allow implicit resolution to select a prerelease (§15.24) | yes |
 | `COREPACK_SPEC_FILE` | path | External file supplying the project spec (§15.35d) | **no** |
 | `COREPACK_MINIMUM_RELEASE_AGE` | hours | Minimum publish age for implicit resolution (§15.35e) | yes |
+| `COREPACK_HOST_RUNTIME` | path | The runtime hosting this chain, from outside `<home>`; set by the tool, read by `enable` (§15.43) | **no** (§14.5) |
 
 ## 15.38 Additional conformance tests
 
@@ -1457,6 +1458,8 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 247 | The same, plus a writable directory on `PATH` that is not a candidate — the one holding the tool's own binary | that directory is **ignored**; shims go to the default and point 3's advisory fires. `PATH` chooses among the list, it never supplies it (§15.13 point 6, #71) |
 | 248 | `<home>/bin` on `PATH` but group-writable, and then absent altogether | not chosen in either case; the default is used and `enable` creates no `<home>/bin` (§15.13 point 6) |
 | 249 | Shims already in the default, which is off `PATH`, and `<home>/bin` now on it | `enable` refreshes the default and writes no second set; `info` names the same directory without reading `PATH` (§15.13 point 7) |
+| 250 | `enable node`, then `enable` again from a process whose own runtime is inside `<home>` — once with `JUP_HOST_RUNTIME` naming a runtime outside it, once with only `PATH` to go on | the shebang names the outside runtime in both cases, and never a path under `<home>` — so nothing `cache clean` removes can invalidate it. The `PATH` case skips the tool's own `node` shim sitting ahead of it (§10.1, §15.43) |
+| 251 | The same, with no runtime outside `<home>` reachable by either route; then `enable node` with the tool's own package directory read-only | the first fails, naming the cache and `cache clean`, and writes nothing — no `#!/usr/bin/env node` and no store path. The second names the **stub** it could not rewrite, not the shim directory, while `enable pnpm` in the same tree still exits 0 in silence (§10.1, §10.7, §15.43) |
 
 ## 15.39 Tools, not only package managers — [required]
 
@@ -1694,3 +1697,79 @@ review, and MUST NOT update it automatically — no query over npm's tags can de
 it, which is the whole reason it is a literal. The alternative was to leave
 `node@lts` erroring, and a tag every other version manager answers is worth a line
 in the table that a release keeps honest.
+
+## 15.43 A shim never names an interpreter inside the store — [required, bug]
+
+> Not from an issue: from §14.26 meeting §15.39 and §15.32. Each is correct alone,
+> and the three of them together bake a path into every shim on the machine that
+> `jup cache clean` then deletes. The failure is silent until the clean, and it
+> takes `enable` — the repair — down with everything else.
+
+**The problem, concretely.** §14.26 has `enable` bake the `realpath` of the
+runtime it is running under into the stub's shebang whenever the shim directory
+claims the name `node`. §15.39 makes `node` a table entry, so `enable node` is a
+thing users do; §15.32 asks them to put the shim directory *first* on `PATH`.
+After that, anything starting `#!/usr/bin/env node` — the tool's own entry point
+included — resolves through our `node` shim, which reads the project's
+`devEngines.runtime` or `.nvmrc` (§15.40), installs that runtime and runs under
+it. So:
+
+```
+$ cd project-with-nvmrc-22.14.0 && jup enable pnpm
+$ head -1 <dist>/shim-proxy.mjs
+#!<home>/v1/node/22.14.0/bin/node
+```
+
+The shebang now names a file inside the directory `cache clean` (§09.7) exists to
+empty. After the next clean every shim on the machine — `yarn`, `npm`, `pnpm`,
+`node` — fails with `bad interpreter: No such file or directory`, exit 126. The
+obvious repair does not work either: `jup` itself is reached through
+`#!/usr/bin/env node`, `env` finds the broken `node` shim, and the user gets exit
+127 instead. Nothing warns, and nothing in §10 or §14.26 forbids it, because both
+were written before a runtime could be one of the things this tool installs.
+
+**Required.**
+
+* An implementation MUST NOT bake into a shim an interpreter path that lies
+  inside its own `<home>` (§07.1). "Inside" is a path-boundary test on resolved
+  paths — `~/.cache/jup` does not contain `~/.cache/jupiter`.
+* It selects the interpreter in §10.1's three tiers: `realpath(process.execPath)`
+  when that is outside `<home>`; else `COREPACK_HOST_RUNTIME` (§11.5, §15.37);
+  else the first `node` on `PATH` that is neither inside `<home>` nor a shim of
+  this tool's own.
+* `COREPACK_HOST_RUNTIME` is **written by the tool**, into the environment of
+  every native child it spawns (§08.3, §15.28), and only by a process whose own
+  runtime is outside `<home>`. A process already inside `<home>` passes the value
+  it inherited through unchanged, which is what carries the answer down a chain
+  of any depth — a store runtime spawning a store runtime spawning a package
+  manager. Overwriting it unconditionally would replace the one usable path with
+  a store path at the first hop.
+* A forwarded value is validated before it is used, not trusted: it must name an
+  executable file, outside `<home>`, that is not one of this tool's shims. It is
+  env-file **ineligible** on §14.5's terms — a project that could set it would be
+  naming the interpreter every shimmed `npm`, `yarn` and `pnpm` on the machine
+  runs under from then on.
+* When no tier yields a runtime, `enable` MUST **fail** and write nothing.
+  Falling back to `#!/usr/bin/env node` is §14.26's exec loop; falling back to the
+  store path is this section's bug. The message names the runtime it found, names
+  `<home>`, says that `cache clean` would break every shim, and asks for a re-run
+  under a runtime installed outside `<home>`.
+
+### The adjacent message
+
+§10.7's read-only case reaches the same guard from two directions, and one of
+them was reporting the wrong thing. `enable node` on a read-only *package*
+directory — the tool installed by a system package manager, or into a container
+image — could not rewrite the shared stub, and said:
+
+```
+Unable to write shims to <dist>: the directory is not writable. Either re-run
+with --install-directory …, set JUP_SHIM_DIRECTORY, …
+```
+
+Both remedies move where the *shims* go; neither moves the stub, which lives with
+the tool. An implementation MUST report the two failures separately: the stub
+case names the stub, says that shimming `node` is what requires it to be
+rewritten, and says that the shim-directory options do not apply. `enable`
+without `node` MUST still succeed in silence there, which it does because the
+stub is compared before it is written (§10.2's idempotency, §10.7).

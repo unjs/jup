@@ -24,7 +24,10 @@
  */
 
 import { spawn } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { constants } from "node:os";
+import { isInsideHome } from "../cache/store.ts";
+import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";
 
 /**
@@ -41,6 +44,33 @@ import { messages } from "../errors-cold.ts";
  * the child through the process group like any uncatchable signal.
  */
 const FORWARDED_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"];
+
+/**
+ * §15.43 — record, in the child's environment, the runtime hosting this chain.
+ *
+ * `node` is a table entry (§15.39), so our own `node` shim resolves the
+ * project's runtime and spawns it *through here*; everything below that point —
+ * a nested `jup enable`, above all — sees a `process.execPath` inside the store.
+ * `enable` must never bake that into a shebang (§10.1): the store is what
+ * `cache clean` deletes, and a shim whose interpreter has been deleted dies with
+ * `bad interpreter` before a line of ours runs, `enable` included. So the last
+ * process in the chain that was running *outside* the store leaves its realpath
+ * here, and `interpreterPath()` reads it back however deep the chain got.
+ *
+ * Written only when our own runtime is outside the home; when it is inside, the
+ * value the caller inherited is passed through untouched. Overwriting it at
+ * every level — the `??=` shape — would replace the one path worth carrying with
+ * a store path at the first hop.
+ */
+function forwardHostRuntime(env: NodeJS.ProcessEnv): void {
+  let own: string;
+  try {
+    own = realpathSync(process.execPath);
+  } catch {
+    own = process.execPath;
+  }
+  if (!isInsideHome(own)) writeEnvInto(env, ENV.HOST_RUNTIME, own);
+}
 
 /**
  * Run a native `bin` target directly and resolve with the exit code it earned.
@@ -71,6 +101,8 @@ const FORWARDED_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGHUP", "SIGQUIT", "SI
  * `env` in as the child's environment: the ambient one wholesale, env-file
  * values included, plus §15.32's `PATH` entry — which is written *here* and
  * never into `process.env`, so it cannot leak into the tool's own process.
+ * §15.43's forwarded host runtime is added on the same terms; see
+ * {@link forwardHostRuntime}.
  */
 export function execNative(
   binPath: string,
@@ -78,6 +110,8 @@ export function execNative(
   env: NodeJS.ProcessEnv = process.env,
   argv0?: string,
 ): Promise<number> {
+  forwardHostRuntime(env);
+
   // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
   // package manager's cwd (§08.3.2), and the child stays in our process group so
   // terminal job control keeps working.
