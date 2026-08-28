@@ -1,6 +1,100 @@
 # Changelog
 
 
+## v0.0.2
+
+[compare changes](https://github.com/unjs/jup/compare/v0.0.1...v0.0.2)
+
+### 🚀 Enhancements
+
+- Node@lts resolves from a compiled-in table constant (§15.42) ([d5f80e9](https://github.com/unjs/jup/commit/d5f80e9))
+- Prefer a per-user directory that is already on PATH (§15.13) ([32015fc](https://github.com/unjs/jup/commit/32015fc))
+
+### 🔥 Performance
+
+- EnableCompileCache ([6d42288](https://github.com/unjs/jup/commit/6d42288))
+- Run §15.13's selection once, and pay for point 7's scan (§16.3) ([ae75df8](https://github.com/unjs/jup/commit/ae75df8))
+- Name the emitted shim stubs `.mjs` (§14.27) ([749af99](https://github.com/unjs/jup/commit/749af99))
+
+### 🩹 Fixes
+
+- Narrow the semver version prefix and the x-range grammar ([c30d711](https://github.com/unjs/jup/commit/c30d711))
+- Parse the rewritten manifest before handing it to writeFileSync ([d84f099](https://github.com/unjs/jup/commit/d84f099))
+- Write package.json atomically when pinning ([19f8dfb](https://github.com/unjs/jup/commit/19f8dfb))
+- Deny the three location variables in a project env file (§14.5) ([b4e4214](https://github.com/unjs/jup/commit/b4e4214))
+- Stop the env-file search at the project boundary (§03.2) ([43c10db](https://github.com/unjs/jup/commit/43c10db))
+- Refuse a spec whose name cannot be a store directory (§03.4, §07.2) ([679c2a5](https://github.com/unjs/jup/commit/679c2a5))
+- Validate the marker's shape before trusting it (§07.2) ([d666611](https://github.com/unjs/jup/commit/d666611))
+- Give the extractor and the store a fixed mode ceiling (§07.4 rule 6) ([780902e](https://github.com/unjs/jup/commit/780902e))
+- Bound a GNU/PAX metadata block before reading it (§07.4 rule 7) ([2ca0eff](https://github.com/unjs/jup/commit/2ca0eff))
+- Cap the bodies http reads into memory ([22be38c](https://github.com/unjs/jup/commit/22be38c))
+- Refuse ${VAR} expansion in a project-level .npmrc (§15.1) ([e8c09f8](https://github.com/unjs/jup/commit/e8c09f8))
+- Do not hand a credential to a registry the repository chose (§14.6) ([1fb72ed](https://github.com/unjs/jup/commit/1fb72ed))
+- Promote the shim directory only when it holds a shim of ours (§15.32) ([58df88f](https://github.com/unjs/jup/commit/58df88f))
+- Harden enable's writability probe and disable's displaced record ([6a0de72](https://github.com/unjs/jup/commit/6a0de72))
+- Bake the interpreter path into the shims enable writes (§10.1, §10.3) ([a2f97ee](https://github.com/unjs/jup/commit/a2f97ee))
+- Fetch every tool from the npm registry, Yarn included (§15.41) ([3e49289](https://github.com/unjs/jup/commit/3e49289))
+- Stop the credential gate at the environment tier (§15.1, §15.38/149) ([4afd8dc](https://github.com/unjs/jup/commit/4afd8dc))
+- **test:** Hand `--import` a URL, not a Windows path ([196b144](https://github.com/unjs/jup/commit/196b144))
+- **shims:** Never write a Windows wrapper through a symlink (§10.3) ([5c3e065](https://github.com/unjs/jup/commit/5c3e065))
+- **store:** §07.4 rule 5 held on POSIX and nowhere else ([fcef33f](https://github.com/unjs/jup/commit/fcef33f))
+- **info:** §15.30 reported npm's own `npm.cmd` as a shim of ours ([0f2298c](https://github.com/unjs/jup/commit/0f2298c))
+- Fall back to the ordinary member write when a sidecar pin has no digest ([91a6807](https://github.com/unjs/jup/commit/91a6807))
+- Complete §14.27's rename in the ownership test `enable` actually calls ([13350ca](https://github.com/unjs/jup/commit/13350ca))
+- Require proof of a completed install before promote discards its own bytes ([ce75084](https://github.com/unjs/jup/commit/ce75084))
+- Re-run §15.11's probe after a lost rename race ([e735427](https://github.com/unjs/jup/commit/e735427))
+- Case-fold only the host of an .npmrc auth prefix ([6e15d86](https://github.com/unjs/jup/commit/6e15d86))
+- Percent-decode URL userinfo before it becomes a Basic credential ([28ad7d1](https://github.com/unjs/jup/commit/28ad7d1))
+- Report the pin string the manifest actually holds ([7dfbc53](https://github.com/unjs/jup/commit/7dfbc53))
+- Let `info` stop where the real walk stops ([e84943d](https://github.com/unjs/jup/commit/e84943d))
+- Apply §15.39's runtime refusal in `info`, as every other reader does ([e495a02](https://github.com/unjs/jup/commit/e495a02))
+- Edit the duplicate key that readers actually resolve to ([ee2ee7c](https://github.com/unjs/jup/commit/ee2ee7c))
+- Check `bin` values, not just the container, before using them ([c4637b9](https://github.com/unjs/jup/commit/c4637b9))
+- Actually honour a `Retry-After` longer than the cap ([e63d597](https://github.com/unjs/jup/commit/e63d597))
+- Let an .npmrc auth pair outrank a token from a lower-precedence file ([ae3fce8](https://github.com/unjs/jup/commit/ae3fce8))
+- Propagate a socket failure into the decompressor ([a1fd6ae](https://github.com/unjs/jup/commit/a1fd6ae))
+- Read the ustar `prefix` field only from a ustar header ([715ce87](https://github.com/unjs/jup/commit/715ce87))
+- Let the shim-directory lookup see a dangling shim ([892dd9d](https://github.com/unjs/jup/commit/892dd9d))
+- Return the bin path that was actually validated ([568a387](https://github.com/unjs/jup/commit/568a387))
+- Read an indented `#` after a comment line as a key, like `parseEnv` does ([3570c6e](https://github.com/unjs/jup/commit/3570c6e))
+- Keep a pin digest and a root manifest path inside their own bounds ([7760fb9](https://github.com/unjs/jup/commit/7760fb9))
+
+### 💅 Refactors
+
+- Drop the deprecated PackageManager* type aliases ([43b243e](https://github.com/unjs/jup/commit/43b243e))
+- Drop the bin-list read path, jup's only self-compat carve-out ([bb38e37](https://github.com/unjs/jup/commit/bb38e37))
+- Keep the warm chunk inside §16.3's byte ceiling ([ac5a772](https://github.com/unjs/jup/commit/ac5a772))
+
+### 📖 Documentation
+
+- Move §15.11's pin-qualified reasoning into the spec ([3e5090e](https://github.com/unjs/jup/commit/3e5090e))
+- Move §10.3's bodies onto the baked interpreter path (§14.26) ([6398c74](https://github.com/unjs/jup/commit/6398c74))
+- §14.27's numbers, measured against the shipped layout ([daac1d8](https://github.com/unjs/jup/commit/daac1d8))
+
+### 🏡 Chore
+
+- Update release script ([dc8552e](https://github.com/unjs/jup/commit/dc8552e))
+
+### ✅ Tests
+
+- Give §15.32's fixture shims the banner the promotion reads (§14.16) ([662fd8a](https://github.com/unjs/jup/commit/662fd8a))
+- Park §15.15's fixture backup where `displace` actually puts it ([902a133](https://github.com/unjs/jup/commit/902a133))
+- Raise the warm chunk ceiling to 256,000 for ten commits of hardening ([a215d7e](https://github.com/unjs/jup/commit/a215d7e))
+- Resolve the temp root, so macOS's symlinked $TMPDIR stops failing ([60e5fea](https://github.com/unjs/jup/commit/60e5fea))
+- Redirect the per-user shim directory the way each platform spells it ([1d6d8ff](https://github.com/unjs/jup/commit/1d6d8ff))
+- Stop the fixtures assuming POSIX where the platform decides ([f30a748](https://github.com/unjs/jup/commit/f30a748))
+- The last six — PATHEXT's spelling, `{exe}`'s source, and a 5 s timeout ([e9853ab](https://github.com/unjs/jup/commit/e9853ab))
+
+### 🤖 CI
+
+- Run the suite on Linux, Windows and macOS ([539a8d2](https://github.com/unjs/jup/commit/539a8d2))
+- Let the Windows leg report without blocking ([0fd71dc](https://github.com/unjs/jup/commit/0fd71dc))
+- Windows blocks again ([1f36539](https://github.com/unjs/jup/commit/1f36539))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.0.1
 
 
