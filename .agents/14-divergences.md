@@ -210,6 +210,14 @@ that against the signed `dist.integrity` exactly as the full-extraction path doe
 Continue to hash the extracted file separately when the user pinned a hash, since
 that is the artifact their pin refers to.
 
+> **Superseded by §15.41.** The filtered path is gone: Yarn Berry is
+> `@yarnpkg/cli-dist` for every user, not only behind a mirror, and its tarball is
+> extracted whole. There is no longer a download whose hashed bytes differ from the
+> bytes received, so the widening above has no special case left to apply to — the
+> comparison it describes is simply what §06.1 row 2 does. The hole this item
+> records was real and is closed at the source rather than patched; the item stays
+> because the reasoning is what §15.41 is built on.
+
 ## 14.11 Constant-time digest comparison and algorithm validation — [sec]
 
 **Corepack:** compares hex digests with `!==`, and passes the algorithm name straight

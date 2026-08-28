@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -125,6 +126,16 @@ beforeEach(async () => {
         }),
       );
     }
+    // §15.41 put every artifact on the npm registry, so a download is a real
+    // tarball now rather than the single `.js` a JSON body could stand in for.
+    if (body instanceof Uint8Array) {
+      return Promise.resolve(
+        new Response(Buffer.from(body), {
+          status: 200,
+          headers: { "content-type": "application/octet-stream" },
+        }),
+      );
+    }
     return Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,
@@ -187,12 +198,23 @@ async function writeLastKnownGood(value: Record<string, string>): Promise<void> 
   await writeFile(join(home, "lastKnownGood.json"), JSON.stringify(value));
 }
 
-/** The two registry documents the yarn table entry reads (§05.2, §05.3). */
+/**
+ * The two packuments the yarn table entry reads (§05.2, §15.41).
+ *
+ * Both are npm documents now. Berry's used to be `repo.yarnpkg.com/tags`, a
+ * url-type registry with `tags`/`aliases` fields; `/tags` is still registered so
+ * that a test asserting nothing reached a vendor host has something to catch.
+ */
 function mockYarnRegistry(): void {
   routes["/yarn"] = {
     name: "yarn",
     "dist-tags": { latest: "1.22.22" },
     versions: { "1.0.0": {}, "1.22.4": {}, "1.22.22": {} },
+  };
+  routes["/@yarnpkg/cli-dist"] = {
+    name: "@yarnpkg/cli-dist",
+    "dist-tags": { stable: "2.4.3", latest: "3.0.0" },
+    versions: { "2.1.0": {}, "2.2.2": {}, "2.4.3": {}, "3.0.0": {} },
   };
   routes["/tags"] = {
     tags: ["3.0.0", "2.4.3", "2.2.2", "2.1.0"],
@@ -314,11 +336,25 @@ describe("install (§09.2, test 86)", () => {
    * must not silently repoint the machine's default.
    */
   it("does not bump last-known-good on a cold install either", async () => {
-    routes["/2.2.2/packages/yarnpkg-cli/bin/yarn.js"] = { fake: "yarn" };
-    // §15.11 redirected this row: Berry from `repo.yarnpkg.com` has no
-    // signature and this fixture pins no hash, so the artifact clears no
-    // verification tier. The opt-out keeps the row about what it is about —
-    // §09.2 not touching `lastKnownGood.json` on a cold install.
+    // §15.41 — Berry is an `@yarnpkg/cli-dist` tarball on the npm registry, so
+    // §06 has a packument to consult for a signature where the old url-type
+    // registry offered none. The fixture therefore serves the metadata too.
+    mockYarnRegistry();
+    const archive = rawArchive(["package/package.json", "package/bin/yarn.js"]);
+    routes["/@yarnpkg/cli-dist/2.2.2"] = {
+      name: "@yarnpkg/cli-dist",
+      version: "2.2.2",
+      dist: {
+        tarball: "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-2.2.2.tgz",
+        // §06.1 row 2 needs *something* to compare the stream against; a
+        // signature is what it does not have, which is the point below.
+        integrity: `sha512-${createHash("sha512").update(archive).digest("base64")}`,
+      },
+    };
+    routes["/@yarnpkg/cli-dist/-/cli-dist-2.2.2.tgz"] = archive;
+    // §15.11: this fixture publishes no signature and pins no hash, so the
+    // artifact clears no verification tier. The opt-out keeps the row about what
+    // it is about — §09.2 not touching `lastKnownGood.json` on a cold install.
     process.env.COREPACK_ALLOW_UNVERIFIED = "1";
     await writeLastKnownGood({ yarn: "2.1.0" });
     await manifest({ packageManager: "yarn@2.2.2" });

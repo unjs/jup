@@ -29,6 +29,15 @@
  *    of them — and the mock serves `time` **only** to a client that actually
  *    asked for the full document, so an implementation that forgot to switch its
  *    header fails the age rows rather than passing them.
+ *
+ * **The `undated source fails closed` rows are gone.** They asserted the other
+ * half of blocker 3 — that a source publishing no dates refuses under the gate
+ * rather than resolving unchecked — against `repo.yarnpkg.com`'s `/tags`
+ * document, the table's only url-type registry. §15.41 moved Yarn Berry onto
+ * `@yarnpkg/cli-dist`, so every source the table names is an npm packument with
+ * a `time` field and nothing reachable can be undated. `undatedSourceError` and
+ * the branch that raises it are still there for a band that is not an npm
+ * registry; there is simply no longer one to point a row at.
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -38,7 +47,6 @@ import {
   createFixture,
   MockRegistry,
   packageManagerTarball,
-  pmScript,
   run,
   seedPackageManager,
 } from "./_harness/index.ts";
@@ -53,13 +61,6 @@ const HOUR = 60 * 60 * 1000;
 
 /** Yarn Classic, so the `<2.0.0` band has something dated to answer with. */
 const YARN_CLASSIC = "1.22.4";
-
-/** §05.3's tags document: versions and aliases, and nothing dated (blocker 3). */
-const BERRY_TAGS = "/tags";
-const TAG_DOCUMENT = JSON.stringify({
-  aliases: { stable: "4.0.0" },
-  tags: ["4.0.0", "3.8.0"],
-});
 
 beforeAll(async () => {
   await registry.start();
@@ -79,12 +80,6 @@ beforeAll(async () => {
     distTags: { latest: YARN_CLASSIC },
     time: new Date(now - 365 * 24 * HOUR),
   });
-  registry.publishFile(BERRY_TAGS, TAG_DOCUMENT, "application/json");
-  registry.publishFile(
-    "/4.0.0/packages/yarnpkg-cli/bin/yarn.js",
-    pmScript("yarn", "4.0.0"),
-    "application/javascript",
-  );
 });
 
 afterAll(async () => {
@@ -239,75 +234,6 @@ describe("§15.35e COREPACK_MINIMUM_RELEASE_AGE", () => {
 
 /* -------------------------------------------------------------------------- */
 /* Blocker 3 — a source that publishes no release dates                        */
-/* -------------------------------------------------------------------------- */
-
-describe("§15.35e — an undated source fails closed", () => {
-  it("203: implicit resolution against repo.yarnpkg.com is refused, naming the way out", async () => {
-    // §05.3's tags document has versions and aliases and nothing dated, so the
-    // minimum age cannot be enforced against it at all. Warning and proceeding
-    // would make the variable report success without having been applied, which
-    // is the fail-open this item exists to close — so it refuses instead, and
-    // names the two ways out.
-    const fixture = createFixture({ name: "app", packageManager: "yarn@^4.0.0" });
-
-    const result = await run(["yarn", "--version"], {
-      ...fixture,
-      registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
-    });
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("publishes no release dates");
-    expect(result.stderr).toContain("https://repo.yarnpkg.com/tags");
-    expect(result.stderr).toContain("pin an exact version");
-    expect(result.stderr).toContain("JUP_NPM_REGISTRY");
-  });
-
-  it("203: an exact Yarn Berry pin is unaffected — only implicit resolution refuses", async () => {
-    const pinned = createFixture({ name: "app", packageManager: "yarn@4.0.0" });
-
-    const result = await run(["yarn", "--version"], {
-      ...pinned,
-      registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24", COREPACK_ALLOW_UNVERIFIED: "1" }),
-    });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("4.0.0\n");
-  });
-
-  it("203: a band the range never matches cannot refuse — `yarn@^1.22` still resolves", async () => {
-    // §04.1 step 6 fans out over *every* band, so a blanket refusal on the
-    // undated band would take Yarn Classic down with Berry. Only a band that
-    // actually contributes a candidate refuses.
-    const fixture = createFixture({ name: "app", packageManager: "yarn@^1.22.0" });
-
-    const result = await run(["yarn", "--version"], {
-      ...fixture,
-      registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
-    });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(`${YARN_CLASSIC}\n`);
-  });
-
-  it("203: without the variable the undated source resolves as it always did", async () => {
-    const fixture = createFixture({ name: "app", packageManager: "yarn@^4.0.0" });
-
-    const result = await run(["yarn", "--version"], {
-      ...fixture,
-      registry,
-      env: env({ COREPACK_ALLOW_UNVERIFIED: "1" }),
-    });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("4.0.0\n");
-  });
-});
-
-/* -------------------------------------------------------------------------- */
-/* The cost of the variable when nobody sets it                                */
 /* -------------------------------------------------------------------------- */
 
 describe("§15.35e — unset costs nothing", () => {

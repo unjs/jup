@@ -330,8 +330,6 @@ export const messages = {
 
   /* §12.8 — store & filesystem -------------------------------------------- */
 
-  cannotLocateBinInTarball: (binPath: string) => `Cannot locate '${binPath}' in downloaded tarball`,
-
   unableToLocateBin: () => `Unable to locate bin in package.json`,
 
   /** `hydrate` says `'jup prepare'` instead — pass the command name. */

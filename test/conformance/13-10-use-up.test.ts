@@ -8,7 +8,7 @@ import {
   createFixture,
   MockRegistry,
   packageManagerTarball,
-  pmScript,
+  publishBerry,
   run,
 } from "./_harness/index.ts";
 
@@ -61,21 +61,12 @@ beforeAll(async () => {
     { distTags: { latest: "4.9.9", stable: "4.9.9" } },
   );
 
-  for (const version of ["2.1.0", "2.4.3", "4.9.9"]) {
-    registry.publishFile(
-      `/${version}/packages/yarnpkg-cli/bin/yarn.js`,
-      pmScript("yarn", version),
-      "application/javascript",
-    );
+  // §15.41 — the older Berry lines the `up` rows walk, published the same way.
+  // These used to be single `.js` files on `repo.yarnpkg.com`, listed by a
+  // `/tags` document; the versions a range can reach are the packument's now.
+  for (const version of ["2.1.0", "2.4.3"]) {
+    publishBerry(registry, version);
   }
-  registry.publishFile(
-    "/tags",
-    JSON.stringify({
-      aliases: { latest: "4.9.9", stable: "4.9.9" },
-      tags: ["2.1.0", "2.4.3", "4.9.9"],
-    }),
-    "application/json",
-  );
 });
 
 afterAll(async () => {

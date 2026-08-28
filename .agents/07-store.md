@@ -46,7 +46,10 @@ root instead of the segment below it.
         ├── 1.22.22/…
         └── 4.14.1/
             ├── .jup
-            └── yarn.js              # single-file download
+            ├── package.json
+            └── bin/
+                └── yarn.js          # @yarnpkg/cli-dist, an ordinary tarball
+                                     # (a lone yarn.js here, before §15.41)
 ```
 
 The version directory name is the **plain semver version with the build suffix
@@ -139,7 +142,6 @@ if the locator is a supported (non-URL) package manager:
         if registry.type === "npm":
             {tarball, signatures, integrity} := GET {registry}/{package}/{version}
             url := tarball
-            if registry.bin: binPath := registry.bin
         url := url with the prefix "https://registry.npmjs.org"
                     replaced by COREPACK_NPM_REGISTRY
 else:                                    # URL reference
@@ -165,8 +167,7 @@ stream := GET url                                        # §05
 ext := extension of the URL's path component
 
 if ext === ".tgz":
-    extract gzip-tar into tmp, stripping ONE leading path component,
-    optionally filtering to a single entry (see below)
+    extract gzip-tar into tmp, stripping ONE leading path component
 elif ext === ".js":
     write the bytes to tmp/<basename of URL path>
 else:
@@ -183,20 +184,21 @@ npm tarballs wrap everything in `package/`. Exactly one leading path component i
 removed from every entry, so `package/bin/yarn.js` lands at `<tmp>/bin/yarn.js`.
 Entries with no leading component are dropped.
 
-### Single-file filter (`binPath` set)
+### The single-file filter — removed (§15.41)
 
-Only the entry whose path — after removing its first segment — equals `binPath` is
-extracted. Everything else is skipped. Then:
+A `.tgz` could once be filtered down to one entry, named by `registry.bin`: only the
+entry whose post-strip path matched was extracted, it was renamed to its basename,
+and the recorded hash came from **re-reading that file** rather than from the
+download stream. A missing entry was `Cannot locate '<binPath>' in downloaded
+tarball` (§12.8).
 
-```
-src := tmp/<binPath>            # e.g. tmp/bin/yarn.js
-dst := tmp/<basename(binPath)>  # e.g. tmp/yarn.js
-rename src → dst
-    ENOENT             → Error `Cannot locate '<binPath>' in downloaded tarball`
-    EEXIST / ENOTEMPTY → another process raced us; delete src and continue
-```
+It existed so Yarn Berry could arrive as a lone `yarn.js` when a custom npm registry
+served `@yarnpkg/cli-dist`. §15.41 made that package the band outright, so nothing
+sets `registry.bin`, `NpmRegistrySpec` no longer has the field, and a tarball is
+always extracted whole. The error string is gone from §12.
 
-The hash is then computed by **re-reading `dst`**, not from the download stream.
+The one remaining non-archive shape is a `.js` URL reference, whose bytes are written
+verbatim — so the hashed bytes are always the bytes as received (§06.2).
 
 ### Extraction safety — NORMATIVE
 
@@ -338,10 +340,7 @@ rethrowing on the last attempt.
 
 ```
 if the download produced a single file:            # there is no package.json
-    if the locator is a known package manager and spec.bin is a non-empty ARRAY:
-        bin := spec.bin
-    else:
-        bin := [locator.name]
+    bin := { locator.name: <basename of the downloaded file> }
 else:                                     # extracted tarball
     read tmp/package.json (unreadable or unparseable → treat as declaring nothing):
         packageBin is a string        → bin := { <package name>: packageBin }
@@ -358,16 +357,21 @@ runs the `package.json` being read has cleared §15.11's verification tier — i
 more attacker-controlled than the code about to be executed beside it. The values it
 yields MUST be confined per §14.13.
 
-The embedded table's `bin` is a **fallback**, and it is authoritative in exactly one
-place: a single-file download, which carries no manifest to consult. For a tarball it
-is consulted only when the package declares no usable `bin` at all, and only when a
-*declared* range band covers the version — the fall-forward guess §02.3 produces for
-an uncovered version MUST NOT reach the marker.
+The embedded table's `bin` is a **fallback**. It is consulted only when the package
+declares no usable `bin` at all, and only when a *declared* range band covers the
+version — the fall-forward guess §02.3 produces for an uncovered version MUST NOT
+reach the marker.
 
-Yarn Berry falls out of this: its table entry declares an **array** `bin`
-(single-file form), and through a custom npm registry it arrives as a *tarball*, so
-the package's own `bin` map is what describes it. The `isValidBinList` /
-`isValidBinSpec` discrimination MUST be preserved.
+**The single-file branch no longer consults the table at all.** Since §15.41 no band
+produces a single file, so the branch is reached only by a URL reference naming a
+`.js` (§04.1 step 1), which carries no version and is therefore never banded. The
+marker records the **file**; the retired `BinList` recorded only the binary names and
+left §08.1 to recover the file from the download URL a second time. A `bin` array in
+a marker written by an earlier release MUST still be read that older way (§07.1).
+
+One consequence: `Unable to locate bin in package.json` is now reachable only for an
+unbanded version or a URL reference. Every declared band supplies a usable `BinSpec`
+fallback, where Yarn Berry's used to supply an array and so could not.
 
 ## 7.8 Error tolerance
 

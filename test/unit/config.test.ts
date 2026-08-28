@@ -65,7 +65,7 @@ describe("registry table — shape (§02.5)", () => {
    */
   it("puts yarn's default on the supported major, hash-pinned (§15.33)", () => {
     const yarn = DEFINITIONS.yarn!;
-    const supported = "4.18.0+sha224.5707fce90df5d8720fae4e85a07ab55e90aa20fded8914893e2ba225";
+    const supported = "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85";
     expect(yarn.default).toBe(supported);
     expect(yarn.transparent.default).toBe(supported);
     // §14.21's asymmetry is gone, and the classic line is what it is gone *from*.
@@ -135,12 +135,29 @@ describe("registry table — shape (§02.5)", () => {
 
   it("resolves dist-tags against the last range entry's registry (§02.3)", () => {
     const [, lastYarn] = DEFINITIONS.yarn!.ranges.at(-1)!;
-    expect(lastYarn.registry).toEqual({
-      type: "url",
-      url: "https://repo.yarnpkg.com/tags",
-      fields: { tags: "aliases", versions: "tags" },
-    });
+    expect(lastYarn.registry).toEqual({ type: "npm", package: "@yarnpkg/cli-dist" });
     expect(DEFINITIONS.yarn!.fetchLatestFrom).toEqual({ type: "npm", package: "yarn" });
+  });
+
+  /**
+   * §15.41 — the table reaches exactly one origin.
+   *
+   * Written as a sweep rather than as a yarn assertion so that a band added
+   * later on a vendor's own host fails here, which is the regression §15.11
+   * lost its dedicated row to: with every source npm-signed there is no longer
+   * an entry that can demonstrate the refusal.
+   */
+  it("names no origin but the npm registry (§15.41)", () => {
+    for (const [name, definition] of Object.entries(DEFINITIONS)) {
+      for (const [range, spec] of definition.ranges) {
+        expect(`${name}@${range} -> ${new URL(spec.url).origin}`).toBe(
+          `${name}@${range} -> https://registry.npmjs.org`,
+        );
+        expect(spec.registry.type).toBe("npm");
+        expect(spec.npmRegistry).toBeUndefined();
+      }
+      expect(definition.fetchLatestFrom.type).toBe("npm");
+    }
   });
 });
 
@@ -176,22 +193,22 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
 
   it("gives yarn 1.22.22 the npm tarball with a BinSpec", () => {
     const spec = getSpecFor("yarn", "1.22.22");
-    expect(spec.url).toBe("https://registry.yarnpkg.com/yarn/-/yarn-{}.tgz");
+    expect(spec.url).toBe("https://registry.npmjs.org/yarn/-/yarn-{}.tgz");
     expect(spec.bin).toEqual({ yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" });
     expect(spec.registry).toEqual({ type: "npm", package: "yarn" });
     expect(spec.npmRegistry).toBeUndefined();
   });
 
-  it("gives yarn 4.14.1 the repo.yarnpkg.com single file with a BinList", () => {
+  it("gives yarn 4.14.1 the @yarnpkg/cli-dist tarball with a BinSpec (§15.41)", () => {
     const spec = getSpecFor("yarn", "4.14.1");
-    expect(spec.url).toBe("https://repo.yarnpkg.com/{}/packages/yarnpkg-cli/bin/yarn.js");
-    expect(spec.bin).toEqual(["yarn", "yarnpkg"]);
-    expect(Array.isArray(spec.bin)).toBe(true);
-    expect(spec.npmRegistry).toEqual({
-      type: "npm",
-      package: "@yarnpkg/cli-dist",
-      bin: "bin/yarn.js",
-    });
+    expect(spec.url).toBe("https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz");
+    // A tarball like every other band: paths, not the list of bare names the
+    // single-file form used to declare.
+    expect(spec.bin).toEqual({ yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" });
+    expect(spec.registry).toEqual({ type: "npm", package: "@yarnpkg/cli-dist" });
+    // The conditional swap is gone: it *is* the band now, not a rewrite that
+    // waited for the user to configure an npm registry.
+    expect(spec.npmRegistry).toBeUndefined();
   });
 
   it("matches npm's single `*` band for any version", () => {

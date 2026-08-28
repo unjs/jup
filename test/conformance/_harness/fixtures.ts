@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { getSpecFor, isSupportedPackageManager } from "../../../src/config/table.ts";
 import { parse } from "../../../src/version/semver.ts";
-import { npmTarball } from "./tarball.ts";
+import { hashOf, npmTarball } from "./tarball.ts";
 
 const roots: string[] = [];
 
@@ -148,11 +148,9 @@ export function versionOf(reference: string): string {
 
 /** The entry-point paths the table declares for this version, tarball-relative. */
 export function binPathsFor(name: string, version: string): string[] {
+  // §15.41 — every band is a tarball with a `BinSpec` of paths; the single-file
+  // branch that used to stand here was Yarn Berry's alone.
   const spec = getSpecFor(name, version);
-  if (Array.isArray(spec.bin)) {
-    // A single-file band: the artifact is the basename of the spec URL.
-    return [basename(new URL(spec.url.replace("{}", version)).pathname)];
-  }
   return [...new Set(Object.values(spec.bin))].map((path) => path.replace(/^\.\//, ""));
 }
 
@@ -213,7 +211,7 @@ export function packageManagerTarball(
       ? getSpecFor(name, version).bin
       : undefined;
   const bin: Record<string, string> = {};
-  if (tableBin !== undefined && !Array.isArray(tableBin)) {
+  if (tableBin !== undefined) {
     Object.assign(bin, tableBin);
   } else {
     for (const path of binPaths) bin[basename(path).replace(/\.[cm]?js$/, "")] = `./${path}`;
@@ -229,4 +227,25 @@ export function packageManagerTarball(
   for (const path of binPaths) files[path] = script;
 
   return npmTarball(files);
+}
+
+/**
+ * §15.41 — Yarn Berry, published the way the table now fetches it.
+ *
+ * Berry used to be a lone `yarn.js` on `repo.yarnpkg.com`, seeded with
+ * `publishFile` at a path built out of the band's URL template. It is an
+ * ordinary npm package now, so the rows that need it publish
+ * `@yarnpkg/cli-dist` like any other tarball — and get npm's signature with it,
+ * which is what lets them stop opting out of §15.11.
+ *
+ * Returns the hash-pinned reference for the published bytes, since that is what
+ * most callers then write into a `packageManager` field.
+ */
+export function publishBerry(
+  registry: { publish: (name: string, version: string, tarball: Uint8Array) => void },
+  version: string,
+): { reference: string; tarball: Uint8Array } {
+  const tarball = packageManagerTarball("yarn", version, { packageName: "@yarnpkg/cli-dist" });
+  registry.publish("@yarnpkg/cli-dist", version, tarball);
+  return { reference: `${version}+sha512.${hashOf(tarball)}`, tarball };
 }

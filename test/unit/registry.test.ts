@@ -1134,14 +1134,17 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
     expect(resolveRegistrySpec(table)).toBe(table);
   });
 
-  it("switches Berry to @yarnpkg/cli-dist once an npm registry is configured", () => {
-    process.env.COREPACK_NPM_REGISTRY = "https://mirror.example.org";
+  it("no longer has a switch to make: Berry is already @yarnpkg/cli-dist (§15.41)", () => {
+    // This row used to assert the rewrite — a configured npm registry moving
+    // Berry off `repo.yarnpkg.com`. §15.41 made that the band, so there is
+    // nothing conditional left: the spec is npm-typed before anything is
+    // configured, and `resolveRegistrySpec` returns it by identity either way.
     const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
-    expect(resolveRegistrySpec(table)).toEqual({
-      type: "npm",
-      package: "@yarnpkg/cli-dist",
-      bin: "bin/yarn.js",
-    });
+    expect(table).toEqual({ type: "npm", package: "@yarnpkg/cli-dist" });
+    expect(resolveRegistrySpec(table)).toBe(table);
+
+    process.env.COREPACK_NPM_REGISTRY = "https://mirror.example.org";
+    expect(resolveRegistrySpec(table)).toBe(table);
   });
 
   it("keeps Berry on its own document for COREPACK_REGISTRY_YARN — that is a mirror", () => {

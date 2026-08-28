@@ -30,10 +30,18 @@ beforeAll(async () => {
   registry.publish("yarn", "1.22.4", packageManagerTarball("yarn", "1.22.4"), {
     distTags: { latest: "1.22.4" },
   });
-  registry.publishFile(
-    "/tags",
-    JSON.stringify({ aliases: { latest: "4.9.9", stable: "4.9.9" }, tags: ["2.4.3", "4.9.9"] }),
-    "application/json",
+  // §15.41 — the tag and version list Berry answers from is a packument now,
+  // not `repo.yarnpkg.com`'s `aliases`/`tags` document.
+  registry.publish(
+    "@yarnpkg/cli-dist",
+    "4.9.9",
+    packageManagerTarball("yarn", "4.9.9", { packageName: "@yarnpkg/cli-dist" }),
+    { distTags: { latest: "4.9.9", stable: "4.9.9" } },
+  );
+  registry.publish(
+    "@yarnpkg/cli-dist",
+    "2.4.3",
+    packageManagerTarball("yarn", "2.4.3", { packageName: "@yarnpkg/cli-dist" }),
   );
 });
 

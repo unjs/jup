@@ -8,15 +8,22 @@
  * since, and #495 is a Node.js TSC member arguing in twenty-two comments that
  * the asymmetry is a supply-chain risk.
  *
- * These rows pin both halves: the refusal, byte for byte, and the fact that the
- * `@yarnpkg/cli-dist` path is now checked against the digest the registry signed
- * rather than skipped because a single file was extracted.
+ * **Row 167 is gone.** It asserted the refusal itself — Berry from
+ * `repo.yarnpkg.com`, unsigned and unpinned, turned away byte for byte — and
+ * §15.41 removed the source it was written against. Every entry in the table is
+ * an npm package with a signature now, so no fixture built from the table can
+ * reach the unverified path, and the row could only have been kept by inventing
+ * a band that does not exist.
  *
- * A note on what makes these rows load-bearing. The trap in testing a refusal is
- * a row that passes because the artifact was going to fail anyway, so every
- * refusal here is paired with a *positive* control on the same fixture and the
- * same mock: the pinned form, or `COREPACK_ALLOW_UNVERIFIED=1`, must run the
- * package manager and print its version.
+ * What that costs is worth stating plainly: §15.11's central rule — TLS alone is
+ * not a verification tier — no longer has a row of its own. The guard that
+ * replaces it is upstream, in `test/unit/config.test.ts`, which sweeps the table
+ * and fails if any band names an origin other than the npm registry. A future
+ * band on a vendor's own host trips that instead.
+ *
+ * Row 168 stays: it is the other half, and the half that still has an artifact —
+ * `@yarnpkg/cli-dist` checked against the digest the registry signed, rather
+ * than skipped because a single file was extracted (§14.10).
  */
 
 import { existsSync } from "node:fs";
@@ -32,34 +39,27 @@ import {
   run,
 } from "./_harness/index.ts";
 
-/** Stands in for `registry.npmjs.org` *and* `repo.yarnpkg.com` (see `intercept.ts`). */
+/** Stands in for `registry.npmjs.org` (see `intercept.ts`). */
 const registry = new MockRegistry();
 
-/** Berry's single bundled `.js` file, exactly as `repo.yarnpkg.com` serves it. */
+/** The entry point the fake Berry runs, shared by the tarball and its digest. */
 const BERRY = pmScript("yarn", "4.0.0");
-const BERRY_ARTIFACT = "/4.0.0/packages/yarnpkg-cli/bin/yarn.js";
-const BERRY_TAGS = "/tags";
-const TAG_DOCUMENT = JSON.stringify({ aliases: { stable: "4.0.0" }, tags: ["4.0.0", "3.8.0"] });
 
-/** The same Berry release as npm publishes it: a tarball with `bin/yarn.js`. */
+/** Berry as npm publishes it, which since §15.41 is the only way the table asks. */
 const CLI_DIST = packageManagerTarball("yarn", "4.0.0", {
   packageName: "@yarnpkg/cli-dist",
   binPaths: ["bin/yarn.js"],
   script: BERRY,
 });
 
-/** The digest of the *file*, which is what a `packageManager` pin names (§06.2). */
-const BERRY_HASH = hashOf(Buffer.from(BERRY, "utf8"));
-
-const REFUSAL =
-  `Refusing to install yarn@4.0.0: https://repo.yarnpkg.com provides no signature ` +
-  `and no hash was pinned. Pin a hash in the packageManager field, or set ` +
-  `JUP_ALLOW_UNVERIFIED=1.`;
+/**
+ * The digest a `packageManager` pin names (§06.2) — the *tarball* now. It was
+ * the single file's while Berry came from `repo.yarnpkg.com`.
+ */
+const BERRY_HASH = hashOf(CLI_DIST);
 
 beforeAll(async () => {
   await registry.start();
-  registry.publishFile(BERRY_ARTIFACT, BERRY, "application/javascript");
-  registry.publishFile(BERRY_TAGS, TAG_DOCUMENT, "application/json");
   registry.publish("@yarnpkg/cli-dist", "4.0.0", CLI_DIST, { distTags: { latest: "4.0.0" } });
   // §04.1 step 6 unions both of yarn's bands, so the Classic packument has to
   // answer as well or a range fails before §15.11 has anything to say.
@@ -76,79 +76,6 @@ afterAll(async () => {
 beforeEach(() => registry.reset());
 
 describe("§15.11 — every artifact clears a verification tier", () => {
-  it("167: Yarn Berry from repo.yarnpkg.com with no pinned hash is refused", async () => {
-    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
-
-    const result = await run(["yarn", "--version"], { ...fixture, registry });
-
-    expect(result.exitCode).toBe(1);
-    // Byte-exact, and bare on stderr: §12.1's proxy-mode presentation.
-    expect(result.stderr).toBe(`${REFUSAL}\n`);
-    expect(result.stdout).toBe("");
-    // Refused *before* the download, so nothing reached the store and — the
-    // part TLS could never establish — nothing was executed.
-    expect(existsSync(join(fixture.home, "v1", "yarn"))).toBe(false);
-    expect(registry.requests.map((request) => request.path)).toEqual([]);
-  });
-
-  it("167: the same version with a pinned hash installs", async () => {
-    // The positive control. Without it this file would pass just as well
-    // against a build that refused Yarn Berry unconditionally, or that could not
-    // reach the mock at all.
-    const fixture = createFixture({ packageManager: `yarn@4.0.0+sha512.${BERRY_HASH}` });
-
-    const result = await run(["yarn", "--version"], { ...fixture, registry });
-
-    expect(result.stderr).toBe("");
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("4.0.0\n");
-  });
-
-  it("167: COREPACK_ALLOW_UNVERIFIED=1 permits it, loudly", async () => {
-    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
-
-    const result = await run(["yarn", "--version"], {
-      ...fixture,
-      registry,
-      env: { COREPACK_ALLOW_UNVERIFIED: "1" },
-    });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("4.0.0\n");
-    // §15.11's opt-out is per-run and must never be silent.
-    expect(result.stderr).toBe(
-      `! Installing yarn@4.0.0 from https://repo.yarnpkg.com with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
-    );
-  });
-
-  it("167: a dynamically resolved Berry range is refused just the same", async () => {
-    // The breaking half of §15.11, and the reason P12 was sequenced last: a
-    // range resolves through `/tags`, which publishes versions and no digests at
-    // all, so the resolved locator carries no pin for §06.1 row 1 to check.
-    const fixture = createFixture({ packageManager: "yarn@4.x" });
-
-    const result = await run(["yarn", "--version"], { ...fixture, registry });
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe(`${REFUSAL}\n`);
-    // The tag document was read — the refusal is about the *artifact*, not a
-    // failure to resolve.
-    expect(registry.requests.map((request) => request.path).sort()).toEqual([BERRY_TAGS, "/yarn"]);
-  });
-
-  it("167: the env file cannot open the hole (§14.5)", async () => {
-    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
-    fixture.write(".jup.env", "COREPACK_ALLOW_UNVERIFIED=1\n");
-
-    const result = await run(["yarn", "--version"], { ...fixture, registry });
-
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain(
-      `! Ignoring COREPACK_ALLOW_UNVERIFIED from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
-    );
-    expect(result.stderr).toContain(REFUSAL);
-  });
-
   it("168: Berry via a custom npm registry is checked against the signed integrity", async () => {
     const fixture = createFixture({ packageManager: "yarn@4.0.0" });
 
@@ -238,7 +165,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
     expect(first.exitCode).toBe(0);
 
     const sha256 = createFixture({
-      packageManager: `yarn@4.0.0+sha256.${hashOf(Buffer.from(BERRY, "utf8"), "sha256")}`,
+      packageManager: `yarn@4.0.0+sha256.${hashOf(CLI_DIST, "sha256")}`,
     });
     const second = await run(["yarn", "--version"], { cwd: sha256.cwd, home, registry });
 
@@ -246,15 +173,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
     expect(second.stdout).toBe("4.0.0\n");
     expect(existsSync(join(home, "v1", "yarn", "4.0.0", ".jup"))).toBe(true);
     expect(
-      existsSync(
-        join(
-          home,
-          "v1",
-          "yarn",
-          `4.0.0+sha256.${hashOf(Buffer.from(BERRY, "utf8"), "sha256")}`,
-          ".jup",
-        ),
-      ),
+      existsSync(join(home, "v1", "yarn", `4.0.0+sha256.${hashOf(CLI_DIST, "sha256")}`, ".jup")),
     ).toBe(true);
   });
 });

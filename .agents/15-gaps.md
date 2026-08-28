@@ -87,6 +87,14 @@ unlisted keys.
 
 ## 15.2 One mirror mechanism for every source — [required]
 
+> **Read with §15.41.** This item was written when `repo.yarnpkg.com` was in the
+> table and `COREPACK_NPM_REGISTRY` could not reach it, which is what made a
+> per-source override necessary. §15.41 moved every band onto the npm registry, so
+> `COREPACK_NPM_REGISTRY` now mirrors the whole table on its own.
+> `COREPACK_REGISTRY_<NAME>` keeps its meaning — redirect one tool without
+> redirecting the others — and everything below still holds; what it lost is the
+> case that motivated it, and with it conformance rows 151–152's Berry half.
+
 > Driven by **#753** (15👍, no maintainer response) — *"Corepack ignores
 > `COREPACK_NPM_REGISTRY` for the Yarn registry"* — and **#872**, where a Renovate
 > deployment gets its IP banned for fetching Yarn across hundreds of repositories and
@@ -354,6 +362,15 @@ and the PR that would close it has sat unmerged.
   settable from an env file (§14.5).
 
 This also closes §14.10 (single-file extractions) and §06.6's `repo.yarnpkg.com` row.
+
+> **§15.41 changed what this can be tested against.** Every source in the table is
+> now an npm package with a signature, so no table artifact can reach the refusal
+> above — the rule stands, but its conformance row (167) is removed rather than
+> written against a source that no longer exists. What guards it instead is an
+> invariant asserted on the table itself: every band's `url` origin is
+> `https://registry.npmjs.org` and its `registry.type` is `"npm"`. The refusal
+> remains reachable in practice through a URL reference
+> (`COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`), which is not a table path.
 
 ## 15.12 Store the pin's hash outside the version string — [recommended] ⬛
 
@@ -1212,7 +1229,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 148 | User `.npmrc` sets `registry=` | that registry is used; `COREPACK_NPM_REGISTRY` still overrides it (§15.1) |
 | 149 | Project `.npmrc` sets `//host/:_authToken` | **ignored**; user-level `.npmrc` auth is honoured (§15.1) |
 | 150 | `.npmrc` sets `@yarnpkg:registry` | Yarn Berry's `@yarnpkg/cli-dist` fetch uses it (§15.1) |
-| 151 | `COREPACK_REGISTRY_YARN` set, `COREPACK_NPM_REGISTRY` unset | Yarn mirrors; npm and pnpm still use the default (§15.2) |
+| 151 | `COREPACK_REGISTRY_YARN` set, `COREPACK_NPM_REGISTRY` unset | Yarn mirrors; npm and pnpm still use the default (§15.2). The Berry half — mirroring `repo.yarnpkg.com`, which `COREPACK_NPM_REGISTRY` could not reach — is **removed by §15.41** |
 | 152 | Override registry differing only by trailing slash or host case | rewritten correctly; no doubled path (§15.3) |
 | 153 | Registry presents a certificate from an unknown CA | the CA-specific message, naming `JUP_CAFILE` (§15.4) |
 | 154 | Registry returns 503 twice then 200 | succeeds after retries; `COREPACK_NETWORK_RETRIES=0` fails immediately (§15.5) |
@@ -1228,7 +1245,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 164 | Warm cache hit | **no** key-refresh request (§15.9, §01.3) |
 | 165 | Trust store keyed by a non-default registry origin | that origin's keys are used (§15.10) |
 | 166 | Project `.jup.env` supplying keys for a custom origin | ignored (§15.10, §14.5) |
-| 167 | Yarn Berry from `repo.yarnpkg.com`, no hash pinned | refused unless `COREPACK_ALLOW_UNVERIFIED=1` (§15.11) |
+| 167 | ~~Yarn Berry from `repo.yarnpkg.com`, no hash pinned~~ | **removed by §15.41** — no table source can fail a tier; the invariant on the table replaces it |
 | 168 | Yarn Berry via a custom npm registry, no hash | tarball-stream digest verified against signed `integrity` (§15.11, §14.10) |
 | 169 | `devEngines.packageManager.integrity` present, `packageManager` clean semver | integrity enforced (§15.12) |
 | 170 | `enable` where the tool's directory is read-only | falls back to the per-user directory and says so (§15.13) |
@@ -1264,7 +1281,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 200 | No recorded default, `yarn dlx` in a bare directory | uses `transparent.default` (§15.33) |
 | 201 | `jup prepare` | works, and prints the migration line (§15.35c) |
 | 202 | `use` run twice on an already-pinned value | idempotent; no doubled build suffix (§15.35g) |
-| 203 | `COREPACK_MINIMUM_RELEASE_AGE` set, newest release younger than it | an older release is chosen; an exact pin is unaffected (§15.35e) |
+| 203 | `COREPACK_MINIMUM_RELEASE_AGE` set, newest release younger than it | an older release is chosen; an exact pin is unaffected (§15.35e). The undated-source half is **removed by §15.41** — every table source is a packument with a `time` field |
 | 204 | `packageManager` pins an exact version that was never published | error names the version as nonexistent, not a bare HTTP 404 (§15.35j) |
 | 205 | `packageManager` present in `$HOME/package.json`, run from an unrelated directory | the mismatch error flags the manifest as outside any project (§15.35k) |
 | 206 | `cache clean` with, then without, cached versions | reports the count removed, then `Nothing to remove` (§15.35l) |
@@ -1445,3 +1462,69 @@ points at `devEngines.runtime`. That field can express what the alias meant.
 * **It does not give the version file a say over the manifest.** A project that
   disagrees with its own `.nvmrc` is answered by `devEngines.runtime`, which is the
   field jup writes and the only one it writes.
+
+## 15.41 One registry protocol, one origin, for the whole table — [required, security]
+
+> Driven by the same issues as §15.2 and §15.11 — **#753** (15👍, no maintainer
+> response), **#872** (a Renovate deployment IP-banned for fetching Yarn across
+> hundreds of repositories, with no way to point at a self-hosted mirror), and
+> **#548**/**#495** on the verification asymmetry — but resolving them at the
+> source rather than adding a mechanism around it.
+
+**Corepack:** the table names three origins. npm, pnpm and Yarn Classic come from
+`registry.npmjs.org` (Classic through the `registry.yarnpkg.com` alias), and Yarn
+Berry comes from `repo.yarnpkg.com`, which is not an npm registry: it serves a
+`{aliases, tags}` document instead of a packument and a bare `yarn.js` instead of
+a tarball, publishes no signatures, no digests and no dates, and cannot be
+mirrored by `COREPACK_NPM_REGISTRY`.
+
+**Consequence:** every accommodation that shape needs is a mechanism the rest of
+the table does not use — §02.4's `BinList` and single-file download, §07.4's
+filtered extraction, §02.5's `npmRegistry` fallback and §05.2's rewrite 1, §15.2's
+per-source override, §14.10's widening of §06.1 row 2, and §15.35e's undated-source
+refusal. And it still leaves the defect users actually meet: because a bare name
+resolves dynamically, `jup install -g yarn` — the most ordinary first command
+there is — resolves against an unsigned source, clears no §15.11 tier, and
+**refuses on a clean machine**. The documented remedies are to pin a hash the user
+does not have or to set `COREPACK_ALLOW_UNVERIFIED=1`, which is the wrong lesson
+to teach on a first run.
+
+**Required:**
+
+* Every `url` and every `registry` in the table MUST name the npm registry.
+  Yarn Berry is `@yarnpkg/cli-dist`, unconditionally — not, as in §05.2 rewrite 1,
+  only once the user has configured an npm registry. Yarn Classic is the `yarn`
+  package on `registry.npmjs.org` rather than the `registry.yarnpkg.com` alias.
+* A conforming implementation MUST NOT fetch a table artifact, packument or tag
+  document from a vendor's own distribution host.
+* `registry` is therefore always `type: "npm"`, and `bin` is always a `BinSpec` of
+  paths. §02.4's `BinList`, §02.5's `npmRegistry`, `NpmRegistrySpec.bin` and
+  §07.4's filtered extraction are removed, and with them §12's
+  `Cannot locate '<binPath>' in downloaded tarball`. A single-file artifact remains
+  reachable only through a URL reference (§04.1 step 1) and records a `BinSpec`
+  naming the file.
+* A marker written by an earlier release may still carry a `bin` **array**. §07.1's
+  cross-release compatibility applies: it MUST still be read, resolving the file
+  from the download URL as before. Nothing writes that shape.
+
+Berry then clears §15.11 on npm's signature like every other entry, so the first
+run works with nothing configured; `COREPACK_NPM_REGISTRY` mirrors the whole table;
+and §15.2's per-source override keeps its meaning without being the only way to
+redirect one entry.
+
+**What this costs, stated plainly.** Three properties lose the only exemplar the
+table could give them, and the rows that tested them are removed rather than kept
+against a source that no longer exists:
+
+* §15.11's refusal (row 167) — no table artifact can now fail a verification tier.
+* §15.35e's undated-source refusal (part of row 203) — no table source is undated.
+* §14.6's cross-origin credential scoping (row 70) — the table has no second origin
+  for a credential to leak to.
+
+The code paths behind all three remain, because each is driven by table *data*
+rather than by a name, and a band added later on a non-npm host would reach them
+again. What replaces the rows is an invariant asserted directly against the table:
+every band's `url` origin is `https://registry.npmjs.org`, its `registry.type` is
+`"npm"`, and it declares no `npmRegistry`. A future band that breaks the rule fails
+there, which is the regression the deleted rows existed to catch.
+

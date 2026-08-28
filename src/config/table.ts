@@ -7,15 +7,19 @@
  *
  * `ranges` is an **ordered list** and is matched in **reverse** — last declared
  * wins (§02.3). Dist-tags always resolve against the **last** entry's registry,
- * which is why `yarn@latest` consults repo.yarnpkg.com even though `yarn@1.22.22`
- * comes from npm.
+ * which is why `yarn@latest` reads `@yarnpkg/cli-dist`'s tags even though
+ * `yarn@1.22.22` comes from the `yarn` package.
+ *
+ * §15.41 — every `url` and every `registry` here names the npm registry. Nothing
+ * in this table reaches a vendor's own distribution host, which is what lets
+ * §15.11's verification tier hold for every entry without an opt-in, and what
+ * lets `COREPACK_NPM_REGISTRY` mirror all of it.
  */
 
 import { existsSync } from "node:fs";
 import { messages, UsageError } from "../errors.ts";
 import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {
-  BinList,
   BinSpec,
   DevEnginesField,
   Locator,
@@ -272,10 +276,14 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     // a pin this table already ships rather than a fresh unverified one.
     // `scripts/refresh-table.mjs` (§16.9) is what stops both rotting; the fields
     // stay separate because §15.33 bullet 1 floors only the transparent one.
-    default: "4.18.0+sha224.5707fce90df5d8720fae4e85a07ab55e90aa20fded8914893e2ba225",
+    // sha1 of the npm tarball, not sha224 of a single file: the band below moved
+    // to `@yarnpkg/cli-dist`, so this is an npm pin and takes npm's shape
+    // (§16.9's `npmDefault`). The digest is of bytes whose npm signature and
+    // `dist.integrity` were both checked before it was written.
+    default: "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85",
     fetchLatestFrom: { type: "npm", package: "yarn" },
     transparent: {
-      default: "4.18.0+sha224.5707fce90df5d8720fae4e85a07ab55e90aa20fded8914893e2ba225",
+      default: "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85",
       commands: [
         ["yarn", "init"],
         ["yarn", "dlx"],
@@ -285,7 +293,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
       [
         "<2.0.0",
         {
-          url: "https://registry.yarnpkg.com/yarn/-/yarn-{}.tgz",
+          url: "https://registry.npmjs.org/yarn/-/yarn-{}.tgz",
           bin: { yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" },
           registry: { type: "npm", package: "yarn" },
           commands: { use: ["yarn", "install"] },
@@ -294,17 +302,29 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
       [
         ">=2.0.0",
         {
-          url: "https://repo.yarnpkg.com/{}/packages/yarnpkg-cli/bin/yarn.js",
-          // BinList, single-file form: both names run `<location>/yarn.js`.
-          bin: ["yarn", "yarnpkg"],
-          registry: {
-            type: "url",
-            url: "https://repo.yarnpkg.com/tags",
-            fields: { tags: "aliases", versions: "tags" },
-          },
-          // `repo.yarnpkg.com` is not an npm registry and cannot be mirrored, so a
-          // custom npm registry switches to `@yarnpkg/cli-dist` (§05.3, §07.4).
-          npmRegistry: { type: "npm", package: "@yarnpkg/cli-dist", bin: "bin/yarn.js" },
+          // §15.41 — the npm registry, unconditionally, like every other band.
+          //
+          // This band used to name `repo.yarnpkg.com`: a single `yarn.js` behind
+          // TLS and nothing else, no signature and no digest. It was the one
+          // source in the table that could not clear §15.11's tier, which made
+          // the most ordinary first command anyone types — `jup install -g yarn`,
+          // no version — refuse on a clean machine, because a bare name resolves
+          // dynamically and had nowhere verified to resolve from. The escape
+          // hatch existed but had to be found: `npmRegistry` swapped the band
+          // onto `@yarnpkg/cli-dist` only once the user had configured an npm
+          // registry, which nobody does to install yarn.
+          //
+          // So the swap is now the band. `@yarnpkg/cli-dist` is Yarn's own
+          // publication of the same artifact, signed by npm, and it moves Berry
+          // onto the signature chain the rest of the table already has — §15.11
+          // clears out of the box, and §06.6's `repo.yarnpkg.com` row is closed
+          // rather than merely documented.
+          url: "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz",
+          // A tarball now, not a single file, so `bin` is a BinSpec of paths —
+          // and they are the paths the package itself declares, which §15.17
+          // would read off the manifest anyway.
+          bin: { yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" },
+          registry: { type: "npm", package: "@yarnpkg/cli-dist" },
           commands: { use: ["yarn", "install"] },
         },
       ],
@@ -855,8 +875,12 @@ export function packageManagerForRegistry(spec: RegistrySpec): string | undefine
 /**
  * §02.5's `npmRegistry` for the band that declares this registry spec.
  *
- * Only Yarn Berry has one: `repo.yarnpkg.com` is not an npm registry, so a
- * configured npm registry switches it to the `@yarnpkg/cli-dist` package.
+ * **No entry declares one.** Yarn Berry was the only band that ever did, and
+ * §15.41 moved it onto `@yarnpkg/cli-dist` outright rather than only when the
+ * user had configured an npm registry — the swap it described is now the band
+ * itself. The mechanism stays because §05.3 still defines it and it costs one
+ * map lookup: a future band published somewhere that is not an npm registry
+ * would need exactly this, and re-deriving it later is the more expensive half.
  */
 export function npmAlternativeFor(spec: RegistrySpec): NpmRegistrySpec | undefined {
   return NPM_ALTERNATIVE_BY_REGISTRY.get(spec);
@@ -907,23 +931,21 @@ export function isPerHost(locator: Locator): boolean {
  *
  * Memoised on the band object: the table is static, the answer cannot change
  * within a process, and this is read on the install path for every native
- * entry. A `BinList` is a list of *names*, which never carry the placeholder,
- * so it is returned untouched.
+ * entry. Every band declares a `BinSpec` of paths (§15.41 retired the list form),
+ * so there is one shape to walk.
  */
-const BIN_CACHE = new WeakMap<PackageManagerSpec, BinSpec | BinList>();
+const BIN_CACHE = new WeakMap<PackageManagerSpec, BinSpec>();
 
-export function resolveSpecBin(spec: PackageManagerSpec): BinSpec | BinList {
+export function resolveSpecBin(spec: PackageManagerSpec): BinSpec {
   const cached = BIN_CACHE.get(spec);
   if (cached !== undefined) return cached;
 
-  let resolved: BinSpec | BinList = spec.bin;
-  if (!Array.isArray(spec.bin)) {
-    const entries = Object.entries(spec.bin);
-    if (entries.some(([, path]) => path.includes("{exe}"))) {
-      resolved = Object.fromEntries(
-        entries.map(([binName, path]) => [binName, path.replaceAll("{exe}", EXE)]),
-      );
-    }
+  let resolved: BinSpec = spec.bin;
+  const entries = Object.entries(spec.bin);
+  if (entries.some(([, path]) => path.includes("{exe}"))) {
+    resolved = Object.fromEntries(
+      entries.map(([binName, path]) => [binName, path.replaceAll("{exe}", EXE)]),
+    );
   }
 
   BIN_CACHE.set(spec, resolved);

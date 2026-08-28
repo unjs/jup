@@ -73,17 +73,39 @@ export interface LazyLocator {
   reference: () => Promise<string>;
 }
 
-/** §02.4 — `{ [binaryName]: relativePathInPackage }`, used when the download is a tarball. */
+/** §02.4 — `{ [binaryName]: relativePathInPackage }`. The only form a `bin` takes. */
 export type BinSpec = Record<string, string>;
 
-/** §02.4 — `[binaryName, …]`, used when the download is a single `.js` file. */
-export type BinList = string[];
+/**
+ * §07.1 — a `bin` **array** in a marker this build did not write.
+ *
+ * §02.4 used to have a second form, `[binaryName, …]`, for a download that was
+ * one `.js` file rather than a tarball: a list of names, with the file itself
+ * recovered from the download URL's basename at execution time. Yarn Berry from
+ * `repo.yarnpkg.com` was the only band that ever declared one, and §15.41 moved
+ * it to `@yarnpkg/cli-dist`, so nothing declares or writes this shape any more —
+ * a single-file install now records a {@link BinSpec} naming the file directly,
+ * which is self-describing and does not need the URL a second time.
+ *
+ * It survives as a **read** type only. §07.1 requires the store to keep working
+ * across releases, and a machine that installed Berry under an older build has
+ * markers holding `["yarn", "yarnpkg"]` sitting in its cache right now. Dropping
+ * the branch that understands them would not simplify anything — it would make
+ * those installs throw `assertUnableToLocateBinPath` on the next run.
+ *
+ * Never widen a *table* or *install* type with this. The one place it is legal
+ * is what `resolveBinPath` reads out of a marker.
+ */
+export type LegacyBinList = string[];
 
 /** §07.2 — the parsed `.jup` marker plus the directory it was found in. */
 export interface InstallSpec {
   location: string;
-  /** Optional: a marker written by an older corepack may not carry one (§08.1). */
-  bin?: BinSpec | BinList;
+  /**
+   * Optional: a marker written by an older corepack may not carry one (§08.1),
+   * and one written by an older *jup* may carry a {@link LegacyBinList}.
+   */
+  bin?: BinSpec | LegacyBinList;
   hash: string;
 }
 
@@ -91,7 +113,7 @@ export interface InstallSpec {
 export interface CorepackMarker {
   locator: Locator;
   /** Optional: markers written by older corepack releases omit it (§08.1). */
-  bin?: BinSpec | BinList;
+  bin?: BinSpec | LegacyBinList;
   hash: string;
 }
 
@@ -102,13 +124,15 @@ export interface CorepackMarker {
 /**
  * Talk the npm registry protocol (§05.2).
  *
- * `bin` is a path *inside the tarball* to a single file; when present the
- * downloader extracts only that one file (§07.4).
+ * There is no `bin` here any more. It named a path *inside* the tarball and made
+ * the downloader extract only that one file — machinery that existed solely so
+ * Yarn Berry could arrive as a lone `yarn.js` when a custom npm registry served
+ * it. §15.41 put Berry on `@yarnpkg/cli-dist` for every user, so the filtered
+ * extraction had no caller left; §07.4 now always extracts the whole archive.
  */
 export interface NpmRegistrySpec {
   type: "npm";
   package: string;
-  bin?: string;
 }
 
 /**
@@ -150,7 +174,7 @@ export interface ToolSpec {
    * ships `bin/bun`, and the platform packages declare no `bin` of their own for
    * §07.7 to read instead. Bin *names* never carry it; only the paths do.
    */
-  bin: BinSpec | BinList;
+  bin: BinSpec;
   /**
    * Default version source — where "which versions exist?" is answered.
    *

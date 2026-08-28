@@ -195,31 +195,6 @@ describe("§13.7 registry, auth and integrity", () => {
     }
   });
 
-  it("70: credentials never leave the registry's own origin (§14.6)", async () => {
-    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
-    const expected = `Basic ${Buffer.from("user:pass").toString("base64")}`;
-
-    const result = await run(["yarn", "--version"], {
-      ...fixture,
-      registry,
-      env: trusted({ COREPACK_NPM_USERNAME: "user", COREPACK_NPM_PASSWORD: "pass" }),
-    });
-
-    expect(result.exitCode).toBe(0);
-    const metadata = registry.requests.filter((request) =>
-      request.original.startsWith("https://registry.npmjs.org/"),
-    );
-    const download = registry.requests.filter((request) =>
-      request.original.startsWith("https://registry.yarnpkg.com/"),
-    );
-    expect(metadata.length).toBeGreaterThan(0);
-    expect(download.length).toBeGreaterThan(0);
-    for (const request of metadata) expect(request.authorization).toBe(expected);
-    // The artifact lives on registry.yarnpkg.com, which is not the configured
-    // registry, so it gets nothing.
-    for (const request of download) expect(request.authorization).toBeUndefined();
-  });
-
   /**
    * Rows 71 and 72 — the environment a user behind a corporate proxy actually
    * has: one proxy for both schemes, a registry that only resolves on its far

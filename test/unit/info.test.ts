@@ -459,14 +459,17 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
 
     const yarn = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.binaries).toEqual(["yarn", "yarnpkg"]);
-    // §05.3 — Berry's own band is not an npm registry, and that is exactly the
-    // surprise `info` exists to remove.
-    expect(yarn.notes.join(" ")).toContain("repo.yarnpkg.com");
+    // §15.41 — there is no surprise left to report. Every band is an npm
+    // registry, so the notes that explained Berry's odd one out are empty, for
+    // yarn and for everything else.
+    expect(yarn.notes).toEqual([]);
+    for (const entry of report().packageManagers) expect(entry.notes).toEqual([]);
 
+    // And it mirrors like any other package: no fallback package, no switch.
     process.env.COREPACK_NPM_REGISTRY = "https://mirror.example.org";
     const mirrored = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(mirrored.registry).toBe("https://mirror.example.org");
-    expect(mirrored.notes.join(" ")).toContain("@yarnpkg/cli-dist");
+    expect(mirrored.notes).toEqual([]);
   });
 
   it("reports no .npmrc files when the machine has none in scope", () => {

@@ -100,27 +100,6 @@ async function npmDefault(packageName) {
 }
 
 /**
- * Yarn Berry, which is not an npm artifact: `repo.yarnpkg.com/tags` publishes
- * the `stable` alias, and the artifact is a single `.js` file. sha224 matches
- * upstream's own convention for this one (§16.9), and §02.5 already ships it.
- *
- * **This one cannot be verified the way the npm path is.** `repo.yarnpkg.com`
- * publishes no signatures and no digests at all — that is §06.6's recorded hole
- * and the whole of what §15.11 refuses to install unpinned — so the digest here
- * rests on TLS alone. That is precisely why §16.9 says not to auto-merge: a
- * human comparing the proposed version against Yarn's own release notes is the
- * only check this line gets.
- */
-async function yarnDefault() {
-  const tags = await getJson("https://repo.yarnpkg.com/tags");
-  const version = tags.aliases.stable;
-  const file = await getBytes(
-    `https://repo.yarnpkg.com/${version}/packages/yarnpkg-cli/bin/yarn.js`,
-  );
-  return `${version}+sha224.${digest(file, "sha224")}`;
-}
-
-/**
  * §15.28 — a per-host package manager, whose `default` is a **bare version**.
  *
  * There is no one digest to pin: `bun@1.4.0` is six different artifacts, and a
@@ -285,7 +264,11 @@ let table = readFileSync(TABLE, "utf8");
 const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
   npmDefault("npm"),
   npmDefault("pnpm"),
-  yarnDefault(),
+  // §15.41 — Berry is an npm package now, so it takes the same verified path as
+  // npm and pnpm. It used to need a branch of its own: `repo.yarnpkg.com` published
+  // no signature and no digest, so the pin written here rested on TLS alone, and
+  // §16.9's "do not auto-merge" existed largely for that one line.
+  npmDefault("@yarnpkg/cli-dist"),
   nativeDefault("bun", NATIVE_TARGETS.bun),
   nativeDefault("deno", NATIVE_TARGETS.deno),
   nativeDefault("@endevco/aube", NATIVE_TARGETS.aube),

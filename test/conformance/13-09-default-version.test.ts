@@ -13,11 +13,11 @@ import {
   cleanupFixtures,
   createFixture,
   hashOf,
-  type Fixture,
   MockRegistry,
   packageManagerTarball,
-  pmScript,
+  publishBerry,
   run,
+  type Fixture,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -27,7 +27,7 @@ const registry = new MockRegistry();
  * through a pinned hash, so the rows that install one pin the digest of the
  * bytes the mock serves.
  */
-const BERRY = `2.2.2+sha512.${hashOf(Buffer.from(pmScript("yarn", "2.2.2"), "utf8"))}`;
+const BERRY = `2.2.2+sha512.${hashOf(packageManagerTarball("yarn", "2.2.2", { packageName: "@yarnpkg/cli-dist" }))}`;
 
 /** Nothing listens here; used to prove a step needed no network. */
 const DEAD = { COREPACK_NPM_REGISTRY: "http://127.0.0.1:1" };
@@ -56,23 +56,17 @@ beforeAll(async () => {
     distTags: { latest: "7.24.2", "latest-7": "7.24.2" },
   });
 
-  for (const version of ["2.2.2", "4.9.9"]) {
-    registry.publishFile(
-      `/${version}/packages/yarnpkg-cli/bin/yarn.js`,
-      pmScript("yarn", version),
-      "application/javascript",
-    );
-  }
-  // Yarn Berry's url-type registry document: tags live under `aliases`, the
-  // version list under `tags` (§05.3).
-  registry.publishFile(
-    "/tags",
-    JSON.stringify({
-      latest: {},
-      aliases: { latest: "4.9.9", stable: "4.9.9" },
-      tags: ["2.2.2", "4.9.9"],
-    }),
-    "application/json",
+  // §15.41 — Berry is an npm package, so its versions and its dist-tags come
+  // from one packument. It used to be single `.js` files on `repo.yarnpkg.com`
+  // plus a url-type `/tags` document (tags under `aliases`, versions under
+  // `tags`, §05.3).
+  publishBerry(registry, "2.2.2");
+  publishBerry(registry, "4.9.9");
+  registry.publish(
+    "@yarnpkg/cli-dist",
+    "4.9.9",
+    packageManagerTarball("yarn", "4.9.9", { packageName: "@yarnpkg/cli-dist" }),
+    { distTags: { latest: "4.9.9", stable: "4.9.9" } },
   );
 
   sequence = createFixture({ packageManager: "yarn@1.22.4" });
@@ -183,20 +177,22 @@ describe("§13.9 default version and last-known-good", () => {
   it("103: install -g yarn (bare) resolves the true latest, not the 1.x line", async () => {
     const fixture = createFixture({});
 
-    // §15.11 redirected this row: a *bare* name resolves through Berry's
-    // `/tags` document, and `repo.yarnpkg.com` publishes neither signatures nor
-    // digests — so the version this row is about is precisely one that clears
-    // no verification tier. The opt-out keeps the row about resolution, which
-    // is its subject, and the refusal itself is covered by row 167.
+    // §15.41 — no opt-out. This row needed `COREPACK_ALLOW_UNVERIFIED=1` for as
+    // long as a bare name resolved through Berry's `/tags` document on
+    // `repo.yarnpkg.com`, which published neither signatures nor digests: the
+    // most ordinary first command anyone types was also the one that could not
+    // clear §15.11. Resolving through `@yarnpkg/cli-dist` gives it npm's
+    // signature, so the plain form now works on a clean machine — and the empty
+    // stderr below is the assertion that says so.
     const result = await run(["install", "-g", "yarn"], {
       ...fixture,
       registry,
-      env: trusted({ COREPACK_ALLOW_UNVERIFIED: "1" }),
+      env: trusted(),
     });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Installing yarn@4.9.9...\n");
-    expect(result.stderr).toContain("JUP_ALLOW_UNVERIFIED=1");
+    expect(result.stderr).toBe("");
     expect(lastKnownGood(fixture).yarn).toMatch(/^4\.9\.9/);
   });
 

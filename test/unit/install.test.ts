@@ -371,34 +371,34 @@ describe("download shapes (§07.3, §07.4)", () => {
     ]);
   });
 
-  it("writes a `.js` artifact verbatim and takes its bin list from the table", async () => {
+  it("writes a `.js` artifact verbatim and names the file in the marker", async () => {
     const script = "#!/usr/bin/env node\nconsole.log('yarn 3')\n";
-    routes["/3.0.0/packages/yarnpkg-cli/bin/yarn.js"] = bytesRoute(Buffer.from(script));
+    routes["/custom/yarn.js"] = bytesRoute(Buffer.from(script));
 
-    // §15.11 redirected this row: `repo.yarnpkg.com` is a url-type registry and
-    // publishes no signatures at all, so the artifact clears a tier only
-    // through a pinned hash. What the row is about — the `.js` shape and the
-    // BinList — is unchanged.
+    // §15.41 — no *band* produces a single file any more, so the `.js` shape is
+    // reached only by a URL reference (§04.1 step 1). The hash in the fragment
+    // is what clears §15.11: a bare URL publishes no signature.
     const spec = await ensureInstalled({
       name: "yarn",
-      reference: `3.0.0+sha512.${hashOf(Buffer.from(script))}`,
+      reference: `${origin}/custom/yarn.js#sha512.${hashOf(Buffer.from(script))}`,
     });
 
     expect(await readFile(join(spec.location, "yarn.js"), "utf8")).toBe(script);
-    // §07.7 — a single-file download uses the table's BinList form.
-    expect(spec.bin).toEqual(["yarn", "yarnpkg"]);
+    // §07.7 — the marker names the *file*. The retired `BinList` recorded only
+    // the binary names and left `resolveBinPath` to recover the file from the
+    // download URL a second time.
+    expect(spec.bin).toEqual({ yarn: "yarn.js" });
     expect(spec.hash).toBe(`sha512.${hashOf(Buffer.from(script))}`);
-    // §06.1 row 4 — a url-type registry publishes no signatures, so nothing was
-    // fetched beyond the artifact itself.
-    expect(requested).toEqual(["https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js"]);
+    // Nothing was fetched beyond the artifact: a URL reference has no packument.
+    expect(requested).toEqual([`${origin}/custom/yarn.js`]);
   });
 
-  it("extracts only `registry.bin` from the tarball when a custom npm registry is configured", async () => {
+  it("installs the whole @yarnpkg/cli-dist tarball, unfiltered (§15.41)", async () => {
     const pair = keypair();
     const tarball = await tarballOf({
       "package.json": JSON.stringify({ name: "@yarnpkg/cli-dist", version: "3.0.0" }),
       "bin/yarn.js": "console.log('berry')\n",
-      "lib/unused.js": "throw new Error('should not be extracted')\n",
+      "lib/used.js": "module.exports = 1\n",
     });
 
     routes["/@yarnpkg/cli-dist/3.0.0"] = jsonRoute(
@@ -417,17 +417,19 @@ describe("download shapes (§07.3, §07.4)", () => {
 
     const spec = await ensureInstalled({ name: "yarn", reference: "3.0.0" });
 
-    // The one filtered entry, promoted to the root under its basename (§07.4).
-    expect(await readFile(join(spec.location, "yarn.js"), "utf8")).toBe("console.log('berry')\n");
-    // The entry was moved out of `bin/` (the now-empty directory the extractor
-    // had to create is harmless), and nothing else was written at all.
-    expect(existsSync(join(spec.location, "bin", "yarn.js"))).toBe(false);
-    expect(existsSync(join(spec.location, "lib"))).toBe(false);
-    expect(existsSync(join(spec.location, "package.json"))).toBe(false);
-    expect(spec.bin).toEqual(["yarn", "yarnpkg"]);
-    // §06.2 — the *extracted file* is what the recorded hash names here, not
-    // the tarball, because that is the artifact a pin would refer to.
-    expect(spec.hash).toBe(`sha512.${hashOf(Buffer.from("console.log('berry')\n"))}`);
+    // Berry arrives like every other npm package now: the archive, whole. The
+    // filtered extraction this row used to assert existed only to pull one
+    // `yarn.js` out of it, and went with the `registry.bin` that drove it.
+    expect(await readFile(join(spec.location, "bin", "yarn.js"), "utf8")).toBe(
+      "console.log('berry')\n",
+    );
+    expect(existsSync(join(spec.location, "lib", "used.js"))).toBe(true);
+    expect(existsSync(join(spec.location, "package.json"))).toBe(true);
+    // The fixture's manifest declares no `bin`, so §07.7 falls back to the band.
+    expect(spec.bin).toEqual({ yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" });
+    // §06.2 — the tarball is the artifact now, so the recorded hash is its
+    // digest rather than one extracted file's.
+    expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
   });
 
   it("fails loudly on an unrecognised URL extension, before any request", async () => {
@@ -799,10 +801,17 @@ describe("§15.7 registry metadata tiering", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §14.10 — the hole this task closes
+ * §14.10 — the hole, and the way §15.41 closed it instead
+ *
+ * §14.10 widened §06.1 row 2 so that the *stream* was hashed even when the
+ * download was filtered down to one file, which is what left Yarn Berry
+ * unverified behind a corporate mirror. §15.41 removed the filtered path
+ * altogether — Berry is an ordinary `@yarnpkg/cli-dist` tarball — so the
+ * widening has no special case left to cover. These rows stay because what
+ * they actually assert is that Berry's bytes are checked at all.
  * ------------------------------------------------------------------ */
 
-describe("§14.10 — single-file extractions are verified too", () => {
+describe("§14.10 — Berry's tarball is verified like any other (§15.41)", () => {
   const berry = {
     "package.json": JSON.stringify({ name: "@yarnpkg/cli-dist", version: "3.0.0" }),
     "bin/yarn.js": "console.log('berry')\n",
@@ -828,12 +837,12 @@ describe("§14.10 — single-file extractions are verified too", () => {
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(options.pair)] });
   }
 
-  it("refuses a tampered tarball on the `registry.bin` path with no pinned hash", async () => {
+  it("refuses a tampered tarball with no pinned hash", async () => {
     const pair = keypair();
     const signed = await tarballOf(berry);
-    // A tampered mirror: the file the filter extracts is still a perfectly
-    // valid `bin/yarn.js`, so extraction succeeds and corepack's guard
-    // (`!registry.bin`) would have installed this without a single check.
+    // A tampered mirror. The archive still extracts cleanly, so nothing but the
+    // digest can tell: corepack's guard (`!registry.bin`) skipped this check
+    // entirely for Berry, which is the hole §14.10 was written against.
     const tampered = await tarballOf({ ...berry, "bin/yarn.js": "steal(process.env)\n" });
     expect(hashOf(tampered)).not.toBe(hashOf(signed));
 
@@ -841,29 +850,31 @@ describe("§14.10 — single-file extractions are verified too", () => {
 
     const error = await rejection(ensureInstalled({ name: "yarn", reference: "3.0.0" }));
 
-    // The digest compared is the one over the *tarball stream*, exactly as on
-    // the full-extraction path — the extracted file's digest could never be
-    // compared against `dist.integrity` at all.
+    // The digest compared is the one over the tarball stream, which is what
+    // `dist.integrity` describes.
     expect(error.message).toBe(
       `Mismatch hashes. Expected ${hashOf(signed)}, got ${hashOf(tampered)}`,
     );
     expect(existsSync(join(home, "v1", "yarn"))).toBe(false);
   });
 
-  it("still installs the untampered artifact, recording the extracted file's digest", async () => {
+  it("still installs the untampered artifact, recording the tarball's digest", async () => {
     const pair = keypair();
     const signed = await tarballOf(berry);
     await serveBerry({ signed, served: signed, pair });
 
     const spec = await ensureInstalled({ name: "yarn", reference: "3.0.0" });
 
-    expect(await readFile(join(spec.location, "yarn.js"), "utf8")).toBe("console.log('berry')\n");
-    // §06.2's third row: the recorded hash names the extracted file, while the
-    // §14.10 check above covered the stream.
-    expect(spec.hash).toBe(`sha512.${hashOf(Buffer.from("console.log('berry')\n"))}`);
+    // Extracted whole, so the entry point keeps the path the package declares.
+    expect(await readFile(join(spec.location, "bin", "yarn.js"), "utf8")).toBe(
+      "console.log('berry')\n",
+    );
+    // §06.2 — one artifact, one digest: the tarball's. The old third row, where
+    // the reference named the extracted file instead, went with the filter.
+    expect(spec.hash).toBe(`sha512.${hashOf(signed)}`);
   });
 
-  it("rejects a bad signature on the `registry.bin` path as well", async () => {
+  it("rejects a bad signature as well", async () => {
     const trusted = keypair();
     const rogue = keypair("SHA256:rogue");
     const signed = await tarballOf(berry);
@@ -884,15 +895,19 @@ describe("§14.10 — single-file extractions are verified too", () => {
 
 describe("download prompt (§05.5, tests 46, 47)", () => {
   /**
-   * §15.11 redirected these rows: Berry from `repo.yarnpkg.com` needs a pinned
-   * hash to clear a verification tier, and the opt-out would print a warning
-   * these rows are counting the absence of. The reference is what changed; the
-   * URL in the notice, which is what they assert, is not.
+   * What these rows assert is the notice — one line, naming the artifact that
+   * is about to be fetched — and the silence around it. The artifact itself is
+   * incidental, so it is the cheapest one that still has to clear §15.11: a
+   * URL reference to a `.js`, with the hash in the fragment as its tier.
+   *
+   * It used to be a `yarn@3.0.0` spec pointing at `repo.yarnpkg.com`. §15.41
+   * moved that band to an `@yarnpkg/cli-dist` tarball, which would drag a
+   * packument, a signature and a trusted key into a test about a prompt.
    */
   function serveScript(): string {
     const script = "console.log('yarn 3')\n";
-    routes["/3.0.0/packages/yarnpkg-cli/bin/yarn.js"] = bytesRoute(Buffer.from(script));
-    return `3.0.0+sha512.${hashOf(Buffer.from(script))}`;
+    routes["/custom/yarn.js"] = bytesRoute(Buffer.from(script));
+    return `${origin}/custom/yarn.js#sha512.${hashOf(Buffer.from(script))}`;
   }
 
   it("prints exactly the notice when the variable is 1, and asks nothing off a TTY", async () => {
@@ -905,7 +920,7 @@ describe("download prompt (§05.5, tests 46, 47)", () => {
     await ensureInstalled({ name: "yarn", reference });
 
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
-      "! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n",
+      `! jup is about to download ${origin}/custom/yarn.js\n`,
     ]);
     // §08.6 — stdin is never touched when the confirmation is skipped.
     expect(resume).not.toHaveBeenCalled();

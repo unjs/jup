@@ -455,53 +455,6 @@ describe("§07.4 rules 8 and 9 — long names and unknown PAX records", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* Single-file filter                                                           */
-/* -------------------------------------------------------------------------- */
-
-describe("the single-file filter", () => {
-  it("extracts only the filtered entry and renames it to its basename", async () => {
-    await extract(gzipStream(NPM_TARBALL), dest, { strip: 1, filter: "bin/yarn.js" });
-
-    expect(await readFile(join(dest, "yarn.js"), "utf8")).toBe(`#!/usr/bin/env node\n`);
-    expect(await exists(join(dest, "package.json"))).toBe(false);
-    expect(await exists(join(dest, "bin/yarn.js"))).toBe(false);
-  });
-
-  it("accepts a filter with no directory component", async () => {
-    await extract(gzipStream([{ name: "package/yarn.js", body: "solo" }]), dest, {
-      strip: 1,
-      filter: "yarn.js",
-    });
-    expect(await readFile(join(dest, "yarn.js"), "utf8")).toBe("solo");
-  });
-
-  it("reports a missing entry with the §12.8 message", async () => {
-    await expect(
-      extract(gzipStream(NPM_TARBALL), dest, { strip: 1, filter: "bin/pnpm.cjs" }),
-    ).rejects.toThrow(messages.cannotLocateBinInTarball("bin/pnpm.cjs"));
-  });
-
-  it("reports a missing entry when the filter has no directory component", async () => {
-    await expect(
-      extract(gzipStream(NPM_TARBALL), dest, { strip: 1, filter: "pnpm.cjs" }),
-    ).rejects.toThrow(`Cannot locate 'pnpm.cjs' in downloaded tarball`);
-  });
-
-  it("still enforces the safety rules on skipped entries", async () => {
-    await expect(
-      extract(
-        gzipStream([
-          { name: "package/../../evil.js", body: "pwned" },
-          { name: "package/bin/yarn.js", body: "y" },
-        ]),
-        dest,
-        { strip: 1, filter: "bin/yarn.js" },
-      ),
-    ).rejects.toThrow(/path escapes/);
-  });
-});
-
-/* -------------------------------------------------------------------------- */
 /* listEntries and create                                                       */
 /* -------------------------------------------------------------------------- */
 

@@ -11,18 +11,8 @@
 
 import { once } from "node:events";
 import { createReadStream, createWriteStream } from "node:fs";
-import {
-  constants as fsConstants,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  rename,
-  rm,
-  stat,
-  unlink,
-} from "node:fs/promises";
-import { basename, join, resolve, sep } from "node:path";
+import { constants as fsConstants, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
+import { join, resolve, sep } from "node:path";
 import type { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
@@ -31,8 +21,6 @@ import { messages } from "../errors-cold.ts";
 export interface ExtractOptions {
   /** npm tarballs wrap everything in `package/`; exactly one component is removed. */
   strip: number;
-  /** When set, extract only the entry whose post-strip path equals this (§07.4). */
-  filter?: string;
   limits?: { maxBytes?: number; maxEntries?: number; maxRatio?: number };
 }
 
@@ -644,10 +632,6 @@ export async function extract(
     const stripped = stripComponents(safe, options.strip);
     if (stripped === undefined) return;
 
-    if (options.filter !== undefined) {
-      if (entry.type !== "file" || stripped !== options.filter) return;
-    }
-
     const target = join(root, stripped);
     if (!isInside(root, target)) throw new Error(messages.refusingToExtract(entry.name));
 
@@ -660,35 +644,6 @@ export async function extract(
     if (slash !== -1) await ensureDir(root, stripped.slice(0, slash), made);
     await writeFile(target, fileMode(entry.mode), body);
   });
-
-  if (options.filter !== undefined) await promoteFilteredEntry(root, options.filter);
-}
-
-/**
- * §07.4's single-file filter tail: `tmp/<binPath>` becomes `tmp/<basename>`.
- * `ENOENT` means the entry was never in the archive; `EEXIST`/`ENOTEMPTY` means
- * another process got there first, which is a benign race.
- */
-async function promoteFilteredEntry(root: string, filter: string): Promise<void> {
-  const safe = safePath(filter);
-  const source = join(root, safe);
-  const destination = join(root, basename(safe));
-  if (source === destination) {
-    const info = await stat(source).catch((error: unknown) => {
-      if (errnoOf(error) === "ENOENT") return undefined;
-      throw error;
-    });
-    if (info === undefined) throw new Error(messages.cannotLocateBinInTarball(filter));
-    return;
-  }
-  try {
-    await rename(source, destination);
-  } catch (error) {
-    const code = errnoOf(error);
-    if (code === "ENOENT") throw new Error(messages.cannotLocateBinInTarball(filter));
-    if (code !== "EEXIST" && code !== "ENOTEMPTY") throw error;
-    await rm(source, { force: true, recursive: true });
-  }
 }
 
 /* -------------------------------------------------------------------------- */

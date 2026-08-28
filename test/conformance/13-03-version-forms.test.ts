@@ -16,7 +16,7 @@ import {
   hashOf,
   MockRegistry,
   packageManagerTarball,
-  pmScript,
+  publishBerry,
   run,
 } from "./_harness/index.ts";
 
@@ -30,7 +30,11 @@ const registry = new MockRegistry();
  * a prerelease lands in — is unchanged.
  */
 function berryPin(version: string): string {
-  return `${version}+sha512.${hashOf(Buffer.from(pmScript("yarn", version), "utf8"))}`;
+  // §15.41 — the pinned artifact is the `@yarnpkg/cli-dist` tarball. It was the
+  // single `yarn.js` while Berry came from `repo.yarnpkg.com`.
+  return `${version}+sha512.${hashOf(
+    packageManagerTarball("yarn", version, { packageName: "@yarnpkg/cli-dist" }),
+  )}`;
 }
 
 /** Every download row needs the mock's key, since it is not in the embedded store. */
@@ -55,13 +59,10 @@ beforeAll(async () => {
     packageManagerTarball("mypm", "1.0.0", { binPaths: ["bin/mypm.js"] }),
   );
 
-  // Yarn Berry's single-file artifacts live on repo.yarnpkg.com, not on npm.
+  // §15.41 — Berry is `@yarnpkg/cli-dist` on npm; these used to be single-file
+  // artifacts on repo.yarnpkg.com.
   for (const version of ["2.0.0-rc.30", "3.0.0-rc.2"]) {
-    registry.publishFile(
-      `/${version}/packages/yarnpkg-cli/bin/yarn.js`,
-      pmScript("yarn", version),
-      "application/javascript",
-    );
+    publishBerry(registry, version);
   }
 });
 
@@ -88,8 +89,8 @@ describe("§13.3 version forms", () => {
   });
 
   it.for([
-    ["yarn", "2.0.0-rc.30", "yarn.js", berryPin("2.0.0-rc.30")],
-    ["yarn", "3.0.0-rc.2", "yarn.js", berryPin("3.0.0-rc.2")],
+    ["yarn", "2.0.0-rc.30", "bin/yarn.js", berryPin("2.0.0-rc.30")],
+    ["yarn", "3.0.0-rc.2", "bin/yarn.js", berryPin("3.0.0-rc.2")],
     ["pnpm", "11.0.0-dev.1005", "bin/pnpm.mjs", "11.0.0-dev.1005"],
   ])(
     "15: the prerelease %s@%s resolves and lands in its range band",
@@ -100,7 +101,7 @@ describe("§13.3 version forms", () => {
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe(`${version}\n`);
-      // The band decides the entry-point layout: a single `yarn.js` for Berry, and
+      // The band decides the entry-point layout: `bin/yarn.js` for Berry, and
       // pnpm's `.mjs` (not `.js`/`.cjs`) for the >=11 band.
       expect(existsSync(join(fixture.home, "v1", name!, version!, entry!))).toBe(true);
     },

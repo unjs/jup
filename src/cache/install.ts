@@ -26,7 +26,6 @@ import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
   compareDigest,
-  hashFile,
   hashStream,
   parseSri,
   shouldSkipIntegrityCheck,
@@ -53,14 +52,7 @@ import {
   writeMarker,
 } from "./store.ts";
 import { extract } from "./tar.ts";
-import type {
-  BinList,
-  BinSpec,
-  InstallSpec,
-  Locator,
-  RegistrySignature,
-  RegistrySpec,
-} from "../types.ts";
+import type { BinSpec, InstallSpec, Locator, RegistrySignature, RegistrySpec } from "../types.ts";
 
 /** §07.4 — the two artifact shapes the table can produce. */
 const TARBALL_EXT = ".tgz";
@@ -69,8 +61,6 @@ const SCRIPT_EXT = ".js";
 /** Everything §07.3 works out before a single artifact byte is fetched. */
 interface ArtifactSource {
   url: string;
-  /** §07.4 — a path *inside* the tarball; set, only that one entry is extracted. */
-  binPath?: string;
   /** The registry in force for this download; it selects §06.1's row. */
   registry?: RegistrySpec;
   /**
@@ -183,7 +173,7 @@ export async function ensureInstalled(
     const digesting = hashStream(digestBranch, streamAlgo);
     const writing =
       ext === TARBALL_EXT
-        ? extract(contentBranch, tmp, { strip: 1, filter: source.binPath })
+        ? extract(contentBranch, tmp, { strip: 1 })
         : writeStreamToFile(contentBranch, join(tmp, posix.basename(pathname)));
 
     // `allSettled`, not `all`: a rejected extraction must not leave the digest
@@ -193,17 +183,17 @@ export async function ensureInstalled(
     if (digestOutcome.status === "rejected") throw digestOutcome.reason as Error;
     const streamDigest = digestOutcome.value;
 
-    // §07.4 — a filtered extraction produced exactly one file, promoted to
-    // `<tmp>/<basename(binPath)>` by the extractor.
-    const isFiltered = ext === TARBALL_EXT && source.binPath !== undefined;
-    const isSingleFile = isFiltered || ext === SCRIPT_EXT;
+    // §07.4 — a `.js` URL is the one artifact that is not an archive. The
+    // *filtered* tarball that used to join it here is gone with §15.41: it
+    // existed only to pull a lone `yarn.js` out of `@yarnpkg/cli-dist`, and that
+    // package is now installed whole like every other tarball.
+    const singleFileName = ext === SCRIPT_EXT ? posix.basename(pathname) : undefined;
 
-    // §06.2 — the artifact whose digest the *reference* names: the extracted
-    // file on the filtered path, the received bytes everywhere else.
-    const artifactAlgo = isFiltered ? algo : streamAlgo;
-    const artifactDigest = isFiltered
-      ? await hashFile(join(tmp, posix.basename(source.binPath!)), algo)
-      : streamDigest;
+    // §06.2 — the artifact whose digest the *reference* names. With the filtered
+    // path retired these are always the received bytes: for a tarball the
+    // archive, for a `.js` the file itself, and the stream is both.
+    const artifactAlgo = streamAlgo;
+    const artifactDigest = streamDigest;
 
     // §06.1 row 1 — an explicit pin is the *only* check. Not "as well as" the
     // signature: pinning a hash against a bad-signature registry must fail with
@@ -213,16 +203,16 @@ export async function ensureInstalled(
       assertDigest(pin.digest, artifactDigest);
     }
 
-    // §06.1 row 2, widened by §14.10: `dist.integrity` describes the tarball as
-    // published, so it is checked against the *stream* digest whether we
-    // extracted the whole archive or filtered it down to one file. Corepack
-    // skips this entirely when `registry.bin` is set, which is what leaves Yarn
-    // Berry unverified behind every corporate mirror.
+    // §06.1 row 2: `dist.integrity` describes the tarball as published, so it is
+    // checked against the stream digest. §14.10's widening — "hash the stream
+    // even on the single-file path" — no longer has a filtered case to cover;
+    // the hole it closed was Yarn Berry behind a corporate mirror, and §15.41
+    // closed that at the source instead.
     if (expected !== undefined) {
       assertDigest(expected.hex, streamDigest);
     }
 
-    const bin = resolveBin(tmp, locator, isSingleFile);
+    const bin = resolveBin(tmp, locator, singleFileName);
     await makeEntryPointsExecutable(tmp, locator, version, bin);
     const hash = `${artifactAlgo}.${artifactDigest}`;
 
@@ -373,7 +363,6 @@ async function chooseSource(
     source.shasum = metadata.shasum;
     source.signatures = metadata.signatures;
     source.fetched = true;
-    if (registry.bin !== undefined) source.binPath = registry.bin;
   } else {
     // §15.2 — the table URL sits on this package manager's own distribution
     // origin (`repo.yarnpkg.com`, `registry.yarnpkg.com`), and
@@ -464,10 +453,10 @@ async function makeEntryPointsExecutable(
   tmpDir: string,
   locator: Locator,
   version: string | undefined,
-  bin: BinSpec | BinList,
+  bin: BinSpec,
 ): Promise<void> {
   // Windows has no execute bit; a `.exe` runs because of its name.
-  if (process.platform === "win32" || Array.isArray(bin) || version === undefined) return;
+  if (process.platform === "win32" || version === undefined) return;
   if (!isSupportedPackageManager(locator.name)) return;
   if (getSpecFor(locator.name, version).exec !== "native") return;
 
@@ -501,10 +490,6 @@ const UMASK = process.umask();
 /* §07.7, §15.17 — what goes in the marker's `bin`                             */
 /* -------------------------------------------------------------------------- */
 
-function isValidBinList(value: unknown): value is BinList {
-  return Array.isArray(value) && value.length > 0;
-}
-
 function isValidBinSpec(value: unknown): value is BinSpec {
   return (
     typeof value === "object" &&
@@ -533,10 +518,8 @@ function isValidBinSpec(value: unknown): value is BinSpec {
  *
  * The table still decides two things:
  *
- * * a **single file** has no `package.json` to read, so its `BinList` is the
- *   only description there is (§07.7's `isValidBinList` / `isValidBinSpec`
- *   discrimination — Yarn Berry declares an array, but through a custom npm
- *   registry it arrives as a *tarball* and the package's map describes it); and
+ * * a **single file** has no `package.json` to read at all, so the only thing
+ *   left to describe it is its own name — see the branch below; and
  * * a tarball whose package declares no usable `bin` falls back to the band —
  *   but only a **declared** one, so §02.3's fall-forward guess for an uncovered
  *   version never reaches the marker.
@@ -548,8 +531,9 @@ function isValidBinSpec(value: unknown): value is BinSpec {
 export function resolveBin(
   tmpDir: string,
   locator: Locator,
-  isSingleFile: boolean,
-): BinSpec | BinList {
+  /** The file's basename when the artifact is a lone `.js`; absent for a tarball. */
+  singleFileName?: string,
+): BinSpec {
   const parsed = parse(locator.reference);
   const known = parsed !== null && isSupportedPackageManager(locator.name);
   const banded = known && hasRangeBand(locator.name, parsed.version);
@@ -557,11 +541,19 @@ export function resolveBin(
   // with `{exe}`, and what goes in the marker must be the path that exists.
   const tableBin = known ? resolveSpecBin(getSpecFor(locator.name, parsed.version)) : undefined;
 
-  if (isSingleFile) {
-    // No manifest to consult. An unbanded version falls back to the locator's
-    // own name — which is what the artifact is.
-    if (isValidBinList(tableBin)) return tableBin;
-    return [locator.name];
+  if (singleFileName !== undefined) {
+    // No manifest to consult, and since §15.41 no *band* produces a single file
+    // either: the only way here is a URL reference naming a `.js` (§04.1 step 1,
+    // behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` for a known name). A URL
+    // reference has no version, so it is never `known` and never banded — which
+    // is why the table is not consulted at all. The artifact is one file and the
+    // locator's own name is what the user asked to run, exactly as the retired
+    // `BinList` resolved it.
+    //
+    // What changed is only that the marker now names the *file*, rather than a
+    // bare list of names leaving `resolveBinPath` to recover it from the
+    // download URL a second time.
+    return { [locator.name]: singleFileName };
   }
 
   const manifest = readManifest(tmpDir);

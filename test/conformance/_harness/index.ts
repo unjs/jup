@@ -6,6 +6,7 @@ export {
   copyTool,
   binPathsFor,
   packageManagerTarball,
+  publishBerry,
   pmScript,
   seedPackageManager,
   versionOf,

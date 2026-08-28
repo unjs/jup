@@ -84,7 +84,7 @@ row under either name. Row 41b covers the pair itself.
 | 43 | `COREPACK_ENABLE_AUTO_PIN=1`, `package.json` is `{}` | after `yarn`, `packageManager` matches `/^yarn@/`; stderr carries the two `!` notices |
 | 44 | Same without the variable | `packageManager` is **not** written |
 | 45 | `COREPACK_ENABLE_NETWORK=0`, version not cached | exit 1, stderr contains `Network access disabled by the environment` |
-| 46 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`, project pins `yarn@3.0.0` | stderr exactly `! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n` |
+| 46 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`, project pins `yarn@3.0.0` | stderr exactly `! jup is about to download https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n` (the `repo.yarnpkg.com` single file, before §15.41) |
 | 47 | Same, second run (cached) | stderr empty |
 | 48 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` only in `.jup.env` | stderr empty — the file cannot set it |
 | 49 | `COREPACK_NPM_REGISTRY` + prompt, no project spec | stderr matches `! jup is about to download <registry>/yarn/-/yarn-1.x.y.tgz` |
@@ -126,7 +126,7 @@ row under either name. Row 41b covers the pair itself.
 | 67 | Username + password, no token | `authorization: Basic base64(user:pass)` |
 | 68 | Username only | no authorization header |
 | 69 | Registry URL with `user:pass@` userinfo | Basic auth sent; userinfo absent from the request line |
-| 70 ⊕ | Username/password set, download served from a **different** origin | **no** credentials on that request (§14.6) |
+| 70 ⊕ | ~~Username/password set, download served from a **different** origin~~ | **removed by §15.41** — the table names one origin, so no table download can be cross-origin. §14.6 is unchanged and still scopes credentials by origin |
 | 71 | `HTTP_PROXY` + a `CONNECT` proxy, registry at `example.com` | request tunnels through the proxy |
 | 72 ⊕ | Same **without** `NODE_USE_ENV_PROXY` | still tunnels (§14.8) |
 | 73 | Mock signs with an untrusted key | exit 1, stderr contains `No compatible signature found in package metadata` |

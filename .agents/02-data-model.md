@@ -54,11 +54,13 @@ How to *discover versions* of a package manager. Two shapes:
 
 ```jsonc
 // npm-style: talk the npm registry protocol (§05.2)
-{ "type": "npm", "package": "pnpm", "bin": "bin/yarn.js" /* optional */ }
+{ "type": "npm", "package": "pnpm" }
 
-// url-style: fetch one JSON document and read two fields out of it
+// url-style: fetch one JSON document and read two fields out of it.
+// No entry in the table declares one since §15.41; the shape is retained for a
+// tool published somewhere that is not an npm registry.
 { "type": "url",
-  "url": "https://repo.yarnpkg.com/tags",
+  "url": "https://example.invalid/tags",
   "fields": { "tags": "aliases", "versions": "tags" } }
 ```
 
@@ -69,9 +71,10 @@ For `type: "url"`:
 * `fetchLatestStableVersion` reads `data[fields.tags].stable` — note **`stable`**,
   not `latest`, for URL registries.
 
-`bin` on an npm registry spec is a path *inside the tarball* to a single file. When
-present, the downloader extracts only that one file (§07.4) rather than the whole
-package — this is how `@yarnpkg/cli-dist` is reduced to a single `yarn.js`.
+An npm registry spec has no `bin`. It named a path *inside the tarball* and made
+the downloader extract only that one file, which existed so `@yarnpkg/cli-dist`
+could be reduced to a single `yarn.js`. §15.41 removed it along with the rest of
+the single-file machinery; §07.4 always extracts the whole archive.
 
 ## 2.3 Tool definition
 
@@ -172,8 +175,9 @@ languages without ordered maps MUST store `ranges` as an ordered list of
 
 The **tag-resolution range** is a separate rule: dist-tags are always resolved
 against `ranges[last key]` — the newest band (`Engine::resolveDescriptor`). So
-`yarn@latest` consults `https://repo.yarnpkg.com/tags`, never the npm `yarn` package,
-even though `yarn@1.22.22` would download from npm.
+`yarn@latest` consults `@yarnpkg/cli-dist`'s dist-tags, never the npm `yarn` package,
+even though `yarn@1.22.22` would download from that one. Before §15.41 the newest
+band was `https://repo.yarnpkg.com/tags`, so the two differed in protocol as well.
 
 ## 2.4 PackageManagerSpec
 
@@ -186,10 +190,9 @@ even though `yarn@1.22.22` would download from npm.
 ```ts
 {
   url: string,                  // download URL template; "{}" ← version
-  bin: BinSpec | BinList,       // see below
-  registry: RegistrySpec,       // version source: which versions exist
-  npmRegistry?: NpmRegistrySpec,// used INSTEAD of `registry` when the user has set
-                                // a custom npm registry (§05.3)
+  bin: BinSpec,                 // see below
+  registry: RegistrySpec,       // version source: which versions exist — always
+                                // `type: "npm"` (§15.41)
   commands?: { use?: string[] },// argv to run after `jup use`/`up`
 
   // §15.28 — per-host artifacts. A band declaring any of these is a per-host band.
@@ -256,19 +259,20 @@ Consequences a conforming implementation MUST follow, all of them following from
 * The store marker still records the hash: the store is host-local, so there it is
   exactly the right fact.
 
-**`bin` has two shapes and they are not interchangeable:**
+**`bin` has one shape:** `BinSpec` = `{ [binaryName]: relativePathInPackage }`,
+e.g. `{"pnpm": "./bin/pnpm.mjs", "pnpx": "./bin/pnpx.mjs"}`.
 
-* `BinSpec` = `{ [binaryName]: relativePathInPackage }` — used when the download is a
-  tarball. e.g. `{"pnpm": "./bin/pnpm.mjs", "pnpx": "./bin/pnpx.mjs"}`.
-* `BinList` = `[binaryName, …]` — used when the download is a **single `.js` file**.
-  The file is placed at `<location>/<basename of url path>` and every listed name
-  maps to it. e.g. Yarn 2+ declares `["yarn", "yarnpkg"]` and both run
-  `<location>/yarn.js`.
+There used to be a second, `BinList` = `[binaryName, …]`, for a download that was a
+single `.js` file: the file landed at `<location>/<basename of url path>` and every
+listed name mapped to it, which is how Yarn 2+ declared `["yarn", "yarnpkg"]`.
+§15.41 moved Berry to a tarball and no band declares a single file any more. Two
+remnants are deliberate: a **URL reference** to a `.js` (§04.1 step 1) still
+produces one, recording a `BinSpec` that names the file; and a `bin` **array** in a
+marker an earlier release wrote MUST still be read (§07.1).
 
-For a **tarball**, the table's `BinSpec` is a fallback rather than the authority:
-§07.7 reads the package's own `bin` first (§15.17), so a band whose paths have gone
-stale cannot break an install. A `BinList` *is* authoritative, because a single-file
-download carries no manifest to read.
+The table's `BinSpec` is a fallback rather than the authority: §07.7 reads the
+package's own `bin` first (§15.17), so a band whose paths have gone stale cannot
+break an install.
 
 A per-host artifact package is the third case, and it is why `{exe}` exists:
 `@oven/bun-<target>` and `@deno/<target>` declare **no `bin` of their own**, so §07.7
@@ -345,23 +349,27 @@ All three: `registry` = `{type: npm, package: pnpm}`, `commands.use` =
 Ranges, in declaration order:
 
 **`<2.0.0`** (Yarn Classic — a normal npm tarball)
-* `url` = `https://registry.yarnpkg.com/yarn/-/yarn-{}.tgz`
+* `url` = `https://registry.npmjs.org/yarn/-/yarn-{}.tgz`  ← `registry.yarnpkg.com` before §15.41
 * `bin` = `{"yarn": "./bin/yarn.js", "yarnpkg": "./bin/yarn.js"}`
 * `registry` = `{type: npm, package: yarn}`
 * `commands.use` = `["yarn", "install"]`
 
-**`>=2.0.0`** (Yarn Berry — a single bundled JS file)
-* `url` = `https://repo.yarnpkg.com/{}/packages/yarnpkg-cli/bin/yarn.js`
-* `bin` = `["yarn", "yarnpkg"]`  ← BinList, single-file form
-* `registry` = `{type: url, url: https://repo.yarnpkg.com/tags,
-   fields: {tags: "aliases", versions: "tags"}}`
-* `npmRegistry` = `{type: npm, package: "@yarnpkg/cli-dist", bin: "bin/yarn.js"}`
+**`>=2.0.0`** (Yarn Berry — `@yarnpkg/cli-dist`, an ordinary npm tarball since §15.41)
+* `url` = `https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz`
+* `bin` = `{"yarn": "./bin/yarn.js", "yarnpkg": "./bin/yarn.js"}`
+* `registry` = `{type: npm, package: "@yarnpkg/cli-dist"}`
 * `commands.use` = `["yarn", "install"]`
 
-The `npmRegistry` fallback is what makes Yarn Berry installable from a corporate npm
-mirror: `repo.yarnpkg.com` is not an npm registry and cannot be mirrored, so when the
-user sets a custom npm registry the tool switches to the `@yarnpkg/cli-dist` package
-and extracts only `bin/yarn.js` from its tarball (§05.3, §07.4).
+  Before §15.41 this band was a single `yarn.js` on `repo.yarnpkg.com`, with a
+  url-type `registry` reading `aliases`/`tags` and an `npmRegistry` fallback that
+  swapped in `@yarnpkg/cli-dist` only once the user had configured an npm registry.
+
+The `npmRegistry` fallback was what made Yarn Berry installable from a corporate npm
+mirror: `repo.yarnpkg.com` is not an npm registry and cannot be mirrored, so setting a
+custom npm registry switched the tool to the `@yarnpkg/cli-dist` package and extracted
+only `bin/yarn.js` from its tarball. §15.41 made that package the band for everyone
+and removed the filtered extraction, so **no entry declares `npmRegistry`** and the
+fallback has no subject (§05.3, §07.4).
 
 > **Note.** `default` for yarn is Yarn **1**, but `transparent.default` is Yarn **4**.
 > This asymmetry is intentional and MUST be preserved: it keeps `yarn` in a bare

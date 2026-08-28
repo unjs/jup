@@ -12,7 +12,7 @@ import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:
 import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
-import type { BinList, BinSpec, InstallSpec } from "../types.ts";
+import type { BinSpec, InstallSpec } from "../types.ts";
 import { getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
@@ -217,13 +217,20 @@ export function resolveBinPath(
   binName: string,
   spec: InstallSpec,
   specUrl: string,
-  fallbackBin?: BinSpec | BinList,
+  fallbackBin?: BinSpec,
 ): string {
   const location = resolve(spec.location);
   const bin = spec.bin ?? fallbackBin;
 
   let declared: string | undefined;
   if (Array.isArray(bin)) {
+    // §07.1 — a `LegacyBinList` out of a marker an older build wrote. Nothing
+    // produces this shape any more: §15.41 retired the only band that declared
+    // one, and a single-file install now records the file's name in a `BinSpec`
+    // (see `resolveBin`). It is still read, because the markers are already on
+    // disk — a machine that installed Yarn Berry under an earlier release has
+    // `["yarn", "yarnpkg"]` in its store, and that install must keep running.
+    // The file is recovered the way it always was, from the download URL.
     if (bin.includes(binName)) {
       const pathname = urlPathname(specUrl);
       // Dispatch on the URL path's extension, exactly as the download did (§07.4).
@@ -289,7 +296,7 @@ export function execPackageManager(
   spec: InstallSpec,
   args: string[],
   specUrl: string,
-  fallbackBin?: BinSpec | BinList,
+  fallbackBin?: BinSpec,
   execMode?: "js" | "native",
 ): number | Promise<number> {
   const binPath = resolveBinPath(binName, spec, specUrl, fallbackBin);

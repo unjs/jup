@@ -154,8 +154,11 @@ packument path is only taken when `COREPACK_NPM_REGISTRY` is set.
 When `COREPACK_NPM_REGISTRY` is set, two rewrites happen (§07.3):
 
 1. If the range's spec declares `npmRegistry`, that spec is used **instead of**
-   `registry` — this is how Yarn Berry switches from `repo.yarnpkg.com` to the
-   `@yarnpkg/cli-dist` npm package.
+   `registry`. **No entry declares one.** This is how Yarn Berry used to switch from
+   `repo.yarnpkg.com` to the `@yarnpkg/cli-dist` npm package once a mirror was
+   configured; §15.41 made `@yarnpkg/cli-dist` the band itself, so the swap is
+   unconditional and this rewrite has no subject. The mechanism is retained for a
+   band published somewhere that is not an npm registry.
 2. Any occurrence of the literal default registry origin
    `https://registry.npmjs.org` in the download URL is replaced with the override.
 

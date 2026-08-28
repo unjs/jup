@@ -41,10 +41,11 @@ Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}
 
 Notes a re-implementation MUST get right:
 
-* **Step 3 uses the *last* range entry's registry, not a per-version one.** Tags are a
-  property of the newest distribution channel. For Yarn this means
-  `https://repo.yarnpkg.com/tags`, so `yarn@latest` resolves to a Berry version even
-  though `yarn@1.22.22` would come from npm.
+* **Step 3 uses the *last* range entry's registry, not a per-version one.**
+  Tags are a property of the newest distribution channel. For Yarn this means
+  `@yarnpkg/cli-dist`'s dist-tags, so `yarn@latest` resolves to a Berry version even
+  though `yarn@1.22.22` would come from the `yarn` package. Before §15.41 the two
+  bands differed in *protocol* as well, the last being `https://repo.yarnpkg.com/tags`.
 * **Step 5 returns an exact version without verifying it exists.** A typo'd or
   yanked version therefore surfaces much later, as a bare
   `Server answered with HTTP 404` naming a tarball URL the user never typed.
@@ -53,8 +54,8 @@ Notes a re-implementation MUST get right:
   cache first — but since steps 4 and 5 would return the same reference for an exact
   version, the cache probe is pure overhead there. See §14.1.
 * **Step 6 queries every range band in parallel** and unions the results, because a
-  range like `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry
-  (repo.yarnpkg.com).
+  range like `>=1` legitimately spans Yarn Classic (the `yarn` package) and Yarn
+  Berry (`@yarnpkg/cli-dist`).
 * **Step 6 leaks prereleases — see §15.24.** Because the filter uses
   `satisfiesWithPrereleases`, which strips the prerelease tag before testing, a
   published `11.0.0-dev.1005` satisfies `*` and then sorts above every stable release.

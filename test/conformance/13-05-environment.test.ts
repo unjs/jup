@@ -12,7 +12,7 @@ import {
   hashOf,
   MockRegistry,
   packageManagerTarball,
-  pmScript,
+  publishBerry,
   REPO_ROOT,
   run,
   seedPackageManager,
@@ -26,11 +26,13 @@ const PNPM_DEFAULT = DEFINITIONS.pnpm!.default;
 const registry = new MockRegistry();
 
 /**
- * §15.11 — Berry from `repo.yarnpkg.com` has no signature and no published
- * digest, so these rows pin the hash of the bytes the mock serves. The rows are
- * about the download *notice*, and the URL in it is unchanged.
+ * Berry, hash-pinned. The pin was load bearing while Berry came from
+ * `repo.yarnpkg.com`, which published neither signatures nor digests; §15.41
+ * moved it onto `@yarnpkg/cli-dist`, so the mock's signature clears §15.11 on
+ * its own and the pin is only what these rows have always quoted. The URL in the
+ * notice did change, and rows 46 and 50 say so.
  */
-const BERRY = `3.0.0+sha512.${hashOf(Buffer.from(pmScript("yarn", "3.0.0"), "utf8"))}`;
+const BERRY = `3.0.0+sha512.${hashOf(packageManagerTarball("yarn", "3.0.0", { packageName: "@yarnpkg/cli-dist" }))}`;
 
 beforeAll(async () => {
   await registry.start();
@@ -40,8 +42,8 @@ beforeAll(async () => {
     packageManagerTarball("yarn", versionOf(YARN_DEFAULT)),
   );
   // §15.33 bullet 2 moved yarn's compiled-in `default` onto the Berry line, and
-  // §05.3 routes Berry through `@yarnpkg/cli-dist` whenever an npm registry is
-  // configured — which is what row 49 is downloading over.
+  // §15.41 routes Berry through `@yarnpkg/cli-dist` unconditionally — which is
+  // what row 49 is downloading.
   registry.publish(
     "@yarnpkg/cli-dist",
     versionOf(YARN_DEFAULT),
@@ -58,11 +60,9 @@ beforeAll(async () => {
       packageName: "@yarnpkg/cli-dist",
     }),
   );
-  registry.publishFile(
-    "/3.0.0/packages/yarnpkg-cli/bin/yarn.js",
-    pmScript("yarn", "3.0.0"),
-    "application/javascript",
-  );
+  // §15.41 — the artifact the prompt rows download. It used to be a single
+  // `.js` on `repo.yarnpkg.com`, which is the URL row 46 quoted.
+  publishBerry(registry, "3.0.0");
 });
 
 afterAll(async () => {
@@ -275,7 +275,7 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup is about to download https://repo.yarnpkg.com/3.0.0/packages/yarnpkg-cli/bin/yarn.js\n`,
+      `! jup is about to download https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
     );
     expect(result.stdout).toBe("3.0.0\n");
   });
@@ -339,8 +339,20 @@ describe("§13.5 environment variables", () => {
     );
   });
 
-  it("50: a Yarn Berry pin over a mirror names the @yarnpkg/cli-dist tarball", async () => {
-    const digest = createHash("sha224").update(pmScript("yarn", "3.0.0-rc.2")).digest("hex");
+  it("50: a Yarn Berry pin names the @yarnpkg/cli-dist tarball", async () => {
+    // The mirror is incidental now. This row used to be about §05.2 rewrite 1 —
+    // a configured npm registry being what moved Berry off `repo.yarnpkg.com`
+    // and onto `@yarnpkg/cli-dist` — and §15.41 made that the band itself, so the
+    // tarball is what gets named whether or not one is configured. The digest
+    // follows: it is the archive's, not the single file's.
+    const digest = createHash("sha224")
+      .update(
+        packageManagerTarball("yarn", "3.0.0-rc.2", {
+          binPaths: ["bin/yarn.js"],
+          packageName: "@yarnpkg/cli-dist",
+        }),
+      )
+      .digest("hex");
     const fixture = createFixture({ packageManager: `yarn@3.0.0-rc.2+sha224.${digest}` });
 
     const result = await run(["yarn", "--version"], {

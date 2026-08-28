@@ -7,13 +7,18 @@ fires when* is the single most security-relevant part of this spec.
 
 Let `build[1]` be the hex digest from the reference's build suffix (§02.1), if any.
 
-| Reference has a hash? | Registry type | `registry.bin` set? | Integrity checks disabled? | What happens |
-|---|---|---|---|---|
-| yes | any | any | any | **Hash check only.** Signature verification is skipped entirely. |
-| no | `npm` | no | no | **Signature verification**, then the registry's signed `integrity` becomes the expected hash, then hash check. |
-| no | `npm` | **yes** | no | **Nothing.** No signature, no hash. |
-| no | `url` | — | — | **Nothing.** No signature, no hash. |
-| no | any | any | **yes** | **Nothing.** |
+| Reference has a hash? | Registry type | Integrity checks disabled? | What happens |
+|---|---|---|---|
+| yes | any | any | **Hash check only.** Signature verification is skipped entirely. |
+| no | `npm` | no | **Signature verification**, then the registry's signed `integrity` becomes the expected hash, then hash check. |
+| no | `url` | — | **Nothing.** No signature, no hash. |
+| no | any | **yes** | **Nothing.** |
+
+The table had a fourth input, `registry.bin`, and a row where an `npm` registry with
+it set verified **nothing**. That was Corepack's `!registry.bin` guard and §14.10's
+subject. §15.41 removed the field, so the row is gone: an `npm` registry is now always
+row 2. Since §15.41 the `url` row is also unreachable from the table, though §15.11
+means it would refuse rather than install unverified.
 
 "Registry type" here means the **artifact** registry: a band declaring
 `artifactRegistry` (§02.4, §15.28) is verified against *that* package's packument, not
@@ -35,10 +40,12 @@ Two consequences a re-implementation MUST NOT accidentally "fix":
   with a hash mismatch, not a signature error — and once the correct hash is supplied
   it installs successfully despite the invalid signature. This is intended: an
   explicit hash is a stronger, user-chosen assertion than the registry's own claim.
-* **Yarn Berry downloaded via `npmRegistry` (which sets `registry.bin`) is verified by
-  neither mechanism** unless the user pins a hash, because the single extracted file's
-  digest cannot be compared against the whole-tarball `dist.integrity`. See §14.10 —
-  this is a genuine hole and this spec requires closing it.
+* **Yarn Berry used to be verified by neither mechanism** when it came through
+  `npmRegistry` (which set `registry.bin`), unless the user pinned a hash: the single
+  extracted file's digest could not be compared against the whole-tarball
+  `dist.integrity`. §14.10 required closing that hole and §15.41 closed it at the
+  source — Berry is an ordinary `@yarnpkg/cli-dist` tarball on row 2, like every
+  other entry.
 
 ## 6.2 Hash verification
 
@@ -55,9 +62,11 @@ if build[1] and actual !== build[1]:
 |---|---|
 | `.tgz` full extraction | the **raw tarball stream** as received (compressed bytes) |
 | `.js` single file | the **file bytes** as received |
-| `.tgz` with `registry.bin` filter | the **extracted single file** on disk, re-read after extraction |
 
-The third case is why hashing cannot always be done inline with the download.
+Both are the bytes as received, so hashing is always inline with the download. There
+used to be a third case — a `.tgz` filtered by `registry.bin` down to one file, whose
+digest was that **extracted file** re-read from disk — and it is the reason this table
+once had to say when hashing could not be inline. §15.41 removed the filter.
 
 `algo` is any digest name the host's crypto supports — there is no allowlist.
 `sha1`, `sha224`, `sha256`, `sha384`, `sha512` all appear in real `packageManager`
@@ -202,8 +211,8 @@ What this design defends against, and what it does not:
 | Registry serves a modified tarball for a hash-pinned version | **Yes** — hash check |
 | Registry serves a modified tarball for an unpinned version, npm registry | **Yes** — signature chain, provided npm's key is not compromised |
 | Compromised **mirror** (`COREPACK_NPM_REGISTRY`) serving unpinned versions | **Yes** — the signature is over the package name + version + integrity, and the mirror does not have npm's key |
-| Compromised mirror serving unpinned **Yarn Berry** (`npmRegistry` path, `registry.bin` set) | **No** — see §14.10 |
-| Compromised `repo.yarnpkg.com` serving unpinned Yarn Berry | **No** — url-type registries have no signatures at all |
+| Compromised mirror serving unpinned **Yarn Berry** | **Yes** — since §15.41 Berry is `@yarnpkg/cli-dist`, on the same signature chain as every other entry. This row read **No** while §14.10's filtered path skipped the check |
+| Compromised `repo.yarnpkg.com` serving unpinned Yarn Berry | **N/A** — §15.41 removed the last table reference to that origin, and to url-type registries generally |
 | Man-in-the-middle on the wire | Via TLS only |
 | Hostile repository disabling verification via `.jup.env` | **No** — see §14.5 |
 | Hostile repository pointing `packageManager` at an arbitrary URL | **Yes** for known package managers (blocked unless `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1`); **no** for unknown names |

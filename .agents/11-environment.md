@@ -38,7 +38,7 @@ always wins over the file.
 
 | Variable | Accepted values | Effect | Env file |
 |---|---|---|---|
-| `COREPACK_NPM_REGISTRY` | URL | Base registry URL. Trailing slashes are stripped. May embed `user:pass@`. Default `https://registry.npmjs.org`. Setting it also switches Yarn Berry from `repo.yarnpkg.com` to the `@yarnpkg/cli-dist` npm package. | yes |
+| `COREPACK_NPM_REGISTRY` | URL | Base registry URL. Trailing slashes are stripped. May embed `user:pass@`. Default `https://registry.npmjs.org`. Since §15.41 it mirrors the whole table, Yarn Berry included; it used to double as the switch that moved Berry from `repo.yarnpkg.com` to `@yarnpkg/cli-dist`. | yes |
 | `COREPACK_NPM_TOKEN` | string | `Authorization: Bearer <token>`. Origin-scoped on downloads; unscoped on metadata requests in the reference implementation (§14.6 requires scoping both). Presence alone counts — an empty value still suppresses Basic auth on the metadata path. | **no** (§14.5) |
 | `COREPACK_NPM_USERNAME` | string | With `COREPACK_NPM_PASSWORD`, `Authorization: Basic base64(user:pass)`. Username alone sends nothing on the metadata path. | **no** (§14.5) |
 | `COREPACK_NPM_PASSWORD` | string | See above. Set it explicitly to the empty string to send an empty password. | **no** (§14.5) |

@@ -16,19 +16,19 @@ import {
   makeTarball,
   MockRegistry,
   packageManagerTarball,
-  pmScript,
+  publishBerry,
   run,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
 
 /**
- * §15.11 — Yarn Berry comes from `repo.yarnpkg.com`, which publishes no
- * signatures and no digests, so every row here pins the hash of the bytes the
- * mock serves. These rows are about the *store* — banners, atomicity, offline
- * operation — and pinning changes only the reference they quote.
+ * Yarn Berry, hash-pinned. §15.41 moved it onto `@yarnpkg/cli-dist`, so it now
+ * clears §15.11 on the mock's signature alone and the pin is no longer load
+ * bearing — but these rows are about the *store* (banners, atomicity, offline
+ * operation), and a pinned reference is the one they have always quoted.
  */
-const BERRY = `2.2.2+sha512.${hashOf(Buffer.from(pmScript("yarn", "2.2.2"), "utf8"))}`;
+const BERRY = `2.2.2+sha512.${hashOf(packageManagerTarball("yarn", "2.2.2", { packageName: "@yarnpkg/cli-dist" }))}`;
 
 /** Root ignores the mode bits, so the read-only-home rows cannot be run as root. */
 const IS_ROOT = typeof process.getuid === "function" && process.getuid() === 0;
@@ -46,11 +46,7 @@ function trusted(extra?: Record<string, string | undefined>): Record<string, str
 
 beforeAll(async () => {
   await registry.start();
-  registry.publishFile(
-    "/2.2.2/packages/yarnpkg-cli/bin/yarn.js",
-    pmScript("yarn", "2.2.2"),
-    "application/javascript",
-  );
+  publishBerry(registry, "2.2.2");
   registry.publish("pnpm", "5.8.0", packageManagerTarball("pnpm", "5.8.0"));
 });
 

@@ -301,16 +301,20 @@ describe("resolveDescriptor step 3 — tags", () => {
   });
 
   it("resolves against the LAST range entry's registry, not the first (§02.3)", async () => {
-    const { npm, berry } = await startYarnServersWithoutMirror();
+    const { npm, berry } = await startYarnServers();
 
-    // `yarn@latest` must be Berry's 4.9.0, from repo.yarnpkg.com's tag
-    // document — not npm's `yarn` dist-tag, which is Classic's 1.22.9.
+    // `yarn@latest` must be Berry's 4.9.0, from `@yarnpkg/cli-dist`'s dist-tags
+    // — not the `yarn` package's, which is Classic's 1.22.9. Both bands are npm
+    // registries since §15.41, so this is now a question of *which package* the
+    // tag is read from rather than which protocol.
     await expect(
       resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
     ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
 
-    expect(berry.requests).toEqual(["/tags"]);
-    expect(npm.requests).toEqual([]);
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist"]);
+    expect(npm.requests).not.toContain("/yarn");
+    // And no vendor host was involved at any point.
+    expect(berry.requests).toEqual([]);
   });
 
   it("asks the mirror for @yarnpkg/cli-dist instead, once one is configured (§05.2)", async () => {
@@ -330,17 +334,19 @@ describe("resolveDescriptor step 3 — tags", () => {
   });
 
   it("names the last band's registry URL even when the network is off", async () => {
-    // The table's real URL, so the assertion is about the *table*, not the mock.
-    // No mirror: with one configured, §05.2 would swap Berry's tag document for
-    // the @yarnpkg/cli-dist packument and the message would name that instead.
+    // The table's real registry, so the assertion is about the *table*, not the
+    // mock. Two things changed with §15.41: the tag lookup is now the
+    // `@yarnpkg/cli-dist` packument rather than `https://repo.yarnpkg.com/tags`,
+    // and because it goes through the npm layer the refusal names the
+    // *repository* rather than the document — `networkDisabledRegistry`, which
+    // is the message every other package manager already produced here.
     await startYarnServersWithoutMirror();
-    BERRY_REGISTRY.url = BERRY_REGISTRY_URL;
     process.env.COREPACK_ENABLE_NETWORK = "0";
 
     const error = await rejection(
       resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
     );
-    expect(error.message).toBe(messages.networkDisabledUrl("https://repo.yarnpkg.com/tags"));
+    expect(error.message).toBe(messages.networkDisabledRegistry("https://registry.npmjs.org"));
   });
 
   it("uses the npm dist-tags for an npm-typed last band", async () => {

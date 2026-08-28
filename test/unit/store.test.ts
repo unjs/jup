@@ -704,22 +704,22 @@ describe("resolveBin — §07.7", () => {
     tmp = createTempDir();
   });
 
-  it("single file: uses the table's BinList when it declares one", () => {
-    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0+sha224.ab" }, true)).toEqual([
-      "yarn",
-      "yarnpkg",
-    ]);
-  });
-
-  it("single file: falls back to the locator name when the table has a BinSpec", () => {
-    // npm's table entry is an object, i.e. not a valid BinList.
-    expect(resolveBin(tmp, { name: "npm", reference: "11.0.0" }, true)).toEqual(["npm"]);
-  });
-
-  it("single file: falls back to the locator name for a URL reference", () => {
+  it("single file: names the file under the locator's own name", () => {
+    // §15.41 retired the last band that produced a single file, so this branch is
+    // reached only by a URL reference to a `.js`. The marker names the file, not
+    // just the binary — the retired `BinList` left `resolveBinPath` to recover
+    // it from the download URL a second time.
     expect(
-      resolveBin(tmp, { name: "yarn", reference: "https://example.com/yarn.js" }, true),
-    ).toEqual(["yarn"]);
+      resolveBin(tmp, { name: "yarn", reference: "https://example.com/yarn.js" }, "yarn.js"),
+    ).toEqual({ yarn: "yarn.js" });
+  });
+
+  it("single file: the table is not consulted, even for a name it knows", () => {
+    // A URL reference carries no version, so there is no band to read and
+    // nothing to disagree with. The file the download produced is the answer.
+    expect(
+      resolveBin(tmp, { name: "npm", reference: "https://example.com/npm-cli.js" }, "npm-cli.js"),
+    ).toEqual({ npm: "npm-cli.js" });
   });
 
   it("tarball: the package's own bin wins over the band that covers it (§15.17)", () => {
@@ -730,7 +730,7 @@ describe("resolveBin — §07.7", () => {
       join(tmp, "package.json"),
       JSON.stringify({ name: "pnpm", bin: { pnpm: "./dist/pnpm.mjs", pnpx: "./dist/pnpx.mjs" } }),
     );
-    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" })).toEqual({
       pnpm: "./dist/pnpm.mjs",
       pnpx: "./dist/pnpx.mjs",
     });
@@ -738,7 +738,7 @@ describe("resolveBin — §07.7", () => {
 
   it("tarball: falls back to the band when the package declares no bin", () => {
     writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "pnpm" }));
-    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" })).toEqual({
       pnpm: "./bin/pnpm.mjs",
       pnpx: "./bin/pnpx.mjs",
     });
@@ -747,26 +747,26 @@ describe("resolveBin — §07.7", () => {
   it("tarball: falls back to the band when there is no package.json at all", () => {
     // Tolerant by design: reading the manifest is now unconditional, and an
     // unreadable one must not turn an install that worked into an `ENOENT`.
-    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" })).toEqual({
       pnpm: "./bin/pnpm.mjs",
       pnpx: "./bin/pnpx.mjs",
     });
 
     writeFileSync(join(tmp, "package.json"), "{ not json");
-    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "pnpm", reference: "11.1.2" })).toEqual({
       pnpm: "./bin/pnpm.mjs",
       pnpx: "./bin/pnpx.mjs",
     });
   });
 
-  it("tarball: ignores a BinList and reads the package's own bin map", () => {
-    // Yarn Berry through a custom npm registry: a tarball, despite the table's
-    // array. This discrimination is the whole point of §07.7.
+  it("tarball: reads the package's own bin map", () => {
+    // Yarn Berry, which since §15.41 is an ordinary `@yarnpkg/cli-dist` tarball
+    // like every other entry, described by its own manifest.
     writeFileSync(
       join(tmp, "package.json"),
       JSON.stringify({ name: "@yarnpkg/cli-dist", bin: { yarn: "./bin/yarn.js" } }),
     );
-    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" })).toEqual({
       yarn: "./bin/yarn.js",
     });
   });
@@ -776,7 +776,7 @@ describe("resolveBin — §07.7", () => {
       join(tmp, "package.json"),
       JSON.stringify({ name: "@yarnpkg/cli-dist", bin: "./bin/yarn.js" }),
     );
-    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" })).toEqual({
       "@yarnpkg/cli-dist": "./bin/yarn.js",
     });
   });
@@ -790,7 +790,7 @@ describe("resolveBin — §07.7", () => {
       join(tmp, "package.json"),
       JSON.stringify({ name: "@yarnpkg/cli-dist", bin: { yarn: "../../../../evil.js" } }),
     );
-    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
+    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" })).toThrow(
       "The bin path '../../../../evil.js' declared by yarn@4.1.0 escapes its installation directory",
     );
 
@@ -799,7 +799,7 @@ describe("resolveBin — §07.7", () => {
       join(tmp, "package.json"),
       JSON.stringify({ name: "@yarnpkg/cli-dist", bin: "/etc/passwd" }),
     );
-    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
+    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" })).toThrow(
       "escapes its installation directory",
     );
   });
@@ -811,31 +811,22 @@ describe("resolveBin — §07.7", () => {
       join(tmp, "package.json"),
       JSON.stringify({ name: "@yarnpkg/cli-dist", bin: { yarn: "./bin/../bin/yarn.js" } }),
     );
-    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toEqual({
+    expect(resolveBin(tmp, { name: "yarn", reference: "4.1.0" })).toEqual({
       yarn: "./bin/../bin/yarn.js",
     });
-  });
-
-  it("tarball: neither branch is §12.8's `Unable to locate bin in package.json`", () => {
-    // Yarn Berry's band declares a BinList, so there is no BinSpec to fall back
-    // to: nothing describes this install and the error is the only answer.
-    writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "x", bin: {} }));
-    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
-      "Unable to locate bin in package.json",
-    );
-
-    writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "x" }));
-    expect(() => resolveBin(tmp, { name: "yarn", reference: "4.1.0" }, false)).toThrow(
-      "Unable to locate bin in package.json",
-    );
   });
 
   it("tarball: a URL reference has no band to fall back to", () => {
     // No version, so no band — §02.3's fall-forward guess is exactly what §15.17
     // keeps out of the marker. With nothing in the package, that is an error.
+    //
+    // Since §15.41 this is the *only* way to reach §12.8: every band in the table
+    // declares a usable `BinSpec`, so a banded version always has a fallback.
+    // Yarn Berry used to be the counter-example, its band declaring a list of
+    // names rather than paths.
     writeFileSync(join(tmp, "package.json"), JSON.stringify({ name: "pnpm" }));
     expect(() =>
-      resolveBin(tmp, { name: "pnpm", reference: "https://example.com/pnpm.tgz" }, false),
+      resolveBin(tmp, { name: "pnpm", reference: "https://example.com/pnpm.tgz" }),
     ).toThrow("Unable to locate bin in package.json");
   });
 });

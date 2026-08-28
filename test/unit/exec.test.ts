@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { messages } from "../../src/errors.ts";
 import { pathWith, resolveBinPath } from "../../src/run/exec.ts";
-import type { BinList, BinSpec } from "../../src/types.ts";
+import type { BinSpec, LegacyBinList } from "../../src/types.ts";
 
 /**
  * §08.4's contract is about how a *process* ends, so every one of these cases is
@@ -45,7 +45,7 @@ function run(
   location: string,
   binName: string,
   specUrl: string,
-  bin: BinSpec | BinList,
+  bin: BinSpec | LegacyBinList,
   args: string[] = [],
 ): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(
@@ -135,11 +135,19 @@ describe("resolveBinPath — §08.1", () => {
       );
     });
 
-    it("falls back to the table spec's bin list", () => {
-      const spec = { location: join(root, "list", "yarn", "4.0.0"), hash: "" };
-      expect(resolveBinPath("yarn", spec, YARN_URL, ["yarn", "yarnpkg"])).toBe(
-        join(spec.location, "yarn.js"),
-      );
+    it("reads a LegacyBinList out of a marker an older build wrote (§07.1)", () => {
+      // Not the *fallback* any more: since §15.41 no band declares a list, so the
+      // table can never supply one. What still exists is the marker already
+      // sitting in a store — a machine that installed Berry under an earlier
+      // release has `["yarn", "yarnpkg"]` on disk — and that install has to keep
+      // running. The file is recovered from the URL, as it always was.
+      const spec = {
+        location: join(root, "list", "yarn", "4.0.0"),
+        bin: ["yarn", "yarnpkg"] as LegacyBinList,
+        hash: "",
+      };
+      expect(resolveBinPath("yarn", spec, YARN_URL)).toBe(join(spec.location, "yarn.js"));
+      expect(resolveBinPath("yarnpkg", spec, YARN_URL)).toBe(join(spec.location, "yarn.js"));
     });
 
     it("asserts rather than crashing when there is no fallback either", () => {
