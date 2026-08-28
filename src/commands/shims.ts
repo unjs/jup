@@ -451,11 +451,15 @@ function eligibleAlternate(directory: string): boolean {
  */
 export function chooseInstallDirectory(options: ShimOptions): {
   directory: string;
+  /** The user named this directory; none of the selection below ran. */
+  named?: true;
   /** The default it was preferred over, when an alternate won. */
   preferredOver?: string;
 } {
   const configured = options.installDirectory ?? readEnv(ENV.SHIM_DIRECTORY);
-  if (configured !== undefined && configured !== "") return { directory: resolvePath(configured) };
+  if (configured !== undefined && configured !== "") {
+    return { directory: resolvePath(configured), named: true };
+  }
 
   const fallback = perUserShimDirectory();
   if (directoryOnPath(fallback)) return { directory: fallback };
@@ -574,28 +578,29 @@ const NOT_WRITABLE = new Set(["EROFS", "EACCES", "EPERM"]);
  * `enable` would have. Its own announcement is not repeated: the line below
  * already names the directory the shims went to.
  *
+ * It is a **thunk**, and required rather than defaulted, because computing it can
+ * run the whole of point 6's selection — `probeWritable` included, which creates
+ * and unlinks a file in a directory this call may never touch. On the happy path
+ * it is never called at all, so a writable `--install-directory` leaves every
+ * candidate exactly as it found it. A side effect has no business hiding in a
+ * default argument either.
+ *
  * Returns the realpath of the directory that will actually be used.
  */
-export function prepareInstallDirectory(
-  directory: string,
-  fallback: string = chooseInstallDirectory({}).directory,
-): string {
+export function prepareInstallDirectory(directory: string, fallback: () => string): string {
   const failure = probeWritable(directory);
   if (failure === undefined) return realpathOr(directory);
+  if (!NOT_WRITABLE.has(failure.code ?? "")) throw failure;
 
-  if (!NOT_WRITABLE.has(failure.code ?? "") || samePath(directory, fallback)) {
-    if (NOT_WRITABLE.has(failure.code ?? "")) {
-      throw new UsageError(shimDirectoryNotWritable(directory));
-    }
-    throw failure;
-  }
+  const target = fallback();
+  if (samePath(directory, target)) throw new UsageError(shimDirectoryNotWritable(directory));
 
-  advisory(shimDirectoryFallback(directory, fallback));
+  advisory(shimDirectoryFallback(directory, target));
 
-  const second = probeWritable(fallback);
-  if (second !== undefined) throw new UsageError(shimDirectoryNotWritable(fallback));
+  const second = probeWritable(target);
+  if (second !== undefined) throw new UsageError(shimDirectoryNotWritable(target));
 
-  return realpathOr(fallback);
+  return realpathOr(target);
 }
 
 function realpathOr(directory: string): string {
@@ -1509,7 +1514,13 @@ export async function cmdEnable(
   if (choice.preferredOver !== undefined) {
     advisory(shimDirectoryPreferred(choice.preferredOver, choice.directory));
   }
-  const installDirectory = prepareInstallDirectory(choice.directory);
+  // Point 2's fallback is where a *bare* `enable` would have gone. When nothing
+  // was named that is the directory just chosen, and when something was, the
+  // thunk only runs if that directory turned out to be unwritable — so the
+  // selection, and the probe inside it, happens exactly once per `enable`.
+  const installDirectory = prepareInstallDirectory(choice.directory, () =>
+    choice.named === true ? chooseInstallDirectory({}).directory : choice.directory,
+  );
 
   const generate = process.platform === "win32" ? generateWin32Link : generatePosixLink;
   // §10.1 — Windows always bakes the path in (the bare `node` its wrappers used
