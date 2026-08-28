@@ -390,12 +390,10 @@ function isDirectory(path: string): boolean {
 }
 
 /**
- * §07.5 — the rename is the commit point. Returns `true` when this call
- * published `tmp`, and `false` when `dest` already held a completed install —
- * another process won the race, and `tmp` is left for the caller to dispose of
- * once it has decided whether the winner is the artifact it wanted. A `dest`
- * that is occupied but carries no marker is neither, and throws. Windows retries
- * 5x with `100 * 2^i` ms backoff.
+ * §07.5 — the rename is the commit point. `true` when this call published `tmp`;
+ * `false` when another process won, leaving `tmp` for the caller to dispose of
+ * once it knows whether the winner is the artifact it wanted. An occupied `dest`
+ * with no marker is neither, and throws. Windows retries 5x, `100 * 2^i` ms.
  */
 export function promote(tmp: string, dest: string): boolean {
   ensureDir(dirname(dest), getInstallFolder());
@@ -418,13 +416,11 @@ export function promote(tmp: string, dest: string): boolean {
     } catch (error) {
       const code = errorCode(error);
 
-      // Something is already at `dest`. That is a benign lost race *only* when
-      // it proves to be a completed install: the marker is written into the
-      // staging tree before the rename, so a winner always has one. A directory
-      // without one is not a winner — it is a foreign or half-copied tree (a
-      // store seeded by an rsync that filtered dotfiles, say) — and discarding
-      // our verified bytes for it would hand the caller unchecked content and
-      // leave a cache entry that re-downloads on every run and never repairs.
+      // Occupied. A benign lost race *only* if it proves to be a completed
+      // install: the marker goes into the staging tree before the rename, so a
+      // winner always carries one. Without it this is a foreign or half-copied
+      // tree (an rsync that filtered dotfiles), and adopting it would hand the
+      // caller unverified bytes plus an entry that never stops re-downloading.
       if (
         code === "EEXIST" ||
         code === "ENOTEMPTY" ||
@@ -447,8 +443,8 @@ export function promote(tmp: string, dest: string): boolean {
     }
   }
 
-  // Unreachable: the retry branch is gated on `i < attempts - 1`, so the final
-  // iteration always returns or rethrows. Stated for the return type's sake.
+  // Unreachable: the retry branch is gated on `i < attempts - 1`, so the last
+  // iteration always returns or rethrows. Stated for the return type.
   /* v8 ignore next */
   throw new Error(messages.occupiedInstallDir(dest));
 }

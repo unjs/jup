@@ -112,31 +112,17 @@ export function shimDirectoryCandidates(): string[] {
 export const SHIM_MARKER = "@jup-shim";
 
 /**
- * §10.2 — the shared stub every POSIX shim links to.
- *
- * It carries no binary name, so it cannot collide with one: every name in the
- * table is a bare command (`yarn`, `npm`, `aubx`), and this is the only file in
- * `dist/` with a hyphen in it. Declared here for the same reason
- * {@link SHIM_MARKER} is — the ownership test names it.
+ * §10.2 — the shared stub every POSIX shim links to. It carries no binary name,
+ * so it cannot collide with one: every table name is a bare command, and this is
+ * the only file in `dist/` with a hyphen. Here because the ownership test names it.
  */
 export const PROXY_STUB_NAME = "shim-proxy.mjs";
 
 /**
- * §10.3 — the per-name stub a Windows wrapper invokes.
- *
- * `.mjs`, like `PROXY_STUB_NAME`: an explicit module extension is a format the
- * runtime knows from the name alone, so it never walks up looking for a
- * `package.json` to read a `"type"` out of (§14.27). In the shipped layout that
- * is two `openat` calls, a `read` and a parse off every `yarn`, `npm` and `pnpm`
- * invocation on the machine — **not** a measurable speed-up, since against a
- * ~32 ms warm run the two spellings differ by 0.02 ms at p50. The reason to
- * prefer it is that the stub then depends on no manifest at all: a packaging
- * that relocated `dist/` away from its `package.json`, or shipped a CommonJS
- * one, would break a `.js` stub on its first `import`.
- *
- * Declared here rather than in `shims.ts` for the same reason `SHIM_MARKER` is:
- * §14.16's ownership test reads it on every invocation, and that module imports
- * this one, not the other way round.
+ * §10.3 — the per-name stub a Windows wrapper invokes. `.mjs` so the runtime
+ * knows the format from the name and never walks up for a `package.json`
+ * `"type"` (§14.27). Here, not in `shims.ts`, for the reason `SHIM_MARKER` is:
+ * §14.16's ownership test reads it on every invocation.
  */
 export function stubNameFor(binName: string): string {
   return `${binName}.mjs`;
@@ -164,18 +150,16 @@ function readHeadSync(file: string, length: number): string | undefined {
  * A POSIX shim is a symlink to the shared stub (§10.2), so the open follows it
  * and reads the stub's banner — which is the point: a link is ours exactly when
  * what it points at is. §10.3's Windows wrappers cannot carry the marker (their
- * bodies are byte-exact), so there they are recognised the way `shims.ts`
- * recognises them, by shebang plus the `stubNameFor` stub they invoke.
+ * bodies are byte-exact), so there they are recognised by shebang plus the
+ * {@link stubNameFor} stub they invoke.
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
   if (head === undefined) {
-    // The open follows the link, so a failure here also covers a shim whose stub
-    // has been moved away — #751's stale shim, which §15.14 says `disable` must
-    // remove rather than skip, and which it can only remove if this lookup finds
-    // the directory holding it. A dangling link is ours iff it still names our
-    // stub, the same rule `shims.ts`'s async `isOurEntry` applies. Reached only
-    // once the read has already failed, so a live shim never pays for it.
+    // The open follows the link, so this also covers #751's stale shim, whose
+    // stub has moved away: §15.14 has `disable` remove it, which needs this
+    // lookup to find the directory. Dangling is ours iff it still names our stub
+    // — `isOurEntry`'s rule. Only reached once the read failed.
     let link: string;
     try {
       link = readlinkSync(file);
@@ -288,8 +272,8 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
 
   const declared = bin !== undefined && Object.hasOwn(bin, binName) ? bin[binName] : undefined;
   if (declared === undefined) throw new Error(messages.assertUnableToLocateBinPath(binName));
-  // An empty value resolves to the install directory itself, which passes the
-  // containment check below and is not an entry point.
+  // Empty resolves to the install directory, which passes containment below and
+  // is not an entry point.
   if (declared === "") throw new Error(messages.assertUnableToLocateBinPath(binName));
 
   const binPath = resolve(location, declared);
@@ -300,13 +284,11 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
     throw new Error(messages.binEscapes(declared, name, basename(location)));
   }
 
-  // Not `binPath` for a relative value: §08.1 joins naively, and a `bin` value of
-  // `./bin/yarn.js` must stay `<location>/bin/yarn.js` in `process.argv[1]`
-  // rather than being rewritten by `resolve`'s normalisation of the location
-  // itself. An absolute value has nothing to prepend, and joining one produced a
-  // path that was neither what the manifest declared nor what the check above
-  // validated — `<location>` concatenated onto itself, handed to `runMain` as a
-  // module that does not exist.
+  // Not `binPath` for a relative value: §08.1 joins naively, and `./bin/yarn.js`
+  // must stay `<location>/bin/yarn.js` in `process.argv[1]` rather than being
+  // rewritten by `resolve`'s normalisation of the location. An absolute value has
+  // nothing to prepend, and joining one yielded `<location>` concatenated onto
+  // itself — neither what was declared nor what was checked.
   return isAbsolute(declared) ? binPath : join(spec.location, declared);
 }
 

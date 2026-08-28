@@ -171,11 +171,7 @@ export const messages = {
   assertUnableToLocateBinPath: (binName: string) =>
     `Assertion failed: Unable to locate path for bin '${binName}'`,
 
-  /**
-   * §07.5 — the rename lost to something that is not a completed install. Name
-   * the directory: the only way out is to look at it, and the alternative is a
-   * run that executes whatever is sitting there.
-   */
+  /** §07.5 — the rename lost to something that is not a completed install. */
   occupiedInstallDir: (target: string) =>
     `Refusing to use ${target}: a directory is already there but carries no ${"`"}.jup${"`"} marker, so it is not a complete install. Remove it and run again.`,
 
