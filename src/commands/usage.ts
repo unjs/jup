@@ -18,8 +18,8 @@
  */
 export const USAGE_LINES: Record<string, string> = {
   cache: "$ jup cache clean|clear|list",
-  disable: "$ jup disable [--install-directory <path>] [--exclude <name>] ...",
-  enable: "$ jup enable [--install-directory <path>] [--exclude <name>] [--force] ...",
+  disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
+  enable: "$ jup enable [--install-directory <path>|--system] [--exclude <name>] [--force] ...",
   hydrate: "$ jup hydrate [--activate] <file>",
   info: "$ jup info [--json]",
   install: "$ jup install [-g,--global] [--cache-only] ...",
@@ -39,8 +39,8 @@ export const HELP_TEXT = `Usage: jup <command>
   jup cache clean [--all]
   jup cache clear [--all]
   jup cache list [--json]
-  jup disable [--install-directory <path>] [--exclude <name>] [...name]
-  jup enable  [--install-directory <path>] [--exclude <name>] [--force] [...name]
+  jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
+  jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
   jup info [--json]
   jup install
   jup install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
@@ -71,6 +71,11 @@ JUP_SHIM_DIRECTORY, else $XDG_BIN_HOME or ~/.local/bin, else
 %LOCALAPPDATA%\\jup\\bin on Windows. When that directory is not on PATH,
 enable prefers ~/bin — or $XDG_BIN_HOME — if one of those is, and says so; it
 never adopts a directory just for being writable and on PATH (§15.13 point 6).
+Running as root adds /usr/local/bin to that list, last, which is what a bare
+enable in a container reaches. --system names it outright — %ProgramData%\\jup\\bin
+on Windows — and, unlike every other directory, is never quietly fallen back
+out of; pass it to disable too when the shims were installed that way
+(§15.13 point 8).
 
 Configuration is by environment variable only; JUP_ENABLE_DOWNLOAD_PROMPT
 defaults to 1 when invoked through a package-manager shim and 0 when invoked as

@@ -431,11 +431,15 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
    back to the per-user directory a bare `enable` would have chosen (point 6) and
    say so:
    `! <dir> is not writable; installing shims to <fallback> instead`
+   `--system` (point 8) is the one exception and MUST fail instead: it names a
+   *scope*, and delivering the other scope quietly is what that flag exists to
+   prevent.
 3. If the chosen directory is not on `PATH` — which, after point 6 has run, means
    no candidate was — print exactly what to add, for the detected shell, and exit
    0. Do not silently install somewhere inert.
 4. `--install-directory=<the directory containing the tool>` remains available for
-   anyone who wants the old behaviour.
+   anyone who wants the old behaviour, and `--system` (point 8) for anyone who
+   wants a machine-wide one.
 5. **`LOCALAPPDATA` MUST only be consulted on Windows** (closes #673). This narrows
    §07.1's documented chain; it is the one place this spec breaks store-location
    compatibility with corepack, and it is correct — a Linux process inheriting
@@ -561,6 +565,68 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
    set behind, on `PATH` or not, and two sets of shims for one set of names is
    worse than one set in a suboptimal place. Moving them is `jup disable` followed
    by `jup enable`, or `--install-directory`.
+
+8. **A system-wide directory: `--system`, and the one alternate `root` may reach.**
+   Points 1 through 7 answer #71 by never *needing* elevation. They leave the
+   opposite case unanswered: a process that already **has** it, in an image whose
+   only user is `root`. There, every candidate in point 6's list is inert —
+   `$XDG_BIN_HOME` is unset, `$HOME/bin` does not exist, and `~/.local/bin` is
+   absent from `PATH` because the shell that would have added it (`~/.profile`,
+   `if [ -d … ]`, at login) is not the shell a `RUN` layer or a `docker run …
+   bash` starts. A bare `enable` therefore installs correctly and reaches
+   nothing, and point 3's advisory — a `PATH` export to type — is a remedy that
+   does not exist in a `Dockerfile`.
+
+   The **system directory** is:
+
+   * POSIX: `/usr/local/bin`. The FHS reserves `/usr/local` for locally installed
+     software, which is what makes it the one system prefix the distribution's
+     own package manager does not own — the property `/usr/bin` (#265) lacks.
+   * Windows: `%ProgramData%\jup\bin`, and nothing when `%ProgramData%` is unset.
+     Not `%ProgramFiles%`, which is #71's own directory, and not `%APPDATA%\npm`,
+     which point 6 rejects as npm's global prefix.
+
+   It enters the specification in exactly two places:
+
+   * **`--system`** selects it, on every platform and for any user. It is a
+     spelling of a directory, not a mode: it takes point 1's "named, never
+     second-guessed" path, so no gate, no `PATH` preference and no continuity
+     search applies to it. It outranks `COREPACK_SHIM_DIRECTORY`, as a flag
+     outranks a variable, and combining it with `--install-directory` MUST be a
+     usage error rather than a precedence rule. Per point 2 it does **not** fall
+     back: `RUN jup enable --system` in a container either installs machine-wide
+     or fails the build, and never exits 0 having installed shims the image
+     cannot find. `disable` MUST accept it too, since removal is the other half
+     of a directory point 7's scan may not reach. `info` (§15.30) takes no
+     directory option at all and does not gain one here: under `root` its scan
+     already reports the system directory, and for anybody else the report says
+     what a bare `disable` would find, which is the honest answer.
+   * **A candidate, last in point 6's list, only when the effective uid is 0.**
+     It is subject to every part of point 6 unchanged — it is an *alternate*, so
+     it is chosen only when it is on `PATH`, already exists, is owned by the
+     effective user, is neither group- nor world-writable, and passes point 2's
+     probe, and it announces itself with point 6's existing line. Last, because a
+     per-user directory that is already on `PATH` remains the better answer even
+     for `root`: it is narrower, and it is the one that user's non-root shell
+     would find.
+
+   `root` is not a proxy for "container", and the rule is deliberately not
+   written as one. What makes it safe is that it is still a **name from the
+   closed list**, gated exactly like `$HOME/bin`: "the first writable directory
+   on `PATH`" under `root` is `/usr/local/sbin` in the `node:*` images and
+   Homebrew's prefix on macOS — where the ownership gate rejects it, since
+   Homebrew chowns that directory to the installing admin user rather than to
+   `root`. A `sudo enable` on a workstation whose `~/.local/bin` is on `PATH`
+   never reaches point 8 at all, and one whose `~/.local/bin` is not says which
+   directory it chose instead.
+
+   It is a **candidate** rather than a special case inside `enable` because point
+   7's scan is how `disable`, `info` and §15.32's promotion find the shims again:
+   a directory `enable` may write to but they cannot see would be a set of shims
+   nothing can remove. The converse is the one gap left open, and it is left open
+   knowingly: a **non-root** `enable --system` — a user who owns
+   `/usr/local/bin`, or is in a group that does — installs where the scan does
+   not look, and `disable --system` is how those come back out.
 
 ## 15.14 Native shims — [required]
 
@@ -1632,6 +1698,11 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 263 | An expired memo while the registry is unreachable | the memo answers, an advisory `!` line names the version and the reason, the stamp is unchanged, and `JUP_QUIET_ADVISORIES=1` mutes only the line (§15.23, §11.5) |
 | 264 | `packageManager: "pnpm@12.<v>"` | the host's `@pnpm/exe.<host>` tarball is fetched and executed directly; the `pnpm` package — a wrapper whose `bin` names placeholders its `preinstall` overwrites — is never downloaded, and the marker's `bin` comes from the table, because that package declares none (§02.5, §07.7, §15.28) |
 | 265 | `pnpx <args>` against that same install | it reaches the one cached executable with `dlx` in front of the user's arguments, because that artifact reads its own file name rather than `argv[0]` — the band's `binArgs`, which is what pnpm's own POSIX `pnpx` script does (§15.28) |
+| 266 | `enable` as `root` where the per-user default is off `PATH` and `/usr/local/bin` is on it, root-owned and `0755` — the `node:*` image | shims land in `/usr/local/bin`, announced with point 6's line; point 3's advisory does not fire, and a later bare `disable` finds them (§15.13 points 7 and 8) |
+| 267 | the same shape as any other user | `/usr/local/bin` is not a candidate at all: the default is used and point 3's advisory fires (§15.13 point 8) |
+| 268 | `enable --system` where the system directory is not writable | fails with §14.18's message; nothing is written and point 2's fallback to the per-user default does **not** happen (§15.13 points 2 and 8) |
+| 269 | `enable --system --install-directory <dir>` | usage error naming both flags; nothing is written, and neither directory is probed (§15.13 point 8) |
+| 270 | `disable --system` after a `--system` install by a non-root user | the shims are removed and §15.15's displaced entries restored, without reading `PATH` (§15.13 points 7 and 8) |
 
 ## 15.39 Tools, not only package managers — [required]
 

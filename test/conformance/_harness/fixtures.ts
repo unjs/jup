@@ -97,7 +97,7 @@ export function alternateShims(root: string): string {
  * alone. `test/unit/shims.test.ts` has done this since it was written; the
  * shared harness had not.
  */
-function tempRoot(prefix: string): string {
+export function tempRoot(prefix: string): string {
   const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
   roots.push(root);
   return root;

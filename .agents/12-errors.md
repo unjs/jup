@@ -196,6 +196,8 @@ The package was signed with an expired key (<keyid>, expired <expires>)         
 ! jup integrity warning: <name>@<version> carries a valid signature from <keyid>, a key that expired <expires>; accepting it   §06.5
 Unable to locate a Node.js runtime to execute <binName>; set JUP_NODE_EXECPATH to point at one   §08.3.1
 Unable to determine where to install the shims; pass --install-directory                    §10.4
+Options --system and --install-directory both name an install directory; pass one or the other   §15.13
+--system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead   §15.13
 <binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)   §10.2
 Refusing to extract '<entry>': path escapes the extraction directory                        §07.4
 Refusing to download from <host>: it does not match the configured registry <registry>      §05.2

@@ -229,6 +229,11 @@ enable  [--install-directory <path>] [...name]
 disable [--install-directory <path>] [...name]
 ```
 
+> §15.13 point 8 adds `--system` to both, which names the machine-wide directory
+> (`/usr/local/bin`; `%ProgramData%\jup\bin` on Windows) instead of a per-user one.
+> It is mutually exclusive with `--install-directory`, and it is the one named
+> directory `enable` never falls back out of.
+
 * With no names, the target set is **every supported tool except `npm`**, minus the
   `shimByDefault: false` opt-outs — which is every runtime (§02.3, §10.5).
 * Each name is validated: `Invalid package manager name '<name>'` for anything not in

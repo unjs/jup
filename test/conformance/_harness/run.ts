@@ -16,8 +16,10 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
-import { join } from "node:path";
+import { symlinkSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempRoot } from "./fixtures.ts";
 import type { MockRegistry } from "./registry.ts";
 
 export const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
@@ -73,7 +75,51 @@ export interface RunOptions {
    * detached would not be in the group that gets signalled.
    */
   detachedGroup?: boolean;
+  /**
+   * Leave §15.13 point 8's `/usr/local/bin` on the child's `PATH`.
+   *
+   * Only the rows that mean to exercise point 8 set this — see `childPath` for
+   * why every other row has it removed.
+   */
+  allowSystemShimDirectory?: boolean;
   timeout?: number;
+}
+
+/** §15.13 point 8's directory, spelled out rather than imported. */
+const SYSTEM_SHIM_DIR = "/usr/local/bin";
+
+let runtimeDirectory: string | undefined;
+
+/**
+ * The child's `PATH`, with §15.13 point 8's directory removed — exported so that
+ * a row asserting on the `PATH` its child saw compares against what `run` sent.
+ *
+ * Point 8 makes `/usr/local/bin` a live candidate for `enable` **when the suite
+ * runs as `root`**, which is a container CI job and the `node:*` image a
+ * developer reaches for. Left alone, any row that takes the per-user default off
+ * `PATH` would install shims into the machine's own system directory — where the
+ * next row, in another worker, then finds them by point 7's continuity scan and
+ * reports something else entirely. Removing the entry keeps every row that
+ * predates point 8 running exactly as written, as any other user.
+ *
+ * `node` has to survive the removal: §14.15's stub is entered through
+ * `#!/usr/bin/env node`, and in exactly the environment this matters for the
+ * directory being removed is where `node` lives. When that is the case the
+ * runtime is offered under a directory of the suite's own containing one
+ * symlink, which is `PATH` keeping its promise without `/usr/local/bin` back on
+ * it.
+ */
+export function childPath(value: string | undefined): string {
+  if (process.platform === "win32") return value ?? "";
+  const entries = (value ?? "").split(delimiter).filter((entry) => entry !== SYSTEM_SHIM_DIR);
+  if (dirname(process.execPath) === SYSTEM_SHIM_DIR) {
+    if (runtimeDirectory === undefined) {
+      runtimeDirectory = tempRoot("jup-runtime-");
+      symlinkSync(process.execPath, join(runtimeDirectory, "node"));
+    }
+    entries.push(runtimeDirectory);
+  }
+  return entries.join(delimiter);
 }
 
 /**
@@ -161,6 +207,12 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
 
   for (const [key, value] of Object.entries(options.env ?? {})) {
     setVar(env, key, value);
+  }
+
+  // Last, so that it covers the rows that build a `PATH` of their own on top of
+  // the runner's — which is every shim row.
+  if (process.platform !== "win32" && options.allowSystemShimDirectory !== true) {
+    setVar(env, "PATH", childPath(env.PATH));
   }
 
   const child = spawn(process.execPath, [...nodeArgs, options.bin ?? BIN, ...args], {

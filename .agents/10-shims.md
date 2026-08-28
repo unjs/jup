@@ -348,6 +348,9 @@ a correct relative-path computation.
 > `info` (§15.30) and §15.32's promotion resolve the same list **without** reading
 > `PATH`, preferring whichever candidate already holds a shim of ours, so the
 > directory a removal looks in cannot drift from the one an install wrote to.
+> Point 8 adds the machine-wide directory to both halves: `--system` names it
+> outright, and it joins the closed list — last, and only for uid 0 — so a `root`
+> `enable` in a container reaches a directory that is actually on `PATH`.
 
 ## 10.5 Target set
 

@@ -59,6 +59,7 @@ always wins over the file.
 | `CI` | When set, the download prompt prints its notice but does not wait for confirmation. |
 | `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location fallback chain (§07.1). |
 | `PATH` | Shim install-directory lookup (§10.4); locating a JavaScript runtime in a native implementation (§08.3). |
+| `ProgramData` | Windows only: `--system`'s shim directory, `%ProgramData%\jup\bin` (§15.13 point 8). |
 | `DEBUG` | Containing `jup` — or `corepack`, which the reference implementation documents — enables verbose diagnostic logging to stderr (§14.24). |
 
 ## 11.5 New in this spec

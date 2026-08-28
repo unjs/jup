@@ -83,6 +83,7 @@ import {
   SHIM_MARKER,
   PROXY_STUB_NAME,
   stubNameFor,
+  systemShimDirectory,
   WIN32_WRAPPER_HEADS,
 } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findCliEntry, findEntryModule } from "../utils/self.ts";
@@ -357,6 +358,8 @@ const DISPLACED_BACKUP_DIR = "displaced";
 
 export interface ShimOptions {
   installDirectory?: string;
+  /** §15.13 point 8 — install to the system-wide directory instead of a per-user one. */
+  system?: boolean;
   /** §14.16 — required to replace an entry we did not create. */
   force?: boolean;
 }
@@ -379,6 +382,29 @@ export interface ShimOptions {
  */
 export const shimDirectoryNotWritable = (directory: string) =>
   `Unable to write shims to ${directory}: the directory is not writable. Either re-run with --install-directory <a writable directory on your PATH>, set JUP_SHIM_DIRECTORY, or define shell aliases instead (e.g. alias yarn="${TOOL_NAME} yarn")`;
+
+/**
+ * §15.13 point 8 — `--system` and `--install-directory` name the same thing.
+ *
+ * A refusal rather than a precedence rule: the two spellings are equally
+ * explicit, so there is no reading of `--system --install-directory /opt/bin`
+ * that is obviously right, and picking one silently would put shims somewhere
+ * the command line also said not to.
+ */
+export const systemAndInstallDirectory = () =>
+  `Options --system and --install-directory both name an install directory; pass one or the other`;
+
+/**
+ * §15.13 point 8 — `--system` on a Windows without `%ProgramData%`.
+ *
+ * The variable is set on every supported Windows, so this is the stripped
+ * environment (a service, a locked-down CI runner) rather than a version
+ * difference. Guessing `C:\ProgramData` from a drive letter that may not be the
+ * system one is exactly the kind of invention point 6 refuses, so `--system`
+ * says it has no directory and points at the one flag that always does.
+ */
+export const noSystemShimDirectory = () =>
+  `--system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead`;
 
 /**
  * §10.7 + §15.43 — the *other* read-only directory, and a different failure.
@@ -521,6 +547,8 @@ function parseShimArgs(args: string[]): ParsedArgs {
         if (name !== "") exclude.push(name);
       }
       index = next;
+    } else if (arg === "--system") {
+      options.system = true;
     } else if (arg === "--force") {
       options.force = true;
     } else {
@@ -528,6 +556,10 @@ function parseShimArgs(args: string[]): ParsedArgs {
       // is also how a typo'd flag reports itself (§12.9).
       names.push(arg);
     }
+  }
+
+  if (options.system === true && options.installDirectory !== undefined) {
+    throw new UsageError(systemAndInstallDirectory());
   }
 
   return { options, names, exclude };
@@ -709,12 +741,34 @@ function eligibleAlternate(directory: string): boolean {
 }
 
 /**
+ * §15.13 points 1 and 8 — the directory the *user* named, or `undefined` when
+ * they named none and the selection below has to choose one.
+ *
+ * `--system` is sugar for a directory, not a mode: it resolves to one name and
+ * then travels the same path `--install-directory` does, which is why it is
+ * answered here rather than anywhere in the selection. That also settles what it
+ * outranks — `JUP_SHIM_DIRECTORY`, like any flag over any variable — and what it
+ * does not: nothing, since the two flags that could disagree with it are refused
+ * as a pair by `parseShimArgs`.
+ */
+function namedDirectory(options: ShimOptions): string | undefined {
+  if (options.system === true) {
+    const directory = systemShimDirectory();
+    if (directory === undefined) throw new UsageError(noSystemShimDirectory());
+    return directory;
+  }
+  const configured = options.installDirectory ?? readEnv(ENV.SHIM_DIRECTORY);
+  return configured === undefined || configured === "" ? undefined : resolvePath(configured);
+}
+
+/**
  * §15.13 point 6 — where `enable` installs, and what it displaced to get there.
  *
- * `--install-directory` and `COREPACK_SHIM_DIRECTORY` are answered first and
- * never second-guessed. After that the order is: the default when it is already
- * on `PATH` (nothing to improve on), then continuity, then the first eligible
- * alternate that is on `PATH`, then the default with §15.13 point 3's advisory.
+ * `--system`, `--install-directory` and `COREPACK_SHIM_DIRECTORY` are answered
+ * first and never second-guessed. After that the order is: the default when it
+ * is already on `PATH` (nothing to improve on), then continuity, then the first
+ * eligible alternate that is on `PATH`, then the default with §15.13 point 3's
+ * advisory.
  *
  * `PATH` chooses among {@link shimDirectoryCandidates} and never supplies a
  * candidate of its own. "The first writable directory on `PATH`" is the rule this
@@ -731,10 +785,8 @@ export function chooseInstallDirectory(options: ShimOptions): {
   /** The default it was preferred over, when an alternate won. */
   preferredOver?: string;
 } {
-  const configured = options.installDirectory ?? readEnv(ENV.SHIM_DIRECTORY);
-  if (configured !== undefined && configured !== "") {
-    return { directory: resolvePath(configured), named: true };
-  }
+  const named = namedDirectory(options);
+  if (named !== undefined) return { directory: named, named: true };
 
   const fallback = perUserShimDirectory();
   if (directoryOnPath(fallback)) return { directory: fallback };
@@ -758,8 +810,15 @@ export function chooseInstallDirectory(options: ShimOptions): {
 }
 
 /**
- * §15.13 points 1 and 7 — `--install-directory`, else `COREPACK_SHIM_DIRECTORY`,
- * else the candidate holding our shims, else the per-user default.
+ * §15.13 points 1, 7 and 8 — `--system` or `--install-directory`, else
+ * `COREPACK_SHIM_DIRECTORY`, else the candidate holding our shims, else the
+ * per-user default.
+ *
+ * `--system` matters most here, on the removal side: `/usr/local/bin` is a
+ * candidate only for `root` (point 8), so a non-root `enable --system` — a user
+ * who is in a group that owns the directory, or one who chowned it — leaves
+ * shims the scan cannot find, and `disable --system` is how they come back out.
+ * Under `root` the scan finds them and a bare `disable` is enough.
  *
  * This is the resolver for everything that is **not** `enable`: `disable` (§10.6)
  * and `info` (§15.30). It MUST NOT read `PATH` — a removal that depended on the
@@ -775,11 +834,7 @@ export function chooseInstallDirectory(options: ShimOptions): {
  * deliberately does not (§10.4).
  */
 export function resolveInstallDirectory(options: ShimOptions, forEnable: boolean): string {
-  const configured = options.installDirectory ?? readEnv(ENV.SHIM_DIRECTORY);
-  const directory =
-    configured !== undefined && configured !== ""
-      ? resolvePath(configured)
-      : (installedShimDirectory() ?? perUserShimDirectory());
+  const directory = namedDirectory(options) ?? installedShimDirectory() ?? perUserShimDirectory();
 
   if (!forEnable) return directory;
 
@@ -1941,8 +1996,17 @@ export async function cmdEnable(
   // was named that is the directory just chosen, and when something was, the
   // thunk only runs if that directory turned out to be unwritable — so the
   // selection, and the probe inside it, happens exactly once per `enable`.
+  //
+  // `--system` is point 8's exception and returns *itself*, which
+  // `prepareInstallDirectory` turns into a refusal: the user named a scope, not
+  // a directory, and quietly delivering the other scope is the failure mode this
+  // flag exists to remove. A `RUN jup enable --system` layer that fell back to
+  // `~/.local/bin` would exit 0 and ship an image whose shims nothing can find,
+  // with the diagnosis deferred to a `pnpm: not found` in some later build.
   const installDirectory = prepareInstallDirectory(choice.directory, () =>
-    choice.named === true ? chooseInstallDirectory({}).directory : choice.directory,
+    choice.named === true && options.system !== true
+      ? chooseInstallDirectory({}).directory
+      : choice.directory,
   );
 
   const generate = process.platform === "win32" ? generateWin32Link : generatePosixLink;

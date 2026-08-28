@@ -21,6 +21,7 @@ import { delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFINITIONS } from "../../src/config/table.ts";
 import {
+  childPath,
   cleanupFixtures,
   copyTool,
   createFixture,
@@ -146,8 +147,9 @@ describe.skipIf(!POSIX)("§15.32 — the resolved package manager on PATH (row 1
 
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(field(result.stdout, "nested")) as string).toBe("DECOY\n");
-    // Untouched, entry for entry.
-    expect(field(result.stdout, "path")).toBe(options.env!.PATH);
+    // Untouched, entry for entry — against what `run` actually sent, which is
+    // the caller's `PATH` minus §15.13 point 8's directory (see `childPath`).
+    expect(field(result.stdout, "path")).toBe(childPath(options.env!.PATH));
     expect(field(result.stdout, "path").split(delimiter)[0]).toBe(decoy);
   });
 
@@ -159,6 +161,8 @@ describe.skipIf(!POSIX)("§15.32 — the resolved package manager on PATH (row 1
 
     // Byte for byte: one entry added at the front, and everything the caller
     // had carried through in its original order.
-    expect(field(result.stdout, "path")).toBe(`${shimDir}${delimiter}${options.env!.PATH}`);
+    expect(field(result.stdout, "path")).toBe(
+      `${shimDir}${delimiter}${childPath(options.env!.PATH)}`,
+    );
   });
 });

@@ -1493,6 +1493,27 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * unchanged and now owed a fourth time: `config/table.ts` at 45,837 is the
    * largest resident by a wider margin than before, and a `yarn --version` still
    * reads past every pnpm band to reach it.
+   *
+   * And **up, 283,000 -> 284,500**, for §15.13 point 8's system directory —
+   * `--system`, and the `/usr/local/bin` a `root` `enable` may reach when no
+   * per-user candidate is on `PATH`. 282,592 -> 284,010, **+1,418 or +0.50%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | §15.13 point 8's `systemShimDirectory`, and the candidate appended for uid 0 | `run/exec.ts` | +1,297 |
+   * | `ProgramData`, the one variable that directory reads, on Windows only | `config/env-vars.ts` | +121 |
+   *
+   * Measured, `_warm.mjs` 51,741 -> 51,975, **+234 bytes or +0.45%** — source
+   * grew 0.50% and the chunk 0.45%, and the executable part of it really is that
+   * small: one `getuid` test, one array push and two string literals. The rest is
+   * the prose above them, which the chunk does not carry.
+   *
+   * It cannot move off the warm path for the reason the candidate list is here
+   * at all: §15.32's promotion reads that list on every proxy invocation, and
+   * `enable` must choose from the same one it later searches (§15.13 point 7).
+   * What is owed is unchanged and now owed a fifth time, against the same
+   * resident: `config/table.ts`, still 45,837, still read past one entry at a
+   * time by every `yarn --version`.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1504,6 +1525,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(283_000);
+    ).toBeLessThanOrEqual(284_500);
   });
 });

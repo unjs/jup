@@ -113,6 +113,8 @@ export const SYSTEM_ENV = {
   LOCALAPPDATA: "LOCALAPPDATA",
   XDG_CACHE_HOME: "XDG_CACHE_HOME",
   XDG_BIN_HOME: "XDG_BIN_HOME",
+  /** §15.13 point 8 — `--system`'s directory on Windows, which has no `/usr/local`. */
+  PROGRAMDATA: "ProgramData",
   /** §08.3 / §10.4 — executable lookup. */
   PATH: "PATH",
   PATHEXT: "PATHEXT",

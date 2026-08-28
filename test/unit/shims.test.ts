@@ -1,6 +1,8 @@
 import { execFile } from "node:child_process";
 import {
+  accessSync,
   chmodSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   lutimesSync,
@@ -50,13 +52,14 @@ import {
   shimSource,
   SHIM_MARKER,
   stubNameFor,
+  systemAndInstallDirectory,
   stubNotExecutable,
   stubNotWritable,
   targetBinaries,
   verifyOnPath,
   whichFile,
 } from "../../src/commands/shims.ts";
-import { isOurShim } from "../../src/run/exec.ts";
+import { isOurShim, shimDirectoryCandidates, systemShimDirectory } from "../../src/run/exec.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -293,6 +296,102 @@ describe("install directory resolution (§15.13)", () => {
     write(join(binDir, "jup"), "#!/bin/sh\n", 0o755);
     expect(resolveInstallDirectory({}, false)).toBe(perUserBin);
   });
+});
+
+/**
+ * §15.13 point 8 — the system directory.
+ *
+ * Nothing here writes to `/usr/local/bin`: every row is either a pure resolution
+ * (no filesystem at all) or a refusal that happens before anything is created.
+ * The end-to-end halves — `root` reaching it, and `disable --system` restoring
+ * what it displaced — are conformance rows 266 and 270, which run only inside a
+ * container for exactly that reason.
+ */
+describe("the system directory (§15.13 point 8)", () => {
+  const IS_WIN32 = process.platform === "win32";
+  // Spelled out rather than imported: a row asserts what §15.13 point 8 says,
+  // not what the implementation computed.
+  const systemDir = IS_WIN32
+    ? join(process.env.ProgramData ?? "C:\\ProgramData", "jup", "bin")
+    : "/usr/local/bin";
+
+  /** Could this process write there? The Homebrew-on-Intel case, and `root`. */
+  function canWrite(directory: string): boolean {
+    try {
+      accessSync(directory, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("resolves to the platform's machine-wide directory", () => {
+    expect(systemShimDirectory()).toBe(systemDir);
+  });
+
+  it.skipIf(!IS_WIN32)("is nothing at all when %ProgramData% is unset", () => {
+    vi.stubEnv("ProgramData", undefined);
+    expect(systemShimDirectory()).toBeUndefined();
+  });
+
+  it("is a candidate only for root, and only last", () => {
+    const uid = vi.spyOn(process, "getuid");
+
+    uid.mockReturnValue(1000);
+    expect(shimDirectoryCandidates()).not.toContain(systemDir);
+
+    uid.mockReturnValue(0);
+    const asRoot = shimDirectoryCandidates();
+    if (IS_WIN32) {
+      // One candidate, no uid to test: point 8 adds nothing there.
+      expect(asRoot).not.toContain(systemDir);
+    } else {
+      // Last: a per-user directory already on `PATH` is still the better answer.
+      expect(asRoot.at(-1)).toBe(systemDir);
+      expect(asRoot[0]).toBe(perUserBin);
+    }
+  });
+
+  it("--system names it, outranking COREPACK_SHIM_DIRECTORY", () => {
+    vi.stubEnv("COREPACK_SHIM_DIRECTORY", binDir);
+
+    // `named`, so none of point 6's selection runs against it: no gate, no
+    // `PATH` preference, no continuity scan — and no filesystem access here.
+    expect(chooseInstallDirectory({ system: true })).toEqual({
+      directory: systemDir,
+      named: true,
+    });
+    // §15.13 point 7 — `disable` and `info` resolve it too, or a non-root
+    // `enable --system` would leave shims nothing could remove.
+    expect(resolveInstallDirectory({ system: true }, false)).toBe(systemDir);
+  });
+
+  it("269: refuses --system together with --install-directory", async () => {
+    await expect(
+      cmdEnable(["--system", `--install-directory=${binDir}`, "yarn"], dist),
+    ).rejects.toThrow(UsageError);
+    await expect(cmdDisable(["--system", "--install-directory", binDir, "yarn"])).rejects.toThrow(
+      systemAndInstallDirectory(),
+    );
+    expect(existsSync(join(binDir, "yarn"))).toBe(false);
+  });
+
+  /**
+   * 268 — the one directory `enable` never falls back out of.
+   *
+   * Skipped where the suite could actually write there: as `root`, and on a
+   * Homebrew-on-Intel Mac, where `/usr/local/bin` belongs to the installing
+   * user. Row 268 is the refusal, and there is nothing to refuse there.
+   */
+  it.skipIf(IS_WIN32 || process.getuid?.() === 0 || canWrite("/usr/local/bin"))(
+    "fails rather than falling back to the per-user default",
+    async () => {
+      await expect(cmdEnable(["--system", "yarn"], dist)).rejects.toThrow(
+        shimDirectoryNotWritable(systemDir),
+      );
+      expect(existsSync(join(perUserBin, "yarn"))).toBe(false);
+    },
+  );
 });
 
 /**

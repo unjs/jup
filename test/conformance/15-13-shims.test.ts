@@ -25,13 +25,16 @@
 
 import { execFile } from "node:child_process";
 import {
+  accessSync,
   chmodSync,
+  constants as fsConstants,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -54,6 +57,35 @@ const TOOL = copyTool();
 
 const IS_WINDOWS = process.platform === "win32";
 const IS_ROOT = process.getuid?.() === 0;
+
+/**
+ * §15.13 point 8's directory, spelled here rather than imported: a conformance
+ * row asserts what the spec says, not what the implementation computed.
+ */
+const SYSTEM_DIR = "/usr/local/bin";
+
+/**
+ * Rows 266 and 270 install into the **real** `/usr/local/bin`, so they run only
+ * where that is a throwaway filesystem: as `root`, inside a container. On a
+ * developer's root shell they would displace whatever `yarn` the machine has and
+ * restore it a few lines later, which is not a bargain a test suite gets to
+ * offer. CI running rootless skips them; a container job runs them.
+ */
+const IN_CONTAINER = existsSync("/.dockerenv") || existsSync("/run/.containerenv");
+const CAN_INSTALL_SYSTEM = !IS_WINDOWS && IS_ROOT === true && IN_CONTAINER;
+
+/**
+ * `/usr/local/bin` is writable by this user — the Homebrew-on-Intel shape, where
+ * row 268's refusal cannot happen because there is nothing to refuse.
+ */
+function systemDirWritable(): boolean {
+  try {
+    accessSync(SYSTEM_DIR, fsConstants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface ShimFixtureOptions {
   /** Extra directories, in order, before the per-user default on `PATH`. */
@@ -325,6 +357,133 @@ describe("§15.13 — never require elevation", () => {
       expect((JSON.parse(report.stdout) as { shims: { directory: string } }).shims.directory).toBe(
         shimDir,
       );
+    },
+  );
+
+  /**
+   * Rows 266–270 — §15.13 point 8, the system directory.
+   *
+   * Point 8 is the answer to the shape this file's other rows cannot reach: a
+   * container whose only user is `root`, where every per-user candidate is inert
+   * and point 3's advisory — a `PATH` line to type into a shell — is a remedy no
+   * `Dockerfile` can perform.
+   */
+  it.skipIf(!CAN_INSTALL_SYSTEM)(
+    "266: root reaches /usr/local/bin when nothing user-owned is on PATH",
+    async () => {
+      const { shimDir, options } = shimFixture({ offPath: true });
+      const onPath = {
+        ...options,
+        // The one row that asks the harness to leave point 8's directory on the
+        // child's `PATH`; every other row runs with it stripped.
+        allowSystemShimDirectory: true,
+        env: { ...options.env, PATH: `${SYSTEM_DIR}${delimiter}${options.env.PATH ?? ""}` },
+      };
+
+      try {
+        const result = await run(["enable", "yarn"], onPath);
+
+        expect(result.exitCode).toBe(0);
+        // Point 6's line, unchanged: point 8 adds a candidate, not a message.
+        expect(result.stderr).toBe(
+          `! ${shimDir} is not on your PATH; installing shims to ${SYSTEM_DIR} instead\n`,
+        );
+        expect(existsSync(join(SYSTEM_DIR, "yarn"))).toBe(true);
+        expect(existsSync(join(shimDir, "yarn"))).toBe(false);
+
+        // Point 7: the directory is a *candidate*, so a bare `disable` from a
+        // shell that never had it on `PATH` still finds what `enable` wrote.
+        const removed = await run(["disable", "yarn"], options);
+        expect(removed.exitCode).toBe(0);
+        expect(existsSync(join(SYSTEM_DIR, "yarn"))).toBe(false);
+      } finally {
+        rmSync(join(SYSTEM_DIR, "yarn"), { force: true });
+        rmSync(join(SYSTEM_DIR, "yarnpkg"), { force: true });
+      }
+    },
+  );
+
+  it.skipIf(IS_WINDOWS || IS_ROOT)(
+    "267: every other user never sees it, whatever PATH says",
+    async () => {
+      const { shimDir, options } = shimFixture({ offPath: true });
+
+      const result = await run(["enable", "yarn"], {
+        ...options,
+        allowSystemShimDirectory: true,
+        env: {
+          ...options.env,
+          SHELL: "/bin/bash",
+          PATH: `${SYSTEM_DIR}${delimiter}${options.env.PATH ?? ""}`,
+        },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(existsSync(join(SYSTEM_DIR, "yarn"))).toBe(false);
+      expect(existsSync(join(shimDir, "yarn"))).toBe(true);
+      // Row 172's outcome unchanged: no candidate was on `PATH`, so the advisory
+      // fires and nothing was preferred over anything.
+      expect(result.stderr).toContain(`! ${shimDir} is not on your PATH`);
+      expect(result.stderr).not.toContain("installing shims to");
+    },
+  );
+
+  it.skipIf(IS_WINDOWS || IS_ROOT || systemDirWritable())(
+    "268: --system fails rather than falling back to the per-user directory",
+    async () => {
+      const { shimDir, options } = shimFixture();
+
+      const result = await run(["enable", "--system", "yarn"], options);
+
+      // Point 2's fallback is what a `RUN jup enable --system` layer must not
+      // get: it would exit 0 and ship an image whose shims are in a directory
+      // nothing on `PATH` names.
+      expect(result.exitCode).toBe(1);
+      // §12 puts a usage error on stdout, corepack's own choice (§14.24).
+      expect(result.stdout).toContain(`Unable to write shims to ${SYSTEM_DIR}`);
+      expect(result.stderr).not.toContain("installing shims to");
+      expect(existsSync(join(shimDir, "yarn"))).toBe(false);
+    },
+  );
+
+  it("269: --system and --install-directory are refused as a pair", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    const named = join(fixture.root, "named-bin");
+    mkdirSync(named, { recursive: true });
+
+    const result = await run(["enable", "--system", "--install-directory", named, "yarn"], options);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("--system and --install-directory");
+    // Neither directory was written to, and neither was probed.
+    expect(existsSync(join(named, "yarn"))).toBe(false);
+    expect(existsSync(join(shimDir, "yarn"))).toBe(false);
+  });
+
+  it.skipIf(!CAN_INSTALL_SYSTEM)(
+    "270: disable --system removes them and restores what they displaced",
+    async () => {
+      const { options } = shimFixture();
+      const foreign = join(SYSTEM_DIR, "yarn");
+
+      try {
+        writeFileSync(foreign, "#!/bin/sh\necho foreign\n");
+        chmodSync(foreign, 0o755);
+
+        const enabled = await run(["enable", "--system", "--force", "yarn"], options);
+        expect(enabled.exitCode).toBe(0);
+        expect(lstatSync(foreign).isSymbolicLink()).toBe(true);
+
+        // §15.15 — `disable` is non-destructive, and `--system` is how a run
+        // that is not `root` names the directory point 7's scan cannot see.
+        const removed = await run(["disable", "--system", "yarn"], options);
+        expect(removed.exitCode).toBe(0);
+        expect(lstatSync(foreign).isSymbolicLink()).toBe(false);
+        expect(readFileSync(foreign, "utf8")).toContain("echo foreign");
+      } finally {
+        rmSync(foreign, { force: true });
+        rmSync(join(SYSTEM_DIR, "yarnpkg"), { force: true });
+      }
     },
   );
 

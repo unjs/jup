@@ -73,6 +73,25 @@ export function perUserShimDirectory(): string | undefined {
 }
 
 /**
+ * §15.13 point 8 — the machine-wide directory: `--system`'s target, and the one
+ * alternate a `root` process may reach.
+ *
+ * `/usr/local/bin` because the FHS reserves `/usr/local` for locally installed
+ * software, which is what keeps it out of the distribution package manager's
+ * hands (#265). `%ProgramData%\jup\bin` is Windows' nearest equivalent — not
+ * `%ProgramFiles%`, which is #71's own directory, and not `%APPDATA%\npm`, which
+ * point 6 rejects as npm's prefix. `undefined` rather than a guessed drive
+ * letter when the variable is unset.
+ */
+export function systemShimDirectory(): string | undefined {
+  if (process.platform !== "win32") return "/usr/local/bin";
+  const programData = process.env[SYSTEM_ENV.PROGRAMDATA];
+  return programData === undefined || programData === ""
+    ? undefined
+    : join(programData, "jup", "bin");
+}
+
+/**
  * §15.13 point 6 — the **closed list** of directories `enable` may choose from:
  * the default first, then the alternates. Nothing here comes from `PATH`, which
  * only decides *among* these, and only under `enable`. Deduped, since the default
@@ -98,6 +117,14 @@ export function shimDirectoryCandidates(): string[] {
     add(join(home, ".local", "bin"));
     add(join(home, "bin"));
   }
+
+  // §15.13 point 8 — last, and only for uid 0: a per-user directory already on
+  // `PATH` remains the better answer even for `root`, and for anyone else the
+  // ownership gate would reject this one anyway. A *candidate* rather than a
+  // branch inside `enable`, because point 7's scan is how `disable`, `info` and
+  // the promotion below find those shims again.
+  if (process.getuid?.() === 0) add(systemShimDirectory());
+
   return list;
 }
 
