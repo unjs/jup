@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.0.4
+
+[compare changes](https://github.com/unjs/jup/compare/v0.0.3...v0.0.4)
+
+### 📦 Build
+
+- Minify ([52360e7](https://github.com/unjs/jup/commit/52360e7))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.0.3
 
 [compare changes](https://github.com/unjs/jup/compare/v0.0.2...v0.0.3)
