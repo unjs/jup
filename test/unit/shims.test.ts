@@ -7,6 +7,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   readlinkSync,
   realpathSync,
   rmSync,
@@ -23,6 +24,7 @@ import { messages, UsageError } from "../../src/errors-cold.ts";
 import {
   bakedInterpreter,
   chooseInstallDirectory,
+  cliEntryNotWritable,
   cmdDisable,
   cmdEnable,
   type DisplacedEntry,
@@ -1299,6 +1301,182 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
     expect(message).not.toContain("--install-directory");
     expect(message).not.toContain("JUP_SHIM_DIRECTORY");
     expect(message).not.toContain("without node");
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.46 — jup's own CLI entry does not run through jup's own shim
+ *
+ * `dist/bin.mjs` — what `package.json`'s `bin` points at — opens
+ * `#!/usr/bin/env node` like any published Node program, and that is
+ * §14.26 consequence 2 aimed at us: with our `node` shim first on the
+ * `PATH` §15.32 asks for, `env node` finds the shim, the shim resolves
+ * the project's runtime, and `jup --version` downloads 171 MB to print
+ * a version string. §15.43 made the path that gets baked in safe; this
+ * is the recursion itself.
+ *
+ * The entry is a bundled build artifact rather than a file we generate,
+ * so what these rows pin is *how little* is touched: the first line,
+ * only when it is wrong, and never the body.
+ * ------------------------------------------------------------------ */
+
+describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI entry", () => {
+  /** What the tests expect `enable` to choose: §15.43 tier 0, here and now. */
+  const HOST = realpathSync(process.execPath);
+
+  /**
+   * A stand-in for the bundled entry. The non-ASCII line is deliberate: the
+   * rewrite works in bytes, and a body measured in UTF-16 code units would
+   * splice this file in the wrong place.
+   */
+  const BODY = [
+    'import { runMain } from "./index.mjs";',
+    "// 200 → 400, ≥ 1 KiB of bundle stands in for the rest",
+    "await runMain(process.argv.slice(2));",
+    "",
+  ].join("\n");
+
+  /** Write `<dist>/bin.mjs` the shape a published install has it: 0o755. */
+  function writeEntry(shebang = "#!/usr/bin/env node"): string {
+    const file = join(dist, "bin.mjs");
+    write(file, `${shebang}\n${BODY}`, 0o755);
+    return file;
+  }
+
+  function firstLine(file: string): string {
+    return readFileSync(file, "utf8").split("\n")[0]!;
+  }
+
+  /** Everything from the first line ending on — the part that must not move. */
+  function body(file: string): string {
+    const content = readFileSync(file, "utf8");
+    return content.slice(content.indexOf("\n"));
+  }
+
+  it("pins the interpreter when the directory claims the interpreter's name", async () => {
+    const entry = writeEntry();
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+
+    expect(firstLine(entry)).toBe(`#!${HOST}`);
+    // The body is copied through byte for byte, and the mode with it — a `bin`
+    // target that came back without its execute bit is §15.45 one file over.
+    expect(body(entry)).toBe(`\n${BODY}`);
+    expectMode(entry, 0o755);
+  });
+
+  it("leaves it byte-identical when no `node` shim is claimed (§10.7)", async () => {
+    const entry = writeEntry();
+    const before = readFileSync(entry);
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+
+    expect(readFileSync(entry).equals(before)).toBe(true);
+    expect(firstLine(entry)).toBe("#!/usr/bin/env node");
+  });
+
+  it("pins it for a directory an *earlier* run claimed the name in", async () => {
+    const entry = writeEntry();
+    // The stub is shared by every name (§14.15), so a `pnpm` shim installed into
+    // a directory that already holds our `node` still goes through `env node`.
+    // `claimsInterpreter` is what sees that, and the entry follows the stub.
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+    writeEntry();
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+    expect(firstLine(entry)).toBe(`#!${HOST}`);
+  });
+
+  it("writes nothing at all on a second run (§10.2 property 4)", async () => {
+    const entry = writeEntry();
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+    // `ctime` moves for a rename even when the content it lands is identical, so
+    // this is what a rewrite-every-time would show.
+    const before = statSync(entry).ctimeMs;
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+
+    expect(statSync(entry).ctimeMs).toBe(before);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when there is no built entry, or none with a shebang", async () => {
+    // A source checkout: the entry is `bin.ts` and is never reached through a
+    // shebang, so there is nothing to pin and `enable` must not need a build.
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+    expect(existsSync(join(dist, "bin.mjs"))).toBe(false);
+
+    // A `bin.mjs` whose first line is not an interpreter is not ours to edit.
+    const entry = writeEntry("// no shebang here");
+    const before = readFileSync(entry);
+    expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+    expect(readFileSync(entry).equals(before)).toBe(true);
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "fails naming the entry, not the stub, when it cannot be rewritten",
+    async () => {
+      const entry = writeEntry();
+      // Seed the stub first, so the failure below is about the entry rather than
+      // about a stub that was never written.
+      expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+      // The file *and* the directory: the temp-then-rename needs the directory,
+      // and a system package install leaves both beyond the user's reach.
+      chmodSync(entry, 0o555);
+      chmodSync(dist, 0o555);
+
+      try {
+        await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
+          cliEntryNotWritable(entry),
+        );
+        await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
+          UsageError,
+        );
+
+        // Not a partial enable: the check runs before any shim is written, so
+        // the name is still free and the entry is untouched.
+        expect(existsSync(join(binDir, "node"))).toBe(false);
+        expect(firstLine(entry)).toBe("#!/usr/bin/env node");
+        // And no temp file left behind by the refused write.
+        expect(readdirSync(dist).some((name) => name.endsWith(".tmp"))).toBe(false);
+      } finally {
+        chmodSync(dist, 0o755);
+        chmodSync(entry, 0o755);
+      }
+    },
+  );
+
+  /**
+   * The third read-only shape, and the third diagnosis. It shares no remedy with
+   * §15.43's stub message (whose two options move the *shims*) and none with
+   * §15.45's (whose `chmod` is about a different property).
+   */
+  it("255: the message names the entry, the recursion, and the remedies that reach it", () => {
+    const entry = join(dist, "bin.mjs");
+    const message = cliEntryNotWritable(entry);
+
+    expect(message).toContain(entry);
+    expect(message).toContain("downloads a runtime");
+    expect(message).toContain("jup disable node");
+    expect(message).not.toContain("chmod +x");
+    expect(message).not.toContain("--install-directory");
+    expect(message).not.toContain("JUP_SHIM_DIRECTORY");
+  });
+
+  /**
+   * §15.46's counterpart to §14.26's bargain for the stub: `disable` removes the
+   * shims and leaves the pin, because §15.43 guarantees it names a runtime the
+   * cache cannot take away, and unpinning would be a write into a directory
+   * §10.7 says is routinely read-only — halfway through a removal.
+   */
+  it("disable removes the shims and leaves the pin in place", async () => {
+    const entry = writeEntry();
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+
+    expect(await cmdDisable([`--install-directory=${binDir}`, "node"])).toBe(0);
+
+    expect(existsSync(join(binDir, "node"))).toBe(false);
+    expect(firstLine(entry)).toBe(`#!${HOST}`);
   });
 });
 

@@ -557,6 +557,13 @@ POSIX does so only when the install directory claims the interpreter's own name,
 which keeps the shipped stub relocatable and §10.7's read-only `distFolder`
 unwritten for everyone else.
 
+The rule covers **every** file of the tool's whose first line names an
+interpreter, not only the ones `enable` generates. The tool's own CLI entry —
+`package.json`'s `bin` target — opens `#!/usr/bin/env node` like any published
+Node program, and consequence 2 below is about that spelling rather than about
+who wrote it: §15.46 pins its shebang under the same condition, by rewriting that
+one line and leaving the rest of the artifact alone.
+
 The cost is that a shim directory populated by one runtime keeps naming that
 runtime after the user upgrades it in place — which is the intent: an interpreter
 chosen once at `enable` time is exactly the property a `PATH` lookup fails to
@@ -574,6 +581,12 @@ interpreter` (exit 126), and `enable` cannot repair them because `env node` now
 finds only the broken `node` shim (exit 127). §15.43 adds the missing half of
 this divergence: which runtime may be named, in what order it is looked for, and
 that `enable` refuses rather than falling back when the answer is none.
+
+That the tool's own entry point "resolves through the shim" is consequence 2
+happening to the tool itself, and §15.43 only made the *result* survivable: the
+recursion is still there, and it still costs a runtime download to print a
+version string. §15.46 removes it, by holding the entry point to the rule this
+section states for everything else the tool ships.
 
 ## 14.27 The stubs are named `.mjs` — [correct/perf]
 

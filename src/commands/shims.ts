@@ -53,9 +53,11 @@ import {
   chmod,
   lstat,
   open,
+  readFile,
   readlink,
   realpath,
   rename,
+  rm,
   stat,
   symlink,
   unlink,
@@ -82,7 +84,7 @@ import {
   PROXY_STUB_NAME,
   stubNameFor,
 } from "../run/exec.ts";
-import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
+import { ENTRY_CANDIDATES, findCliEntry, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder, isInsideHome } from "../cache/store.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
@@ -362,6 +364,27 @@ export const stubNotWritable = (stub: string) =>
  */
 export const stubNotExecutable = (stub: string) =>
   `Unable to make ${stub} executable: the shims are symlinks to that file, so it is the one that has to carry the execute bit, and the mode could not be changed — ${TOOL_NAME}'s own files are read-only or owned by another user. Shims installed against it would be passed over in silence. Run \`chmod +x ${stub}\` as the owner of that file, or install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`.`;
+
+/**
+ * §15.46 — the pin could not be written into ${TOOL_NAME}'s own CLI entry.
+ *
+ * A third read-only failure, and a third diagnosis. {@link stubNotWritable} is
+ * about the file the *shims* run; this one is about the file `${TOOL_NAME}`
+ * itself runs, and the harm it prevents is not a broken shim but a recursion —
+ * with our ${INTERPRETER_NAME} shim first on `PATH` (§15.32), an entry point that
+ * opens `#!/usr/bin/env ${INTERPRETER_NAME}` finds *us*, so every `${TOOL_NAME}`
+ * command resolves the project's runtime and downloads it to print its own
+ * version.
+ *
+ * The remedies differ accordingly. {@link stubNotExecutable}'s `chmod` reaches
+ * the wrong property, and the shim-directory options reach the wrong directory;
+ * what does reach it is installing ${TOOL_NAME} somewhere writable, or not
+ * claiming the name at all — which here means `disable` as well as `enable`,
+ * because an earlier run's ${INTERPRETER_NAME} shim is enough to require the pin
+ * (§10.1, `claimsInterpreter`).
+ */
+export const cliEntryNotWritable = (entry: string) =>
+  `Unable to update ${entry}: shimming ${INTERPRETER_NAME} puts ${TOOL_NAME}'s own ${INTERPRETER_NAME} shim ahead of the runtime on your PATH, so ${TOOL_NAME}'s entry point has to name its interpreter by absolute path — otherwise every ${TOOL_NAME} command re-enters that shim and downloads a runtime to run ${TOOL_NAME} itself. That file could not be rewritten: ${TOOL_NAME}'s own files are read-only or owned by another user. Install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`, or run \`${TOOL_NAME} disable ${INTERPRETER_NAME}\` and keep ${INTERPRETER_NAME} out of \`${TOOL_NAME} enable\`, which leaves this file untouched.`;
 
 /**
  * §15.43 — every runtime `enable` can see lives in the store, so there is
@@ -1047,6 +1070,88 @@ async function ensureStub(
   );
 
   return file;
+}
+
+/**
+ * §15.46 — pin the interpreter into ${TOOL_NAME}'s **own** CLI entry, the same
+ * way and for the same reason §10.1 pins it into the stub.
+ *
+ * `dist/bin.mjs` — what `package.json`'s `bin` points `jup` and `corepack` at —
+ * opens `#!/usr/bin/env ${INTERPRETER_NAME}` like any published Node CLI, and
+ * that line is §14.26 consequence 2 waiting to happen to *us*. Once a
+ * ${INTERPRETER_NAME} shim of ours is on the `PATH` §15.32 asks the user to
+ * prepend the shim directory to, `env` finds the shim, the shim resolves the
+ * project's `devEngines.runtime` or `.nvmrc` (§15.40), and `jup --version`
+ * downloads a 171 MB runtime to print a version string. Every subsequent run
+ * still pays for a resolution and a second process. Baking the absolute path in
+ * removes the lookup, so the entry runs under the same host runtime `enable`
+ * chose for the shims.
+ *
+ * **Only the first line, and only when it is wrong.** This is a bundled build
+ * artifact rather than a file we generate, so there is no source to compare it
+ * against and no version of it we are entitled to rewrite — the shebang is the
+ * whole of our business with it, and everything from the first newline on is
+ * copied through byte for byte. Testing before writing is what keeps §10.7's
+ * read-only `distFolder` and §10.2's idempotency intact for the second and every
+ * later `enable`.
+ *
+ * Temp-then-rename, unlike {@link ensureStub}: a `writeFile` truncates first, and
+ * an interrupt between the two halves leaves an empty `bin.mjs`, which is the one
+ * file that cannot be repaired by running this tool. The mode rides across, or a
+ * `bin` target npm made `0o755` would come back as whatever the umask says and
+ * stop being executable — §15.45's failure, one file over.
+ */
+async function pinCliEntry(distFolder: string, interpreter: string): Promise<void> {
+  const file = findCliEntry(distFolder);
+  // A source checkout builds nothing to pin, and its `bin.ts` is never reached
+  // through a shebang — it is run as `node src/bin.ts`. Nothing to do is a
+  // success here, not a gap: `enable` must not fail for want of a build.
+  if (file === undefined) return;
+
+  const wanted = `#!${interpreter}`;
+
+  // The cheap half of the comparison first: 1 KiB covers a shebang naming any
+  // path a filesystem will hold, and the warm `enable node` — by far the common
+  // one — then never reads the rest of a 300 KB bundle.
+  const head = await readHead(file, 1024);
+  if (head === undefined || !head.startsWith("#!")) return;
+  const firstLine = head.split("\n", 1)[0] ?? "";
+  // Already ours to the byte. A `\r` from a CRLF checkout deliberately does not
+  // compare equal: the kernel would take it as part of the interpreter path, so
+  // that file is wrong and the rewrite below is the repair.
+  if (firstLine === wanted) return;
+
+  // Byte offsets from here on. `head` is a UTF-8 *decode*, and a path outside
+  // ASCII would put its newline at a different index in the buffer than in the
+  // string.
+  const original = await readFile(file).catch(() => undefined);
+  if (original === undefined) return;
+  const end = original.indexOf(0x0a);
+  // No line ending at all: a one-line file that is not something we can pin
+  // without inventing the rest of it.
+  if (end === -1) return;
+  const pinned = Buffer.concat([Buffer.from(wanted, "utf8"), original.subarray(end)]);
+
+  const mode = (await stat(file).catch(() => undefined))?.mode ?? 0o755;
+  const suffix = process.getBuiltinModule("node:crypto").randomBytes(6).toString("hex");
+  const tmp = join(distFolder, `.${basename(file)}.${suffix}.tmp`);
+
+  await guardWrites(
+    distFolder,
+    async () => {
+      try {
+        // `wx` under an unguessable name, so a link planted beside the entry is
+        // not something we write through — `pin.ts` writes the user's manifest
+        // the same way and for the same reason.
+        await writeFile(tmp, pinned, { flag: "wx", mode: mode & 0o777 });
+        await rename(tmp, file);
+      } catch (error) {
+        await rm(tmp, { force: true });
+        throw error;
+      }
+    },
+    () => cliEntryNotWritable(file),
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1791,6 +1896,13 @@ export async function cmdEnable(
       ? requireInterpreterPath()
       : undefined;
 
+  // §15.46 — the same pin goes into our own CLI entry, under the same condition:
+  // what makes the stub's `env node` unsafe makes `bin.mjs`'s unsafe too, and a
+  // user who never claimed the name keeps a byte-identical entry (§10.7). Before
+  // any shim is written, so a refusal here leaves the shim directory exactly as
+  // it found it — the ordering §15.45 gives the execute-bit check.
+  if (interpreter !== undefined) await pinCliEntry(distFolder, interpreter);
+
   // §10.5 — all binaries are processed concurrently.
   const installed = await Promise.all(
     binaries.map(async (binName): Promise<[string, string] | undefined> => {
@@ -1811,6 +1923,16 @@ export async function cmdEnable(
  * §10.6 — removes only the names it was asked about, and within those only the
  * entries it created (§15.15); `disable yarn` also removes `yarnpkg`. Anything
  * `enable` displaced is then put back.
+ *
+ * **The §15.46 pin is deliberately left in place**, as the stub's §10.1 shebang
+ * always has been. Removing the shims does make it unnecessary, but it does not
+ * make it wrong: §15.43 guarantees the path names a runtime outside `<home>`, so
+ * the entry keeps working exactly as before, one `PATH` lookup cheaper. Undoing
+ * it would mean a write into ${TOOL_NAME}'s own package directory — the one
+ * §10.7 says is routinely read-only — in the middle of a command whose whole
+ * job is to take things away, and a `disable` that failed there would strand the
+ * user with some shims gone and no way to finish. Re-running `enable` re-bakes
+ * it, which is §14.26's stated bargain for the stub and holds here too.
  */
 export async function cmdDisable(args: string[]): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);

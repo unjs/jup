@@ -82,8 +82,9 @@ Both `chmod 0o755`.
 > **Divergence (§14.26).** Wherever a shim names the interpreter as a bare `node`,
 > a conforming implementation MUST instead name it by **absolute path**: the
 > `realpath` of the runtime executing `enable`, resolved at `enable` time. This
-> covers §10.3's three Windows wrappers and, conditionally, the POSIX stub's
-> shebang. Two failures make the bare name unusable:
+> covers §10.3's three Windows wrappers, conditionally the POSIX stub's shebang,
+> and — for the same reason and under the same condition — the tool's **own CLI
+> entry** (§15.46). Two failures make the bare name unusable:
 >
 > 1. **`cmd.exe` resolves a bare name from the current directory first.** `cd` into
 >    any repository that ships a `node.bat`, `node.cmd` or `node.exe`, type
@@ -108,6 +109,12 @@ Both `chmod 0o755`.
 > at that name. Otherwise the stub keeps `#!/usr/bin/env node`, so the shipped stubs
 > stay relocatable and §10.7's read-only `distFolder` is not rewritten for a user who
 > never asked for a `node` shim. A *foreign* `node` in the directory does not count.
+>
+> **The same condition governs the tool's own CLI entry** — the file `package.json`'s
+> `bin` names, which opens `#!/usr/bin/env node` like any published Node program.
+> Consequence 2 reaches it exactly as it reaches the stub, and §15.46 has the rewrite:
+> its first line and nothing else, tested before it is written, skipped entirely where
+> the installation has no built entry to pin.
 >
 > The `%~dp0\node.exe` and `$basedir/node` branches are kept: they cost nothing, and
 > they are what keeps a shim directory that *is* the Node install directory
@@ -448,6 +455,9 @@ write could not work:
 
 * shimming the runtime rewrites the stub to pin the interpreter (§10.1), and the
   message names the **stub**, not the shim directory, whose remedies do not move it;
+* shimming the runtime also rewrites the tool's own CLI entry, for the same reason
+  (§15.46), and that message names **that file** and the recursion it prevents —
+  a third read-only failure with a third diagnosis;
 * the stub is current but not executable, and the `chmod` §10.2 property 5 requires
   is itself refused (§15.45).
 

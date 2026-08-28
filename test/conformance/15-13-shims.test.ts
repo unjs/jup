@@ -15,6 +15,7 @@
  * | 195 | §15.29 | #507 (12👍) — `enable` exits 0 and nothing changed |
  * | 246–249 | §15.13 | the per-user default is not on macOS's `PATH` at all, and is on Debian's only after the next login |
  * | 254 | §15.45 | the stubs `npm pack` ships are not executable, so every shim is inert |
+ * | 255 | §15.46 | the tool's own entry point runs through the tool's own `node` shim |
  *
  * Every row runs the real entry point through a throwaway copy of the tool
  * (`copyTool`) with `HOME` redirected into the fixture, because §15.13's default
@@ -788,3 +789,153 @@ describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable
     expect(statSync(stub).ctimeMs).toBe(before);
   });
 });
+
+/* ------------------------------------------------------------------ *
+ * §15.46 — row 255
+ *
+ * `dist/bin.mjs` — what `package.json`'s `bin` points `jup` and
+ * `corepack` at — opens `#!/usr/bin/env node`, and §14.26 consequence 2
+ * is about that spelling rather than about who wrote it. Once
+ * `enable node` has put our shim on the `PATH` §15.32 asks the user to
+ * prepend, `env node` finds the shim, the shim resolves the project's
+ * `.nvmrc` (§15.40), and `jup --version` downloads a runtime to print
+ * its own version string.
+ *
+ * The row plants a `bin.mjs` beside the copy's entry — a source
+ * checkout has none, which §15.46 makes a no-op rather than a failure —
+ * and then runs it through a real `execve`, because `node <entry>` is
+ * precisely the spelling that never reads a shebang. `JUP_ENABLE_NETWORK=0`
+ * turns the recursion into a loud failure instead of a 171 MB download,
+ * so the row proves the same property either way round without a
+ * network.
+ * ------------------------------------------------------------------ */
+
+describe.skipIf(IS_WINDOWS)(
+  "§15.46 — jup's own entry point does not run through jup's shim",
+  () => {
+    /** Its own copy: this row rewrites a file inside the installation. */
+    const BUILT = copyTool();
+
+    /** `<copy>/src/bin.mjs` — the built entry §15.46 pins, standing in for `dist/`. */
+    const ENTRY = join(dirname(BUILT), "bin.mjs");
+
+    /** What §15.43 tier 0 chooses for a suite running outside any `<home>`. */
+    const HOST = realpathSync(process.execPath);
+
+    const UNPINNED = "#!/usr/bin/env node";
+
+    /**
+     * The entry, in the shape a published install has it: a `bin` target npm left
+     * `0o755`, opening on the relocatable shebang. Re-written between the phases
+     * below, which is how the "already pinned" and "unpinned again" states are
+     * reached without a second copy of the tool.
+     */
+    function writeEntry(shebang: string): void {
+      writeFileSync(ENTRY, `${shebang}\nimport "./bin.ts";\n`);
+      chmodSync(ENTRY, 0o755);
+    }
+
+    function firstLine(file: string): string {
+      return readFileSync(file, "utf8").split("\n")[0]!;
+    }
+
+    it("255: enable pins its first line, only when a node shim is claimed, and only once", async () => {
+      const { shimDir, options } = shimFixture();
+      const run255 = (args: string[]) => run(args, { ...options, bin: BUILT });
+      writeEntry(UNPINNED);
+      const before = readFileSync(ENTRY);
+
+      // An `enable` that claims no `node` leaves it byte-identical: §10.7's
+      // read-only installation and §10.2's idempotency both rest on that.
+      expect((await run255(["enable", "pnpm"])).exitCode).toBe(0);
+      expect(readFileSync(ENTRY).equals(before)).toBe(true);
+
+      // Claiming the name is what requires the pin — the same condition §10.1
+      // puts on the stub, and the same interpreter §15.43 chooses for it.
+      expect((await run255(["enable", "node"])).exitCode).toBe(0);
+      expect(firstLine(ENTRY)).toBe(`#!${HOST}`);
+      expect(existsSync(join(shimDir, "node"))).toBe(true);
+      // The body and the mode are the artifact's, not ours: only line one moved.
+      expect(readFileSync(ENTRY, "utf8").slice(firstLine(ENTRY).length)).toBe(
+        before.toString("utf8").slice(UNPINNED.length),
+      );
+      expect(statSync(ENTRY).mode & 0o777).toBe(0o755);
+
+      // Warm: already the line we want, so nothing is written. `ctime` moves for
+      // the rename even when the bytes are identical, which is what an
+      // unconditional rewrite would show here.
+      const ctime = statSync(ENTRY).ctimeMs;
+      const again = await run255(["enable", "node"]);
+      expect(again.exitCode).toBe(0);
+      expect(again.stdout).toBe("");
+      expect(statSync(ENTRY).ctimeMs).toBe(ctime);
+    });
+
+    it("255: so `jup --version` in a project pinning an uncached runtime installs nothing", async () => {
+      const { fixture, shimDir, options } = shimFixture();
+      // §15.40 — a runtime the store does not hold, and no network to get it.
+      fixture.write(".nvmrc", "22.14.0\n");
+      const env = {
+        ...options.env,
+        COREPACK_HOME: fixture.home,
+        COREPACK_ENABLE_NETWORK: "0",
+        // The shim directory is first on `PATH` already (`shimFixture`), which is
+        // §15.32's own advice and the precondition for the whole failure.
+        PATH: [shimDir, process.env.PATH ?? ""].join(delimiter),
+      } as NodeJS.ProcessEnv;
+
+      writeEntry(UNPINNED);
+      expect((await run(["enable", "node"], { ...options, bin: BUILT })).exitCode).toBe(0);
+      expect(firstLine(ENTRY)).toBe(`#!${HOST}`);
+
+      // Pinned: the kernel runs the host runtime named on line one, so nothing
+      // resolves `.nvmrc` and nothing is installed.
+      const { stdout } = await execFileAsync(ENTRY, ["--version"], { cwd: fixture.cwd, env });
+      expect(stdout).toBe("0.0.0\n");
+      expect(existsSync(join(fixture.home, "v1", "node"))).toBe(false);
+
+      // And the contrast, from the same tree: put the relocatable shebang back —
+      // what every `enable` before §15.46 left — and the entry resolves through
+      // our own `node` shim, which goes looking for a runtime it cannot have.
+      writeEntry(UNPINNED);
+      const recursed = await execFileAsync(ENTRY, ["--version"], {
+        cwd: fixture.cwd,
+        env,
+      }).catch((error: Error & { code?: number; stderr?: string }) => error);
+
+      expect(recursed).toBeInstanceOf(Error);
+      expect((recursed as { stderr?: string }).stderr ?? "").toContain("22.14.0");
+    });
+
+    it.skipIf(IS_ROOT)("255: and fails naming that file when it cannot be rewritten", async () => {
+      const { shimDir, options } = shimFixture();
+      writeEntry(UNPINNED);
+      // Seed the stub, so the refusal below is about the entry rather than about a
+      // stub that was never written.
+      expect((await run(["enable", "pnpm"], { ...options, bin: BUILT })).exitCode).toBe(0);
+      // The file *and* its directory: the write is temp-then-rename, and a system
+      // package install puts both beyond the user's reach.
+      await chmod(ENTRY, 0o555);
+      await chmod(dirname(ENTRY), 0o555);
+
+      try {
+        const refused = await run(["enable", "node"], { ...options, bin: BUILT });
+
+        // §12 — a `UsageError` is reported on stdout, with the usage line after it.
+        expect(refused.exitCode).toBe(1);
+        expect(refused.stdout).toContain(ENTRY);
+        // Not §15.43's stub message, which names the wrong file, and not §15.45's,
+        // whose remedy is for a different property.
+        expect(refused.stdout).not.toContain("shim stub");
+        expect(refused.stdout).not.toContain("chmod +x");
+        expect(refused.stdout).not.toContain("set JUP_SHIM_DIRECTORY");
+        // Nothing half-written: the check precedes every shim it protects.
+        expect(existsSync(join(shimDir, "node"))).toBe(false);
+        expect(firstLine(ENTRY)).toBe(UNPINNED);
+      } finally {
+        await chmod(dirname(ENTRY), 0o755);
+        await chmod(ENTRY, 0o755);
+      }
+    });
+  },
+);

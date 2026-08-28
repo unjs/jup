@@ -1470,6 +1470,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 252 | A stub whose shebang names `<home>/v1/node/<v>/bin/node` — what an older `enable` left — beside three other cached versions, then `cache clean` | `node@<v>` survives, the other three are gone, the count on stdout is `3`, and one line on stderr names what was kept, why, and the re-`enable` that clears it (§15.44, §15.35l) |
 | 253 | The same tree with `cache clean --all`, and then a correctly pinned stub (interpreter outside `<home>`) with a plain `cache clean` | `--all` removes the interpreter too, warning on stderr *before* it does; the pinned tree prints exactly `Removed <n> cached version(s) from <path>` with an empty stderr and nothing spared (§15.44, §15.43) |
 | 254 | A published-shaped install — the stub back to `0o644`, as `npm pack` leaves it — then `enable`, then the installed shim run through `execve`; then a warm `enable` over the repaired stub | the first exits 0, the stub the shim points at carries the execute bit, and running the shim by path works; the second changes nothing at all, `chmod` included (§15.45, §10.2 properties 4 and 5) |
+| 255 | A built install whose CLI entry opens `#!/usr/bin/env node`: `enable pnpm`, then `enable node`, then `enable node` again; and, with the entry read-only, `enable node` once more | the first leaves the entry byte-identical, the second rewrites its **first line only** to the absolute interpreter and leaves every later byte and the mode alone, the third writes nothing at all; the read-only run fails naming that file and not the stub, and `jup --version` under a project pinning an uncached runtime never downloads one (§15.46, §10.1, §10.7) |
 
 ## 15.39 Tools, not only package managers — [required]
 
@@ -1887,3 +1888,70 @@ alone.
 * An implementation MAY keep a build-time `chmod` on the generated stubs — a
   checkout, and a tarball unpacked by other means, both benefit — but MUST NOT
   treat it as the guarantee. The guarantee is in `enable`.
+
+## 15.46 The tool's own entry point does not run through its own shim — [required, bug]
+
+> The third and last of §14.26's aftershocks, and the one that was always the
+> point. §15.43 stopped the recursion from *corrupting* what `enable` bakes in and
+> §15.44 stopped `cache clean` from bricking an install that already is; neither
+> stops the recursion, which costs a runtime download to print a version string.
+
+**The problem, concretely.** The tool's own CLI entry — the file `package.json`'s
+`bin` points at — opens `#!/usr/bin/env node`, as a published Node program does.
+`node` is a table entry (§15.39), so `jup enable node` puts a shim of ours on that
+name, and §15.32 asks the user to put the shim directory **first** on `PATH`. From
+that moment `env node` finds our shim, the shim resolves the project's
+`devEngines.runtime` or `.nvmrc` (§15.40), and the tool runs under a runtime out
+of its own store:
+
+```
+$ cd project-with-nvmrc-22.14.0
+$ jup --version
+! jup is about to download …/node-linux-x64-22.14.0.tgz
+0.0.2                                   # 1.8 s, and 171 MB of store
+```
+
+Every later run is cheaper but never free: `jup --version` costs a spec
+resolution and a second process where it used to cost one `stat`, which is the
+§01 startup budget spent on nothing. §14.26 consequence 2 describes this exact
+loop; it was written about the *shims* and the entry point is subject to it in
+the same way, for the same reason, from the same line of text.
+
+**Required.**
+
+* `enable` MUST pin the interpreter into the tool's own CLI entry, by the rule
+  §10.1 already states for the stub: the absolute path chosen by §15.43's three
+  tiers, and no separate selection path. A store runtime is refused there, so it
+  is refused here.
+* It MUST apply under the **same condition** as the stub's pin — always on
+  Windows, and on POSIX only when the install directory claims the interpreter's
+  own name (§10.1's *When it applies*). An `enable` that claims no such name MUST
+  leave the entry **byte-identical**, because §10.7's read-only installation and
+  §10.2's idempotency both depend on `enable` writing nothing when nothing is
+  wrong.
+* The entry is a **build artifact**, not a file the tool generates. Only its first
+  line may be rewritten, and only when that line is not already the line wanted:
+  the implementation reads the head, compares, and returns without writing when it
+  matches — the same test-before-write discipline §10.2 property 4 and §15.45
+  require. Everything from the first line ending on is copied through unchanged.
+* The write MUST be atomic — temp file, then rename — and MUST carry the entry's
+  mode across. A truncating write interrupted halfway leaves the one file that
+  cannot be repaired by running this tool, and an entry that comes back without
+  its execute bit is §15.45's silent failure one file over.
+* An installation with no such entry — a source checkout, where the entry is
+  TypeScript and is never reached through a shebang — MUST be a **no-op**, not a
+  failure. `enable` does not require a build.
+* When the rewrite is refused (`EROFS`/`EACCES`/`EPERM`), `enable` MUST **fail**
+  rather than half-enable, on §10.7's terms. The message MUST name the entry, say
+  that shimming the interpreter is what requires it to be pinned and what it would
+  otherwise cost, and give the remedies that reach *that* file: install the tool
+  somewhere writable, or stop claiming the name — which here means `disable`
+  as well as omitting it from `enable`, since an earlier run's shim is enough to
+  require the pin. It MUST NOT reuse §15.43's stub message, which names the wrong
+  file, or §15.45's, whose `chmod` remedy is for a different property.
+* `disable` MUST NOT unpin it. The removal makes the pin unnecessary, not wrong:
+  §15.43 guarantees the path is outside `<home>`, so the entry keeps working. The
+  unpin would be a write into the tool's own package directory — routinely
+  read-only (§10.7) — in the middle of a command that has already started removing
+  shims, and a failure there would strand the user midway. Re-running `enable`
+  re-bakes it, which is §14.26's stated bargain for the stub.

@@ -3,7 +3,9 @@
  *
  * Two questions, both answered by walking **up** from whichever file is asking:
  * where is our package root (for `COREPACK_ROOT`), and where is the entry module
- * a shim stub should import (for `enable`).
+ * a shim stub should import (for `enable`). A third — where is our *own* CLI
+ * entry, the file `bin` points at — is answered relative to the second, because
+ * §15.46 pins its shebang and the two files live in the same folder.
  *
  * Walking is not over-engineering here. A bundler is free to emit chunks into a
  * subdirectory — obuild puts them in `dist/_chunks/` — so a fixed number of
@@ -119,4 +121,33 @@ export function findEntryModule(
   });
 
   return directory === undefined || found === undefined ? undefined : { directory, entry: found };
+}
+
+/**
+ * Candidate names for **our own CLI entry** — the file `package.json`'s `bin`
+ * points both `jup` and `corepack` at, and therefore the file a user's `jup` on
+ * `PATH` actually executes. Best first, matching {@link ENTRY_CANDIDATES}' shape.
+ *
+ * Deliberately only the *built* spellings. From a source checkout the entry is
+ * `bin.ts`, which no shim and no `PATH` name ever reaches through `execve` — it
+ * is run as `node src/bin.ts` by the test harness and by `pnpm dev` — so §15.46
+ * has nothing to pin there and {@link findCliEntry} answering `undefined` is the
+ * correct answer rather than a gap.
+ */
+export const CLI_ENTRY_CANDIDATES = ["bin.mjs", "bin.js"];
+
+/**
+ * Our own CLI entry inside `directory`, or `undefined` when this installation
+ * has none — §15.46.
+ *
+ * Takes the directory rather than finding it, because its one caller has already
+ * resolved the same folder for the stub it writes beside this file, and the two
+ * must not be able to disagree.
+ */
+export function findCliEntry(directory: string): string | undefined {
+  for (const candidate of CLI_ENTRY_CANDIDATES) {
+    const file = join(directory, candidate);
+    if (existsSync(file)) return file;
+  }
+  return undefined;
 }
