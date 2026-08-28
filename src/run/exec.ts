@@ -8,7 +8,7 @@
 import { closeSync, openSync, readlinkSync, readSync } from "node:fs";
 import { runMain } from "node:module";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
@@ -288,6 +288,9 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
 
   const declared = bin !== undefined && Object.hasOwn(bin, binName) ? bin[binName] : undefined;
   if (declared === undefined) throw new Error(messages.assertUnableToLocateBinPath(binName));
+  // An empty value resolves to the install directory itself, which passes the
+  // containment check below and is not an entry point.
+  if (declared === "") throw new Error(messages.assertUnableToLocateBinPath(binName));
 
   const binPath = resolve(location, declared);
   if (binPath !== location && !binPath.startsWith(location + sep)) {
@@ -297,10 +300,14 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
     throw new Error(messages.binEscapes(declared, name, basename(location)));
   }
 
-  // Not `binPath`: §08.1 joins naively, and a `bin` value of `./bin/yarn.js` must
-  // stay `<location>/bin/yarn.js` in `process.argv[1]` rather than being rewritten
-  // by `resolve`'s normalisation of the location itself.
-  return join(spec.location, declared);
+  // Not `binPath` for a relative value: §08.1 joins naively, and a `bin` value of
+  // `./bin/yarn.js` must stay `<location>/bin/yarn.js` in `process.argv[1]`
+  // rather than being rewritten by `resolve`'s normalisation of the location
+  // itself. An absolute value has nothing to prepend, and joining one produced a
+  // path that was neither what the manifest declared nor what the check above
+  // validated — `<location>` concatenated onto itself, handed to `runMain` as a
+  // module that does not exist.
+  return isAbsolute(declared) ? binPath : join(spec.location, declared);
 }
 
 /**
