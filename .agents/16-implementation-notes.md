@@ -51,11 +51,40 @@ openat  ./.jup.env                → ENOENT (cheap; only until a manifest is fo
 openat  ./.corepack.env           → ENOENT (legacy name, §03.2; only when .jup.env is absent)
 stat    <store>/<pm>/<ver>/.jup
 openat  <store>/<pm>/<ver>/.jup   → read → close
+openat  <shimdir>/<binName>       → read → close   (§15.32; see below — free when
+                                    the run came through the shim itself)
 execve  <node> <binPath> <args...>
 ```
 
 That is the whole thing. Notice what is absent: no `lastKnownGood.json` read, no
 `opendir` of the store, no network, no temp files, no lockfile.
+
+### §15.32's `PATH` promotion, measured
+
+The promotion prepends the shim directory, and §15.13 point 7 says the directory
+is whichever **candidate** holds a shim of ours — read, never guessed from `PATH`.
+Traced on Linux with `strace -e trace=openat`, on a pinned project with a warm
+store:
+
+| Invocation | Candidate-directory `openat`s |
+|---|---|
+| Through the shim (`yarn --version`), shim installed | **0** |
+| `jup yarn --version`, shim installed | 1 (hit on the first candidate) |
+| `jup yarn --version`, no shims, no `XDG_BIN_HOME` | 2 (both candidates miss) |
+| `jup yarn --version`, no shims, `XDG_BIN_HOME` set | 3 (all three miss) |
+
+The first row is the one that runs on every `yarn`, `npm` and `pnpm` on the
+machine, and it costs nothing: §14.15's POSIX shim is a symlink named `<binName>`
+and Node does not `realpath` `argv[1]`, so a run reached *through* a shim already
+knows the directory and the file the read would have opened is the one executing.
+It is checked against the candidate list all the same — a promotion decided on a
+name alone is what the banner read exists to prevent (§15.32).
+
+The remaining rows are `jup <pm>` typed directly. One failed `openat` per
+candidate is the price of not reading `PATH`, and the misses land exactly where
+there is nothing to promote. Before the candidate list existed every one of these
+rows cost 1, so the change trades **+1 or +2 on the direct invocation for −1 on
+the invocation that dominates**.
 
 Things that will silently wreck this budget:
 

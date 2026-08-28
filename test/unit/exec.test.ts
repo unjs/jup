@@ -3,6 +3,7 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -438,6 +439,76 @@ describe("§15.32 — PATH", () => {
 
     expect(result.status).toBe(0);
     // Ours, and first — not the decoy that also answers to `yarn`.
+    expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}${delimiter}/usr/bin`);
+  });
+
+  /**
+   * §16.3 — the zero-syscall branch, and the guard that keeps it honest.
+   *
+   * A copy of the driver *at* `<dir>/yarn` is §14.15's shape as Node sees it:
+   * `argv[1]` is the shim's own path, not the stub's, because Node does not
+   * `realpath` it. The pair below asserts both halves of the test that reads —
+   * the name has to match, **and** the directory has to be one we would have
+   * chosen, or the promotion is being decided on a name alone.
+   */
+  function driverNamed(directory: string, binName: string): string {
+    // Extensionless, so it needs the same `"type": "module"` marker the real
+    // `dist/` carries for the real stub.
+    writeFileSync(join(directory, "package.json"), `{"type":"module"}\n`);
+    const entry = join(directory, binName);
+    writeFileSync(entry, readFileSync(driver));
+    return entry;
+  }
+
+  it("needs no read when the run came through the shim itself (§16.3)", () => {
+    const location = fixture("path-self", { "bin/yarn.js": REPORT });
+    const { shims, decoy } = pathFixture("path-self", []);
+    // No marker stub is written into `shims` at all: the file that runs *is* the
+    // shim, so there is nothing left for the banner read to find, and the
+    // promotion must still happen.
+    const entry = driverNamed(shims, "yarn");
+
+    const result = spawnSync(
+      process.execPath,
+      [entry, location, "yarn", TGZ_URL, JSON.stringify({ yarn: "./bin/yarn.js" })],
+      {
+        encoding: "utf8",
+        env: {
+          HOME: join(root, "nowhere"),
+          USERPROFILE: join(root, "nowhere"),
+          COREPACK_SHIM_DIRECTORY: shims,
+          PATH: `${decoy}${delimiter}/usr/bin`,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}${delimiter}/usr/bin`);
+  });
+
+  it("will not promote a directory off the candidate list, whatever it is named", () => {
+    const location = fixture("path-notcand", { "bin/yarn.js": REPORT });
+    const { shims, decoy } = pathFixture("path-notcand", ["yarn"]);
+    // `argv[1]` is `<decoy>/yarn`: the right name in the wrong directory. The
+    // answer must come from the candidate list, so `<shims>` wins on its banner
+    // and `<decoy>` is left exactly where it was.
+    const entry = driverNamed(decoy, "yarn");
+
+    const result = spawnSync(
+      process.execPath,
+      [entry, location, "yarn", TGZ_URL, JSON.stringify({ yarn: "./bin/yarn.js" })],
+      {
+        encoding: "utf8",
+        env: {
+          HOME: join(root, "nowhere"),
+          USERPROFILE: join(root, "nowhere"),
+          COREPACK_SHIM_DIRECTORY: shims,
+          PATH: `${decoy}${delimiter}/usr/bin`,
+        },
+      },
+    );
+
+    expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}${delimiter}/usr/bin`);
   });
 

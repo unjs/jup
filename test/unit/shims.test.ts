@@ -10,7 +10,9 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -310,9 +312,30 @@ describe.skipIf(process.platform === "win32")("the PATH preference (§15.13 poin
     mkdirSync(homeBin);
     vi.stubEnv("PATH", homeBin);
 
-    expect(chooseInstallDirectory({ installDirectory: binDir })).toEqual({ directory: binDir });
+    // `named` is what lets `cmdEnable` skip the second selection: with nothing
+    // named, the directory already chosen *is* point 2's fallback.
+    expect(chooseInstallDirectory({ installDirectory: binDir })).toEqual({
+      directory: binDir,
+      named: true,
+    });
     vi.stubEnv("COREPACK_SHIM_DIRECTORY", binDir);
-    expect(chooseInstallDirectory({})).toEqual({ directory: binDir });
+    expect(chooseInstallDirectory({})).toEqual({ directory: binDir, named: true });
+  });
+
+  it("runs the selection once: a named directory leaves an alternate untouched", async () => {
+    mkdirSync(homeBin);
+    vi.stubEnv("PATH", homeBin);
+    // Point 2's probe creates and unlinks a file, which moves the directory's
+    // mtime. Backdating it makes "was this directory written to?" observable —
+    // and the answer must be no, because `--install-directory` was given and
+    // succeeded, so the alternate is never a candidate for anything.
+    const past = new Date(Date.now() - 60_000);
+    utimesSync(homeBin, past, past);
+
+    expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+    expect(statSync(homeBin).mtimeMs).toBe(past.getTime());
+    expect(existsSync(join(binDir, "yarn"))).toBe(true);
   });
 
   it("249: continuity outranks it, and point 7 reads no PATH at all", async () => {

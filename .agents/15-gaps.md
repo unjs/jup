@@ -540,10 +540,15 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
    `<home>/shims.json` already exists to be extended. It is rejected: it is state
    that can disagree with the filesystem, it is keyed on a `<home>` that
    `COREPACK_HOME` may move between the two runs, and it answers a question the
-   shims already answer. **The shims are the record.** Scanning for them costs one
-   `open` per candidate on paths that were going to be `stat`ed anyway (§16.3), and
-   it is self-correcting across an upgrade, a changed home, and a
-   `COREPACK_SHIM_DIRECTORY` the user has since stopped setting.
+   shims already answer. **The shims are the record.** It is also self-correcting
+   across an upgrade, a changed home, and a `COREPACK_SHIM_DIRECTORY` the user has
+   since stopped setting.
+
+   The scan is not free and §16.3 measures it rather than waving at it: one failed
+   `openat` per candidate on a miss, which is 2 or 3 against the 1 a single-directory
+   read cost. §15.32's promotion — the only reader of it on the warm path — buys
+   that back on the invocation that dominates, a package manager run through its own
+   shim, where the shim's own path answers the question with **no** syscall at all.
 
    Continuity outranking the `PATH` preference (step 3 above step 4) follows from
    the same reading: a second `enable` that *moved* the shims would leave the first

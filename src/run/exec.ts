@@ -168,18 +168,28 @@ export function isOurShim(file: string, binName: string): boolean {
  * path we were about to `stat` anyway (§16.3) and makes the promotion mean what
  * it says.
  *
- * §15.13 point 7 makes that same read the *selector*: `enable` may have chosen an
- * alternate, and this promotion MUST NOT read `PATH` to find out which. The extra
- * opens land only when the default holds no shim — when there is nothing to
- * promote anyway.
+ * §15.13 point 7 makes that same read the *selector*, since `enable` may have
+ * chosen an alternate and this MUST NOT read `PATH` to find out which. §16.3
+ * carries the measured cost and the `argv[1]` branch that pays for it: §14.15's
+ * shim is a symlink named `<binName>` and Node does not `realpath` `argv[1]`, so
+ * a run *through* a shim already holds the answer and opens nothing. Both halves
+ * of that test are load-bearing — a promotion decided on a name alone is what the
+ * banner check exists to prevent.
  */
 function shimDirectoryFor(binName: string): string | undefined {
   const configured = readEnv(ENV.SHIM_DIRECTORY);
-  if (configured !== undefined && configured !== "") {
-    const directory = resolve(configured);
-    return isOurShim(join(directory, binName), binName) ? directory : undefined;
+  const candidates =
+    configured !== undefined && configured !== ""
+      ? [resolve(configured)]
+      : shimDirectoryCandidates();
+
+  const self = process.argv[1];
+  if (self !== undefined && basename(self) === binName) {
+    const directory = dirname(self);
+    if (candidates.includes(directory)) return directory;
   }
-  for (const directory of shimDirectoryCandidates()) {
+
+  for (const directory of candidates) {
     if (isOurShim(join(directory, binName), binName)) return directory;
   }
   return undefined;
