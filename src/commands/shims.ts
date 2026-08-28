@@ -78,6 +78,7 @@ import {
   perUserShimDirectory as perUserDefault,
   shimDirectoryCandidates,
   SHIM_MARKER,
+  PROXY_STUB_NAME,
   stubNameFor,
 } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
@@ -94,7 +95,7 @@ const TOOL_NAME = "jup";
  * invocation and this module imports that one, not the other way round;
  * re-exported here because this is where the concept belongs.
  */
-export { SHIM_MARKER, stubNameFor } from "../run/exec.ts";
+export { SHIM_MARKER, PROXY_STUB_NAME, stubNameFor } from "../run/exec.ts";
 
 /**
  * §10.1 — the interpreter the generic shebang names.
@@ -715,16 +716,6 @@ export function shimSource(entryName: string, binName?: string, interpreter?: st
     "",
   ].join("\n");
 }
-
-/**
- * §10.2 — the one stub every POSIX shim points at.
- *
- * It carries no binary name, so it cannot collide with one: every name in the
- * table is a bare command (`yarn`, `npm`, `aubx`), and this is the only file in
- * `dist/` with a hyphen in it.
- */
-export const PROXY_STUB_NAME = "shim-proxy.mjs";
-
 
 /** §14.18 — map the read-only install to something the user can act on. */
 async function guardWrites<T>(directory: string, action: () => Promise<T>): Promise<T> {

@@ -5,7 +5,7 @@
  * manager itself can tell a trampoline was involved.
  */
 
-import { closeSync, openSync, readSync } from "node:fs";
+import { closeSync, openSync, readlinkSync, readSync } from "node:fs";
 import { runMain } from "node:module";
 import { homedir } from "node:os";
 import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
@@ -112,6 +112,16 @@ export function shimDirectoryCandidates(): string[] {
 export const SHIM_MARKER = "@jup-shim";
 
 /**
+ * §10.2 — the shared stub every POSIX shim links to.
+ *
+ * It carries no binary name, so it cannot collide with one: every name in the
+ * table is a bare command (`yarn`, `npm`, `aubx`), and this is the only file in
+ * `dist/` with a hyphen in it. Declared here for the same reason
+ * {@link SHIM_MARKER} is — the ownership test names it.
+ */
+export const PROXY_STUB_NAME = "shim-proxy.mjs";
+
+/**
  * §10.3 — the per-name stub a Windows wrapper invokes.
  *
  * `.mjs`, like `PROXY_STUB_NAME`: an explicit module extension is a format the
@@ -159,7 +169,22 @@ function readHeadSync(file: string, length: number): string | undefined {
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
-  if (head === undefined) return false;
+  if (head === undefined) {
+    // The open follows the link, so a failure here also covers a shim whose stub
+    // has been moved away — #751's stale shim, which §15.14 says `disable` must
+    // remove rather than skip, and which it can only remove if this lookup finds
+    // the directory holding it. A dangling link is ours iff it still names our
+    // stub, the same rule `shims.ts`'s async `isOurEntry` applies. Reached only
+    // once the read has already failed, so a live shim never pays for it.
+    let link: string;
+    try {
+      link = readlinkSync(file);
+    } catch {
+      return false;
+    }
+    const target = basename(link);
+    return target === PROXY_STUB_NAME || target === stubNameFor(binName);
+  }
   if (head.includes(SHIM_MARKER)) return true;
   return (
     process.platform === "win32" &&
