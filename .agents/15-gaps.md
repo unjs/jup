@@ -1197,7 +1197,7 @@ Introduced by this section. All follow §11.6's precedence.
 | `COREPACK_NETWORK_RETRIES` | integer | Retry attempts, default 3, `0` disables (§15.5) | yes |
 | `COREPACK_REQUIRE_SIGNATURES` | `1` | Turn §15.7's soft-fail into a hard failure | yes |
 | `COREPACK_ALLOW_UNVERIFIED` | `1` | Permit an artifact with no verification tier (§15.11) | **no** |
-| `COREPACK_SHIM_DIRECTORY` | path | Default shim install directory (§15.13) | yes |
+| `COREPACK_SHIM_DIRECTORY` | path | Default shim install directory (§15.13) | **no** (§14.5) |
 | `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write/refresh `.jup.lock` (§15.23) | yes |
 | `COREPACK_ENABLE_PRERELEASES` | `1` | Allow implicit resolution to select a prerelease (§15.24) | yes |
 | `COREPACK_SPEC_FILE` | path | External file supplying the project spec (§15.35d) | **no** |

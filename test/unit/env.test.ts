@@ -405,23 +405,26 @@ describe("applyEnvFile", () => {
     process.env.COREPACK_NPM_REGISTRY = "https://real.test";
 
     applyEnvFile(
-      { COREPACK_NPM_REGISTRY: "https://file.test", COREPACK_HOME: "/from-file" },
+      { COREPACK_NPM_REGISTRY: "https://file.test", COREPACK_NETWORK_TIMEOUT: "5000" },
       join(dir, DEFAULT_ENV_FILE_NAME),
     );
 
     expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://real.test");
-    expect(process.env.COREPACK_HOME).toBe("/from-file");
+    // The second key is an *eligible* one, so the file still supplies it — the
+    // example is `COREPACK_NETWORK_TIMEOUT` rather than `COREPACK_HOME` because
+    // §14.5 now denies the store root outright (see `isEnvFileEligible` below).
+    expect(process.env.COREPACK_NETWORK_TIMEOUT).toBe("5000");
   });
 
   it("keeps an empty real value winning over the file", () => {
-    process.env.COREPACK_HOME = "";
+    process.env.COREPACK_NETWORK_TIMEOUT = "";
 
-    applyEnvFile({ COREPACK_HOME: "/from-file" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    applyEnvFile({ COREPACK_NETWORK_TIMEOUT: "5000" }, join(dir, DEFAULT_ENV_FILE_NAME));
 
-    expect(process.env.COREPACK_HOME).toBe("");
+    expect(process.env.COREPACK_NETWORK_TIMEOUT).toBe("");
   });
 
-  // Tests 60, 61, 62 — §14.5's five additions, each announced.
+  // Tests 60, 61, 62 — §14.5's and §15.37's additions, each announced.
   describe.each([...SECURITY_ONLY_FROM_ENVIRONMENT])("%s", (name) => {
     it("is ignored when it comes from a file, with a warning on stderr", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -519,6 +522,113 @@ describe("§15.37 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§15.4)", () => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * §14.5 — the three location variables are INELIGIBLE
+ *
+ * `COREPACK_HOME`, `COREPACK_SHIM_DIRECTORY` and `COREPACK_NODE_EXECPATH`
+ * each name a *place code is loaded or run from*, which makes all three
+ * trust decisions rather than layout preferences:
+ *
+ *   * `COREPACK_HOME` roots the store. An install directory carrying the
+ *     `.jup` marker is handed back by `resolveInstallTarget` with no digest
+ *     check whenever the spec is unpinned, so a repository that could point
+ *     this at a tree it ships would execute its own code on the first run.
+ *     The npm trusted-key cache lives under the same root (§06).
+ *   * `COREPACK_SHIM_DIRECTORY` is prepended to the `PATH` the package
+ *     manager and every process it spawns inherit (§08.4) — it decides
+ *     which `git`, not merely where our shims land.
+ *   * `COREPACK_NODE_EXECPATH` is §08.3.1's interpreter selector. No code
+ *     in this host reads it yet; it is denied before the hazard exists.
+ *
+ * All three are announced (§14.5's one warning per offending variable)
+ * rather than dropped in silence, because a repository trying to relocate
+ * any of them is worth telling the user about.
+ * ------------------------------------------------------------------ */
+
+describe("§14.5 — COREPACK_HOME, COREPACK_SHIM_DIRECTORY and COREPACK_NODE_EXECPATH", () => {
+  it.for([
+    ["COREPACK_HOME", "./.store"],
+    ["COREPACK_SHIM_DIRECTORY", "./tools"],
+    ["COREPACK_NODE_EXECPATH", "./tools/node"],
+  ])("%s is ineligible, security-relevant, and announced", ([name, value]) => {
+    expect(ENV_FILE_INELIGIBLE.has(name!)).toBe(true);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has(name!)).toBe(true);
+    expect(isEnvFileEligible(name!)).toBe(false);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const path = join(dir, DEFAULT_ENV_FILE_NAME);
+
+    applyEnvFile({ [name!]: value! }, path);
+
+    expect(process.env[name!]).toBeUndefined();
+    expect(readEnv(name!)).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(messages.ignoringEnvVar(name!, path));
+  });
+
+  // §11.6 — the deny-list is keyed by the `COREPACK_` spelling and canonicalised
+  // before it is checked, so the `JUP_` name is not a way past it. This is the
+  // spelling a repository written against this implementation would actually use.
+  it.for([
+    ["JUP_HOME", "./.store"],
+    ["JUP_SHIM_DIRECTORY", "./tools"],
+    ["JUP_NODE_EXECPATH", "./tools/node"],
+  ])("%s from a project env file is refused too", ([name, value]) => {
+    expect(isEnvFileEligible(name!)).toBe(false);
+
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const path = join(dir, DEFAULT_ENV_FILE_NAME);
+
+    applyEnvFile({ [name!]: value! }, path);
+
+    expect(process.env[name!]).toBeUndefined();
+    expect(process.env[corepackSpelling(name!)]).toBeUndefined();
+    expect(readEnv(corepackSpelling(name!))).toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(messages.ignoringEnvVar(name!, path));
+  });
+
+  // The end-to-end shape of the attack: a cloned repository ships `.jup.env`
+  // beside its `package.json`, pointing the store at a tree it also ships. The
+  // file is found and loaded — only the variable is refused.
+  it("refuses a JUP_HOME planted in a real .jup.env next to the manifest", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const path = writeEnvFile(
+      DEFAULT_ENV_FILE_NAME,
+      "JUP_HOME=./.store\nCOREPACK_ENABLE_STRICT=0\n",
+    );
+
+    const loaded = loadEnvFileFrom(dir);
+    expect(loaded?.vars.JUP_HOME).toBe("./.store");
+    applyEnvFile(loaded!.vars, loaded!.path);
+
+    expect(process.env.JUP_HOME).toBeUndefined();
+    expect(process.env.COREPACK_HOME).toBeUndefined();
+    expect(readEnv(ENV.HOME)).toBeUndefined();
+    // An eligible variable in the same file is unaffected — the refusal is per
+    // variable, not per file.
+    expect(process.env.COREPACK_ENABLE_STRICT).toBe("0");
+    expect(warn).toHaveBeenCalledWith(messages.ignoringEnvVar("JUP_HOME", path));
+  });
+
+  it("still lets the real environment set all three", () => {
+    process.env.COREPACK_HOME = "/home/user/.cache/jup";
+    process.env.JUP_SHIM_DIRECTORY = "/home/user/.local/bin";
+    process.env.COREPACK_NODE_EXECPATH = "/usr/bin/node";
+
+    applyEnvFile(
+      {
+        COREPACK_HOME: "./.store",
+        JUP_SHIM_DIRECTORY: "./tools",
+        COREPACK_NODE_EXECPATH: "./tools/node",
+      },
+      join(dir, DEFAULT_ENV_FILE_NAME),
+    );
+
+    expect(readEnv(ENV.HOME)).toBe("/home/user/.cache/jup");
+    expect(readEnv(ENV.SHIM_DIRECTORY)).toBe("/home/user/.local/bin");
+    expect(readEnv(ENV.NODE_EXECPATH)).toBe("/usr/bin/node");
+  });
+});
+
 describe("isEnvFileEligible", () => {
   it("accepts the behavioural variables only", () => {
     expect(isEnvFileEligible("COREPACK_ENABLE_AUTO_PIN")).toBe(true);
@@ -526,14 +636,12 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_ENABLE_STRICT")).toBe(true);
     expect(isEnvFileEligible("COREPACK_DEFAULT_TO_LATEST")).toBe(true);
     expect(isEnvFileEligible("COREPACK_ENABLE_NETWORK")).toBe(true);
-    expect(isEnvFileEligible("COREPACK_HOME")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NPM_REGISTRY")).toBe(true);
     // §15.37 marks the per-source overrides eligible, on the same footing as
     // `COREPACK_NPM_REGISTRY`: they redirect a download, which a project may
     // do, rather than deciding who is trusted, which it may not.
     expect(isEnvFileEligible("COREPACK_REGISTRY_YARN")).toBe(true);
     expect(isEnvFileEligible("COREPACK_REGISTRY_PNPM")).toBe(true);
-    expect(isEnvFileEligible("COREPACK_NODE_EXECPATH")).toBe(true);
     // §15.37 — mandating signed sources is a policy a project may state, unlike
     // the trust store itself (§14.5), which a cloned repo must never supply.
     expect(isEnvFileEligible("COREPACK_REQUIRE_SIGNATURES")).toBe(true);
@@ -541,11 +649,6 @@ describe("isEnvFileEligible", () => {
     // again — and §15.37's table marks them eligible.
     expect(isEnvFileEligible("COREPACK_NETWORK_TIMEOUT")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NETWORK_RETRIES")).toBe(true);
-    // §15.37 marks §15.13's shim directory eligible: where a project's tooling
-    // lands is a preference, not a security boundary — nothing is executed from
-    // it that was not already going to run. Asserted explicitly so a later edit
-    // to ENV_FILE_INELIGIBLE cannot quietly withdraw it.
-    expect(isEnvFileEligible("COREPACK_SHIM_DIRECTORY")).toBe(true);
     // §15.24's opt-in: choosing to accept prereleases is a project's call, and
     // it widens a candidate set rather than deciding who is trusted.
     expect(isEnvFileEligible("COREPACK_ENABLE_PRERELEASES")).toBe(true);
@@ -574,6 +677,21 @@ describe("isEnvFileEligible", () => {
     // precisely what §03.2's prefix sandbox exists to prevent.
     expect(isEnvFileEligible("COREPACK_SPEC_FILE")).toBe(false);
     expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_SPEC_FILE")).toBe(true);
+
+    // §14.5 — the three *locations* code is loaded and run from. Each was
+    // eligible until this entry, and each is a trust decision rather than a
+    // preference: `COREPACK_HOME` is the store whose `.jup` marker short-circuits
+    // digest verification for an unpinned spec (and the trusted-key cache
+    // beside it), `COREPACK_SHIM_DIRECTORY` is prepended to the `PATH` the
+    // package manager and its children inherit (§08.4), and
+    // `COREPACK_NODE_EXECPATH` is §08.3.1's interpreter selector. A cloned
+    // repository able to set any of them chooses what executes.
+    expect(isEnvFileEligible("COREPACK_HOME")).toBe(false);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_HOME")).toBe(true);
+    expect(isEnvFileEligible("COREPACK_SHIM_DIRECTORY")).toBe(false);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_SHIM_DIRECTORY")).toBe(true);
+    expect(isEnvFileEligible("COREPACK_NODE_EXECPATH")).toBe(false);
+    expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_NODE_EXECPATH")).toBe(true);
 
     for (const name of ENV_FILE_INELIGIBLE) {
       expect(isEnvFileEligible(name)).toBe(false);
@@ -766,18 +884,20 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
 
   it("lets the real environment win across spellings (§11.6)", () => {
     // The merge below only shadows a file key by the *same* name, so without the
-    // pair check a file's JUP_HOME would out-rank a real COREPACK_HOME purely by
-    // being spelled the way `readEnv` prefers.
-    process.env.COREPACK_HOME = "/real";
+    // pair check a file's JUP_NETWORK_TIMEOUT would out-rank a real
+    // COREPACK_NETWORK_TIMEOUT purely by being spelled the way `readEnv` prefers.
+    // The variable is an eligible one on purpose: for an ineligible name the
+    // deny-list would decide this before precedence ever ran.
+    process.env.COREPACK_NETWORK_TIMEOUT = "1000";
 
-    applyEnvFile({ JUP_HOME: "/from-file" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    applyEnvFile({ JUP_NETWORK_TIMEOUT: "5000" }, join(dir, DEFAULT_ENV_FILE_NAME));
 
-    expect(process.env.JUP_HOME).toBeUndefined();
-    expect(readEnv(ENV.HOME)).toBe("/real");
+    expect(process.env.JUP_NETWORK_TIMEOUT).toBeUndefined();
+    expect(readEnv(ENV.NETWORK_TIMEOUT)).toBe("1000");
   });
 
   it("still applies the other spelling when nothing real is set", () => {
-    applyEnvFile({ JUP_HOME: "/from-file" }, join(dir, DEFAULT_ENV_FILE_NAME));
-    expect(readEnv(ENV.HOME)).toBe("/from-file");
+    applyEnvFile({ JUP_NETWORK_TIMEOUT: "5000" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    expect(readEnv(ENV.NETWORK_TIMEOUT)).toBe("5000");
   });
 });

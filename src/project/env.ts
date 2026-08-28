@@ -44,8 +44,9 @@ export const LEGACY_ENV_FILE_NAME = ".corepack.env";
  * default depends on how the tool was invoked, which a project file must not be
  * able to override. The rest are §14.5's and §15.37's security additions: a
  * hostile repo must not be able to disable signature verification, point at an
- * arbitrary host, pair a token with a hostile registry to exfiltrate it, or
- * switch off (or redirect) TLS certificate verification.
+ * arbitrary host, pair a token with a hostile registry to exfiltrate it,
+ * switch off (or redirect) TLS certificate verification, or nominate any of the
+ * three *locations* code is loaded and run from (§14.5, below).
  */
 export const ENV_FILE_INELIGIBLE = new Set<string>([
   ENV.ENV_FILE,
@@ -60,6 +61,9 @@ export const ENV_FILE_INELIGIBLE = new Set<string>([
   ENV.ALLOW_UNVERIFIED,
   ENV.SPEC_FILE,
   ENV.QUIET_ADVISORIES,
+  ENV.HOME,
+  ENV.SHIM_DIRECTORY,
+  ENV.NODE_EXECPATH,
 ]);
 
 /**
@@ -103,6 +107,33 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // able to set it could silence the evidence of what its *other* variables
   // were refused for, so muting stays the caller's decision to make.
   ENV.QUIET_ADVISORIES,
+  // §14.5 — the store root, and with it the trusted-key cache. Corepack (and
+  // §11.1 until this entry) treats this as a preference: where the cache lives.
+  // It is not. It is the answer to "which bytes have already been verified":
+  // an install directory carrying the `.jup` marker is returned by
+  // `resolveInstallTarget` with no digest check at all whenever the project
+  // spec is unpinned — the common `"packageManager": "yarn@1.22.22"` case — so
+  // a cloned repository able to point this at a tree it ships would be handing
+  // itself arbitrary code execution on the first run, with no network, no
+  // prompt and no warning. The same directory holds the cached npm signing
+  // keys (§06), so the second reading of it is "which publishers are trusted".
+  // Relocating the store stays the decision of whoever runs the tool.
+  ENV.HOME,
+  // §15.13 / §15.37 — the shim directory is prepended to the `PATH` the package
+  // manager and every process it spawns inherits (§08.4), which makes it the
+  // first place the *system* looks for `git`, `node`, and every other helper —
+  // not merely where this tool's own shims are written. A repository that could
+  // name it from its env file could ship the directory too, and the first
+  // helper the package manager shells out to would be its own. What runs ahead
+  // of the user's `PATH` is a trust decision, not a layout preference.
+  ENV.SHIM_DIRECTORY,
+  // §08.3.1 — the interpreter package managers are executed *with*. Nothing in
+  // this host reads it yet, so the entry is here before the hazard is: whoever
+  // implements §08.3.1's "if COREPACK_NODE_EXECPATH is set, use it" would
+  // otherwise be giving a cloned repository the ability to name the binary that
+  // runs on `git clone && yarn`. Choosing the interpreter is choosing what
+  // executes; it can never come from the project.
+  ENV.NODE_EXECPATH,
 ]);
 
 /**
@@ -384,7 +415,7 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     }
 
     if (!isEnvFileEligible(name)) {
-      // Warn only for the five §14.5 adds. Corepack already refuses
+      // Warn only for the §14.5 / §15.37 adds. Corepack already refuses
       // COREPACK_ENV_FILE and COREPACK_ENABLE_DOWNLOAD_PROMPT silently, and
       // conformance row 48 asserts stderr is empty when a project's env file
       // tries to turn the download prompt on — so announcing those two would
