@@ -161,26 +161,38 @@ function backoffFor(attempt: number): number {
   return step / 2 + Math.random() * (step / 2);
 }
 
+/** A `Retry-After` past {@link MAX_RETRY_AFTER}: honour it by *not* retrying. */
+export const RETRY_AFTER_TOO_LONG = "too-long";
+
 /**
- * `Retry-After` in both of RFC 9110's forms, in milliseconds, or `undefined`.
+ * `Retry-After` in both of RFC 9110's forms, in milliseconds.
  *
  * A registry under load answers `429` with delta-seconds; a maintenance window
  * answers `503` with an HTTP-date. Honouring only the first is the common bug.
+ *
+ * `undefined` means "no usable header, back off as normal";
+ * {@link RETRY_AFTER_TOO_LONG} means the origin named a wait past the cap. The
+ * two are kept apart because they call for opposite behaviour, and collapsing
+ * them into one `undefined` turned "come back in an hour" into a retry on the
+ * ordinary 250 ms backoff.
  */
-export function retryAfterMs(header: string | null, now: number = Date.now()): number | undefined {
+export function retryAfterMs(
+  header: string | null,
+  now: number = Date.now(),
+): number | typeof RETRY_AFTER_TOO_LONG | undefined {
   if (header === null) return undefined;
   const value = header.trim();
   if (value === "") return undefined;
 
   if (/^\d+$/.test(value)) {
     const milliseconds = Number(value) * 1000;
-    return milliseconds > MAX_RETRY_AFTER ? undefined : milliseconds;
+    return milliseconds > MAX_RETRY_AFTER ? RETRY_AFTER_TOO_LONG : milliseconds;
   }
 
   const at = Date.parse(value);
   if (Number.isNaN(at)) return undefined;
   const milliseconds = at - now;
-  if (milliseconds > MAX_RETRY_AFTER) return undefined;
+  if (milliseconds > MAX_RETRY_AFTER) return RETRY_AFTER_TOO_LONG;
   return milliseconds > 0 ? milliseconds : 0;
 }
 
@@ -562,8 +574,14 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
       // {@link MAX_DRAIN_BYTES}).
       await drain(response);
 
-      if (!last && isRetryableStatus(response.status)) {
-        await sleep(retryAfterMs(response.headers.get("retry-after")) ?? backoffFor(attempt));
+      const after = retryAfterMs(response.headers.get("retry-after"));
+      // A `Retry-After` past the cap is the origin saying "come back much
+      // later". Waiting that long is not on offer, and retrying anyway on the
+      // ordinary backoff is the behaviour that turns one rate-limited request
+      // into three and gets a CI runner banned. Failing now is the kinder half
+      // of the same decision, and the reason the cap exists.
+      if (!last && after !== RETRY_AFTER_TOO_LONG && isRetryableStatus(response.status)) {
+        await sleep(after ?? backoffFor(attempt));
         continue;
       }
       throw new Error(messages.badStatus(response.status, href));

@@ -18,6 +18,7 @@ import {
   httpGet,
   httpGetJson,
   retryAfterMs,
+  RETRY_AFTER_TOO_LONG,
   USER_AGENT,
 } from "../../src/net/http.ts";
 
@@ -816,9 +817,12 @@ describe("retryAfterMs", () => {
     expect(retryAfterMs("Sat, 22 Aug 2026 09:00:00 GMT", now)).toBe(0);
   });
 
-  it("declines a wait longer than the cap, and anything unparseable", () => {
-    expect(retryAfterMs("120", now)).toBeUndefined();
-    expect(retryAfterMs("Sat, 22 Aug 2026 11:00:00 GMT", now)).toBeUndefined();
+  it("reports a wait longer than the cap as such, so the caller can stop", () => {
+    expect(retryAfterMs("120", now)).toBe(RETRY_AFTER_TOO_LONG);
+    expect(retryAfterMs("Sat, 22 Aug 2026 11:00:00 GMT", now)).toBe(RETRY_AFTER_TOO_LONG);
+  });
+
+  it("declines anything unparseable, which backs off as normal instead", () => {
     expect(retryAfterMs("soon", now)).toBeUndefined();
     expect(retryAfterMs("", now)).toBeUndefined();
     expect(retryAfterMs(null, now)).toBeUndefined();
