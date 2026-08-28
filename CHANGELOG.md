@@ -1,6 +1,25 @@
 # Changelog
 
 
+## v0.0.3
+
+[compare changes](https://github.com/unjs/jup/compare/v0.0.2...v0.0.3)
+
+### 🚀 Enhancements
+
+- Record range resolutions in jup.lock, and fix the review's findings ([dd8ab17](https://github.com/unjs/jup/commit/dd8ab17))
+
+### 🩹 Fixes
+
+- Never bake a shim interpreter that lives inside the store ([cc7753d](https://github.com/unjs/jup/commit/cc7753d))
+- Cache clean spares the version the shims run on ([f6dfe35](https://github.com/unjs/jup/commit/f6dfe35))
+- Enable guarantees the stub it links to is executable ([1f0e03e](https://github.com/unjs/jup/commit/1f0e03e))
+- Pin the interpreter into jup's own CLI entry ([f7c47f3](https://github.com/unjs/jup/commit/f7c47f3))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.0.2
 
 [compare changes](https://github.com/unjs/jup/compare/v0.0.1...v0.0.2)
