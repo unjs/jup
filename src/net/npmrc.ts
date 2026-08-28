@@ -719,12 +719,20 @@ function noteRegistryOrigin(config: NpmrcConfig, level: NpmrcLevel, origin: stri
  * The trailing slash is what makes {@link npmrcAuthorizationFor}'s `startsWith`
  * a *path-segment* test rather than a string test: without it, a credential
  * scoped to `//host/team` would also be sent to `//host/team-other`.
+ *
+ * Only the host is case-folded. A URL path is case-sensitive and the request
+ * target is built without folding it, so folding it here would make a prefix
+ * with any uppercase path — `//npm.pkg.github.com/OWNER/`, the spelling GitHub
+ * Packages documents — unable to match the request it was written for.
  */
 function normalisePrefix(raw: string): string | undefined {
   if (!raw.startsWith("//")) return undefined;
   const body = raw.slice(2).replace(/\/+$/, "");
   if (body === "") return undefined;
-  return `//${body.toLowerCase()}/`;
+  const slash = body.indexOf("/");
+  const host = slash === -1 ? body : body.slice(0, slash);
+  const path = slash === -1 ? "" : body.slice(slash);
+  return `//${host.toLowerCase()}${path}/`;
 }
 
 /* -------------------------------------------------------------------------- */
