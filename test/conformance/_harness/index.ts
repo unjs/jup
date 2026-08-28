@@ -1,6 +1,7 @@
 /** The conformance harness, §13.1. */
 
 export {
+  alternateShims,
   createFixture,
   cleanupFixtures,
   copyTool,

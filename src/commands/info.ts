@@ -927,7 +927,9 @@ function describeShims(): InfoReport["shims"] {
 
   try {
     // The resolver `disable` uses, so a report and a removal never disagree
-    // about where the shims are. `forEnable: false` — no realpath.
+    // about where the shims are — and, per §15.13 point 7, one that reads no
+    // `PATH`, so the answer does not depend on the shell this ran from.
+    // `forEnable: false` — no realpath.
     directory = resolveInstallDirectory({}, false);
   } catch (error) {
     // §12.9's "unable to determine where to install the shims" is a fine answer

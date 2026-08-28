@@ -18,8 +18,11 @@
  * Four §15 items reshape the command around that core:
  *
  * * **§15.13** — shims go to a per-user directory by default, never somewhere
- *   that needs elevation, and `enable` says so when the directory it picked is
- *   not on `PATH`.
+ *   that needs elevation. When that directory is not on `PATH`, `enable` prefers
+ *   another entry from a **closed list** of per-user directories that is (point
+ *   6), and says so; if none is, it says what line to add (point 3). `disable`
+ *   and `info` find the result by looking for the shims, never by reading `PATH`
+ *   (point 7).
  * * **§15.15** — anything `enable` displaces is recorded in `<home>/shims.json`
  *   and put back by `disable`, which now removes only entries it created.
  * * **§15.16** — npm is shimmed by default; `--exclude npm` opts out.
@@ -70,7 +73,12 @@ import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
-import { perUserShimDirectory as perUserDefault, SHIM_MARKER } from "../run/exec.ts";
+import {
+  isOurShim,
+  perUserShimDirectory as perUserDefault,
+  shimDirectoryCandidates,
+  SHIM_MARKER,
+} from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder } from "../cache/store.ts";
 
@@ -175,6 +183,10 @@ export const shimDirectoryNotWritable = (directory: string) =>
 /** §15.13 point 2 — verbatim. */
 export const shimDirectoryFallback = (directory: string, fallback: string) =>
   `! ${directory} is not writable; installing shims to ${fallback} instead`;
+
+/** §15.13 point 6 — verbatim. Deliberately shaped like the fallback line above. */
+export const shimDirectoryPreferred = (fallback: string, chosen: string) =>
+  `! ${fallback} is not on your PATH; installing shims to ${chosen} instead`;
 
 /** §15.29 point 2 — verbatim. */
 export const shimShadowed = (name: string, path: string, shim: string) =>
@@ -378,10 +390,105 @@ export function perUserShimDirectory(): string {
 }
 
 /**
- * §15.13 point 1 — `--install-directory`, else `COREPACK_SHIM_DIRECTORY`, else
- * the per-user default.
+ * §15.13 point 7 — the first candidate that already holds a shim of ours, or
+ * `undefined` when none does.
  *
- * The `PATH` lookup for our own binary is gone from this chain on purpose: it is
+ * This is the whole of the "record" of where `enable` put things. A sidecar file
+ * was the alternative and the spec rejects it: it can disagree with the
+ * filesystem, and it is keyed on a `<home>` that `COREPACK_HOME` may move between
+ * the install and the removal. The shims answer the question themselves.
+ *
+ * Every binary name is scanned, opt-outs included, because `enable bun` on its
+ * own is a supported thing to have done.
+ */
+function installedShimDirectory(): string | undefined {
+  const binaries = targetBinaries([], [], { includeOptOut: true });
+  for (const directory of shimDirectoryCandidates()) {
+    for (const binName of binaries) {
+      if (isOurShim(join(directory, binName), binName)) return directory;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * §15.13 point 6 — is this alternate one we may install into?
+ *
+ * The default is never put through this: it is what jup would have used anyway,
+ * and refusing it would leave `enable` nowhere to go. The gate is here to stop
+ * the *preference* from choosing a worse target than the default, which means
+ * three things — the directory must already exist (jup creates the default and
+ * nothing else, so a `PATH` entry naming an absent directory stays inert), it
+ * must be ours, and it must not be writable by anyone else. A shim is a file
+ * every `yarn` on the machine runs through, so a group-writable directory on a
+ * shared host is a local privilege escalation with extra steps; §07.4 takes the
+ * same line on modes coming out of an archive.
+ */
+function eligibleAlternate(directory: string): boolean {
+  const stats = statSync(directory, { throwIfNoEntry: false });
+  if (stats === undefined || !stats.isDirectory()) return false;
+  if (process.platform === "win32") return true;
+  const uid = process.getuid?.();
+  if (uid !== undefined && stats.uid !== uid) return false;
+  return (stats.mode & 0o022) === 0;
+}
+
+/**
+ * §15.13 point 6 — where `enable` installs, and what it displaced to get there.
+ *
+ * `--install-directory` and `COREPACK_SHIM_DIRECTORY` are answered first and
+ * never second-guessed. After that the order is: the default when it is already
+ * on `PATH` (nothing to improve on), then continuity, then the first eligible
+ * alternate that is on `PATH`, then the default with §15.13 point 3's advisory.
+ *
+ * `PATH` chooses among {@link shimDirectoryCandidates} and never supplies a
+ * candidate of its own. "The first writable directory on `PATH`" is the rule this
+ * refuses to be: in a `node:*` image that is `/usr/local/bin` beside `node`,
+ * which is #71 restored; on a Mac it is Homebrew's prefix; and `~/.volta/bin`,
+ * `~/.asdf/shims` and `~/.nvm/.../bin` are user-owned, on `PATH`, and managed by
+ * someone else. Nothing observable separates those from a general-purpose
+ * per-user bin directory except the name, so the names are the list.
+ */
+export function chooseInstallDirectory(options: ShimOptions): {
+  directory: string;
+  /** The default it was preferred over, when an alternate won. */
+  preferredOver?: string;
+} {
+  const configured = options.installDirectory ?? readEnv(ENV.SHIM_DIRECTORY);
+  if (configured !== undefined && configured !== "") return { directory: resolvePath(configured) };
+
+  const fallback = perUserShimDirectory();
+  if (directoryOnPath(fallback)) return { directory: fallback };
+
+  // Continuity outranks the preference: moving an existing set would leave the
+  // old one behind, and two sets of shims for one set of names is worse than one
+  // set in a suboptimal place. `jup disable && jup enable` moves them.
+  const installed = installedShimDirectory();
+  if (installed !== undefined) return { directory: installed };
+
+  for (const alternate of shimDirectoryCandidates().slice(1)) {
+    if (!directoryOnPath(alternate)) continue;
+    if (!eligibleAlternate(alternate)) continue;
+    // Probed before anything is announced: a message naming a directory the
+    // shims then fall back out of would be worse than no message.
+    if (probeWritable(alternate) !== undefined) continue;
+    return { directory: alternate, preferredOver: fallback };
+  }
+
+  return { directory: fallback };
+}
+
+/**
+ * §15.13 points 1 and 7 — `--install-directory`, else `COREPACK_SHIM_DIRECTORY`,
+ * else the candidate holding our shims, else the per-user default.
+ *
+ * This is the resolver for everything that is **not** `enable`: `disable` (§10.6)
+ * and `info` (§15.30). It MUST NOT read `PATH` — a removal that depended on the
+ * `PATH` of the moment would strand shims installed from a shell with a different
+ * one, and a report that did would name a directory the shims are not in.
+ * `enable`'s own chain is {@link chooseInstallDirectory}.
+ *
+ * The `PATH` lookup for our own binary is gone from both chains on purpose: it is
  * exactly what #71 is about. `--install-directory=<the directory containing the
  * tool>` (point 4) remains available for anyone who wants the old behaviour.
  *
@@ -393,7 +500,7 @@ export function resolveInstallDirectory(options: ShimOptions, forEnable: boolean
   const directory =
     configured !== undefined && configured !== ""
       ? resolvePath(configured)
-      : perUserShimDirectory();
+      : (installedShimDirectory() ?? perUserShimDirectory());
 
   if (!forEnable) return directory;
 
@@ -462,13 +569,20 @@ const NOT_WRITABLE = new Set(["EROFS", "EACCES", "EPERM"]);
  * §15.13 point 2 — probe *before* writing anything, and fall back to the
  * per-user default rather than failing, saying so on the way.
  *
+ * `fallback` is what point 6 would have chosen with no directory named, so a
+ * `--install-directory` that turns out to be read-only lands where a bare
+ * `enable` would have. Its own announcement is not repeated: the line below
+ * already names the directory the shims went to.
+ *
  * Returns the realpath of the directory that will actually be used.
  */
-export function prepareInstallDirectory(directory: string): string {
+export function prepareInstallDirectory(
+  directory: string,
+  fallback: string = chooseInstallDirectory({}).directory,
+): string {
   const failure = probeWritable(directory);
   if (failure === undefined) return realpathOr(directory);
 
-  const fallback = perUserShimDirectory();
   if (!NOT_WRITABLE.has(failure.code ?? "") || samePath(directory, fallback)) {
     if (NOT_WRITABLE.has(failure.code ?? "")) {
       throw new UsageError(shimDirectoryNotWritable(directory));
@@ -1291,9 +1405,18 @@ export function pathExportLine(directory: string, shell: Shell = detectShell()):
   }
 }
 
+/**
+ * Is `directory` named by an entry of `PATH`?
+ *
+ * Only an **absolute** entry counts (§15.13 point 6). An empty entry means the
+ * current directory and a relative one means a directory that moves with it;
+ * neither puts anything durably on `PATH`, and `samePath` resolves a relative
+ * entry against the cwd — so without this a `PATH` of `bin` would report `~/bin`
+ * as on `PATH` for any process that happened to be sitting in `$HOME`.
+ */
 function directoryOnPath(directory: string): boolean {
   for (const entry of (process.env[SYSTEM_ENV.PATH] ?? "").split(delimiter)) {
-    if (entry !== "" && samePath(entry, directory)) return true;
+    if (entry !== "" && isAbsolute(entry) && samePath(entry, directory)) return true;
   }
   return false;
 }
@@ -1368,9 +1491,13 @@ export async function cmdEnable(
   // Validate before touching the filesystem, so a bad name reports itself even
   // when the install directory cannot be resolved (§12.9).
   const binaries = targetBinaries(names, exclude);
-  // §15.13 — resolve, then probe, then fall back; nothing is written before the
-  // directory is known to be writable.
-  const installDirectory = prepareInstallDirectory(resolveInstallDirectory(options, false));
+  // §15.13 — choose, announce, probe, then fall back; nothing is written before
+  // the directory is known to be writable.
+  const choice = chooseInstallDirectory(options);
+  if (choice.preferredOver !== undefined) {
+    advisory(shimDirectoryPreferred(choice.preferredOver, choice.directory));
+  }
+  const installDirectory = prepareInstallDirectory(choice.directory);
 
   const generate = process.platform === "win32" ? generateWin32Link : generatePosixLink;
   // §10.1 — Windows always bakes the path in (the bare `node` its wrappers used
