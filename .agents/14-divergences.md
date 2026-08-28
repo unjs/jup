@@ -525,3 +525,41 @@ and `--preserve-symlinks-main` is the case where the *module* is loaded from the
 link as well: the name still arrives (through `argv[1]`), and the entry still has
 to be found through the realpath. Only the native single-binary form is exempt,
 because it dispatches on `basename(argv[0])` and imports nothing.
+
+## 14.26 The shim names its interpreter by absolute path — [correct]
+
+**Corepack:** §10.3's Windows wrappers name the interpreter as a bare `node` in
+their fallback branch, and the POSIX stub opens `#!/usr/bin/env node`. Both are
+`PATH`-relative — worse, on Windows the `.cmd` is *current-directory*-relative.
+
+**Consequence:** two ways for the wrong file to run.
+
+1. `cmd.exe` resolves a bare command name from the **current directory** before
+   consulting `PATH`. Any repository that ships a `node.bat`, `node.cmd` or
+   `node.exe` — a wrapper script, a vendored toolchain, a file a contributor
+   added — takes over the interpreter of every shim invoked from that directory.
+   Corepack is largely shielded by accident: its shims sit beside `node.exe` in
+   the Node install directory, so `@IF EXIST "%~dp0\node.exe"` is the branch that
+   fires and the fallback is dead code. §15.13 moves ours to
+   `%LOCALAPPDATA%\jup\bin`, where there is no `node.exe` — which promotes the
+   unsafe branch to the *default* Windows path. Git Bash reaches the same
+   fallback in the extensionless wrapper.
+2. `env node` re-searches `PATH`, and §15.32 asks the user to put the shim
+   directory **first** on it. `node` is a binary name in the table (§15.39), so
+   once `enable node` (§10.5) has claimed that name there, `env` finds the shim
+   instead of the runtime and the stub execs itself without bound — on Windows a
+   fresh `cmd.exe` per level rather than one spinning process.
+
+**Required:** the interpreter is named by the **absolute `realpath`** of the
+runtime executing `enable`, as specified in §10.1's *Baking in the interpreter*
+and rendered as `<node>` in §10.3's three bodies. Windows always bakes it in;
+POSIX does so only when the install directory claims the interpreter's own name,
+which keeps the shipped stub relocatable and §10.7's read-only `distFolder`
+unwritten for everyone else.
+
+The cost is that a shim directory populated by one runtime keeps naming that
+runtime after the user upgrades it in place — which is the intent: an interpreter
+chosen once at `enable` time is exactly the property a `PATH` lookup fails to
+give. Re-running `enable` re-bakes it, and the surviving `%~dp0\node.exe` /
+`$basedir/node` branches still make a shim directory that *is* the Node install
+directory relocatable.

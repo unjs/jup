@@ -774,6 +774,14 @@ describe("restoring what enable displaced (§15.15)", () => {
 });
 
 describe("Windows shims (§10.3)", () => {
+  /**
+   * §10.3's `<node>` — the absolute `realpath` of the runtime running `enable`,
+   * which is what the fallback branches name instead of a bare `node` (§14.26).
+   * Computed here the way the spec words it, not read back from the module.
+   */
+  const node = realpathSync(process.execPath);
+  const posixNode = node.replaceAll("\\", "/");
+
   /** The three bodies, transcribed from §10.3 rather than from the implementation. */
   const expectedCmd = (rel: string) =>
     `@SETLOCAL
@@ -781,7 +789,7 @@ describe("Windows shims (§10.3)", () => {
   "%~dp0\\node.exe"  "%~dp0\\${rel}" %*
 ) ELSE (
   @SET PATHEXT=%PATHEXT:;.JS;=;%
-  node  "%~dp0\\${rel}" %*
+  "${node}"  "%~dp0\\${rel}" %*
 )
 `;
 
@@ -796,7 +804,7 @@ esac
 if [ -x "$basedir/node" ]; then
   exec "$basedir/node"  "$basedir/${rel}" "$@"
 else
-  exec node  "$basedir/${rel}" "$@"
+  exec "${posixNode}"  "$basedir/${rel}" "$@"
 fi
 `;
 
@@ -821,9 +829,9 @@ if (Test-Path "$basedir/node$exe") {
   $ret=$LASTEXITCODE
 } else {
   if ($MyInvocation.ExpectingInput) {
-    $input | & "node$exe"  "$basedir/${rel}" $args
+    $input | & "${node}"  "$basedir/${rel}" $args
   } else {
-    & "node$exe"  "$basedir/${rel}" $args
+    & "${node}"  "$basedir/${rel}" $args
   }
   $ret=$LASTEXITCODE
 }

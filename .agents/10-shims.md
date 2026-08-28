@@ -77,6 +77,42 @@ Both `chmod 0o755`.
 > §10.3: a `.cmd` or `.ps1` wrapper invokes `<runtime> <stub>`, so by the time the
 > tool runs the invocation name is genuinely gone. Windows keeps one stub per name.
 
+### Baking in the interpreter
+
+> **Divergence (§14.26).** Wherever a shim names the interpreter as a bare `node`,
+> a conforming implementation MUST instead name it by **absolute path**: the
+> `realpath` of the runtime executing `enable`, resolved at `enable` time. This
+> covers §10.3's three Windows wrappers and, conditionally, the POSIX stub's
+> shebang. Two failures make the bare name unusable:
+>
+> 1. **`cmd.exe` resolves a bare name from the current directory first.** `cd` into
+>    any repository that ships a `node.bat`, `node.cmd` or `node.exe`, type
+>    `yarn --version`, and that file runs. Corepack was shielded by accident — its
+>    shims sat beside `node.exe` in the Node install directory, so the `IF EXIST`
+>    branch was the one that fired. §15.13 moves ours to `%LOCALAPPDATA%\jup\bin`,
+>    where there is no `node.exe`, which makes the fallback the *default* Windows
+>    path. Git Bash has the same problem in the extensionless wrapper.
+> 2. **`#!/usr/bin/env node` re-searches `PATH`,** which §15.32 asks the user to put
+>    the shim directory *first* on. Once `enable node` (§10.5) has claimed the name
+>    `node` there, `env` finds the shim rather than the runtime and the stub execs
+>    itself until the machine gives up — on Windows a new `cmd.exe` per level rather
+>    than one spinning process.
+>
+> `realpath`, because `process.execPath` is frequently a symlink into a version
+> manager's store and the point of baking a path in is that it names one file rather
+> than whatever a lookup would answer later.
+>
+> **When it applies.** Windows always bakes it in. POSIX bakes it into the shared
+> stub's shebang only when the install directory claims the interpreter's own name —
+> either this run enables `node`, or an earlier one already installed a shim of ours
+> at that name. Otherwise the stub keeps `#!/usr/bin/env node`, so the shipped stubs
+> stay relocatable and §10.7's read-only `distFolder` is not rewritten for a user who
+> never asked for a `node` shim. A *foreign* `node` in the directory does not count.
+>
+> The `%~dp0\node.exe` and `$basedir/node` branches are kept: they cost nothing, and
+> they are what keeps a shim directory that *is* the Node install directory
+> relocatable.
+
 ## 10.2 POSIX shim creation
 
 ```
@@ -153,6 +189,11 @@ idempotency short-circuit on Windows.
 Let `<rel>` be the path from the shim directory to `dist/<B>.js`, backslash-separated
 for `.cmd` and forward-slash-separated for the other two.
 
+Let `<node>` be the **absolute** path of the runtime `enable` is itself running
+under, `realpath`'d — see §10.1's *Baking in the interpreter*. Windows always bakes
+it in. It is forward-slash-separated in the sh body, which is the spelling Git Bash
+and MSYS accept for a Windows path, and left as-is in the other two.
+
 **`<B>.cmd`**
 ```bat
 @SETLOCAL
@@ -160,7 +201,7 @@ for `.cmd` and forward-slash-separated for the other two.
   "%~dp0\node.exe"  "%~dp0\<rel>" %*
 ) ELSE (
   @SET PATHEXT=%PATHEXT:;.JS;=;%
-  node  "%~dp0\<rel>" %*
+  "<node>"  "%~dp0\<rel>" %*
 )
 ```
 The `PATHEXT` manipulation removes `.JS` from the executable-extension list so that
@@ -179,7 +220,7 @@ esac
 if [ -x "$basedir/node" ]; then
   exec "$basedir/node"  "$basedir/<rel>" "$@"
 else
-  exec node  "$basedir/<rel>" "$@"
+  exec "<node>"  "$basedir/<rel>" "$@"
 fi
 ```
 
@@ -205,9 +246,9 @@ if (Test-Path "$basedir/node$exe") {
   $ret=$LASTEXITCODE
 } else {
   if ($MyInvocation.ExpectingInput) {
-    $input | & "node$exe"  "$basedir/<rel>" $args
+    $input | & "<node>"  "$basedir/<rel>" $args
   } else {
-    & "node$exe"  "$basedir/<rel>" $args
+    & "<node>"  "$basedir/<rel>" $args
   }
   $ret=$LASTEXITCODE
 }
