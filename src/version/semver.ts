@@ -31,8 +31,15 @@ const PRE_ID = String.raw`(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)`;
 
 const BUILD = String.raw`[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*`;
 
+/**
+ * The prefix is `v?`, not `[v=]*`: node-semver's strict `valid()` — what
+ * corepack's `isValidVersion` calls — takes one bare `v` and nothing else, so
+ * `=1.2.3` and `vv1.2.3` are not versions. `=1.2.3` *is* a valid range, and
+ * calling it exact would skip the registry query and the `.jup.lock` resolution
+ * record §04.1/§15.23 require of a range.
+ */
 const FULL_RE = new RegExp(
-  String.raw`^[v=]*(${NUM})\.(${NUM})\.(${NUM})(?:-(${PRE_ID}(?:\.${PRE_ID})*))?(?:\+(${BUILD}))?$`,
+  String.raw`^v?(${NUM})\.(${NUM})\.(${NUM})(?:-(${PRE_ID}(?:\.${PRE_ID})*))?(?:\+(${BUILD}))?$`,
 );
 
 /** `<major>` with the wildcard spellings a range may use in its place. */
@@ -54,10 +61,27 @@ function toNumber(raw: string): number | null {
   return Number.isSafeInteger(value) ? value : null;
 }
 
+/** A prerelease identifier of only digits — semver 2.0.0 §11.4.1's "numeric". */
+const NUMERIC_ID_RE = /^\d+$/;
+
+/**
+ * Whether an identifier kept as a string is numeric anyway (oversized). The
+ * leading-digit gate skips the regex for ordinary alphanumeric ids; this runs
+ * under {@link compare}, on the warm path.
+ */
+function isNumericIdentifier(id: string): boolean {
+  const first = id.charCodeAt(0);
+  return first >= 0x30 && first <= 0x39 && NUMERIC_ID_RE.test(id);
+}
+
 function splitPrerelease(raw: string | undefined): Array<string | number> {
   if (!raw) return [];
   return raw.split(".").map((id) => {
-    if (/^\d+$/.test(id)) {
+    // §11.4.1 classifies on the *spelling* ("identifiers consisting of only
+    // digits"), not on whether the host can hold the value — as node-semver does.
+    // An oversized id keeps its digits and its numeric class; only the
+    // representation falls back to a string.
+    if (NUMERIC_ID_RE.test(id)) {
       const value = Number.parseInt(id, 10);
       if (Number.isSafeInteger(value)) return value;
     }
@@ -125,9 +149,22 @@ export function isValidRange(value: string): boolean {
 function compareIdentifiers(a: string | number, b: string | number): -1 | 0 | 1 {
   const aNum = typeof a === "number";
   const bNum = typeof b === "number";
-  // Numeric identifiers always have lower precedence than alphanumeric ones.
+  // Numeric identifiers rank below alphanumeric ones (§11.4.3). A number is a
+  // numeric id held exactly; a string is alphanumeric *or* a numeric one past
+  // every safe integer — so a number is below a string in either mixed case.
   if (aNum && !bNum) return -1;
   if (bNum && !aNum) return 1;
+
+  if (!aNum && !bNum) {
+    const aDigits = isNumericIdentifier(a);
+    const bDigits = isNumericIdentifier(b);
+    if (aDigits !== bDigits) return aDigits ? -1 : 1;
+    // Two oversized numeric ids compare numerically (§11.4.1). `PRE_ID` forbids
+    // leading zeroes, so longer-is-greater then lexicographic *is* numeric
+    // order — and stays exact, which coercing 20 digits to a float would not.
+    if (aDigits && a.length !== b.length) return a.length < b.length ? -1 : 1;
+  }
+
   if (a === b) return 0;
   return a < b ? -1 : 1;
 }
@@ -219,17 +256,36 @@ function isWildcard(raw: string | undefined): boolean {
   return raw === undefined || raw === "x" || raw === "X" || raw === "*";
 }
 
-function parsePartial(value: string): Partial | null {
+/**
+ * `strict` is passed only by the plain/operator comparator path, because that is
+ * the only place node-semver rejects a component after a wildcard: `^1.x.3`,
+ * `~1.x.3` and `1.x.3 - 2.0.0` are accepted there and mean the truncated range,
+ * which is exactly what the lenient read below returns.
+ */
+function parsePartial(value: string, strict = false): Partial | null {
   const match = PARTIAL_RE.exec(value);
   if (!match) return null;
 
-  if (isWildcard(match[1])) {
+  // node-semver offers the prerelease slot only after a written third component,
+  // so `1-beta`, `1.2-beta` and `1.x-beta` are not ranges while `1.2.x-beta` is.
+  // Accepting them dropped the tag, quietly changing what the range meant.
+  if (match[4] !== undefined && match[3] === undefined) return null;
+
+  const wildMajor = isWildcard(match[1]);
+  const wildMinor = isWildcard(match[2]);
+  // A wildcard ends the version: `1.x.3`, `x.2.3` and `*.2.3` are not ranges.
+  // Returning at the first wildcard silently discarded the rest, so `pnpm@1.x.3`
+  // resolved to the newest 1.x instead of being read as a tag (§04.1).
+  if (strict && (wildMajor || wildMinor) && !isWildcard(match[3])) return null;
+  if (strict && wildMajor && !wildMinor) return null;
+
+  if (wildMajor) {
     return { major: null, minor: null, patch: null, prerelease: [] };
   }
   const major = toNumber(match[1]!);
   if (major === null) return null;
 
-  if (isWildcard(match[2])) {
+  if (wildMinor) {
     return { major, minor: null, patch: null, prerelease: [] };
   }
   const minor = toNumber(match[2]!);
@@ -373,7 +429,7 @@ function parseComparatorToken(token: string): ComparatorSet | null {
   // A bare operator (`>`) carries no constraint, matching node-semver.
   if (rest.length === 0) return [ANY];
 
-  const p = parsePartial(rest);
+  const p = parsePartial(rest, true);
   if (!p) return null;
   return xRangeComparators(op, p);
 }
