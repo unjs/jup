@@ -27,11 +27,8 @@
 
 import {
   accessSync,
-  closeSync,
   constants as fsConstants,
-  openSync,
   readFileSync,
-  readSync,
   realpathSync,
   statSync,
 } from "node:fs";
@@ -46,12 +43,15 @@ import {
   SYSTEM_ENV,
 } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, hostTarget, SUPPORTED_NAMES } from "../config/table.ts";
-import { isCI, isEnvFileEligible, parseEnvFile } from "../project/env.ts";
+import { isEnvFileEligible, parseEnvFile } from "../project/env.ts";
 import { redactUserinfo, UsageError } from "../errors-cold.ts";
 import { parseManifest } from "../utils/json.ts";
 import {
+  CACHE_DIRECTORY,
   integrityForHost,
   LOCKFILE_NAME,
+  readCachedEntry,
+  readEntry,
   readLockfile,
   type Resolution,
   resolutionKey,
@@ -67,7 +67,8 @@ import {
 } from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
-import { resolveInstallDirectory, SHIM_MARKER, stubNameFor, WIN32_WRAPPER_HEADS } from "./shims.ts";
+import { resolveInstallDirectory } from "./shims.ts";
+import { isOurShim } from "../run/exec.ts";
 import { tlsSettings } from "../net/tls.ts";
 import {
   findInstalledVersion,
@@ -122,14 +123,14 @@ export interface ProjectInfo {
 
 export interface ResolutionInfo {
   /**
-   * `pinned` — the field names the version outright; `locked` — `.jup.lock`
-   * answers it; `cache` — nothing is recorded, but an installed version
-   * satisfies the range; `network` — resolving needs a request, which `info`
-   * does not make; `frozen` — a request is needed and is refused; `fallback` —
-   * no project spec, so the global default decides; `unknown` — the spec is
-   * unusable.
+   * `pinned` — the field names the version outright; `locked` — the recorded
+   * `jup.lock` answers it; `cached` — the memo in `node_modules/.jup` answers it
+   * and has not expired (§15.23); `cache` — nothing is recorded or memoed, but an
+   * installed version satisfies the range; `network` — resolving needs a
+   * request, which `info` does not make; `fallback` — no project spec, so the
+   * global default decides; `unknown` — the spec is unusable.
    */
-  status: "pinned" | "locked" | "cache" | "network" | "frozen" | "fallback" | "unknown";
+  status: "pinned" | "locked" | "cached" | "cache" | "network" | "fallback" | "unknown";
   name: string | null;
   version: string | null;
   /** `<algo>.<hex>`, the build-suffix spelling of §02.1. */
@@ -148,13 +149,17 @@ export interface LockfileInfo {
   /** `<name>@<range as written>` — the key this project's spec would use. */
   key: string | null;
   resolution: Resolution | null;
-  /** §15.23 / §15.37 — whether the file may be written or refreshed. */
+  /** §15.23 / §15.37 — whether `use` and `up` may write the recorded file. */
   frozen: boolean;
-  frozenSource:
-    | typeof ENV.FROZEN_LOCKFILE
-    | JupSpelling<typeof ENV.FROZEN_LOCKFILE>
-    | typeof SYSTEM_ENV.CI
-    | "default";
+  frozenSource: typeof ENV.FROZEN_LOCKFILE | JupSpelling<typeof ENV.FROZEN_LOCKFILE> | "default";
+  /** §15.23 — the resolution cache in `node_modules/.jup`, which ordinary runs write. */
+  cache: {
+    path: string;
+    present: boolean;
+    resolution: Resolution | null;
+    /** Whether that entry has aged past its 24-hour window; `false` with none. */
+    expired: boolean;
+  };
 }
 
 export interface EnvFileInfo {
@@ -550,23 +555,39 @@ function locateManifest(cwd: string): string | undefined {
 /** §15.23 — the recorded resolution for this project's spec, and whether it may move. */
 function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
   const frozen = envEntry(ENV.FROZEN_LOCKFILE);
-  const frozenSource =
-    frozen !== undefined && frozen.value !== "" ? frozen.name : isCI() ? SYSTEM_ENV.CI : "default";
 
   const descriptor = descriptorOf(project);
   const usable = project.name !== null && project.range !== null && usesLockfile(descriptor);
   const key = usable ? resolutionKey(descriptor) : null;
 
   const data = readLockfile(dir);
+  const cacheDir = join(dir, CACHE_DIRECTORY);
+  const cache = readLockfile(cacheDir);
+
+  // Both entries come back through the lockfile readers rather than out of the
+  // parsed file by key, because `info`'s whole contract is to report what the
+  // next run would use. Indexing directly skipped §15.23's satisfaction gate, so
+  // a `10.0.0` recorded under `^11.0.0` — a hand edit, a bad merge, a restored
+  // `node_modules` — was reported as the locked version while the run resolved
+  // straight past it. `readEntry` and `readCachedEntry` apply that gate, and the
+  // expiry rule, in the one place they are written.
+  const recorded = key === null ? null : readEntry(dir, descriptor);
+  const memo = key === null ? null : readCachedEntry(dir, descriptor);
 
   return {
     path: join(dir, LOCKFILE_NAME),
     present: data !== null,
     key,
-    resolution: key === null || data === null ? null : (data.resolutions[key] ?? null),
-    // Mirrors `env.isFrozenLockfile()` with no `refresh`: `info` never writes.
-    frozen: frozen !== undefined && frozen.value !== "" ? frozen.value === "1" : isCI(),
-    frozenSource,
+    resolution: recorded,
+    // Mirrors `env.isFrozenLockfile()`: `info` itself never writes either file.
+    frozen: frozen?.value === "1",
+    frozenSource: frozen !== undefined && frozen.value !== "" ? frozen.name : "default",
+    cache: {
+      path: join(cacheDir, LOCKFILE_NAME),
+      present: cache !== null,
+      resolution: memo?.entry ?? null,
+      expired: memo?.expired ?? false,
+    },
   };
 }
 
@@ -645,13 +666,20 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
     };
   }
 
-  // §15.23 — the refusal happens before any request, so this is a fact rather
-  // than a prediction.
-  if (lockfile.frozen) {
+  // §15.23 — nothing is recorded, so the memo in `node_modules/.jup` answers, while
+  // it is still inside its window. An expired one is not reported here: the next
+  // run would go and ask, and this command reports what that run would do, not
+  // what it would fall back to if the registry were unreachable.
+  const memo = lockfile.cache.resolution;
+  if (memo !== null && !lockfile.cache.expired) {
+    const integrity = integrityForHost(memo);
     return {
       ...base,
-      status: "frozen",
-      reason: `${project.name}@${project.range} is not resolved in ${LOCKFILE_NAME} and lockfile updates are disabled (${lockfile.frozenSource})`,
+      status: "cached",
+      version: memo.resolved,
+      hash: integrity === undefined ? null : hashOfIntegrity(integrity),
+      source: lockfile.cache.path,
+      installed: findInstalledVersion(project.name, memo.resolved) !== null,
     };
   }
 
@@ -1001,48 +1029,16 @@ function samePath(left: string, right: string): boolean {
   }
 }
 
-/**
- * §14.16 — a file is one of ours iff it carries the generated-stub marker.
- *
- * The read follows symlinks, which is what makes it work for a POSIX shim: the
- * link in the shim directory points at a stub next to the library entry, and the
- * marker lives in the stub. Only the head is read, because the same question
- * gets asked of whatever `PATH` turned up — which may be a large native binary.
+/*
+ * §14.16's ownership test — a file is ours iff it carries the generated-stub
+ * marker, or is one of §10.3's wrappers naming our stub — is `isOurShim` in
+ * `run/exec.ts`, imported above. It used to be copied here, which made three
+ * spellings of one rule and let them drift: the shared one additionally
+ * recognises a **dangling** symlink that still names our stub (#751, §15.14),
+ * and that is the answer `info` wants. A shim whose stub has moved away is one
+ * of ours — it is what `enable` replaces and `disable` removes — and calling it
+ * somebody else's would hide the exact breakage the report exists to explain.
  */
-function isOurShim(file: string, binName: string): boolean {
-  const head = readHead(file, 1024);
-  if (head === undefined) return false;
-  if (head.includes(SHIM_MARKER)) return true;
-  // §10.3 — on Windows the entry on `PATH` is a `.cmd`/`.ps1`/sh wrapper that
-  // *invokes* the marked stub rather than carrying the marker itself, so it is
-  // recognised the way `enable` recognises it (§14.16): by the exact head it
-  // begins with, plus the `<binName>.mjs` stub it names. "Mentions `node` and
-  // some `.js`" is not that test — it matches npm's own `npm.cmd`, which is
-  // exactly what §10.3's wrappers are modelled on, and `info` then reported a
-  // Node distribution's npm as a shim of ours.
-  return (
-    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) &&
-    head.includes(stubNameFor(binName))
-  );
-}
-
-function readHead(file: string, length: number): string | undefined {
-  let fd: number;
-  try {
-    fd = openSync(file, "r");
-  } catch {
-    return undefined;
-  }
-  try {
-    const buffer = Buffer.allocUnsafe(length);
-    const bytes = readSync(fd, buffer, 0, length, 0);
-    return buffer.toString("utf8", 0, bytes);
-  } catch {
-    return undefined;
-  } finally {
-    closeSync(fd);
-  }
-}
 
 /** §10.4 — `which(name)`, returning the file rather than its directory. */
 function lookupOnPath(name: string): string | null {
@@ -1151,6 +1147,12 @@ export function formatReport(report: InfoReport): string {
   out.push(
     line(`frozen`, `${report.lockfile.frozen ? `yes` : `no`} (${report.lockfile.frozenSource})`),
   );
+  out.push(line(`cache`, report.lockfile.cache.path));
+  if (report.lockfile.cache.resolution !== null) {
+    const memo = report.lockfile.cache.resolution;
+    const age = report.lockfile.cache.expired ? ` (expired)` : ``;
+    out.push(line(`cached`, `${memo.resolved}${age}`));
+  }
 
   out.push(section(`Environment`));
   if (report.envFile === null) {

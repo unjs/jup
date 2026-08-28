@@ -694,7 +694,7 @@ function linuxLibc(arch: string): string {
  *
  * glibc is unsuffixed, which is not a preference but a compatibility rule: it is
  * the answer on every host that has ever reached this function, so committed
- * `.jup.lock` files and every existing `targets` map keep meaning what they
+ * `jup.lock` files and every existing `targets` map keep meaning what they
  * meant. A musl host is the only one that sees a new key, and it is the host
  * that was being told the wrong thing before.
  */
@@ -902,7 +902,7 @@ export function getPackageManagerFor(binName: string): string | undefined {
  *
  * Three consequences hang off the answer, and all three are about a **digest
  * that is not portable**: `use` must not write one into `packageManager`
- * (§15.28), `.jup.lock` must record one per host rather than one flat
+ * (§15.28), `jup.lock` must record one per host rather than one flat
  * (§15.23), and the install must not fold one into the locator's reference.
  *
  * Derived rather than declared, so a band cannot say one thing and do another:

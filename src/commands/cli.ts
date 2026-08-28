@@ -27,12 +27,14 @@ import {
   SUPPORTED_NAMES,
 } from "../config/table.ts";
 import { isFrozenLockfile } from "../project/env.ts";
-import { explainFetchFailure, messages, UsageError } from "../errors-cold.ts";
+import { advisory, explainFetchFailure, messages, UsageError } from "../errors-cold.ts";
 import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
 import {
   LOCKFILE_NAME,
-  readResolution,
+  readKnownResolution,
+  readLockfile,
+  removeCachedResolution,
   removeResolution,
   resolutionKey,
   usesLockfile,
@@ -271,7 +273,7 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
  * The project's own spec, plus the lookup that produced it.
  *
  * `up` needs both halves: the descriptor to resolve, and the lookup to tell a
- * declared `packageManager` range (which §15.23 refreshes in `.jup.lock`)
+ * declared `packageManager` range (which §15.23 refreshes in `jup.lock`)
  * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
  */
 function resolveProjectSpec(
@@ -321,15 +323,22 @@ export async function cmdInstall(args: string[]): Promise<number> {
 
   // §15.23 — warm the cache with the version the project will actually run.
   // `install` exists to fill a Docker layer, and resolving a range afresh here
-  // can legitimately answer something newer than `.jup.lock` records — which
-  // would cache one version and then run another, offline, in the layer that has
-  // no network to fix it with. The recorded resolution is consulted under the
-  // same key the proxy path uses: the pin itself, not the `devEngines` range that
-  // §09.1 lets outrank it for `up`.
+  // can legitimately answer something newer than the project's files record —
+  // which would cache one version and then run another, offline, in the layer
+  // that has no network to fix it with.
+  //
+  // Both files are consulted, in §15.23's order, through the same helper the
+  // proxy path uses: an ordinary run no longer writes the committed `jup.lock`,
+  // so "no recorded resolution, a live memo" is now the *common* state, and an
+  // `install` blind to the memo caches the newest match while the very next
+  // `pnpm install` reads the memo and demands the older one. The key is the
+  // pin's, not the `devEngines` range that §09.1 lets outrank it for `up`.
   const pinned = lookup.getSpec({ requireVersion: false });
-  const recorded = usesLockfile(pinned) ? readResolution(dirname(lookup.target), pinned) : null;
+  const known = usesLockfile(pinned)
+    ? readKnownResolution(dirname(lookup.target), pinned).locator
+    : null;
 
-  const locator = recorded ?? (await resolveOrThrow(descriptor, { allowTags: true }));
+  const locator = known ?? (await resolveOrThrow(descriptor, { allowTags: true }));
 
   out(`${messages.addingToCache(locator.name, locator.reference)}\n`);
   // `cacheOnly` suppresses §04.7's guarded last-known-good bump.
@@ -527,18 +536,27 @@ export async function cmdUp(args: string[]): Promise<number> {
     throw new UsageError(messages.upNotSemver());
   }
 
-  // §15.23 — when the `packageManager` field itself holds a range, that range is
-  // the user's statement of intent and `up` must not overwrite it with a version:
-  // what it refreshes is the recorded resolution. A pin synthesised from
-  // `devEngines` is a different case and still becomes a real pin (row 114).
-  const pin = lookup.hasPin === true ? lookup.getSpec({ requireVersion: false }) : undefined;
+  // §15.23 — when the pin the project declares *is* a range, that range is the
+  // user's statement of intent and `up` must not overwrite it with a version:
+  // what it refreshes is the recorded resolution.
+  //
+  // The question is what the spec says, never which field happens to carry it
+  // (§15.26 — one logical pin). `use <name>@<range>` writes the range into
+  // `devEngines.packageManager.version` alone whenever no top-level
+  // `packageManager` exists, which is also the shape pnpm 11.21 generates; a
+  // gate asking for a top-level string skipped both, collapsed the range to an
+  // exact version, and deleted the very `jup.lock` entry `use` had just
+  // recorded. `getSpec` answers for all three shapes: the top-level field when
+  // it is there, the `devEngines` declaration when it is not — and `descriptor`
+  // is already that answer whenever no `devEngines` range outranked it (§09.1).
+  const pin = lookup.range === undefined ? descriptor : declaredPin(lookup);
   if (pin !== undefined && usesLockfile(pin)) {
     if (!isValidRange(pin.range)) {
       // A dist-tag pin. §09.4 has always refused these, and recording a tag's
       // current expansion is `use`'s job, not `up`'s.
       throw new UsageError(messages.upNotSemver());
     }
-    if (isFrozenLockfile({ refresh: true })) {
+    if (isFrozenLockfile()) {
       throw new UsageError(messages.lockfileUnresolved(pin.name, pin.range));
     }
 
@@ -551,6 +569,13 @@ export async function cmdUp(args: string[]): Promise<number> {
     const dir = dirname(lookup.target);
     return applyToProject(refreshed, (reference, spec) => {
       writeResolution(dir, pin, { name: pin.name, reference }, spec.hash, isPerHost(refreshed));
+      // The memo under `node_modules` answers the same key and now holds the
+      // version this command just superseded — and it answers *alone* wherever
+      // the recorded file is not visible: an `up` not yet committed, a `git
+      // stash`, a CI cache that restores `node_modules` without the lockfile.
+      // Retiring it is what stops the project silently running the old version
+      // (§15.23).
+      removeCachedResolution(dir, resolutionKey(pin));
       // §15.35l — the resolution file is what changed, so that is what is named.
       out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
       // The field is unchanged, so that is what the package manager migrates from.
@@ -584,6 +609,22 @@ export async function cmdUp(args: string[]): Promise<number> {
   return pinToProject(highest, { here, pinStyle });
 }
 
+/**
+ * The pin as the manifest declares it, or `undefined` when it cannot be read.
+ *
+ * Only reached when a `devEngines` range outranked the pin (§09.1), which is the
+ * one case where a `packageManager` field too malformed to parse — a number, a
+ * bare `@` — is not already fatal: the project has a usable range either way, so
+ * `up` refreshes on that and overwrites the broken field, as §09.5 has `use` do.
+ */
+function declaredPin(lookup: Extract<SpecResult, { type: "Found" }>): Descriptor | undefined {
+  try {
+    return lookup.getSpec({ requireVersion: false });
+  } catch {
+    return undefined;
+  }
+}
+
 /* -------------------------------------------------------------------------- */
 /* §09.5 — use                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -603,12 +644,89 @@ export async function cmdUse(args: string[]): Promise<number> {
   const pinStyle = readPinStyle(parsed);
 
   const descriptor = parseSpec(pattern, CLI_SOURCE, { requireVersion: false });
+
+  // §15.23 — a **semver range** is a statement of intent, and `use` keeps it:
+  // the field goes on saying `^11.0.0` and the version it resolved to is
+  // recorded in `jup.lock` beside it. Three patterns are not that statement and
+  // still pin exactly, as they always have: an exact version, which is its own
+  // record; a dist-tag, which is a question about right now rather than a
+  // standing constraint; and a bare name, whose `*` was synthesised by
+  // `parseSpec` rather than typed — pinning a project to "any pnpm, forever"
+  // because somebody typed `jup use pnpm` would be nobody's intent.
+  const range =
+    pattern.slice(1).includes("@") && isValidRange(descriptor.range) && usesLockfile(descriptor);
+
+  // §15.27 — `--here` mutates `cwd`'s own manifest, creating it if absent.
+  const here = hasFlag(parsed, "--here");
+
+  // Checked before the resolve so a frozen job fails on the flag it set rather
+  // than after a download it cannot use.
+  //
+  // §15.23's flag governs the *file*, not one syntax of pin: an exact `use` over
+  // a project that currently declares a range retires that range's recorded
+  // resolution below — dropping the key, and `rm`ing `jup.lock` outright when it
+  // was the only one — and a deletion is a write. So the exact form is refused
+  // too, and for the same reason, whenever the committed file actually holds the
+  // entry it would remove.
+  if (isFrozenLockfile()) {
+    const frozen = range ? descriptor : recordedPinToRetire(here, descriptor.name);
+    if (frozen !== undefined) {
+      throw new UsageError(messages.lockfileUnresolved(frozen.name, frozen.range));
+    }
+  }
+
   // `useCache: false`: `corepack use yarn@stable` must ask what stable means
   // today, not what is lying around in the store.
   const resolved = await resolveOrThrow(descriptor, { allowTags: true, useCache: false });
 
-  // §15.27 — `--here` mutates `cwd`'s own manifest, creating it if absent.
-  return pinToProject(resolved, { here: hasFlag(parsed, "--here"), pinStyle });
+  const options = { here, pinStyle };
+  return range ? pinRangeToProject(descriptor, resolved, options) : pinToProject(resolved, options);
+}
+
+/**
+ * §15.23 / §09.5 — `use <name>@<range>`: the range goes in the field, the
+ * version it resolved to goes in `jup.lock`.
+ *
+ * This is the only path that creates the recorded resolution from scratch —
+ * `up` refreshes one, and a normal run never writes it at all — so it also has
+ * to retire whatever the field used to say, exactly as an exact `use` does.
+ */
+function pinRangeToProject(
+  descriptor: Descriptor,
+  locator: Locator,
+  options?: { here?: boolean; pinStyle?: PinStyle },
+): Promise<number> {
+  return applyToProject(locator, (_reference, spec) => {
+    const { previousPackageManager, target, written } = writePin(
+      process.cwd(),
+      // §15.28 — the digest is per-host for a native tool, so it never reaches
+      // the manifest; for a range it never does anyway, since the field holds no
+      // version for a digest to describe. `jup.lock` below is where it lands.
+      { name: descriptor.name, reference: descriptor.range, resolved: locator.reference },
+      options,
+    );
+
+    const dir = dirname(target);
+    writeResolution(dir, descriptor, locator, spec.hash, isPerHost(locator));
+    // The memo for this same key is now a note about what the registry said
+    // before this decision was taken, and it answers alone wherever the
+    // committed file is not visible — an uncommitted `use`, a `git stash`, a CI
+    // cache holding `node_modules` but not the lockfile (§15.23).
+    removeCachedResolution(dir, resolutionKey(descriptor));
+
+    // §15.27, §15.35l — both files changed, so both are named, in the order they
+    // are read back: the field that declares the range, then the file that says
+    // what it currently means.
+    out(`${messages.updatedManifest(target, descriptor.name, written)}\n`);
+    out(
+      `${messages.updatedManifest(join(dir, LOCKFILE_NAME), descriptor.name, locator.reference)}\n`,
+    );
+
+    const stale = staleResolutionKey(previousPackageManager);
+    if (stale !== undefined && stale !== resolutionKey(descriptor)) removeResolution(dir, stale);
+
+    return previousPackageManager;
+  });
 }
 
 /**
@@ -675,7 +793,7 @@ function pinToProject(
   // mismatch, which is the one outcome a pin exists to prevent. The version is
   // still pinned exactly; what stands in for the digest is npm's signature over
   // the host's own artifact (§06.3, checked on every install), plus §15.23's
-  // per-host record in `.jup.lock` for the hosts that have actually run.
+  // per-host record in `jup.lock` for the hosts that have actually run.
   const perHost = isPerHost(locator);
 
   return applyToProject(locator, (reference, spec) => {
@@ -724,7 +842,39 @@ function readPinStyle(parsed: ParsedArgs): PinStyle | undefined {
 }
 
 /**
- * The `.jup.lock` key a replaced `packageManager` value used to own, or
+ * §15.23 — the declared range pin whose recorded resolution an *exact* mutation
+ * is about to retire, but only when the committed file actually holds it.
+ *
+ * `isFrozenLockfile` governs "whether the project's `jup.lock` may be written",
+ * and a deletion is a write — the entry goes, and the file with it when it was
+ * the only one. So the exact form of `use` is refused under the flag on exactly
+ * the projects where it would change that file, and nowhere else: a project with
+ * no recorded entry has nothing to freeze, and refusing there would break every
+ * `use` in CI for a file that does not exist.
+ *
+ * The walk is the mutating one, with the same `--here` and the same tool, so the
+ * manifest read here is the manifest {@link pinToProject} is about to write.
+ */
+function recordedPinToRetire(here: boolean, tool: string): Descriptor | undefined {
+  const lookup = discoverProjectSpec(process.cwd(), { mutating: true, here, tool });
+  if (lookup.type !== "Found") return undefined;
+
+  let pin: Descriptor;
+  try {
+    pin = lookup.getSpec({ requireVersion: false });
+  } catch {
+    // §09.5 — a malformed field is one `use` overwrites rather than reads, and
+    // a field nobody can parse owns no resolution key either.
+    return undefined;
+  }
+  if (!usesLockfile(pin)) return undefined;
+
+  const data = readLockfile(dirname(lookup.target));
+  return data !== null && Object.hasOwn(data.resolutions, resolutionKey(pin)) ? pin : undefined;
+}
+
+/**
+ * The `jup.lock` key a replaced `packageManager` value used to own, or
  * `undefined` when it owned none (the literal `unknown`, or an exact pin).
  */
 function staleResolutionKey(previous: string): string | undefined {
@@ -839,15 +989,20 @@ export async function cmdCache(args: string[]): Promise<number> {
   // shim dying with `bad interpreter` and `enable`, the repair, unreachable
   // behind the broken `node` shim. So the version holding it is spared.
   //
-  // The lookup is skipped when there is nothing installed, which is both the
-  // no-op case and the second `cache clean` in a row: nothing can be spared out
-  // of an empty store, so the read of the stub — and the import of the shim
-  // module that does it — is not paid for. That skip cannot hide the state this
-  // guards against, because a runtime `enable` could bake in was installed by
-  // this tool and therefore carries a marker. On the ordinary install, where
-  // §15.43 has already put the interpreter outside `<home>`, the lookup costs
-  // one open of a file whose first line answers, and nothing more.
-  const pinned = installed.length === 0 ? undefined : await interpreterInStore();
+  // The lookup is unconditional. It is tempting to skip it when `listInstalled`
+  // comes back empty — nothing can be spared out of an empty store — but that
+  // list is not the store: §07.2 makes it skip any version directory without a
+  // `.jup` marker, and a marker is exactly what an interrupted install, a disk
+  // cleaner, or a hand-edited store loses. Such a store lists as empty while
+  // still holding the runtime the shims' shebang names, and the skip would
+  // `rm -rf <home>/v1` out from under them, print `Nothing to remove`, and leave
+  // every shim dying with `bad interpreter` behind an `enable` that can no
+  // longer start. §15.44 exists for precisely the installs a marker cannot vouch
+  // for, so its guard must not be gated on one. The cost on the ordinary install
+  // — where §15.43 has already put the interpreter outside `<home>` — is one
+  // open of a file whose first line answers, on a command about to delete the
+  // whole store.
+  const pinned = await interpreterInStore();
 
   if (!all) {
     // Nothing pinned is the overwhelmingly common case, and it takes the
@@ -862,15 +1017,24 @@ export async function cmdCache(args: string[]): Promise<number> {
     }
 
     const { name, version } = pinned.installed;
-    await cleanSparing(pinned.installed);
-    process.stderr.write(
-      `${messages.interpreterKept(name, version, pinned.interpreter, getHomeFolder())}\n`,
-    );
+    const failed = await cleanSparing(pinned.installed);
+    // §15.44's line, and then whatever could not be removed — in that order,
+    // because the spared version is the reason the count is low by design and a
+    // failure is the reason it is low by accident.
+    advisory(messages.interpreterKept(name, version, pinned.interpreter, getHomeFolder()));
+    for (const failure of failed) advisory(messages.cacheEntryNotRemoved(failure.path));
+
     // Counted by exclusion rather than as `length - 1`: the spared directory is
     // not necessarily one of the versions `listInstalled` counts (§07.2 wants a
-    // marker), and the number printed has to be the number actually removed.
+    // marker), and the number printed has to be the number actually removed —
+    // which excludes anything a failed `rm` left standing.
+    const installFolder = getInstallFolder();
+    const survived = new Set(failed.map((failure) => failure.path));
     const removed = installed.filter(
-      (entry) => entry.name !== name || entry.version !== version,
+      (entry) =>
+        (entry.name !== name || entry.version !== version) &&
+        !survived.has(join(installFolder, entry.name)) &&
+        !survived.has(join(installFolder, entry.name, entry.version)),
     ).length;
     out(
       `${removed === 0 ? messages.nothingToRemove() : messages.removedFromCache(removed, getInstallFolder())}\n`,
@@ -883,8 +1047,13 @@ export async function cmdCache(args: string[]): Promise<number> {
   // user who reads it after the fact has already lost the `jup` that would tell
   // them why.
   if (pinned !== undefined) {
-    process.stderr.write(
-      `${messages.interpreterRemoved(pinned.installed.name, pinned.installed.version, pinned.interpreter, getHomeFolder())}\n`,
+    advisory(
+      messages.interpreterRemoved(
+        pinned.installed.name,
+        pinned.installed.version,
+        pinned.interpreter,
+        getHomeFolder(),
+      ),
     );
   }
 
@@ -968,27 +1137,42 @@ function storeVersionOf(file: string): { name: string; version: string } | undef
  * `<install>/<name>` both have to survive for the spared version to. Everything
  * else goes, other versions of the same tool and §07.5's temp folders included:
  * sparing one directory is not a licence to keep anything else.
+ *
+ * Every removal is attempted, and the ones that failed are **returned** rather
+ * than thrown. `rm(…, {force: true})` forgives a missing path but still rejects
+ * on `EACCES`/`EPERM` — a tree left root-owned by an earlier `sudo` run, an
+ * immutable file, a handle Windows still holds — and one rejection out of
+ * `Promise.all` used to abort the whole command mid-clean: the §15.44 line never
+ * printed, the count never printed, and the user was left with a raw error and
+ * no idea what had been removed or what had deliberately been kept. A clean that
+ * cannot finish must still say what it did.
  */
-async function cleanSparing(spare: { name: string; version: string }): Promise<void> {
+async function cleanSparing(spare: {
+  name: string;
+  version: string;
+}): Promise<Array<{ path: string }>> {
   const installFolder = getInstallFolder();
   const keep = join(installFolder, spare.name, spare.version);
 
-  const entries = await readdir(installFolder).catch(() => []);
-  await Promise.all(
-    entries.map(async (name) => {
-      const toolFolder = join(installFolder, name);
-      if (name !== spare.name) return rm(toolFolder, { recursive: true, force: true });
+  const targets: string[] = [];
+  for (const name of await readdir(installFolder).catch(() => [])) {
+    const toolFolder = join(installFolder, name);
+    if (name !== spare.name) {
+      targets.push(toolFolder);
+      continue;
+    }
+    for (const version of await readdir(toolFolder).catch(() => [])) {
+      const versionFolder = join(toolFolder, version);
+      if (versionFolder !== keep) targets.push(versionFolder);
+    }
+  }
 
-      const versions = await readdir(toolFolder).catch(() => []);
-      await Promise.all(
-        versions
-          .map((version) => join(toolFolder, version))
-          .filter((versionFolder) => versionFolder !== keep)
-          .map((versionFolder) => rm(versionFolder, { recursive: true, force: true })),
-      );
-      return undefined;
-    }),
+  const results = await Promise.allSettled(
+    targets.map((path) => rm(path, { recursive: true, force: true })),
   );
+  return targets
+    .filter((_path, index) => results[index]?.status === "rejected")
+    .map((path) => ({ path }));
 }
 
 /* -------------------------------------------------------------------------- */

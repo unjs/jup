@@ -737,20 +737,18 @@ describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
     expect(isCI()).toBe(true);
   });
 
-  it("defaults to thawed outside CI and frozen inside it", () => {
+  it("is thawed by default, in CI as anywhere else", () => {
     expect(isFrozenLockfile()).toBe(false);
 
+    // §15.23 — no CI default: nothing writes the recorded file implicitly any
+    // more, so there is no implicit write for CI to guard against.
     process.env.CI = "1";
-    expect(isFrozenLockfile()).toBe(true);
-    // ...but a command the user ran *to* refresh the file is not what the CI
-    // default is guarding against.
-    expect(isFrozenLockfile({ refresh: true })).toBe(false);
+    expect(isFrozenLockfile()).toBe(false);
   });
 
-  it("lets an explicit value win in both directions, refresh included", () => {
+  it("freezes on an explicit 1, and on nothing else", () => {
     process.env.COREPACK_FROZEN_LOCKFILE = "1";
     expect(isFrozenLockfile()).toBe(true);
-    expect(isFrozenLockfile({ refresh: true })).toBe(true);
 
     process.env.CI = "1";
     process.env.COREPACK_FROZEN_LOCKFILE = "0";
@@ -758,7 +756,7 @@ describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
 
     // An empty value is "unset", as everywhere else in this module.
     process.env.COREPACK_FROZEN_LOCKFILE = "";
-    expect(isFrozenLockfile()).toBe(true);
+    expect(isFrozenLockfile()).toBe(false);
   });
 
   // §15.37 marks it env-file eligible: it is a behavioural preference, not a

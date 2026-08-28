@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors.ts";
 import { pathWith, resolveBinPath, SHIM_MARKER } from "../../src/run/exec.ts";
 import { execNative } from "../../src/run/native.ts";
@@ -79,6 +79,15 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(root, { recursive: true, force: true });
+});
+
+// Every env stub is undone between cases, whether or not the case that set it
+// reached its own last line. A failing assertion used to leave `COREPACK_HOME`
+// pointing at the runtime's own prefix for the rest of the file, which turns one
+// failure into a page of them; `shims.test.ts` and `cli.test.ts` both hook it
+// here for the same reason.
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 describe("resolveBinPath — §08.1", () => {
@@ -347,6 +356,23 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
     ]);
   });
 
+  it("writes into the child's environment and never into our own", async () => {
+    // `env` defaults to `process.env`, so a forward that wrote *into* the object
+    // it was handed would set `COREPACK_HOST_RUNTIME` on this process for the
+    // rest of its life — §14.5 refuses that same value from an env file, and a
+    // mutating default is the only other way into it. Called the way the
+    // signature permits, with no environment of the caller's own.
+    const out = join(root, "host-runtime-default-env");
+    expect(await execNative(probe(), [out])).toBe(0);
+
+    expect(readFileSync(out, "utf8").split("\n").slice(0, 2)).toEqual([
+      realpathSync(process.execPath),
+      realpathSync(process.execPath),
+    ]);
+    expect(process.env.COREPACK_HOST_RUNTIME).toBeUndefined();
+    expect(process.env.JUP_HOST_RUNTIME).toBeUndefined();
+  });
+
   it("passes an inherited value through when our own runtime is in the store", async () => {
     // The position a store runtime is in, without a 126 MB copy of one: move
     // `<home>` over the runtime this test is running under, and the boundary
@@ -365,8 +391,6 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
     // And it is not invented either: a chain that started inside the store has
     // nothing to forward, and `enable` falls through to its `PATH` walk.
     expect(await observed({ ...process.env })).toEqual(["", ""]);
-
-    vi.unstubAllEnvs();
   });
 });
 

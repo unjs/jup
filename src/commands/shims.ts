@@ -83,6 +83,7 @@ import {
   SHIM_MARKER,
   PROXY_STUB_NAME,
   stubNameFor,
+  WIN32_WRAPPER_HEADS,
 } from "../run/exec.ts";
 import { ENTRY_CANDIDATES, findCliEntry, findEntryModule } from "../utils/self.ts";
 import { getHomeFolder, isInsideHome } from "../cache/store.ts";
@@ -98,7 +99,7 @@ const TOOL_NAME = "jup";
  * invocation and this module imports that one, not the other way round;
  * re-exported here because this is where the concept belongs.
  */
-export { SHIM_MARKER, PROXY_STUB_NAME, stubNameFor } from "../run/exec.ts";
+export { SHIM_MARKER, PROXY_STUB_NAME, stubNameFor, WIN32_WRAPPER_HEADS } from "../run/exec.ts";
 
 /**
  * §10.1 — the interpreter the generic shebang names.
@@ -216,10 +217,12 @@ function requireInterpreterPath(): string {
  *
  * The shims themselves are the record, exactly as §15.13 point 7 has it — a
  * sidecar naming the interpreter could disagree with the file the kernel will
- * actually exec. On POSIX that file is the shared stub, whose shebang every shim
- * in the directory reaches through a symlink; on Windows it is the wrappers,
- * which name the interpreter each (§10.3) because the stub's own shebang is dead
- * weight there.
+ * actually exec. On POSIX the answer is the shebang of the stub each installed
+ * shim links to, read *through* the shim so that a shim written by another copy
+ * of the tool still answers; on Windows it is the wrappers, which name the
+ * interpreter each (§10.3) because the stub's own shebang is dead weight there.
+ * Neither lookup consults `PATH`, and both answer "none" rather than failing
+ * when there is no shim directory to read.
  *
  * Both seams exist for the tests, which drive a temporary dist folder and a
  * temporary shim directory; production passes neither.
@@ -230,15 +233,69 @@ export async function bakedInterpreter(options?: {
 }): Promise<string | undefined> {
   if (process.platform === "win32") return win32BakedInterpreter(options?.installDirectory);
 
-  const stub = join(options?.distFolder ?? resolveDistFolder(), PROXY_STUB_NAME);
+  // The installed shims first, and only then our own copy of the stub. A shim is
+  // a symlink (§10.2), so opening it reads the stub it actually points at —
+  // which is the stub of whichever copy of the tool wrote it. That copy is
+  // frequently not this one (an `npx jup enable`, a global that has since been
+  // reinstalled), and reading only our own `dist/` would then miss the store
+  // path the running shims are dying on and let `cache clean` delete it. Falling
+  // back to our own stub covers the install that has no shim directory to read —
+  // §15.44 answers "none" rather than failing there, and our stub is the same
+  // record one directory over.
+  return (
+    (await posixShimInterpreter(options?.installDirectory)) ??
+    (await readShebangOf(join(options?.distFolder ?? resolveDistFolder(), PROXY_STUB_NAME)))
+  );
+}
+
+/**
+ * The shebang of the stub the *installed* shims run through, or `undefined`.
+ *
+ * `resolveInstallDirectory` rather than `chooseInstallDirectory`, and for the
+ * reason {@link win32BakedInterpreter} gives: this is a read of where the shims
+ * already are, and §15.13 point 7 forbids that read from consulting `PATH`.
+ *
+ * Only an entry carrying {@link SHIM_MARKER} answers. The per-user shim
+ * directory is full of other programs (§15.32 says so), and a foreign `node`
+ * sitting there would otherwise contribute its own first line to a decision
+ * about what `cache clean` may delete.
+ */
+async function posixShimInterpreter(installDirectory?: string): Promise<string | undefined> {
+  let directory: string;
+  try {
+    directory = installDirectory ?? resolveInstallDirectory({}, false);
+  } catch {
+    return undefined;
+  }
+
+  for (const binName of targetBinaries([], [], { includeOptOut: true })) {
+    // `readHead` opens through the symlink, so this is the stub's own first
+    // line without a `readlink` of our own.
+    const head = await readHead(join(directory, binName), 1024);
+    if (head === undefined || !head.includes(SHIM_MARKER)) continue;
+    const interpreter = shebangOf(head);
+    if (interpreter !== undefined) return interpreter;
+  }
+  return undefined;
+}
+
+/** The interpreter named by `file`'s shebang, or `undefined` if it has none. */
+async function readShebangOf(file: string): Promise<string | undefined> {
   // 1 KiB covers a shebang naming any path a filesystem will hold; the first
   // line is all that is read out of it.
-  const head = await readHead(stub, 1024);
-  if (head === undefined || !head.startsWith("#!")) return undefined;
+  const head = await readHead(file, 1024);
+  return head === undefined ? undefined : shebangOf(head);
+}
 
-  // `#!/usr/bin/env node` — the relocatable spelling the shipped stubs keep —
-  // lands here too and is simply not a path any caller will find in the store.
-  // `trim` takes the `\r` off a stub that has been through a CRLF checkout.
+/**
+ * The interpreter out of a file's first line.
+ *
+ * `#!/usr/bin/env node` — the relocatable spelling the shipped stubs keep —
+ * lands here too and is simply not a path any caller will find in the store.
+ * `trim` takes the `\r` off a stub that has been through a CRLF checkout.
+ */
+function shebangOf(head: string): string | undefined {
+  if (!head.startsWith("#!")) return undefined;
   const interpreter = (head.split("\n", 1)[0] ?? "").slice(2).trim();
   return interpreter === "" ? undefined : interpreter;
 }
@@ -288,16 +345,6 @@ const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;
 
 /** Windows writes three files per binary name (§10.3); `disable` removes all three. */
 const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
-
-/**
- * The first line of each §10.3 wrapper.
- *
- * The wrappers cannot carry {@link SHIM_MARKER}: §10.3 fixes their bodies byte
- * for byte and the conformance suite compares them literally. They are
- * recognised instead by their shebang plus the `<binName>.mjs` stub they invoke,
- * which no unrelated binary of the same name would contain.
- */
-export const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
 
 /** `0` where the platform has no `O_NOFOLLOW` (Windows), exactly as `tar.ts` does it. */
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
@@ -1007,11 +1054,21 @@ async function readHead(file: string, length: number): Promise<string | undefine
 async function ensureExecutable(file: string, distFolder: string): Promise<void> {
   if (process.platform === "win32") return;
 
-  const mode = (await stat(file).catch(() => undefined))?.mode;
+  // `access`, not a mode comparison: §15.45 asks for a `chmod` "only when the
+  // execute bits are missing", and the question that decides whether a shim runs
+  // is whether *this* caller can exec the stub — which is what `X_OK` answers.
+  // Demanding all three bits instead would fail a `0o744` or `0o700` stub that
+  // already runs, and then either rewrite its mode on every warm `enable`
+  // (§10.2 property 4) or, on an install owned by someone else, turn a working
+  // installation into a refusal. It also loops: `chmod +x` under a non-zero
+  // umask yields `0o744`, which would fail the same test the message just asked
+  // the user to satisfy.
+  if (isExecutableFile(file)) return;
+
   // Unreadable is not this function's failure to report: the caller has just
   // compared the file's contents, so anything that hides it now is a race, and
   // the shim it writes will fail loudly rather than silently.
-  if (mode === undefined || (mode & 0o111) === 0o111) return;
+  if ((await stat(file).catch(() => undefined)) === undefined) return;
 
   // `0o755`, the mode §10.1 states and every other write here uses, rather than
   // `mode | 0o111`: the point is to leave the file in the one shape the spec
@@ -1144,6 +1201,14 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
         // not something we write through — `pin.ts` writes the user's manifest
         // the same way and for the same reason.
         await writeFile(tmp, pinned, { flag: "wx", mode: mode & 0o777 });
+        // `open`'s mode argument is masked by the umask, so the `mode:` above is
+        // a floor and not the mode: under `umask 077` a `0o755` entry comes back
+        // `0o700`, and every other user's `jup` on `PATH` is then a file the
+        // lookup passes over in silence — §15.45's failure, moved one file over,
+        // which the last bullet of §15.46 exists to prevent. `chmod` is not
+        // masked, so it is what actually carries the mode across (`ensureStub`
+        // does the same after its own write).
+        await chmod(tmp, mode & 0o777);
         await rename(tmp, file);
       } catch (error) {
         await rm(tmp, { force: true });
@@ -1891,17 +1956,24 @@ export async function cmdEnable(
   // only runtime in sight is one of ours. Nothing is written yet, so the failure
   // leaves both directories exactly as they were; the alternatives would be a
   // shebang that execs itself (§14.26) or one `cache clean` invalidates.
+  const claimsName = await claimsInterpreter(installDirectory, binaries);
   const interpreter =
-    process.platform === "win32" || (await claimsInterpreter(installDirectory, binaries))
-      ? requireInterpreterPath()
-      : undefined;
+    process.platform === "win32" || claimsName ? requireInterpreterPath() : undefined;
 
-  // §15.46 — the same pin goes into our own CLI entry, under the same condition:
-  // what makes the stub's `env node` unsafe makes `bin.mjs`'s unsafe too, and a
-  // user who never claimed the name keeps a byte-identical entry (§10.7). Before
-  // any shim is written, so a refusal here leaves the shim directory exactly as
-  // it found it — the ordering §15.45 gives the execute-bit check.
-  if (interpreter !== undefined) await pinCliEntry(distFolder, interpreter);
+  // §15.46 — the same pin goes into our own CLI entry, but **not** under the
+  // wrapper's "always on Windows" condition: under the *stub's*. The recursion
+  // §15.46 removes is `#!/usr/bin/env node` finding our own shim, and only a run
+  // that claims the interpreter's name can put a shim there. Windows never reads
+  // that shebang at all — `jup.cmd` is npm's cmd-shim and invokes the runtime
+  // itself — so pinning there buys nothing and costs everything: `enable yarn`
+  // against an admin-owned or read-only package directory (Chocolatey, Scoop,
+  // `C:\Program Files`, a container image) would fail `cliEntryNotWritable` with
+  // no shims written, and that message's remedy — stop claiming the name — is
+  // inert when the platform is the trigger.
+  //
+  // Before any shim is written, so a refusal here leaves the shim directory
+  // exactly as it found it — the ordering §15.45 gives the execute-bit check.
+  if (claimsName && interpreter !== undefined) await pinCliEntry(distFolder, interpreter);
 
   // §10.5 — all binaries are processed concurrently.
   const installed = await Promise.all(

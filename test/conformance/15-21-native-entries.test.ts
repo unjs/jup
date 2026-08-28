@@ -294,7 +294,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
     const fixture = createFixture({ name: "app", packageManager: "bun@^1.4.0" });
     // A colleague's machine got here first.
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify(
         {
           version: 1,
@@ -310,9 +310,18 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
       )}\n`,
     );
 
-    expect((await run(["bun", "--version"], options(fixture))).exitCode).toBe(0);
+    const before = fixture.read("jup.lock");
 
-    const lock = fixture.json(".jup.lock") as {
+    // An ordinary run takes the recorded version, verifies its own download
+    // through npm's signature (§06.3) — the tier a native artifact always has —
+    // and writes nothing: §15.23 leaves the project's file to `use` and `up`.
+    expect((await run(["bun", "--version"], options(fixture))).exitCode).toBe(0);
+    expect(fixture.read("jup.lock")).toBe(before);
+
+    // Recording this host's digest is what `use` is for, and it is additive.
+    expect((await run(["use", "bun@^1.4.0"], options(fixture))).exitCode).toBe(0);
+
+    const lock = fixture.json("jup.lock") as {
       resolutions: Record<string, { resolved: string; integrity: Record<string, string> }>;
     };
     const entry = lock.resolutions["bun@^1.4.0"]!;
@@ -321,6 +330,10 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube and nub", () => {
     // is not, and a run on one host must not invalidate the record for another.
     expect(entry.integrity["some-other-host"]).toBe("sha512-theirs");
     expect(entry.integrity[hostTarget()]).toMatch(/^sha512-/);
+    // And the field keeps the range it declared.
+    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toBe(
+      "bun@^1.4.0",
+    );
   });
 
   it("220: the default-version lookup pins no digest, because the launcher's is the wrong one", async () => {

@@ -35,7 +35,7 @@ const BUILD = String.raw`[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*`;
  * The prefix is `v?`, not `[v=]*`: node-semver's strict `valid()` — what
  * corepack's `isValidVersion` calls — takes one bare `v` and nothing else, so
  * `=1.2.3` and `vv1.2.3` are not versions. `=1.2.3` *is* a valid range, and
- * calling it exact would skip the registry query and the `.jup.lock` resolution
+ * calling it exact would skip the registry query and the `jup.lock` resolution
  * record §04.1/§15.23 require of a range.
  */
 const FULL_RE = new RegExp(

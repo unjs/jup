@@ -22,7 +22,7 @@
  *   it.** An embedded key stays trusted until its own `expires` says otherwise;
  *   a refresh can only *add* keyids.
  * * **A damaged cache is not fatal.** Same precedent as `lastKnownGood.json`
- *   (§04.4, §07.8) and `.jup.lock` (§15.23): every failure mode degrades to
+ *   (§04.4, §07.8) and `jup.lock` (§15.23): every failure mode degrades to
  *   "no cached keys", which is where this build started.
  */
 

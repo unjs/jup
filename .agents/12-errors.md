@@ -208,7 +208,19 @@ Unable to execute <binPath>: <reason>                                           
 "packageManager" cannot name <name>: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead   §15.39
 Invalid <source>: expected a single version, optionally with # comments and key=value lines   §15.40
 Unsupported version "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"   §15.40
+! Unable to reach the registry to resolve <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until the registry answers again.   §15.23
+! The registry lists no release matching <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until a matching release is published.   §15.23
+! Could not remove <path>; it is still in the cache. Remove it by hand, or re-run with permission to delete it.   §09.7, §15.44
 ```
+
+The two stale-resolution lines are the only output a successful fallback produces,
+and both name the memo's path because the reader's next question is which file to
+delete. They are `!` lines and so are muted by `JUP_QUIET_ADVISORIES` (§11.5) — the
+run is correct, just not current. Their two halves are kept distinct because the
+remedies differ: an unreachable registry is somebody's outage and will pass, while a
+range nothing matches will not fix itself. Neither may be raised for an error that is
+a statement about the *request* — a disabled network, a minimum release age, a 401,
+a 403, a 404, a certificate that did not verify — which §15.23 requires to propagate.
 
 The two version-file messages name `<source>` — the file's path relative to the
 initial cwd, the same origin §03.4 reports for a manifest — because in a monorepo

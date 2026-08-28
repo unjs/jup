@@ -447,6 +447,13 @@ The layout is renamed too, and each of the four costs less than leaving it:
 terms (§15.13). That directory is this spec's own invention — Corepack installs
 shims beside its own binary — so there is nothing at the old path to strand.
 
+§15.23's `jup.lock` and its `node_modules/.jup/` memo are not in that table because
+nothing moved: Corepack rejects ranges outright and has never written a resolution file
+of any spelling, so these are jup's own names with no predecessor to strand. That is
+also why they are the one part of the layout that MUST NOT grow a legacy read path — a
+fallback there would buy compatibility with a file that never existed, paid for with a
+second `stat` on the range fast path (§01.3).
+
 The env file is the one that could have stranded something. `.corepack.env` is a
 file real repositories have on disk today, so §03.2 renames it to `.jup.env` and
 keeps reading the old name: `.jup.env` first, `.corepack.env` only when the first

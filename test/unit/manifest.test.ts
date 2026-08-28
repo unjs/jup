@@ -1349,6 +1349,59 @@ describe("writePin — §15.26", () => {
     });
   });
 
+  // §15.12 — the sidecar describes the version beside it. Declared beside a
+  // *range* it describes no single release, so it may not be folded into a
+  // `packageManager` pin that outranks it: the two would name different versions.
+  it("ignores a sidecar integrity declared beside a range (§15.12)", () => {
+    const spec = readSpecFromManifest(
+      {
+        packageManager: "yarn@1.22.4",
+        devEngines: { packageManager: { name: "yarn", version: "^1", integrity: "sha512-q83v" } },
+      },
+      join(root, "package.json"),
+    );
+
+    expect(spec.raw).toBe("yarn@1.22.4");
+  });
+
+  it("still folds a sidecar integrity declared beside the exact version (§15.12)", () => {
+    const spec = readSpecFromManifest(
+      {
+        packageManager: "yarn@1.22.4",
+        devEngines: {
+          packageManager: { name: "yarn", version: "1.22.4", integrity: "sha512-q83v" },
+        },
+      },
+      join(root, "package.json"),
+    );
+
+    expect(spec.raw).toBe("yarn@1.22.4+sha512.abcdef");
+  });
+
+  // `--pin-style=sidecar` is a request about how the digest is spelled, not
+  // permission to overwrite a member that speaks for another tool.
+  it("sidecar style does not write into another tool's devEngines member", () => {
+    manifest(".", {
+      packageManager: "yarn@1.22.0",
+      devEngines: {
+        packageManager: { name: "pnpm", version: "10.5.0", onFail: "ignore" },
+      },
+    });
+
+    writePin(
+      root,
+      { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" },
+      { pinStyle: "sidecar" },
+    );
+
+    expect(read().packageManager).toBe("yarn@1.22.4+sha512.abcdef");
+    expect(read().devEngines?.packageManager).toEqual({
+      name: "pnpm",
+      version: "10.5.0",
+      onFail: "ignore",
+    });
+  });
+
   it("updates both fields when devEngines names an exact version", () => {
     manifest(".", {
       packageManager: "yarn@1.22.0",
@@ -1393,6 +1446,97 @@ describe("writePin — §15.26", () => {
     writePin(root, { name: "yarn", reference: "1.22.4", hash: "sha512.not-hex" });
 
     expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
+  });
+
+  // §15.12 — the sidecar digest describes the version beside it, so a pin that
+  // moves the version must settle the digest in the same edit. Skipping the
+  // write instead leaves a digest for a release the project no longer uses; it
+  // is inert while the field holds a range, and turns into a hash mismatch on
+  // every install the moment anyone narrows the version back to one release.
+  it("removes a stale integrity when the pin becomes a range (§15.23)", () => {
+    manifest(".", {
+      devEngines: {
+        packageManager: { name: "pnpm", version: "10.5.0", integrity: "sha512-q83v" },
+      },
+    });
+
+    // §15.28 — a range pin carries no digest: the resolved one lives in `jup.lock`.
+    writePin(root, { name: "pnpm", reference: "^11.0.0", resolved: "11.1.2" });
+
+    expect(read().devEngines?.packageManager).toEqual({ name: "pnpm", version: "^11.0.0" });
+    // Not merely absent from the parse — gone from the text, so no later reader,
+    // human or tool, can fold it back in.
+    expect(readFileSync(join(root, "package.json"), "utf8")).not.toContain("integrity");
+  });
+
+  it("removes a stale integrity when the version moves and no digest is available", () => {
+    manifest(".", {
+      devEngines: {
+        packageManager: { name: "pnpm", version: "10.5.0", integrity: "sha512-q83v" },
+      },
+    });
+
+    // §15.28 — a per-host tool's digest never reaches the manifest.
+    writePin(root, { name: "pnpm", reference: "10.6.0" });
+
+    expect(read().devEngines?.packageManager).toEqual({ name: "pnpm", version: "10.6.0" });
+  });
+
+  it("keeps an integrity that still describes the version being written", () => {
+    manifest(".", {
+      devEngines: {
+        packageManager: { name: "pnpm", version: "10.5.0", integrity: "sha512-q83v" },
+      },
+    });
+
+    writePin(root, { name: "pnpm", reference: "10.5.0" });
+
+    // Nothing moved, so nothing is stale: §15.11 keeps the verification tier.
+    expect(read().devEngines?.packageManager).toEqual({
+      name: "pnpm",
+      version: "10.5.0",
+      integrity: "sha512-q83v",
+    });
+  });
+
+  it("writes a fresh digest when a range is narrowed back to an exact version", () => {
+    manifest(".", { devEngines: { packageManager: { name: "pnpm", version: "^11.0.0" } } });
+
+    writePin(
+      root,
+      { name: "pnpm", reference: "11.1.2+sha512.abcdef", hash: "sha512.abcdef" },
+      { pinStyle: "sidecar" },
+    );
+
+    expect(read().devEngines?.packageManager).toMatchObject({
+      name: "pnpm",
+      version: "11.1.2",
+      integrity: "sha512-q83v",
+    });
+  });
+
+  it("preserves indentation, line endings and key order when removing integrity", () => {
+    const original = [
+      "{",
+      `\t"devEngines": {`,
+      `\t\t"packageManager": {`,
+      `\t\t\t"name": "pnpm",`,
+      `\t\t\t"integrity": "sha512-q83v",`,
+      `\t\t\t"version": "10.5.0",`,
+      `\t\t\t"onFail": "error"`,
+      "\t\t}",
+      "\t}",
+      "}",
+      "",
+    ].join("\r\n");
+    write("package.json", original);
+
+    writePin(root, { name: "pnpm", reference: "^11.0.0", resolved: "11.1.2" });
+
+    const updated = readFileSync(join(root, "package.json"), "utf8");
+    expect(updated).toBe(
+      original.replace(`\t\t\t"integrity": "sha512-q83v",\r\n`, "").replace("10.5.0", "^11.0.0"),
+    );
   });
 
   it("reports the path it wrote, which is what the caller prints (§15.35l)", () => {

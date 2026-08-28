@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
@@ -23,6 +23,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 import { WARM_MODULES } from "../../build.config.ts";
 import { DEFINITIONS, getSpecFor } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
+import { messages as cold } from "../../src/errors-cold.ts";
+import { LOCKFILE_NAME } from "../../src/project/lockfile.ts";
 import {
   classifyInvocation,
   isGlobalInvocation,
@@ -648,6 +650,157 @@ describe("runProxy — .jup.env applies before the flags are read (test 52)", ()
 });
 
 /* ------------------------------------------------------------------ *
+ * §15.23 — the expired memo, and what it is allowed to answer for
+ * ------------------------------------------------------------------ */
+
+describe("runProxy — the expired-memo fallback (§15.23)", () => {
+  /** The version the memo names, installed so a fallback run can hand over. */
+  const STALE = "11.1.2";
+
+  /** A port nothing is listening on, for the one failure that is not a status. */
+  let deadRegistry: string;
+
+  beforeAll(async () => {
+    const closed = createServer();
+    await new Promise<void>((resolve) => closed.listen(0, "127.0.0.1", resolve));
+    deadRegistry = `http://127.0.0.1:${(closed.address() as AddressInfo).port}`;
+    await new Promise<void>((resolve, reject) => {
+      closed.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
+  /**
+   * A registry answering one fixed status, in a process of its own.
+   *
+   * The file-wide mock above cannot serve these: `run` is `spawnSync`, which
+   * blocks *this* process's event loop for the whole child run, so an
+   * in-process server never gets to answer and every request would look like a
+   * timeout — which is a transport failure, the very case these tests have to
+   * tell apart from a status.
+   */
+  async function statusRegistry(code: number): Promise<{ url: string; stop: () => void }> {
+    const script =
+      `require("node:http").createServer((q, s) => {` +
+      `s.writeHead(${code}, {"content-type": "application/json"}); s.end("{}");` +
+      `}).listen(0, "127.0.0.1", function () { process.stdout.write(String(this.address().port)); })`;
+    const child = spawn(process.execPath, ["-e", script], { stdio: ["ignore", "pipe", "ignore"] });
+    const port = await new Promise<string>((resolve, reject) => {
+      child.stdout.once("data", (chunk: Buffer) => resolve(chunk.toString()));
+      child.once("error", reject);
+    });
+    return { url: `http://127.0.0.1:${port}`, stop: () => void child.kill() };
+  }
+
+  /**
+   * A project whose spec is a **tag**, with an expired memo for it and the
+   * memoed version already in the store.
+   *
+   * The tag matters: §04.1 resolves it *before* step 4's store probe, so the
+   * resolution genuinely has to reach the registry even though the version it
+   * would return is installed. That is what makes the difference between
+   * "propagated" and "fell back" observable — one run fails, the other prints
+   * `pnpm@11.1.2` from the store.
+   */
+  function memoProject(): { cwd: string; home: string; memo: string } {
+    const { cwd, home } = makeProject({ packageManager: `pnpm@latest` });
+    const memo = join(cwd, "node_modules", ".jup", LOCKFILE_NAME);
+    mkdirSync(dirname(memo), { recursive: true });
+    writeFileSync(
+      memo,
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@latest": { resolved: STALE, expires: Date.now() - 1000 } },
+      })}\n`,
+    );
+    installFake(home, "pnpm", STALE);
+    return { cwd, home, memo };
+  }
+
+  const notice = cold.staleResolutionUnreachable("pnpm", "latest", STALE);
+
+  it("answers with the expired memo, and says so, when the registry is unreachable", () => {
+    const { cwd, home, memo } = memoProject();
+    const before = readFileSync(memo, "utf8");
+
+    const result = run(cwd, home, ["pnpm", "--version"], {
+      COREPACK_NPM_REGISTRY: deadRegistry,
+      COREPACK_NETWORK_RETRIES: "0",
+    });
+
+    // A connection that is refused is the case the fallback exists for.
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`pnpm@${STALE} --version\n`);
+    // And it is *announced*: a silent fallback is indistinguishable from a
+    // normal run, and recurs on every invocation until the outage ends.
+    expect(result.stderr).toBe(`${notice}\n`);
+    // The stamp is not extended, which is why the notice has to recur too.
+    expect(readFileSync(memo, "utf8")).toBe(before);
+  });
+
+  it("mutes the notice, not the fallback, under COREPACK_QUIET_ADVISORIES=1", () => {
+    const { cwd, home } = memoProject();
+
+    const result = run(cwd, home, ["pnpm", "--version"], {
+      COREPACK_NPM_REGISTRY: deadRegistry,
+      COREPACK_NETWORK_RETRIES: "0",
+      COREPACK_QUIET_ADVISORIES: "1",
+    });
+
+    // §11.5 — the line is one jup adds, so the mute covers it (§14.23).
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`pnpm@${STALE} --version\n`);
+    expect(result.stderr).toBe("");
+  });
+
+  it("propagates a network-disabled refusal rather than running the stale version", () => {
+    const { cwd, home } = memoProject();
+
+    const result = run(cwd, home, ["pnpm", "--version"], { COREPACK_ENABLE_NETWORK: "0" });
+
+    // §15.19's diagnostic, not a silent downgrade: a security control that
+    // reports success without having been applied is worse than one that stops.
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(`${cold.notInCacheOffline("pnpm", "latest")}\n`);
+    expect(result.stderr).not.toContain(notice);
+  });
+
+  it("propagates a 401 rather than running the stale version", async () => {
+    const { cwd, home } = memoProject();
+    const unauthorised = await statusRegistry(401);
+
+    const result = run(cwd, home, ["pnpm", "--version"], {
+      COREPACK_NPM_REGISTRY: unauthorised.url,
+      COREPACK_NETWORK_RETRIES: "0",
+    });
+    unauthorised.stop();
+
+    // A rotated or revoked token is permanent, so falling back would pin the
+    // project on the memoed version indefinitely — and never say so, since the
+    // stamp is not extended and the swallow repeats on every run.
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toContain("Server answered with HTTP 401");
+    expect(result.stderr).not.toContain(notice);
+  });
+
+  it("falls back for a 503, which is a registry that is degraded rather than sure", async () => {
+    const { cwd, home } = memoProject();
+    const unavailable = await statusRegistry(503);
+
+    const result = run(cwd, home, ["pnpm", "--version"], {
+      COREPACK_NPM_REGISTRY: unavailable.url,
+      COREPACK_NETWORK_RETRIES: "0",
+    });
+    unavailable.stop();
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`pnpm@${STALE} --version\n`);
+    expect(result.stderr).toBe(`${notice}\n`);
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * §01.3 — the fast-path budget (test 96)
  * ------------------------------------------------------------------ */
 
@@ -1250,6 +1403,73 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * Held at 260,000 rather than the 258,173 this leaves, on the same terms as
    * every raise above — and the lowering the previous entry says is owed is
    * still owed.
+   *
+   * And then **up, 260,000 -> 266,000**, for §15.23's split of the resolution
+   * file in two: a committed `jup.lock` that only `use` and `up` write, and a
+   * `node_modules/jup.lock` memo that ordinary runs write instead. 259,586 ->
+   * 265,546, **+5,960 or +2.3%**.
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | `CACHE_DIRECTORY`, `CACHE_TTL_MS`, `readCachedResolution`, `writeCachedResolution` | `project/lockfile.ts` | +5,317 |
+   * | the read order — recorded, memo, resolve — and the expired-memo fallback | `main.ts` | +791 |
+   * | the CI frozen default, deleted: nothing implicit writes any more | `project/env.ts` | -148 |
+   *
+   * What the warm path *lost* is not in that table and is the reason the change
+   * is worth its bytes: a range run no longer writes the project root, and no
+   * longer consults `COREPACK_FROZEN_LOCKFILE` before it may resolve. What it
+   * gained is one `readFileSync` of a second path, and only on a range run whose
+   * recorded file had nothing to say. Two thirds of the entry is prose, on the
+   * same terms as the `version-file.ts` entry above.
+   *
+   * Held at 266,000 rather than the 265,546 this leaves — the tightest margin
+   * any entry here has taken, deliberately: the next range-resolution change
+   * should have to argue for itself rather than land inside somebody else's
+   * headroom. The lowering two entries above still stands owed.
+   *
+   * And then **up, 266,000 -> 278,000**, for a review pass over §15.23 and the
+   * shim rules — six bug fixes and two seams, landing together across four warm
+   * modules and measured together. Source 259,586 -> 277,687, **+18,101 or +7.0%**; measured,
+   * `_warm.mjs` went 86,620 -> 90,478, **+3,858 bytes or +4.45%**.
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | the memo moved to `node_modules/.jup/`, the `expires` upper bound, `readEntry`/`readCachedEntry`, `readKnownResolution`, `removeCachedResolution` | `project/lockfile.ts` | +10,201 |
+   * | §15.23's fallback scoped to transport failures and announced; `fromRegistry` in place of the identity test | `main.ts` | +6,637 |
+   * | §15.43's shim recogniser completed, and `WIN32_WRAPPER_HEADS` moved here to be its one definition | `run/exec.ts` | +898 |
+   * | §15.12's sidecar folded only when the version beside it is exact | `project/manifest.ts` | +519 |
+   * | §15.23's CI frozen default, already gone; small net trims elsewhere | `project/env.ts` and three others | -154 |
+   *
+   * The ratio is the thing to read, on the terms this comment has used
+   * throughout: source grew 6.8% and the chunk 4.33%, so this is nearer an
+   * added-code entry than a prose one, and it should be. Four of the six are
+   * bug fixes with a failing case behind each — a memo npm deleted on every
+   * install, an `expires` believed however far out it read, a fallback that
+   * swallowed `COREPACK_ENABLE_NETWORK=0` and a rotated credential alike, and a
+   * recogniser blind to the very wrappers this tool writes. The other two are
+   * the seams that stopped the fixes from being pasted twice:
+   * `readKnownResolution` is §15.23's precedence order in one place rather than
+   * in `main.ts` and `install` separately, and `WIN32_WRAPPER_HEADS` now has one
+   * home rather than three.
+   *
+   * None of it moves off the warm path. `lockfile.ts` *is* the range fast path;
+   * `main.ts` is the branch taken when resolution fails; `exec.ts`'s recogniser
+   * decides what `PATH` entry may be baked into a shim. What did move off is the
+   * fallback's two advisory strings, which were written into `main.ts` and are
+   * now in `errors-cold.ts` behind the dynamic import that branch had already
+   * taken to classify the failure: measured on its own, `_warm.mjs` 90,870 ->
+   * 90,374, **-496 bytes**, for text a warm run can never print. That is the
+   * lowering mechanism this comment keeps pointing at, applied in the small.
+   *
+   * Held at 278,000 rather than the 277,687 this leaves, on the same terms as
+   * every raise above. Two things are owed. `project/lockfile.ts` at +10,201 is
+   * nearly double the +5,317 the entry above recorded for the same subsystem,
+   * and roughly two thirds of it is prose that the emitted chunk does not carry
+   * — which is an argument for the ceiling being measured on source, not against
+   * it, but it does mean the next range-resolution change starts with almost no
+   * headroom. And the lowering owed since the `errors.ts` split is now owed
+   * three times over: `config/table.ts` at 42,665 is still the largest resident,
+   * most of it data a `yarn --version` never reads past one entry of.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1261,6 +1481,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(260_000);
+    ).toBeLessThanOrEqual(278_000);
   });
 });

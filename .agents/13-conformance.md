@@ -185,7 +185,7 @@ row under either name. Row 41b covers the pair itself.
 | 111 | `up` with `packageManager: yarn@2.1.0` | bumps to the highest 2.x (`2.4.3`) |
 | 112 | `up` with `yarn@1.1.0` + `devEngines` range `"1.x \|\| 2.x"` | bumps to `2.4.3` — crosses majors |
 | 113 | Same with `onFail: "ignore"` | identical |
-| 114 | `up` with only `devEngines`, no `packageManager` | a `packageManager` field is created |
+| 114 | `up` with only `devEngines`, declaring an exact version | the declaration is updated in place; no `packageManager` is created (§15.26). A range declared there is instead kept and its resolution refreshed (§15.23) |
 | 115 | `up` with a non-semver pin | exit 1, `The 'jup up' command can only be used when…` |
 | 116 | `use`/`up` preserve the manifest's indentation and line endings | tab-indented and CRLF files round-trip unchanged |
 

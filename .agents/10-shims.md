@@ -83,8 +83,8 @@ Both `chmod 0o755`.
 > a conforming implementation MUST instead name it by **absolute path**: the
 > `realpath` of the runtime executing `enable`, resolved at `enable` time. This
 > covers §10.3's three Windows wrappers, conditionally the POSIX stub's shebang,
-> and — for the same reason and under the same condition — the tool's **own CLI
-> entry** (§15.46). Two failures make the bare name unusable:
+> and — for the same reason, and under the *stub's* condition on both platforms —
+> the tool's **own CLI entry** (§15.46). Two failures make the bare name unusable:
 >
 > 1. **`cmd.exe` resolves a bare name from the current directory first.** `cd` into
 >    any repository that ships a `node.bat`, `node.cmd` or `node.exe`, type
@@ -110,8 +110,10 @@ Both `chmod 0o755`.
 > stay relocatable and §10.7's read-only `distFolder` is not rewritten for a user who
 > never asked for a `node` shim. A *foreign* `node` in the directory does not count.
 >
-> **The same condition governs the tool's own CLI entry** — the file `package.json`'s
-> `bin` names, which opens `#!/usr/bin/env node` like any published Node program.
+> **The stub's condition governs the tool's own CLI entry on every platform** — the
+> file `package.json`'s `bin` names, which opens `#!/usr/bin/env node` like any
+> published Node program. Windows's unconditional rule is the wrappers' alone;
+> §15.46 says why the entry does not share it.
 > Consequence 2 reaches it exactly as it reaches the stub, and §15.46 has the rewrite:
 > its first line and nothing else, tested before it is written, skipped entirely where
 > the installation has no built entry to pin.
@@ -186,9 +188,9 @@ Four properties this MUST have:
 5. **The stub is executable when `enable` returns.** A symlink carries no mode of
    its own, so the bit the kernel checks is the stub's; a shim pointing at a
    non-executable stub is skipped by the `PATH` lookup without a word. `enable`
-   therefore `stat`s the stub it links to and `chmod`s it `0755` when the execute
-   bits are missing — **only** then, so property 4's "writes nothing" still holds
-   for the ordinary warm run. §15.45 has the case this exists for and what happens
+   therefore tests the stub it links to for executability and `chmod`s it `0755`
+   only when it is not executable — **only** then, so property 4's "writes nothing"
+   still holds for the ordinary warm run. §15.45 has the case this exists for and what happens
    when the `chmod` itself is refused.
 
 Anything else occupying the name — a plain file, a wrong symlink, a real binary — is

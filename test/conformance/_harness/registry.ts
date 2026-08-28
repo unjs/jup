@@ -38,6 +38,14 @@ export type RegistryMode =
   | "no_dist"
   /** §15.8: JFrog Artifactory's shape — signed at the root, stripped per version. */
   | "root_only_signatures"
+  /**
+   * The packument 5xxs while version documents and tarballs serve normally —
+   * the shape of a real registry incident, where the metadata API degrades and
+   * the CDN in front of the tarballs does not. It is the one arrangement that
+   * makes a *resolution* fail without also making the install fail, which is
+   * what §15.23's expired-memo fallback exists for.
+   */
+  | "packument_error"
   | "untrusted_key";
 
 export interface RecordedRequest {
@@ -289,6 +297,12 @@ export class MockRegistry {
     }
 
     if (rest.length === 0) {
+      if (this.mode === "packument_error") {
+        response.writeHead(503, { "content-type": "application/json" });
+        response.end(`{"error":"Service Unavailable"}`);
+        return;
+      }
+
       const versions: Record<string, unknown> = {};
       for (const version of entry.versions.keys()) {
         versions[version] = this.#versionDoc(name, version, base, "root");

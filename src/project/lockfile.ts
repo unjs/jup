@@ -1,5 +1,5 @@
 /**
- * `.jup.lock` — the resolution file for non-exact project specs (§15.23).
+ * `jup.lock` — the resolution file for non-exact project specs (§15.23).
  *
  * Corepack's four-year objection to ranges in `packageManager` is that they
  * "prevent using hashes" and "give a false sense of confidence". That is an
@@ -8,19 +8,33 @@
  * the digest of the bytes that version produced. Ranges for humans, a recorded
  * hash for reproducibility and integrity.
  *
- * Three properties are load-bearing and each shows up as a rule below:
+ * The same shape serves two files under very different rules (§15.23):
  *
- * * **An exact pin never touches this file** — not a read, not a `stat`. The
+ * * **The resolution file**, `<project>/jup.lock` — committed, authoritative,
+ *   written by nothing but the commands typed in order to change it, `jup use
+ *   <name>@<range>` and `jup up`. Running a package manager never edits it, so
+ *   the version a project runs on is one somebody chose, and `git status` stays
+ *   quiet.
+ * * **The resolution cache**, `<project>/node_modules/.jup/jup.lock` — host-local,
+ *   uncommitted, written by ordinary runs so a range costs one registry request
+ *   a day rather than one per invocation. Its entries carry an
+ *   {@link Resolution.expires} stamp; the recorded file's never do.
+ *
+ * Four properties are load-bearing, and each is a rule below:
+ *
+ * * **An exact pin never touches either file** — not a read, not a `stat`. The
  *   gate is {@link usesLockfile}, and every caller asks it first.
  * * **A recorded resolution costs one `readFileSync` and no network.** §01.3's
- *   fast-path budget extends to ranges, so a hit must not consult the registry,
- *   `lastKnownGood.json`, or the store directory listing.
- * * **A damaged file is not fatal.** It is derived state; the same precedent
- *   §04.4 sets for `lastKnownGood.json` applies, and every failure mode here
- *   degrades to "resolve normally" rather than blocking a run.
+ *   fast-path budget extends to ranges.
+ * * **The cache is never created out of nothing.** `node_modules` belongs to the
+ *   package manager: jup writes inside it when it is already there, and creates
+ *   nothing but its own `.jup` directory within it.
+ * * **A damaged file is not fatal.** Both are derived state, so every failure
+ *   mode degrades to "resolve normally" — §04.4's precedent for
+ *   `lastKnownGood.json`.
  */
 
-import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   isValidRange,
@@ -42,7 +56,40 @@ import type { Descriptor, Locator } from "../types.ts";
  * compatibility with a file that never existed, bought with a second `stat` on
  * the range fast path.
  */
-export const LOCKFILE_NAME = ".jup.lock";
+export const LOCKFILE_NAME = "jup.lock";
+
+/** The directory the memo lives inside, and the one jup never creates. */
+const MODULES_DIRECTORY = "node_modules";
+
+/**
+ * §15.23 — where the resolution *cache* lives, relative to the project.
+ *
+ * `node_modules` rather than the project root: the alternative is a second file
+ * beside the first that every project has to gitignore, or a store-side index
+ * keyed by a path that goes stale the moment a directory is renamed.
+ * `node_modules` is already ignored, already disposable, and already what gets
+ * deleted to start over.
+ *
+ * A dot-prefixed directory *within* it, because npm reads every visible entry in
+ * `node_modules` as an installed package: at `node_modules/jup.lock` the memo is
+ * `jup.lock@ extraneous` to `npm ls` and is deleted by the next `npm install`,
+ * which announces it as `removed 1 package`. It would be destroyed by the very
+ * command jup exists to run, its window would never once close on its own, and
+ * the user would be told about a package nobody installed. That is why every peer
+ * tool keeping state here hides it the same way — `.package-lock.json`,
+ * `.modules.yaml`. The file inside keeps its plain name: the directory, not the
+ * spelling, says which of §15.23's two files this is.
+ */
+export const CACHE_DIRECTORY = join(MODULES_DIRECTORY, ".jup");
+
+/**
+ * §15.23 — how long a cached resolution stands before it is resolved again.
+ *
+ * The cache keeps a range off the network; it does not freeze it there, which is
+ * the committed file's job. A day is short enough that `pnpm@latest` still means
+ * "recent", long enough that a working day makes one request per range.
+ */
+export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** The only `version` this build understands; anything else reads as "no resolutions". */
 export const LOCKFILE_VERSION = 1;
@@ -74,6 +121,19 @@ export interface Resolution {
    * exactly the right degradation, and is why this did not need a `version` bump.
    */
   integrity?: string | Record<string, string>;
+  /**
+   * Cache entries only (§15.23): epoch milliseconds after which the range is
+   * resolved again. The recorded file never carries one — a committed decision
+   * does not rot.
+   *
+   * A stamp is believed only inside the window it may claim: one *without* an
+   * `expires` reads as already expired, and so does one further out than
+   * {@link CACHE_TTL_MS} from now. Both halves are needed for the property that
+   * matters — a memo can cost a resolution, never pin a version forever — since
+   * a `node_modules` restored from an image, or written under a fast clock,
+   * carries a stamp that would otherwise hold the range for as long as it says.
+   */
+  expires?: number;
 }
 
 interface LockfileData {
@@ -134,10 +194,17 @@ export function readLockfile(dir: string): LockfileData | null {
   const kept: Record<string, Resolution> = {};
   for (const [key, value] of Object.entries(resolutions as Record<string, unknown>)) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    const { resolved, integrity } = value as { resolved?: unknown; integrity?: unknown };
+    const { resolved, integrity, expires } = value as {
+      resolved?: unknown;
+      integrity?: unknown;
+      expires?: unknown;
+    };
     if (typeof resolved !== "string" || !isValidVersion(resolved)) continue;
     const recorded = readIntegrityField(integrity);
-    kept[key] = recorded === undefined ? { resolved } : { resolved, integrity: recorded };
+    const entry: Resolution =
+      recorded === undefined ? { resolved } : { resolved, integrity: recorded };
+    if (typeof expires === "number" && Number.isFinite(expires)) entry.expires = expires;
+    kept[key] = entry;
   }
 
   return { version: LOCKFILE_VERSION, resolutions: kept };
@@ -153,31 +220,108 @@ export function readLockfile(dir: string): LockfileData | null {
  * back to the registry — the one thing §15.23 exists to prevent. (The strict
  * rule stays where §03.3 puts it, on the `devEngines` cross-check.)
  *
- * A **dist-tag** key has no range to violate, so a recorded resolution for one
- * always stands until `corepack up` refreshes it. That is the whole point of
- * recording it: `packageManager: "pnpm@latest"` otherwise means a registry
- * request on every invocation.
+ * A **dist-tag** key has no range to violate, so an entry for one always stands.
+ * In the recorded file that means a hand-written entry is honoured until a hand
+ * edit removes it; in the cache, where tags actually land, {@link CACHE_TTL_MS}
+ * is what keeps `packageManager: "pnpm@latest"` meaning "recent" instead of
+ * "whatever it meant the first time anyone ran it".
  */
 export function readResolution(dir: string, descriptor: Descriptor): Locator | null {
-  const data = readLockfile(dir);
-  if (data === null) return null;
+  const entry = readEntry(dir, descriptor);
+  return entry === null ? null : locatorFor(descriptor, entry);
+}
 
-  const key = resolutionKey(descriptor);
-  if (!Object.hasOwn(data.resolutions, key)) return null;
-  const entry = data.resolutions[key]!;
+/** A cache hit, and whether its {@link CACHE_TTL_MS} window has closed. */
+export interface CachedResolution {
+  locator: Locator;
+  /**
+   * `true` when the entry has aged out. It is returned anyway: the caller
+   * resolves afresh and falls back to it only if that fails, because an expired
+   * memo beats no answer when the registry is unreachable (§15.23) — §04.4's
+   * "degrade, never block" rule, applied to a project's own file.
+   */
+  expired: boolean;
+}
 
-  if (isValidRange(descriptor.range) && !satisfiesWithPrereleases(entry.resolved, descriptor.range))
-    return null;
+/**
+ * §15.23 — the cached resolution in `<dir>/node_modules/.jup`, or `null`.
+ *
+ * Consulted only after the recorded file has said nothing: a committed decision
+ * outranks a memo about what the registry answered yesterday, always.
+ */
+export function readCachedResolution(
+  dir: string,
+  descriptor: Descriptor,
+  now = Date.now(),
+): CachedResolution | null {
+  const hit = readCachedEntry(dir, descriptor, now);
+  if (hit === null) return null;
 
-  // The recorded digest becomes a build suffix, which is what makes it *used*
-  // rather than merely stored: §06.1 row 1 treats a reference-borne hash as an
-  // explicit pin and checks the downloaded bytes against it.
-  const integrity = integrityForHost(entry);
-  const hash = integrity === undefined ? undefined : hashFromIntegrity(integrity);
-  return {
-    name: descriptor.name,
-    reference: hash === undefined ? entry.resolved : `${entry.resolved}+${hash}`,
-  };
+  return { locator: locatorFor(descriptor, hit.entry), expired: hit.expired };
+}
+
+/** What a project's two files already know, without a request (§15.23). */
+export interface KnownResolution {
+  /** The recorded resolution, else an unexpired memo; `null` when neither answers. */
+  locator: Locator | null;
+  /**
+   * The memo as read, expired or not: an aged-out one is still §15.23's answer
+   * of last resort. `null` when the recorded file answered, which outranks it.
+   */
+  cached: CachedResolution | null;
+}
+
+/**
+ * §15.23's read order — the recorded resolution, then an unexpired memo — in the
+ * one place both callers reach for it. The proxy path and `install` (§09.2) must
+ * agree to the version, or a Docker layer caches one and runs another, offline.
+ */
+export function readKnownResolution(
+  dir: string,
+  descriptor: Descriptor,
+  now = Date.now(),
+): KnownResolution {
+  const recorded = readResolution(dir, descriptor);
+  if (recorded !== null) return { locator: recorded, cached: null };
+
+  const cached = readCachedResolution(dir, descriptor, now);
+  return { locator: cached === null || cached.expired ? null : cached.locator, cached };
+}
+
+/** The memo as the file holds it, for a caller that wants to *report* it. */
+export interface CachedEntry {
+  entry: Resolution;
+  expired: boolean;
+}
+
+/**
+ * {@link readCachedResolution}, stopping at the entry: `info` prints §15.28's
+ * whole host map rather than this host's one digest, so it cannot take the
+ * flattened locator. Reading through here rather than indexing the parsed file
+ * is what keeps that command honest — the range gate and the expiry rule are
+ * applied once, and it reports what the next run would accept.
+ */
+export function readCachedEntry(
+  dir: string,
+  descriptor: Descriptor,
+  now = Date.now(),
+): CachedEntry | null {
+  const entry = readEntry(join(dir, CACHE_DIRECTORY), descriptor);
+  return entry === null ? null : { entry, expired: hasExpired(entry, now) };
+}
+
+/**
+ * Whether a memo has aged out — bounded at both ends (§15.23).
+ *
+ * A stamp beyond one full {@link CACHE_TTL_MS} window is one this build cannot
+ * have written, so it is treated as expired rather than believed. Clamping
+ * rather than dropping the entry keeps it available as the stale-but-better-
+ * than-nothing answer when the re-resolution fails.
+ */
+function hasExpired(entry: Resolution, now: number): boolean {
+  const { expires } = entry;
+  if (typeof expires !== "number") return true;
+  return !(expires > now && expires <= now + CACHE_TTL_MS);
 }
 
 /**
@@ -208,6 +352,56 @@ export function writeResolution(
   hash: string | undefined,
   perHost = false,
 ): void {
+  writeEntry(dir, descriptor, locator, hash, perHost);
+}
+
+/**
+ * §15.23 — memo the resolution in `<dir>/node_modules/.jup`, with an expiry stamp.
+ *
+ * Does nothing when `node_modules` is not already a directory: creating it would
+ * be jup conjuring the package manager's own directory into existence — possibly
+ * in a repository holding nothing but an `.nvmrc` — for a run asked only to print
+ * a version. Not caching costs one resolution next time, and §04.1 step 4's store
+ * probe already answers most of those offline.
+ *
+ * The `.jup` directory within it is jup's own and is created on demand — the one
+ * directory that rule is not about, and without it there is nowhere to write.
+ */
+export function writeCachedResolution(
+  dir: string,
+  descriptor: Descriptor,
+  locator: Locator,
+  hash: string | undefined,
+  perHost = false,
+  now = Date.now(),
+): void {
+  try {
+    const modules = statSync(join(dir, MODULES_DIRECTORY), { throwIfNoEntry: false });
+    if (modules?.isDirectory() !== true) return;
+  } catch {
+    return;
+  }
+
+  const cacheDir = join(dir, CACHE_DIRECTORY);
+  try {
+    mkdirSync(cacheDir, { recursive: true });
+  } catch {
+    // Read-only, or `.jup` already there as a file: derived state, so the run
+    // continues and pays one resolution next time (see `writeResolution`).
+    return;
+  }
+
+  writeEntry(cacheDir, descriptor, locator, hash, perHost, now + CACHE_TTL_MS);
+}
+
+function writeEntry(
+  dir: string,
+  descriptor: Descriptor,
+  locator: Locator,
+  hash: string | undefined,
+  perHost: boolean,
+  expires?: number,
+): void {
   const parsed = parse(locator.reference);
   // A reference we cannot reduce to a plain version is not recordable — and
   // cannot arrive here, since `usesLockfile` already excluded URL references.
@@ -235,6 +429,8 @@ export function writeResolution(
     }
   }
 
+  if (expires !== undefined) resolution.expires = expires;
+
   data.resolutions[key] = resolution;
 
   save(dir, data);
@@ -248,6 +444,27 @@ export function writeResolution(
  * the next `use` back to a range would silently reuse a stale one.
  */
 export function removeResolution(dir: string, key: string): void {
+  // The cache is keyed by the same string, so a range the field no longer names
+  // loses its memo too: otherwise editing the pin back to that range would
+  // resurrect a stale resolution without even the request that would correct it.
+  removeCachedResolution(dir, key);
+  dropResolution(dir, key);
+}
+
+/**
+ * Drop one key from the **memo** alone (§15.23).
+ *
+ * What `use` and `up` record supersedes the memo beside it, and a memo left
+ * there answers alone wherever the recorded file is not visible — an uncommitted
+ * write, a `git stash`, a CI cache holding `node_modules` but not the lockfile —
+ * with the version the command just replaced. An emptied `.jup` is left alone:
+ * removing it would race the next run's `mkdir`.
+ */
+export function removeCachedResolution(dir: string, key: string): void {
+  dropResolution(join(dir, CACHE_DIRECTORY), key);
+}
+
+function dropResolution(dir: string, key: string): void {
   const data = readLockfile(dir);
   if (data === null || !Object.hasOwn(data.resolutions, key)) return;
 
@@ -267,6 +484,42 @@ export function removeResolution(dir: string, key: string): void {
 /* -------------------------------------------------------------------------- */
 /* Internals                                                                   */
 /* -------------------------------------------------------------------------- */
+
+/**
+ * The entry `descriptor` would use out of the file in `dir`, if it still stands.
+ * "Still satisfies" is the **lenient** test (§04.2); {@link readResolution} says why.
+ *
+ * Exported for `info`, which must report the entry through the gate the run
+ * applies: a recorded version outside its range is one the run skips, so naming
+ * it would describe a resolution the very next invocation refuses.
+ */
+export function readEntry(dir: string, descriptor: Descriptor): Resolution | null {
+  const data = readLockfile(dir);
+  if (data === null) return null;
+
+  const key = resolutionKey(descriptor);
+  if (!Object.hasOwn(data.resolutions, key)) return null;
+  const entry = data.resolutions[key]!;
+
+  if (isValidRange(descriptor.range) && !satisfiesWithPrereleases(entry.resolved, descriptor.range))
+    return null;
+
+  return entry;
+}
+
+/**
+ * The locator one entry stands for. The recorded digest becomes a build suffix,
+ * which is what makes it *used* rather than merely stored: §06.1 row 1 treats a
+ * reference-borne hash as an explicit pin and checks the bytes against it.
+ */
+function locatorFor(descriptor: Descriptor, entry: Resolution): Locator {
+  const integrity = integrityForHost(entry);
+  const hash = integrity === undefined ? undefined : hashFromIntegrity(integrity);
+  return {
+    name: descriptor.name,
+    reference: hash === undefined ? entry.resolved : `${entry.resolved}+${hash}`,
+  };
+}
 
 function serialise(data: LockfileData): string {
   const resolutions: Record<string, Resolution> = {};
@@ -299,7 +552,14 @@ function save(dir: string, data: LockfileData): void {
 
   let tmp: string | undefined;
   try {
-    tmp = `${target}.${process.pid}.tmp`;
+    // In `dir`, the destination's own directory, because `rename` is atomic
+    // only within one filesystem — a temp elsewhere would be a copy that tears.
+    // Dot-prefixed, though the file it replaces is not: the temp name is the one
+    // thing here that can be left behind — a kill between write and rename — and
+    // an orphan at the project root should not turn up in `git status` next to
+    // the file it failed to become. `pin.ts` hides its manifest temp for the
+    // same reason.
+    tmp = join(dir, `.${LOCKFILE_NAME}.${process.pid}.tmp`);
     writeFileSync(tmp, content, "utf8");
     renameSync(tmp, target);
   } catch {
@@ -313,16 +573,6 @@ function save(dir: string, data: LockfileData): void {
   }
 }
 
-/**
- * `sha512-<base64>` -> `sha512.<hex>`, the build-suffix spelling of §02.1.
- *
- * Deliberately not `integrity.parseSri`: that module reaches for `node:crypto`,
- * which drags seventy-odd native modules into a process that, on a lockfile hit,
- * is about to do nothing but `stat` a marker and `exec` (§01.3, §16.3). The
- * algorithm name is passed through rather than checked against an allowlist —
- * `install` already rejects an unsupported one with §12's message, and doing it
- * twice would only give the same input two different errors.
- */
 /** Sort an object's keys, so re-serialising an unchanged file round-trips. */
 function sorted(map: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};

@@ -49,10 +49,10 @@ An implementation conforms to this specification when it:
 - satisfies every **MUST** in files 01 through 12;
 - satisfies the additional requirements in §15;
 - passes tests 1–147 in §13; and
-- passes tests 148–255 in §15.38.
+- passes tests 148–263 in §15.38.
 
 Both §14 and §15 define intentional differences from Corepack. Section 14 records differences found while studying Corepack's source. Section 15 adds requirements derived from its issue tracker. If the two sections cover the same behavior, §15 takes precedence.
 
 Some user-facing text is part of the compatibility contract. Content marked as verbatim and shown in `fixed width` must be reproduced exactly, including capitalization, spacing, and punctuation. Existing scripts and CI jobs may compare these messages byte for byte.
 
-Those strings name **jup**, not Corepack, wherever Corepack's own text names itself — in the program name, in the usage lines, and in the `JUP_` variable a remedy points at. So do the paths: the store is `<cache>/jup`, its marker `.jup`, `pack`'s default output `jup.tgz`, and the env file `.jup.env` — which is the one name that keeps reading its Corepack spelling, because it is the only one that exists in repositories today. §14.24 states the rule and what it leaves alone; §12 carries the resulting text.
+Those strings name **jup**, not Corepack, wherever Corepack's own text names itself — in the program name, in the usage lines, and in the `JUP_` variable a remedy points at. So do the paths: the store is `<cache>/jup`, its marker `.jup`, `pack`'s default output `jup.tgz`, the resolution file `jup.lock` (§15.23), and the env file `.jup.env` — which is the one name that keeps reading its Corepack spelling, because it is the only one that exists in repositories today. §14.24 states the rule and what it leaves alone; §12 carries the resulting text.

@@ -223,7 +223,7 @@ describe("§13.10 use / up", () => {
   // and row 189 covers the same rule for `use`.
   it("114: up on a devEngines-only project updates devEngines in place", async () => {
     const fixture = createFixture({
-      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+      devEngines: { packageManager: { name: "yarn", version: "2.1.0" } },
     });
 
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
@@ -241,6 +241,26 @@ describe("§13.10 use / up", () => {
     const rerun = await run(["yarn", "--version"], { ...fixture, registry, env: trusted() });
     expect(rerun.exitCode).toBe(0);
     expect(rerun.stderr).toBe("");
+  });
+
+  // The other half of row 114, once §15.23 landed: a *range* declared in the
+  // same place is not a pin to rewrite but a range to keep. `use <name>@<range>`
+  // writes exactly this shape on a project with no top-level field (§15.26), so
+  // an `up` that read only `packageManager` would collapse the range it had just
+  // written and delete its own record along with it.
+  it("114: up on a devEngines-only range keeps the range and records the resolution", async () => {
+    const fixture = createFixture({
+      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+    });
+
+    const result = await run(["up"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(pinOf(fixture)).toBeUndefined();
+    expect(devEnginesOf(fixture)).toMatchObject({ name: "yarn", version: "2.x" });
+    expect(fixture.json("jup.lock")).toMatchObject({
+      resolutions: { "yarn@2.x": { resolved: "2.4.3" } },
+    });
   });
 
   it("115: up refuses a non-semver pin", async () => {

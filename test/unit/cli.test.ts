@@ -17,6 +17,27 @@ import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } fr
  */
 const shimState = vi.hoisted(() => ({ interpreter: undefined as string | undefined }));
 
+/**
+ * §09.7 — `rm -rf` forgives a missing path but not a refused one: a root-owned
+ * tree from an earlier `sudo`, an immutable file, a handle Windows still holds.
+ * None of those can be produced portably (the suite runs as root often enough),
+ * so exactly one path is made to reject and everything else is the real `rm`.
+ */
+const rmState = vi.hoisted(() => ({ refuse: new Set<string>() }));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  const rm: typeof actual.rm = (path, options) =>
+    rmState.refuse.has(String(path))
+      ? Promise.reject(
+          Object.assign(new Error(`EACCES: permission denied, rm '${path}'`), {
+            code: "EACCES",
+          }),
+        )
+      : actual.rm(path, options);
+  return { ...actual, rm, default: { ...actual, rm } };
+});
+
 vi.mock("../../src/commands/shims.ts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/commands/shims.ts")>()),
   bakedInterpreter: async () => shimState.interpreter,
@@ -71,6 +92,8 @@ const ENV_KEYS = [
   "COREPACK_ENV_FILE",
   "COREPACK_MIGRATE_FROM",
   "COREPACK_ALLOW_UNVERIFIED",
+  "COREPACK_FROZEN_LOCKFILE",
+  "COREPACK_QUIET_ADVISORIES",
 ] as const;
 
 /** The origins the embedded table points at, all mapped onto `routes`. */
@@ -165,6 +188,7 @@ afterEach(async () => {
   // §15.44's injected answer is per-test; anything else would leak a spared
   // version into the next `cache clean`.
   shimState.interpreter = undefined;
+  rmState.refuse.clear();
   // `applyEnvFile` replaces `process.env` wholesale (§11.6), so restore the
   // object itself rather than patching keys back onto a replacement.
   process.env = savedEnv;
@@ -203,6 +227,23 @@ async function manifest(data: unknown, dir = project): Promise<void> {
 
 function readManifest(dir = project): Record<string, unknown> {
   return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<string, unknown>;
+}
+
+/** §15.23 — the resolutions the project's committed `jup.lock` holds. */
+function lockfile(dir = project): Record<string, unknown> {
+  const file = join(dir, "jup.lock");
+  if (!existsSync(file)) return {};
+  return (JSON.parse(readFileSync(file, "utf8")) as { resolutions: Record<string, unknown> })
+    .resolutions;
+}
+
+/** §15.23 — the memo an ordinary run leaves in `node_modules/.jup`. */
+async function memo(resolutions: Record<string, unknown>, dir = project): Promise<void> {
+  await mkdir(join(dir, "node_modules", ".jup"), { recursive: true });
+  await writeFile(
+    join(dir, "node_modules", ".jup", "jup.lock"),
+    `${JSON.stringify({ version: 1, resolutions })}\n`,
+  );
 }
 
 function lastKnownGood(): Record<string, string> {
@@ -388,6 +429,54 @@ describe("install (§09.2, test 86)", () => {
   it("refuses positional arguments", async () => {
     await manifest({ packageManager: "yarn@2.2.2" });
     await expect(cmdInstall(["yarn@2.2.2"])).rejects.toBeInstanceOf(UsageError);
+  });
+
+  /* §15.23 — what the project's two files already say ------------------- */
+
+  it("warms the cache with the memo's version, not the newest match", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.1.0");
+    await seed("yarn", "2.4.3");
+    await manifest({ packageManager: "yarn@2.x" });
+    // The now-ordinary state: nothing committed, a live memo. Caching 2.4.3 here
+    // and then running 2.1.0 offline is the whole failure `install` exists to
+    // prevent — and in a `JUP_ENABLE_NETWORK=0` layer it is not a re-download,
+    // it is a hard failure.
+    await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
+
+    await expect(cmdInstall([])).resolves.toBe(0);
+
+    expect(stdout).toBe(`Adding yarn@2.1.0 to the cache...\n`);
+    expect(requested).toEqual([]);
+  });
+
+  it("prefers the recorded resolution to the memo", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.1.0");
+    await seed("yarn", "2.2.2");
+    await manifest({ packageManager: "yarn@2.x" });
+    await writeFile(
+      join(project, "jup.lock"),
+      `${JSON.stringify({ version: 1, resolutions: { "yarn@2.x": { resolved: "2.2.2" } } })}\n`,
+    );
+    await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
+
+    await expect(cmdInstall([])).resolves.toBe(0);
+
+    // A committed decision beats a note about what the registry said yesterday.
+    expect(stdout).toBe(`Adding yarn@2.2.2 to the cache...\n`);
+    expect(requested).toEqual([]);
+  });
+
+  it("ignores an expired memo and resolves afresh", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    await manifest({ packageManager: "yarn@2.x" });
+    await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() - 60_000 } });
+
+    await expect(cmdInstall([])).resolves.toBe(0);
+
+    expect(stdout).toBe(`Adding yarn@2.4.3 to the cache...\n`);
   });
 });
 
@@ -750,6 +839,70 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     }
   });
 
+  it("spares the interpreter even when the store carries no markers", async () => {
+    // §07.2's marker is what `listInstalled` counts, and an interrupted install,
+    // a disk cleaner or a hand-edited store loses it — the "shimmed by an older
+    // build" case §15.44 exists for most of all. The store then *lists* as empty
+    // while still holding the file every shim's shebang names.
+    const interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    shimState.interpreter = interpreter;
+    await mkdir(join(home, "v1", "node", "22.14.0", "bin"), { recursive: true });
+    await writeFile(interpreter, "#!/bin/sh\nexit 0\n");
+    await mkdir(join(home, "v1", "yarn", "2.2.2"), { recursive: true });
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    // Gated on `listInstalled().length`, the guard was skipped, `<home>/v1` went
+    // wholesale, and every shim died with `bad interpreter` behind an `enable`
+    // that could no longer start.
+    expect(existsSync(interpreter)).toBe(true);
+    expect(existsSync(join(home, "v1", "yarn"))).toBe(false);
+    // Nothing the store could vouch for was removed, so the count says so.
+    expect(stdout).toBe("Nothing to remove\n");
+    expect(stderr).toContain("Kept node@22.14.0");
+  });
+
+  it("reports what it could not remove, and finishes the clean", async () => {
+    const interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    shimState.interpreter = interpreter;
+    await seed("node", "22.14.0");
+    await seed("yarn", "2.2.2");
+    await seed("pnpm", "9.0.0");
+    // A tree an earlier `sudo` left root-owned, or a handle Windows still holds.
+    rmState.refuse.add(join(home, "v1", "yarn"));
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    // One rejection out of `Promise.all` used to abort the command here: no
+    // §15.44 line, no count, and a raw error in place of both.
+    expect(existsSync(join(home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
+    expect(existsSync(join(home, "v1", "pnpm"))).toBe(false);
+    expect(existsSync(interpreter.replace(join("bin", "node"), ".jup"))).toBe(true);
+    // The count is what was *removed*, so the survivor is not in it either.
+    expect(stdout).toBe(`Removed 1 cached version(s) from ${join(home, "v1")}\n`);
+    expect(stderr).toContain("Kept node@22.14.0");
+    expect(stderr).toContain(messages.cacheEntryNotRemoved(join(home, "v1", "yarn")));
+  });
+
+  it("routes both §15.44 lines through COREPACK_QUIET_ADVISORIES", async () => {
+    // §11.5 — every `!` line this spec adds is silenced by the flag, and these
+    // two were written straight to the stream. The *count* is command output and
+    // is unaffected.
+    process.env.COREPACK_QUIET_ADVISORIES = "1";
+    shimState.interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    await seed("node", "22.14.0");
+    await seed("yarn", "2.2.2");
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    expect(stdout).toBe(`Removed 1 cached version(s) from ${join(home, "v1")}\n`);
+    expect(stderr).toBe("");
+
+    await seed("yarn", "2.2.2");
+    await expect(cmdCache(["clean", "--all"])).resolves.toBe(0);
+    expect(stderr).toBe("");
+  });
+
   it("an interpreter outside the store changes nothing at all", async () => {
     // The only state §15.43 now produces, and §15.35l's row 206 fixes its
     // output byte for byte: one line on stdout, an empty stderr, `v1` gone.
@@ -871,6 +1024,59 @@ describe("use (§09.5, tests 105-110)", () => {
     await expect(cmdUse([])).rejects.toBeInstanceOf(UsageError);
     await expect(cmdUse(["yarn@1", "pnpm@9"])).rejects.toBeInstanceOf(UsageError);
   });
+
+  /* §15.23 — the memo, and what the frozen flag actually governs -------- */
+
+  it("retires the memo for the range it just recorded", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    await manifest({ name: "demo" });
+    // A memo from an earlier run under the very range being recorded now.
+    await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
+
+    await expect(cmdUse(["yarn@2.x"])).resolves.toBe(0);
+
+    expect(readManifest().packageManager).toBe("yarn@2.x");
+    expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.4.3" } });
+    // The superseded memo does not outlive the decision that replaced it: in
+    // any state where the recorded file is not visible it would answer alone.
+    expect(existsSync(join(project, "node_modules", ".jup", "jup.lock"))).toBe(false);
+  });
+
+  it("refuses an exact use that would delete a recorded resolution when frozen", async () => {
+    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    await seed("yarn", "2.4.3");
+    await manifest({ name: "demo", packageManager: "yarn@2.x" });
+    await writeFile(
+      join(project, "jup.lock"),
+      `${JSON.stringify({ version: 1, resolutions: { "yarn@2.x": { resolved: "2.1.0" } } })}\n`,
+    );
+
+    const error = await rejection(cmdUse(["yarn@2.4.3"]));
+
+    // The flag governs the file, not one syntax of pin: an exact `use` retires
+    // the range's entry, and `rm`s `jup.lock` outright when it was the only one.
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(messages.lockfileUnresolved("yarn", "2.x"));
+    // Refused before the resolve, and before anything was written.
+    expect(requested).toEqual([]);
+    expect(stdout).toBe("");
+    expect(readManifest().packageManager).toBe("yarn@2.x");
+    expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.1.0" } });
+  });
+
+  it("still allows an exact use with nothing recorded to lose", async () => {
+    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    await seed("yarn", "2.4.3");
+    // A range pin, but no recorded resolution: there is no file to freeze, and
+    // refusing here would break every `use` in CI over a file that never
+    // existed.
+    await manifest({ name: "demo", packageManager: "yarn@2.x" });
+
+    await expect(cmdUse(["yarn@2.4.3"])).resolves.toBe(0);
+    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3/);
+    expect(existsSync(join(project, "jup.lock"))).toBe(false);
+  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -927,12 +1133,17 @@ describe("up (§09.4, tests 111-115)", () => {
   // project *creates* a `packageManager` field — which is #874 exactly: the new
   // field then conflicts with the declaration beside it and the next read fails.
   // The pin now goes where the declaration already is.
+  //
+  // The declaration is an exact version, because that is the half of the row
+  // that is still about *where* the pin lands: a devEngines-declared **range**
+  // is a §15.23 pin like any other and is now preserved rather than collapsed —
+  // the test below this one.
   it("updates devEngines in place for a devEngines-only project (test 114)", async () => {
     mockYarnRegistry();
     await seed("yarn", "2.4.3");
     await manifest({
       name: "demo",
-      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+      devEngines: { packageManager: { name: "yarn", version: "2.1.0" } },
     });
 
     await cmdUp([]);
@@ -945,6 +1156,91 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(written.devEngines).toEqual({
       packageManager: { name: "yarn", version: "2.4.3" },
     });
+  });
+
+  /* §15.23 — the range `use` writes is the range `up` refreshes -------- */
+
+  it("keeps a devEngines-only range and refreshes jup.lock instead", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    // Exactly what `jup use yarn@2.x` leaves behind on a project with no
+    // top-level field (§15.26): the range in `devEngines`, and nothing else.
+    await manifest({
+      name: "demo",
+      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+    });
+    await writeFile(
+      join(project, "jup.lock"),
+      `${JSON.stringify({ version: 1, resolutions: { "yarn@2.x": { resolved: "2.1.0" } } })}\n`,
+    );
+
+    await expect(cmdUp([])).resolves.toBe(0);
+
+    const written = readManifest();
+    // The user's statement of intent, untouched — and the resolution it stands
+    // for, refreshed. Gated on `hasPin` this collapsed to an exact version and
+    // deleted the recorded resolution on the way past.
+    expect(written.packageManager).toBeUndefined();
+    expect(written.devEngines).toEqual({
+      packageManager: { name: "yarn", version: "2.x" },
+    });
+    expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.4.3" } });
+    expect(stdout).toContain(`Updated ${join(project, "jup.lock")} to use yarn@2.4.3`);
+  });
+
+  it("keeps a top-level range even when devEngines declares one too", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    await manifest({
+      name: "demo",
+      packageManager: "yarn@2.x",
+      devEngines: { packageManager: { name: "yarn", version: ">=2" } },
+    });
+
+    await expect(cmdUp([])).resolves.toBe(0);
+
+    const written = readManifest();
+    expect(written.packageManager).toBe("yarn@2.x");
+    expect(written.devEngines).toEqual({
+      packageManager: { name: "yarn", version: ">=2" },
+    });
+    // The pin's key, not the devEngines range's: the pin is what the proxy path
+    // will look up.
+    expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.4.3" } });
+  });
+
+  it("retires the memo for the key it just refreshed", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    await manifest({ name: "demo", packageManager: "yarn@2.x" });
+    // A memo an ordinary run left behind, still well inside its 24-hour window.
+    await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
+
+    await expect(cmdUp([])).resolves.toBe(0);
+
+    expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.4.3" } });
+    // Left behind, it would answer alone in every state where the recorded file
+    // is not visible — an uncommitted `up`, a `git stash`, a CI cache holding
+    // `node_modules` but not the lockfile — and the project would go on running
+    // the version this command just replaced.
+    expect(existsSync(join(project, "node_modules", ".jup", "jup.lock"))).toBe(false);
+  });
+
+  it("refreshes on the devEngines range when the pin is too malformed to read", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    // A non-string `packageManager` beside a usable range: reading the pin
+    // throws §12.2, and the range is what `up` has to work from. `onFail: warn`
+    // is what keeps the mismatch a warning rather than the error test 110 covers.
+    await manifest({
+      name: "demo",
+      packageManager: 42,
+      devEngines: { packageManager: { name: "yarn", version: "2.x", onFail: "warn" } },
+    });
+
+    await expect(cmdUp([])).resolves.toBe(0);
+
+    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
   it("does not consult the cache, or it could never update anything", async () => {

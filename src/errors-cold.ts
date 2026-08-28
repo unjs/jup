@@ -30,10 +30,15 @@
  * already behind a dynamic import at their `main.ts` call sites.
  */
 
+import { join } from "node:path";
 import { ENV, jupSpelling } from "./config/env-vars.ts";
 import { messages as warm, UsageError } from "./errors.ts";
+import { CACHE_DIRECTORY, LOCKFILE_NAME } from "./project/lockfile.ts";
 
 export * from "./errors.ts";
+
+/** §15.23's memo, as the advisories naming it have to spell it. */
+const MEMO_FILE = join(CACHE_DIRECTORY, LOCKFILE_NAME);
 
 /**
  * Strip `user:pass@` from a URL before it reaches a message.
@@ -393,6 +398,36 @@ export const messages = {
    */
   interpreterKept: (name: string, version: string, interpreter: string, home: string) =>
     `! Kept ${name}@${version}: jup's shims name ${interpreter} as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside ${home} to repin them, then clean again.`,
+
+  /**
+   * §09.7 — one entry the clean could not delete.
+   *
+   * `rm -rf` forgives a missing path and nothing else, so what reaches here is a
+   * permission or a lock: a tree left root-owned by an earlier `sudo` run, an
+   * immutable file, a handle Windows has not let go of. The command carries on
+   * and reports its real count; this line is what stops the difference between
+   * "removed" and "still there" from being invisible.
+   */
+  cacheEntryNotRemoved: (path: string) =>
+    `! Could not remove ${path}; it is still in the cache. Remove it by hand, or re-run with permission to delete it.`,
+
+  /**
+   * §15.23 — the memo stood in because the registry could not be reached.
+   *
+   * A fallback that printed nothing was indistinguishable from a normal run, and
+   * stayed so: the memo's stamp is deliberately not extended, so it recurs on
+   * every later invocation. The user has to be told what they are running and why.
+   *
+   * Here rather than in `main.ts` for the reason the whole file exists: this is
+   * text a warm run cannot print. Both call sites sit behind the dynamic import
+   * that already had to be taken to classify the failure.
+   */
+  staleResolutionUnreachable: (name: string, range: string, version: string) =>
+    `! Unable to reach the registry to resolve ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until the registry answers again.`,
+
+  /** The same notice for the other half of "degraded": it answered, with nothing usable. */
+  staleResolutionUnmatched: (name: string, range: string, version: string) =>
+    `! The registry lists no release matching ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until a matching release is published.`,
 
   /**
    * §15.44 — the `--all` counterpart. Present tense, because it is printed

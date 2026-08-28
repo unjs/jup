@@ -273,6 +273,32 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
     expect(registry.requests).toHaveLength(0);
   });
 
+  it("234: `use node@<range>` keeps the range in the member and records it", async () => {
+    const fixture = createFixture({ name: "app" });
+
+    const result = await run(["use", "node@22.x"], options(fixture));
+    expect(result.exitCode).toBe(0);
+
+    const manifest = fixture.json("package.json") as {
+      devEngines: { runtime: { name: string; version: string } };
+    };
+    // §15.23 — a runtime's field is validated as a semver range, so a typed
+    // range goes in as written, exactly as `packageManager` takes one.
+    expect(manifest.devEngines.runtime).toMatchObject({ name: "node", version: "22.x" });
+    expect(
+      (
+        fixture.json("jup.lock") as {
+          resolutions: Record<string, { resolved: string } | undefined>;
+        }
+      ).resolutions["node@22.x"]?.resolved,
+    ).toBe(NODE_VERSION);
+
+    // And the next run answers from that record, with no request at all.
+    registry.reset();
+    expect((await run(["node", "-e", "0"], options(fixture))).exitCode).toBe(0);
+    expect(registry.requests).toHaveLength(0);
+  });
+
   it("234: `use node@…` creates the whole block when the manifest has no devEngines", async () => {
     const fixture = createFixture({ name: "app" });
 

@@ -53,6 +53,12 @@ function pinnedProject(devEngines: unknown, pin: unknown = PIN) {
   return fixture;
 }
 
+/** §15.23 — the resolutions an ordinary run memoed in `node_modules/.jup`. */
+function memoOf(fixture: { json(relative: string): unknown }): Record<string, unknown> {
+  return (fixture.json("node_modules/.jup/jup.lock") as { resolutions: Record<string, unknown> })
+    .resolutions;
+}
+
 describe("§13.4 devEngines", () => {
   // Rows 22 and 23 are superseded by §15.23, whose first requirement is that
   // `devEngines.packageManager.version` accept a range: the derived `yarn@*` and
@@ -61,16 +67,20 @@ describe("§13.4 devEngines", () => {
   it("22: {name: yarn} with no packageManager resolves as yarn@*", async () => {
     const fixture = createFixture({ devEngines: { packageManager: { name: "yarn" } } });
     seedPackageManager(fixture.home, "yarn", "1.22.4");
+    fixture.write("node_modules/.keep", "");
 
     const result = await run(["yarn", "--version"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
     expect(result.stderr).toBe("");
-    expect((fixture.json(".jup.lock") as { resolutions: unknown }).resolutions).toEqual({
+    // §15.23 — memoed, not recorded: a proxy run never writes the project's own
+    // `jup.lock`.
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(memoOf(fixture)["yarn@*"]).toMatchObject({
       // Seeded, not downloaded: its placeholder hash is not a usable digest, so
       // none is recorded. Row 181 asserts the recorded digest of real bytes.
-      "yarn@*": { resolved: "1.22.4" },
+      resolved: "1.22.4",
     });
   });
 
@@ -79,15 +89,15 @@ describe("§13.4 devEngines", () => {
       devEngines: { packageManager: { name: "pnpm", version: "6.x" } },
     });
     seedPackageManager(fixture.home, "pnpm", "6.6.2");
+    fixture.write("node_modules/.keep", "");
 
     const result = await run(["pnpm", "--version"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
     expect(result.stderr).toBe("");
-    expect((fixture.json(".jup.lock") as { resolutions: unknown }).resolutions).toEqual({
-      "pnpm@6.x": { resolved: "6.6.2" },
-    });
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(memoOf(fixture)["pnpm@6.x"]).toMatchObject({ resolved: "6.6.2" });
   });
 
   it("24: the same, plus a matching hash-bearing packageManager, runs 6.6.2", async () => {

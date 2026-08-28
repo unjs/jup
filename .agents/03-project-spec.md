@@ -86,10 +86,12 @@ pin. Because it is a `Found`, §3.6's auto-pin does not fire: the project has al
 said what it wants.
 
 The target being the version file has one visible consequence: a version file
-carrying a **range** resolves through `.jup.lock` like any other range (§15.23), and
-the record is written **beside the version file** — `dirname(target)`, as for a
-manifest. In a monorepo that is next to the `.nvmrc` that declared the range, not at
-the repository root. An exact version needs no lockfile and writes none.
+carrying a **range** resolves through `jup.lock` like any other range (§15.23), and
+both that file and the memo in `node_modules` are looked for **beside the version
+file** — `dirname(target)`, as for a manifest. In a monorepo that is next to the
+`.nvmrc` that declared the range, not at the repository root. An exact version needs
+no lockfile and writes none; a range writes only the memo, since §15.23 leaves the
+recorded file to `use` and `up`.
 
 The contents are parsed **lazily**, exactly as `parseSpec` is: a version file that
 cannot be read must fail the request that needed it, not the walk. Both failures are
@@ -185,7 +187,7 @@ Before reading each directory's manifest, and only until one is found:
 
 ### Legacy name
 
-Corepack's spelling is `.corepack.env`, and unlike `.jup.lock` (§15.23) it is a file
+Corepack's spelling is `.corepack.env`, and unlike `jup.lock` (§15.23) it is a file
 that exists in real repositories today. §14.24 renames it; this is the read side of
 that rename, and it follows §11.6's rule for the variables exactly: `.jup.env` is the
 name, `.corepack.env` is still *read*, and the jup spelling wins.

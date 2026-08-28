@@ -1,8 +1,18 @@
 /**
- * §15.23 — ranges in the pin, and `.jup.lock` (rows 181–183).
+ * §15.23 — ranges in the pin, `jup.lock`, and the memo beside it (rows 181–183,
+ * 256–258).
  *
  * The reconciliation the corepack tracker circled for four years: a range is
  * what a human writes, and a recorded resolution is what makes it reproducible.
+ * Two rules split the file in two here, and most of the rows below exist to hold
+ * one of them:
+ *
+ * * the project's `jup.lock` is written by `use` and `up` and by nothing else,
+ *   so running a package manager can never change what the project runs on;
+ * * an ordinary run memoes its resolution in `node_modules/.jup/jup.lock`
+ *   instead,
+ *   which keeps a range off the network without committing anybody to anything.
+ *
  * Row 182 is the load-bearing one — a recorded resolution that still satisfies
  * its range must resolve with **no network at all**, so it is asserted against
  * the mock's own request log rather than against a successful exit.
@@ -30,15 +40,59 @@ function env(extra?: Record<string, string | undefined>): Record<string, string 
   return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), CI: undefined, ...extra };
 }
 
-/** The lockfile as the tool wrote it, parsed. */
-function lockOf(fixture: { json(relative: string): unknown }): {
+interface Lockfile {
   version: number;
-  resolutions: Record<string, { resolved: string; integrity?: string }>;
-} {
-  return fixture.json(".jup.lock") as {
-    version: number;
-    resolutions: Record<string, { resolved: string; integrity?: string }>;
-  };
+  resolutions: Record<string, { resolved: string; integrity?: string; expires?: number }>;
+}
+
+/** The recorded lockfile as the tool wrote it, parsed. */
+function lockOf(fixture: { json(relative: string): unknown }): Lockfile {
+  return fixture.json("jup.lock") as Lockfile;
+}
+
+/** The memo an ordinary run leaves in `node_modules/.jup`, parsed. */
+function memoOf(fixture: { json(relative: string): unknown }): Lockfile {
+  return fixture.json(MEMO) as Lockfile;
+}
+
+/**
+ * Inside a dot-prefixed directory, because npm reads a visible entry in
+ * `node_modules` as an installed package: a memo at `node_modules/jup.lock` is
+ * `jup.lock@ extraneous` to `npm ls` and is deleted by the next `npm install` —
+ * destroyed, with a `removed 1 package` line to show for it, by the very command
+ * jup is there to run.
+ */
+const MEMO = "node_modules/.jup/jup.lock";
+
+/**
+ * A project that already has a `node_modules`, which is the only condition under
+ * which jup memoes anything: the directory belongs to the package manager and
+ * jup never conjures it into existence (§15.23).
+ */
+function withModules(manifest: unknown): ReturnType<typeof createFixture> {
+  const fixture = createFixture(manifest);
+  fixture.write("node_modules/.keep", "");
+  return fixture;
+}
+
+/** A recorded resolution, hand-written the way `use` would have left it. */
+function record(
+  fixture: { write(relative: string, content: string): string },
+  key: string,
+  resolved: string,
+  integrity?: string,
+): void {
+  fixture.write(
+    "jup.lock",
+    `${JSON.stringify(
+      {
+        version: 1,
+        resolutions: { [key]: integrity === undefined ? { resolved } : { resolved, integrity } },
+      },
+      undefined,
+      2,
+    )}\n`,
+  );
 }
 
 beforeAll(async () => {
@@ -47,6 +101,9 @@ beforeAll(async () => {
   for (const version of ["10.5.0", "11.0.0", "11.1.2"]) {
     registry.publish("pnpm", version, packageManagerTarball("pnpm", version));
   }
+  registry.publish("pnpm", "11.1.2", packageManagerTarball("pnpm", "11.1.2"), {
+    distTags: { latest: "11.1.2" },
+  });
 });
 
 afterAll(async () => {
@@ -56,15 +113,19 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.23 ranges and .jup.lock", () => {
-  it("181: a range pin resolves, and records the version and its integrity", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+describe("§15.23 ranges and jup.lock", () => {
+  it("181: `use` with a range keeps the range and records what it resolved to", async () => {
+    const fixture = createFixture({ name: "demo" });
 
-    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("11.1.2\n");
-    expect(result.stderr).toBe("");
+    // The range is the statement of intent, so the field goes on making it.
+    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toBe(
+      "pnpm@^11.0.0",
+    );
+    expect(result.stdout).toContain(`Updated ${fixture.path("package.json")} to use pnpm@^11.0.0`);
+    expect(result.stdout).toContain(`Updated ${fixture.path("jup.lock")} to use pnpm@11.1.2`);
 
     // The recorded digest is the one the install path verified — the sha512 of
     // the bytes the registry actually served — so the next run pins them.
@@ -80,17 +141,41 @@ describe("§15.23 ranges and .jup.lock", () => {
 
     // Human-diffable, and stable: two-space indent, one key per line, trailing
     // newline. Re-recording an unchanged resolution must not churn the file.
-    expect(fixture.read(".jup.lock")).toBe(`${JSON.stringify(lockOf(fixture), undefined, 2)}\n`);
+    expect(fixture.read("jup.lock")).toBe(`${JSON.stringify(lockOf(fixture), undefined, 2)}\n`);
   });
 
-  it("182: a second run with that lockfile present makes no network request", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+  it("181: an exact `use` still pins exactly, and records nothing", async () => {
+    const fixture = createFixture({ name: "demo" });
 
-    const first = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    const result = await run(["use", "pnpm@11.1.2"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toMatch(
+      /^pnpm@11\.1\.2\+sha512\./,
+    );
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("181: a dist-tag is a question, not a statement: `use pnpm@latest` pins exactly", async () => {
+    const fixture = createFixture({ name: "demo" });
+
+    const result = await run(["use", "pnpm@latest"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toMatch(
+      /^pnpm@11\.1\.2\+sha512\./,
+    );
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("182: a run with that lockfile present makes no network request", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+
+    const first = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
     expect(first.exitCode).toBe(0);
     expect(registry.requests.length).toBeGreaterThan(0);
 
-    const before = fixture.read(".jup.lock");
+    const before = fixture.read("jup.lock");
     registry.reset();
 
     const second = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
@@ -100,62 +185,56 @@ describe("§15.23 ranges and .jup.lock", () => {
     expect(second.stderr).toBe("");
     // §01.3's fast-path budget, extended to ranges: not one request, of any kind.
     expect(registry.requests).toEqual([]);
-    // And nothing was rewritten, so the file stays out of `git status`.
-    expect(fixture.read(".jup.lock")).toBe(before);
+    // And nothing was rewritten, so the file stays out of `git status` — nor was
+    // a memo written for an answer the recorded file already gave.
+    expect(fixture.read("jup.lock")).toBe(before);
+    expect(fixture.exists(MEMO)).toBe(false);
   });
 
-  it("183: a range with no lockfile and COREPACK_FROZEN_LOCKFILE=1 is refused", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+  it("183: an unrecorded range resolves, and memoes it rather than the project", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
 
-    const result = await run(["pnpm", "--version"], {
-      ...fixture,
-      registry,
-      env: env({ COREPACK_FROZEN_LOCKFILE: "1" }),
-    });
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe(
-      `pnpm@^11.0.0 is not resolved in .jup.lock and lockfile updates are disabled.\n`,
-    );
-    expect(result.stdout).toBe("");
-    // Refused *before* the registry was consulted: a frozen lockfile is a
-    // statement about the network as much as about the file.
-    expect(registry.requests).toEqual([]);
-    expect(fixture.exists(".jup.lock")).toBe(false);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("11.1.2\n");
+    expect(result.stderr).toBe("");
+
+    // The project's own file is untouched: running a package manager is not a
+    // decision about what the project runs on, and `git status` says so.
+    expect(fixture.exists("jup.lock")).toBe(false);
+
+    // The memo goes inside `.jup`, never loose in `node_modules`: npm reads a
+    // visible entry there as an installed package, reports it as
+    // `jup.lock@ extraneous`, and deletes it on the next `install` — so a memo
+    // written the other way would be destroyed by the very command jup exists to
+    // run, and would never live long enough for its 24-hour window to matter.
+    expect(fixture.exists("node_modules/jup.lock")).toBe(false);
+
+    const memo = memoOf(fixture).resolutions["pnpm@^11.0.0"]!;
+    expect(memo.resolved).toBe("11.1.2");
+    expect(memo.integrity).toBe(sriOf(registry.tarballOf("pnpm", "11.1.2")));
+    // Stamped, which is the difference between a memo and a record.
+    expect(memo.expires).toBeGreaterThan(Date.now());
+    expect(memo.expires).toBeLessThanOrEqual(Date.now() + 24 * 60 * 60 * 1000);
   });
 
-  it("183: CI defaults to frozen, and an explicit value wins in both directions", async () => {
-    const inCI = createFixture({ packageManager: "pnpm@^11.0.0" });
-    const refused = await run(["pnpm", "--version"], {
-      ...inCI,
-      registry,
-      env: env({ CI: "1" }),
-    });
+  it("183: CI no longer freezes an ordinary run — there is nothing left to freeze", async () => {
+    const inCI = withModules({ packageManager: "pnpm@^11.0.0" });
 
-    expect(refused.exitCode).toBe(1);
-    expect(refused.stderr).toBe(
-      `pnpm@^11.0.0 is not resolved in .jup.lock and lockfile updates are disabled.\n`,
-    );
+    const result = await run(["pnpm", "--version"], { ...inCI, registry, env: env({ CI: "1" }) });
 
-    // `COREPACK_FROZEN_LOCKFILE=0` thaws it again, inside CI and out.
-    const thawed = createFixture({ packageManager: "pnpm@^11.0.0" });
-    const allowed = await run(["pnpm", "--version"], {
-      ...thawed,
-      registry,
-      env: env({ CI: "1", COREPACK_FROZEN_LOCKFILE: "0" }),
-    });
-
-    expect(allowed.exitCode).toBe(0);
-    expect(allowed.stdout).toBe("11.1.2\n");
-    expect(lockOf(thawed).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("11.1.2\n");
+    expect(inCI.exists("jup.lock")).toBe(false);
+    expect(memoOf(inCI).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
   });
 
-  it("183: a frozen lockfile that *does* resolve the range still runs, offline", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
-    expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
-      0,
-    );
-    registry.reset();
+  it("183: COREPACK_FROZEN_LOCKFILE=1 leaves an ordinary run alone", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    record(fixture, "pnpm@^11.0.0", "11.1.2");
+    const before = fixture.read("jup.lock");
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
@@ -163,30 +242,106 @@ describe("§15.23 ranges and .jup.lock", () => {
       env: env({ COREPACK_FROZEN_LOCKFILE: "1", CI: "1" }),
     });
 
+    // The variable governs `use` and `up`; a proxy run never writes the file it
+    // names, so freezing it changes nothing about this path at all.
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
     expect(registry.requests).toEqual([]);
+    expect(fixture.read("jup.lock")).toBe(before);
   });
 
-  it("re-resolves when the recorded version no longer satisfies the range", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+  it("256: a second run inside the memo's window makes no request either", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
+      0,
+    );
+    const before = fixture.read(MEMO);
+    registry.reset();
+
+    const second = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+
+    expect(second.exitCode).toBe(0);
+    expect(second.stdout).toBe("11.1.2\n");
+    expect(registry.requests).toEqual([]);
+    // An unexpired memo is not re-stamped: nothing was learned to write down.
+    expect(fixture.read(MEMO)).toBe(before);
+  });
+
+  it("257: an expired memo is re-resolved", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
     fixture.write(
-      ".jup.lock",
-      `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "10.5.0" } } })}\n`,
+      MEMO,
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0", expires: Date.now() - 1000 } },
+      })}\n`,
     );
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
-    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+    const memo = memoOf(fixture).resolutions["pnpm@^11.0.0"]!;
+    expect(memo.resolved).toBe("11.1.2");
+    expect(memo.expires).toBeGreaterThan(Date.now());
+  });
+
+  it("257: an expired memo still answers when the resolution cannot be made", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    fixture.write(
+      MEMO,
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", expires: Date.now() - 1000 } },
+      })}\n`,
+    );
+    const before = fixture.read(MEMO);
+
+    // The packument 5xxs; version documents and tarballs are fine. The TTL
+    // exists so a range keeps moving, not so an install stops working during
+    // somebody else's incident (§15.23).
+    registry.mode = "packument_error";
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("11.1.2\n");
+    // And the failed refresh did not extend the memo's life: an outage is not a
+    // reason to believe a stale answer for another day.
+    expect(fixture.read(MEMO)).toBe(before);
+  });
+
+  it("258: a project with no node_modules resolves, and has nothing created for it", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("11.1.2\n");
+    // `node_modules` belongs to the package manager; jup does not conjure it.
+    expect(fixture.exists("node_modules")).toBe(false);
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("re-resolves when the recorded version no longer satisfies the range", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    record(fixture, "pnpm@^11.0.0", "10.5.0");
+    const before = fixture.read("jup.lock");
+
+    const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("11.1.2\n");
+    // The run resolves around a record it cannot use, and memoes the answer —
+    // but correcting the record is a decision, and decisions are `up`'s.
+    expect(fixture.read("jup.lock")).toBe(before);
+    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
   });
 
   it("uses the recorded integrity as a pin: wrong bytes fail the same way a bad pin does", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     const wrong = sriOf(registry.tarballOf("pnpm", "11.0.0"));
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({
         version: 1,
         resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", integrity: wrong } },
@@ -210,14 +365,14 @@ describe("§15.23 ranges and .jup.lock", () => {
       version: 1,
       resolutions: { "pnpm@11.1.2": { resolved: "10.5.0" } },
     })}\n`;
-    fixture.write(".jup.lock", planted);
+    fixture.write("jup.lock", planted);
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
     expect(registry.requests).toEqual([]);
-    expect(fixture.read(".jup.lock")).toBe(planted);
+    expect(fixture.read("jup.lock")).toBe(planted);
   });
 
   it("writes no lockfile for a project that pins exactly", async () => {
@@ -227,25 +382,42 @@ describe("§15.23 ranges and .jup.lock", () => {
     expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
       0,
     );
-    expect(fixture.exists(".jup.lock")).toBe(false);
+    expect(fixture.exists("jup.lock")).toBe(false);
   });
 
-  it("degrades to a normal resolution when the lockfile is unreadable or unknown", async () => {
-    for (const content of [
-      "{ not json",
-      `{"version":2,"resolutions":{"pnpm@^11.0.0":{"resolved":"10.5.0"}}}`,
-      `[]`,
-      `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":42}}}`,
-    ]) {
-      const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
-      fixture.write(".jup.lock", content);
+  const DAMAGED = [
+    "{ not json",
+    `{"version":2,"resolutions":{"pnpm@^11.0.0":{"resolved":"10.5.0"}}}`,
+    `[]`,
+    `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":42}}}`,
+  ];
+
+  it("degrades to a normal resolution when the recorded file is unreadable", async () => {
+    for (const content of DAMAGED) {
+      const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+      fixture.write("jup.lock", content);
 
       const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
       expect(result.exitCode, content).toBe(0);
       expect(result.stdout).toBe("11.1.2\n");
-      // Rewritten in the canonical shape, rather than left broken.
-      expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+      // The memo is written in the canonical shape; the project's own file is
+      // left exactly as broken as it was, for its owner to fix.
+      expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+      expect(fixture.read("jup.lock")).toBe(content);
+    }
+  });
+
+  it("degrades to a normal resolution when the memo is unreadable", async () => {
+    for (const content of DAMAGED) {
+      const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+      fixture.write(MEMO, content);
+
+      const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+
+      expect(result.exitCode, content).toBe(0);
+      expect(result.stdout).toBe("11.1.2\n");
+      expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
     }
   });
 
@@ -258,7 +430,7 @@ describe("§15.23 ranges and .jup.lock", () => {
     expect(result.stdout).toBe("10.5.0\n");
     // `pnpm@^10.0.0 …` is one invocation (§04.6), not a statement about the
     // project, and the project's own range is not what it resolved either.
-    expect(fixture.exists(".jup.lock")).toBe(false);
+    expect(fixture.exists("jup.lock")).toBe(false);
   });
 
   it("does not record a fallback version in the project that fell back", async () => {
@@ -278,7 +450,7 @@ describe("§15.23 ranges and .jup.lock", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
-    expect(fixture.exists(".jup.lock")).toBe(false);
+    expect(fixture.exists("jup.lock")).toBe(false);
   });
 
   it("leaves a recorded resolution exactly as the project wrote it", async () => {
@@ -287,17 +459,17 @@ describe("§15.23 ranges and .jup.lock", () => {
     // resolution only on `corepack up`, so a run that merely *uses* one must not
     // rewrite the file — not to reformat it, and not to add what it now knows.
     const planted = `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.1.2"}}}\n`;
-    fixture.write(".jup.lock", planted);
+    fixture.write("jup.lock", planted);
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
-    expect(fixture.read(".jup.lock")).toBe(planted);
+    expect(fixture.read("jup.lock")).toBe(planted);
   });
 
-  it("records the resolution beside the manifest that declared it, not beside the cwd", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+  it("memoes beside the manifest that declared the range, not beside the cwd", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
     fixture.write("packages/app/keep.txt", "");
 
     const result = await run(["pnpm", "--version"], {
@@ -308,12 +480,12 @@ describe("§15.23 ranges and .jup.lock", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(fixture.exists("packages/app/.jup.lock")).toBe(false);
-    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+    expect(fixture.exists(`packages/app/${MEMO}`)).toBe(false);
+    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
   });
 
   it("accepts a range in both packageManager and devEngines — the pnpm 11.21 shape", async () => {
-    const fixture = createFixture({
+    const fixture = withModules({
       packageManager: "pnpm@^11.0.0",
       devEngines: { packageManager: { name: "pnpm", version: ">=11", onFail: "error" } },
     });
@@ -323,13 +495,13 @@ describe("§15.23 ranges and .jup.lock", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
     expect(result.stderr).toBe("");
-    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
   });
 
   it("install warms the cache with the recorded version, not the newest match", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
@@ -349,7 +521,7 @@ describe("§15.23 ranges and .jup.lock", () => {
       devEngines: { packageManager: { name: "pnpm", version: ">=10", onFail: "error" } },
     });
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
@@ -366,7 +538,7 @@ describe("§15.23 ranges and .jup.lock", () => {
   it("up refreshes the recorded resolution and keeps the range in the manifest", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
@@ -385,6 +557,118 @@ describe("§15.23 ranges and .jup.lock", () => {
     });
   });
 
+  it("up keeps the range `use` wrote into devEngines, wherever it lives", async () => {
+    // §15.26 — `use` writes the pin into every field that encodes it, and on a
+    // devEngines-only project that is `devEngines.packageManager.version` alone.
+    // `up` must then read the pin from the same place: gated on a *top-level*
+    // string it saw no range at all, overwrote this one with an exact version,
+    // and deleted the `jup.lock` entry `use` had just recorded on the way past —
+    // which is the pnpm 11.21 shape, so it is not a corner.
+    const fixture = withModules({
+      name: "demo",
+      devEngines: { packageManager: { name: "pnpm", version: ">=10", onFail: "error" } },
+    });
+
+    const used = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+    expect(used.exitCode).toBe(0);
+
+    const afterUse = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines: { packageManager: { version: string } };
+    };
+    expect(afterUse.packageManager).toBeUndefined();
+    expect(afterUse.devEngines.packageManager.version).toBe("^11.0.0");
+    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+
+    // Rewind the record to an older release, so the refresh has something to do.
+    record(fixture, "pnpm@^11.0.0", "11.0.0");
+
+    const upped = await run(["up"], { ...fixture, registry, env: env() });
+    expect(upped.exitCode).toBe(0);
+
+    const afterUp = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines: { packageManager: { version: string } };
+    };
+    expect(afterUp.packageManager).toBeUndefined();
+    expect(afterUp.devEngines.packageManager.version).toBe("^11.0.0");
+    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]).toEqual({
+      resolved: "11.1.2",
+      integrity: sriOf(registry.tarballOf("pnpm", "11.1.2")),
+    });
+    expect(upped.stdout).toContain(`to use pnpm@11.1.2`);
+  });
+
+  it("up retires the memo it has just superseded", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    record(fixture, "pnpm@^11.0.0", "11.0.0");
+    // What an ordinary run left behind, still well inside its window.
+    fixture.write(
+      MEMO,
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0", expires: Date.now() + 3_600_000 } },
+      })}\n`,
+    );
+
+    const result = await run(["up"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+    // Left in place, the memo outlives the decision that replaced it: it answers
+    // alone in every state where the recorded file is not visible — an
+    // uncommitted `up`, a `git stash`, a CI cache holding `node_modules` but not
+    // the lockfile — and the project goes on running the superseded version.
+    expect(fixture.exists(MEMO)).toBe(false);
+  });
+
+  it("install reads the memo when nothing is committed", async () => {
+    // The now-ordinary state: a run has memoed, and no `jup.lock` exists at all.
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    fixture.write(
+      MEMO,
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0", expires: Date.now() + 3_600_000 } },
+      })}\n`,
+    );
+
+    const result = await run(["install"], { ...fixture, registry, env: env() });
+
+    // Caching 11.1.2 and then running 11.0.0 offline is the failure `install`
+    // exists to prevent, and in a `JUP_ENABLE_NETWORK=0` layer it is fatal.
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("Adding pnpm@11.0.0 to the cache...\n");
+    expect(existsSync(join(fixture.home, "v1", "pnpm", "11.0.0"))).toBe(true);
+    expect(existsSync(join(fixture.home, "v1", "pnpm", "11.1.2"))).toBe(false);
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("use refuses to *delete* a recorded resolution under COREPACK_FROZEN_LOCKFILE=1", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    record(fixture, "pnpm@^11.0.0", "11.0.0");
+    const before = fixture.read("jup.lock");
+
+    const result = await run(["use", "pnpm@11.1.2"], {
+      ...fixture,
+      registry,
+      env: env({ COREPACK_FROZEN_LOCKFILE: "1" }),
+    });
+
+    // An exact `use` retires the range's entry — and `rm`s `jup.lock` outright
+    // when it was the only one. The flag governs whether that file may be
+    // written, and a deletion is a write; the range form alone was guarded.
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Usage Error: pnpm@^11.0.0 is not resolved in jup.lock and lockfile updates are disabled.`,
+    );
+    expect(registry.requests).toEqual([]);
+    expect(fixture.read("jup.lock")).toBe(before);
+    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toBe(
+      "pnpm@^11.0.0",
+    );
+  });
+
   it("up refuses to refresh under an explicit COREPACK_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
@@ -396,7 +680,7 @@ describe("§15.23 ranges and .jup.lock", () => {
 
     expect(frozen.exitCode).toBe(1);
     expect(frozen.stdout).toContain(
-      `Usage Error: pnpm@^11.0.0 is not resolved in .jup.lock and lockfile updates are disabled.`,
+      `Usage Error: pnpm@^11.0.0 is not resolved in jup.lock and lockfile updates are disabled.`,
     );
 
     // But CI on its own does not block a command the user ran *to* refresh it.
@@ -406,11 +690,16 @@ describe("§15.23 ranges and .jup.lock", () => {
   });
 
   it("use replaces a range with an exact pin and retires its resolution", async () => {
-    const fixture = createFixture({ packageManager: "pnpm@^10.0.0" });
+    const fixture = withModules({ name: "demo" });
 
-    const first = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    const first = await run(["use", "pnpm@^10.0.0"], { ...fixture, registry, env: env() });
     expect(first.exitCode).toBe(0);
     expect(lockOf(fixture).resolutions["pnpm@^10.0.0"]?.resolved).toBe("10.5.0");
+
+    // A run under the range, so there is a memo to retire as well as a record.
+    expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
+      0,
+    );
 
     const used = await run(["use", "pnpm@11.1.2"], { ...fixture, registry, env: env() });
 
@@ -419,7 +708,29 @@ describe("§15.23 ranges and .jup.lock", () => {
       /^pnpm@11\.1\.2\+sha512\./,
     );
     // The last resolution went with the range it belonged to, and an empty
-    // resolution map is no file at all.
-    expect(fixture.exists(".jup.lock")).toBe(false);
+    // resolution map is no file at all — in either file, since a memo left
+    // behind would come back to life the moment the range did.
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(fixture.exists(MEMO)).toBe(false);
+  });
+
+  it("use refuses to record under an explicit COREPACK_FROZEN_LOCKFILE=1", async () => {
+    const fixture = createFixture({ name: "demo" });
+
+    const result = await run(["use", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env({ COREPACK_FROZEN_LOCKFILE: "1" }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Usage Error: pnpm@^11.0.0 is not resolved in jup.lock and lockfile updates are disabled.`,
+    );
+    // Refused before the resolve, so a frozen job fails on its own flag rather
+    // than after a download it was never going to be allowed to record.
+    expect(registry.requests).toEqual([]);
+    expect(fixture.exists("package.json")).toBe(true);
+    expect(fixture.json("package.json")).toEqual({ name: "demo" });
   });
 });

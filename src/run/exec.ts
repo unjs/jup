@@ -128,6 +128,17 @@ export function stubNameFor(binName: string): string {
   return `${binName}.mjs`;
 }
 
+/**
+ * The first line of each §10.3 Windows wrapper.
+ *
+ * The wrappers cannot carry {@link SHIM_MARKER} — §10.3 fixes their bodies byte
+ * for byte — so they are recognised by their head plus the {@link stubNameFor}
+ * stub they invoke. Here for the reason {@link SHIM_MARKER} is: {@link isOurShim}
+ * reads it on every invocation and decides which `node` on `PATH` §15.43 may
+ * bake in. `shims.ts` re-exports it, so there is one list.
+ */
+export const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
+
 /** First `length` bytes of a file as UTF-8, or `undefined` if it cannot be read. */
 function readHeadSync(file: string, length: number): string | undefined {
   let handle: number | undefined;
@@ -169,9 +180,13 @@ export function isOurShim(file: string, binName: string): boolean {
     return target === PROXY_STUB_NAME || target === stubNameFor(binName);
   }
   if (head.includes(SHIM_MARKER)) return true;
+  // All three shapes, and not gated on the platform — `isOurEntry` reads them
+  // the same way. The gate was the bug: `whichAll` walks `PATHEXT` on Windows,
+  // so the only candidates it can hand this are `.cmd` and `.ps1`, and a §15.43
+  // tier-2 walk blind to those baked our own `node.cmd` into every wrapper it
+  // wrote — §14.26's exec loop, by hand.
   return (
-    process.platform === "win32" &&
-    head.startsWith("#!/bin/sh") &&
+    WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) &&
     head.includes(stubNameFor(binName))
   );
 }

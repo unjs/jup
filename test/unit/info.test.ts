@@ -312,7 +312,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
     await manifest({ packageManager: "pnpm@^11.0.0" });
     seed("pnpm", "11.1.2");
     await writeFile(
-      join(project, ".jup.lock"),
+      join(project, "jup.lock"),
       `${JSON.stringify({
         version: 1,
         // `sha512-AQI=` is the SRI spelling of the bytes `01 02`.
@@ -323,7 +323,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
     const info = report();
 
     expect(info.lockfile).toMatchObject({
-      path: join(project, ".jup.lock"),
+      path: join(project, "jup.lock"),
       present: true,
       key: "pnpm@^11.0.0",
       resolution: { resolved: "11.1.2", integrity: "sha512-AQI=" },
@@ -332,12 +332,36 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
       status: "locked",
       version: "11.1.2",
       hash: "sha512.0102",
-      source: join(project, ".jup.lock"),
+      source: join(project, "jup.lock"),
       installed: true,
     });
   });
 
-  it("says so plainly when the range is frozen and nothing is recorded", async () => {
+  it("skips a recorded resolution that no longer satisfies its range", async () => {
+    // Reachable from a hand edit, a bad merge, or a `jup.lock` restored beside a
+    // manifest that has since moved on. The run resolves around such an entry
+    // (§15.23), so reporting it as `locked` would name a version the very next
+    // invocation refuses.
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    seed("pnpm", "10.0.0");
+    await writeFile(
+      join(project, "jup.lock"),
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "10.0.0" } },
+      })}\n`,
+    );
+
+    const info = report();
+
+    // The file is there, and its key is the one this spec would use; the entry
+    // in it is not an answer.
+    expect(info.lockfile).toMatchObject({ present: true, key: "pnpm@^11.0.0", resolution: null });
+    expect(info.resolution.status).not.toBe("locked");
+    expect(info.resolution.version).not.toBe("10.0.0");
+  });
+
+  it("reports what freezes `use` and `up`, and where it came from", async () => {
     await manifest({ packageManager: "pnpm@^11.0.0" });
     process.env.COREPACK_FROZEN_LOCKFILE = "1";
 
@@ -345,20 +369,106 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
 
     expect(info.lockfile.frozen).toBe(true);
     expect(info.lockfile.frozenSource).toBe("COREPACK_FROZEN_LOCKFILE");
-    expect(info.resolution.status).toBe("frozen");
-    expect(info.resolution.reason).toContain("lockfile updates are disabled");
+    // §15.23 — freezing the recorded file says nothing about *this* run: a proxy
+    // run never writes it, so the resolution is reported on its own terms.
+    expect(info.resolution.status).toBe("network");
   });
 
-  it("attributes the CI default, and honours an explicit thaw inside CI", async () => {
+  it("no longer attributes a CI default, because there is not one", async () => {
     await manifest({ packageManager: "pnpm@^11.0.0" });
     process.env.CI = "1";
-    expect(report().lockfile).toMatchObject({ frozen: true, frozenSource: "CI" });
+    expect(report().lockfile).toMatchObject({ frozen: false, frozenSource: "default" });
 
-    process.env.COREPACK_FROZEN_LOCKFILE = "0";
+    process.env.COREPACK_FROZEN_LOCKFILE = "1";
     expect(report().lockfile).toMatchObject({
-      frozen: false,
+      frozen: true,
       frozenSource: "COREPACK_FROZEN_LOCKFILE",
     });
+  });
+
+  it("reports an unexpired memo as what the next run would use", async () => {
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    seed("pnpm", "11.1.2");
+    mkdirSync(join(project, "node_modules", ".jup"), { recursive: true });
+    await writeFile(
+      join(project, "node_modules", ".jup", "jup.lock"),
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", expires: Date.now() + 60_000 } },
+      })}\n`,
+    );
+
+    const info = report();
+
+    expect(info.lockfile.cache).toMatchObject({
+      path: join(project, "node_modules", ".jup", "jup.lock"),
+      present: true,
+      expired: false,
+    });
+    expect(info.resolution).toMatchObject({
+      status: "cached",
+      version: "11.1.2",
+      source: join(project, "node_modules", ".jup", "jup.lock"),
+      installed: true,
+    });
+  });
+
+  it("skips a memo that no longer satisfies its range, however fresh its stamp", async () => {
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    seed("pnpm", "10.0.0");
+    mkdirSync(join(project, "node_modules", ".jup"), { recursive: true });
+    await writeFile(
+      join(project, "node_modules", ".jup", "jup.lock"),
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "10.0.0", expires: Date.now() + 60_000 } },
+      })}\n`,
+    );
+
+    const info = report();
+
+    expect(info.lockfile.cache).toMatchObject({ present: true, resolution: null, expired: false });
+    expect(info.resolution.status).not.toBe("cached");
+    expect(info.resolution.version).not.toBe("10.0.0");
+  });
+
+  it("ignores a memo stamped further out than the window it is allowed to claim", async () => {
+    // A `node_modules` restored from an image, or written under a fast clock:
+    // believed as-is it would pin the range with no request for as long as it
+    // says. §15.23 gives the stamp an upper bound as well as a lower one.
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    mkdirSync(join(project, "node_modules", ".jup"), { recursive: true });
+    await writeFile(
+      join(project, "node_modules", ".jup", "jup.lock"),
+      `${JSON.stringify({
+        version: 1,
+        resolutions: {
+          "pnpm@^11.0.0": { resolved: "11.1.2", expires: Date.now() + 400 * 24 * 60 * 60 * 1000 },
+        },
+      })}\n`,
+    );
+
+    const info = report();
+
+    expect(info.lockfile.cache.expired).toBe(true);
+    expect(info.resolution.status).toBe("network");
+  });
+
+  it("ignores an expired memo: the next run would go and ask", async () => {
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    mkdirSync(join(project, "node_modules", ".jup"), { recursive: true });
+    await writeFile(
+      join(project, "node_modules", ".jup", "jup.lock"),
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", expires: Date.now() - 1000 } },
+      })}\n`,
+    );
+
+    const info = report();
+
+    expect(info.lockfile.cache.expired).toBe(true);
+    expect(info.resolution.status).toBe("network");
   });
 
   it("falls back to the cache probe, which is what a real run would do next", async () => {
@@ -607,6 +717,43 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     const winning = buildReport().shims.entries.find((entry) => entry.binary === "yarn")!;
     expect(winning.ours).toBe(true);
     expect(winning.shadowed).toBe(false);
+  });
+
+  // §15.14 / #751 — the ownership test is now the one `run/exec.ts` exports,
+  // shared with `enable`, `disable` and §15.43's interpreter walk instead of
+  // copied here. It is a superset of the copy it replaced: a **dangling**
+  // symlink that still names our stub is ours. That is the answer `info` wants —
+  // such a shim is one `enable` replaces and `disable` removes, and reporting it
+  // as somebody else's would hide the exact breakage the report exists to
+  // explain (§15.30: "a shim is installed" means one of ours).
+  it.skipIf(IS_WINDOWS)("reports a shim whose stub has moved away as ours", () => {
+    const bin = join(home, "bin");
+    mkdirSync(bin, { recursive: true });
+    process.env.COREPACK_SHIM_DIRECTORY = bin;
+    // The #751 state: the link is there, `yarn.mjs` is not.
+    symlinkSync("yarn.mjs", join(bin, "yarn"));
+
+    process.env.PATH = bin;
+    const yarn = buildReport().shims.entries.find((entry) => entry.binary === "yarn")!;
+
+    expect(yarn.shim).toBe(join(bin, "yarn"));
+    // Not on `PATH`, though: a dangling link is not executable, so the name
+    // resolves to nothing and the report says both halves.
+    expect(yarn.path).toBeNull();
+    expect(yarn.ours).toBe(false);
+    expect(yarn.shadowed).toBe(false);
+  });
+
+  it.skipIf(IS_WINDOWS)("still declines a dangling link that names something else", () => {
+    const bin = join(home, "bin");
+    mkdirSync(bin, { recursive: true });
+    process.env.COREPACK_SHIM_DIRECTORY = bin;
+    symlinkSync("../elsewhere/yarn.js", join(bin, "yarn"));
+
+    process.env.PATH = bin;
+    const yarn = buildReport().shims.entries.find((entry) => entry.binary === "yarn")!;
+
+    expect(yarn.shim).toBeNull();
   });
 
   // §15.13 redirected this row: the shim directory is now always determinable —

@@ -55,7 +55,7 @@ describe("§13.2 spec parsing and discovery", () => {
     // reach the real repo.yarnpkg.com — exit 0 is therefore also the assertion
     // that the recorded resolution answered without any network at all.
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "yarn@stable": { resolved: "1.22.4" } } })}\n`,
     );
 
@@ -66,22 +66,29 @@ describe("§13.2 spec parsing and discovery", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("4: packageManager yarn@^1.0.0 resolves, and records what it resolved to", async () => {
+  it("4: packageManager yarn@^1.0.0 resolves, and memoes what it resolved to", async () => {
     const fixture = createFixture({ packageManager: "yarn@^1.0.0" });
     seedPackageManager(fixture.home, "yarn", "1.22.4");
+    fixture.write("node_modules/.keep", "");
 
     const result = await run(["yarn", "--version"], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
     expect(result.stderr).toBe("");
+    // §15.23 — the project's own file is a decision, and running yarn is not
+    // one: what a proxy run may write is the memo in `node_modules/.jup`.
+    expect(fixture.exists("jup.lock")).toBe(false);
     // No `integrity`: this store entry was hand-planted with a placeholder hash
     // rather than downloaded, and an unusable digest is recorded as none at all.
     // Row 181 covers the real thing, against bytes that were actually fetched.
-    expect(fixture.json(".jup.lock")).toEqual({
-      version: 1,
-      resolutions: { "yarn@^1.0.0": { resolved: "1.22.4" } },
-    });
+    const memo = fixture.json("node_modules/.jup/jup.lock") as {
+      version: number;
+      resolutions: Record<string, { resolved: string; expires: number }>;
+    };
+    expect(memo.version).toBe(1);
+    expect(memo.resolutions["yarn@^1.0.0"]?.resolved).toBe("1.22.4");
+    expect(memo.resolutions["yarn@^1.0.0"]?.expires).toBeGreaterThan(Date.now());
   });
 
   it("5: packageManager yarn@ -> No version specified", async () => {

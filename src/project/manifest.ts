@@ -610,7 +610,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
   } else {
     // §15.23 — an exact version, a semver range, and a dist-tag are all valid
     // here; §04.1 classifies which is which, and a range or a tag additionally
-    // has its resolution recorded in `.jup.lock`. Corepack's
+    // has its resolution recorded in `jup.lock`. Corepack's
     // exact-version-only rule lived at exactly this line, and is the whole of
     // #95 (121👍), #402 and #729 — the rule that broke Dependabot, Renovate and
     // Netlify, and that pnpm 11.21's generated `devEngines` ranges trip over.
@@ -726,11 +726,11 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
     }
     // `packageManager` wins whenever it is present, even after a warning.
-    return { raw: withSidecarIntegrity(pm, integrity, onFail), range, devEngines, hasPin };
+    return { raw: withSidecarIntegrity(pm, integrity, version, onFail), range, devEngines, hasPin };
   }
 
   return {
-    raw: withSidecarIntegrity(`${name}@${version ?? "*"}`, integrity, onFail),
+    raw: withSidecarIntegrity(`${name}@${version ?? "*"}`, integrity, version, onFail),
     range,
     devEngines,
     hasPin,
@@ -756,13 +756,25 @@ export function readSpecFromManifest(
  *   silently discarded, because two digests for one artifact means at most one
  *   of them describes what will run;
  * * a range or a dist-tag, which no single digest can describe. §15.23's
- *   `.jup.lock` is where a range's resolved digest lives, and it records
+ *   `jup.lock` is where a range's resolved digest lives, and it records
  *   one on the first resolve;
  * * a URL reference, which carries its hash in the fragment (§02.1).
  */
-function withSidecarIntegrity(raw: unknown, integrity: unknown, onFail: unknown): unknown {
+function withSidecarIntegrity(
+  raw: unknown,
+  integrity: unknown,
+  declared: unknown,
+  onFail: unknown,
+): unknown {
   if (integrity === undefined || integrity === null) return raw;
   if (typeof raw !== "string") return raw;
+
+  // §15.12 — the sidecar describes the `version` beside it, and only that. Where
+  // that version is a range it describes no single release, so it may not be
+  // folded into a `packageManager` pin that outranks it (§03.3): the digest and
+  // the reference would be about different versions. Writers now delete such a
+  // digest (§15.26); one still here is a hand edit or an older jup.
+  if (typeof declared === "string" && !isValidVersion(declared)) return raw;
 
   if (typeof integrity !== "string") {
     warnOrThrow(messages.devEnginesBadIntegrity(integrity), onFail);

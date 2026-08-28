@@ -145,6 +145,7 @@ describe.skipIf(!POSIX)("§15.40 version files", () => {
     );
     fixture.write("packages/app/package.json", `${JSON.stringify({ name: "app" })}\n`);
     fixture.write("packages/app/.nvmrc", "22.x\nsome-nvm-setting=on\n");
+    fixture.write("packages/app/node_modules/.keep", "");
 
     const nested = { ...options(fixture), cwd: join(fixture.cwd, "packages", "app") };
     const result = await run(["node", "-e", "0"], nested);
@@ -156,12 +157,13 @@ describe.skipIf(!POSIX)("§15.40 version files", () => {
     expect(installed(fixture, PINNED)).toBe(true);
     expect(installed(fixture, NEWEST)).toBe(false);
 
-    // §15.23 — a range resolves through `.jup.lock`, and the version file is the
-    // spec result's target, so the record lands beside the file that declared
-    // the range rather than at the repository root.
-    expect(fixture.exists("packages/app/.jup.lock")).toBe(true);
-    expect(fixture.exists(".jup.lock")).toBe(false);
-    expect(fixture.json("packages/app/.jup.lock")).toMatchObject({
+    // §15.23 — a range resolves through `jup.lock`, and the version file is the
+    // spec result's target, so the memo lands beside the file that declared the
+    // range rather than at the repository root. Neither project file is written:
+    // running `node` is not a decision about what the repository builds on.
+    expect(fixture.exists("packages/app/jup.lock")).toBe(false);
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(fixture.json("packages/app/node_modules/.jup/jup.lock")).toMatchObject({
       resolutions: { "node@22.x": expect.objectContaining({ resolved: PINNED }) },
     });
   });

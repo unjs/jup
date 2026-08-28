@@ -30,12 +30,52 @@ import {
   setNestedString,
   setTopLevelString,
 } from "../utils/json-write.ts";
-import { parseManifest } from "../utils/json.ts";
+import {
+  BOM,
+  CH_BACKSLASH,
+  CH_COLON,
+  CH_COMMA,
+  CH_LBRACE,
+  CH_QUOTE,
+  isWhitespace,
+  parseManifest,
+  skipWhitespace,
+  stripBom,
+} from "../utils/json.ts";
 import { devEnginesFieldFor } from "../config/table.ts";
 import { integrityFromHash } from "./lockfile.ts";
 import { discoverProjectSpec, warnOrThrow } from "./manifest.ts";
-import { isValidVersion, parse, satisfies } from "../version/semver.ts";
+import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type { DevEnginesDeclaration, DevEnginesField, Manifest } from "../types.ts";
+
+/**
+ * What to write, and what it resolved to.
+ *
+ * `reference` is the text that lands in the field. Usually that is an exact
+ * version, optionally carrying §02.1's digest suffix — but §15.23 lets `jup use`
+ * pin a **semver range**, and then the two halves come apart: the field holds
+ * `^11.0.0` while every check that asks "is this pin allowed here?" has to ask it
+ * of the version the range actually resolved to. `resolved` carries that version
+ * for those checks; when it is absent, `reference` answers both questions, which
+ * is the exact-pin case unchanged.
+ */
+export interface PinInfo {
+  name: string;
+  reference: string;
+  resolved?: string;
+  hash?: string;
+}
+
+/**
+ * The semver text a field may hold: an exact version (digest suffix stripped),
+ * or §15.23's range. `undefined` for anything a semver field cannot record —
+ * a URL, or a dist-tag.
+ */
+function pinText(reference: string): string | undefined {
+  const parsed = parse(reference);
+  if (parsed !== null) return parsed.version;
+  return isValidRange(reference) ? reference : undefined;
+}
 
 /**
  * §03.7, as amended by §15.26 and §15.27 — write the pin.
@@ -80,7 +120,7 @@ import type { DevEnginesDeclaration, DevEnginesField, Manifest } from "../types.
  */
 export function writePin(
   cwd: string,
-  info: { name: string; reference: string; hash?: string },
+  info: PinInfo,
   options?: { here?: boolean; pinStyle?: PinStyle },
 ): { previousPackageManager: string; target: string; written: string } {
   // §15.39 — which field encodes this pin, decided by the tool's kind and by
@@ -149,7 +189,7 @@ export function writePin(
     warnOrThrow(
       messages.devEnginesPinMismatch(
         info.name,
-        info.reference,
+        info.resolved ?? info.reference,
         declared.name,
         declared.version ?? "*",
       ),
@@ -158,10 +198,15 @@ export function writePin(
   } else if (
     range !== undefined &&
     !devEnginesTarget.replacesDeclaredVersion &&
-    !satisfies(info.reference, range.range)
+    !satisfies(info.resolved ?? info.reference, range.range)
   ) {
     warnOrThrow(
-      messages.devEnginesPinMismatch(info.name, info.reference, range.name, range.range),
+      messages.devEnginesPinMismatch(
+        info.name,
+        info.resolved ?? info.reference,
+        range.name,
+        range.range,
+      ),
       range.onFail,
     );
   }
@@ -201,9 +246,17 @@ export function writePin(
     // not a reason to write no pin at all, so the ordinary member write is the
     // fallback: it lands the same clean version, just without an `integrity`
     // line there is no hash for.
+    //
+    // The fallback is gated on the *target*, not on `sidecar`. When
+    // `devEnginesWriteTarget` said not to write — a member that speaks for
+    // another tool, a URL reference with no semver to record, a broken
+    // top-level pin — `--pin-style=sidecar` is a request about the digest's
+    // spelling, not permission to overwrite a declaration this pin does not
+    // describe. `writeSidecarPin` may still create a member where there is
+    // none, which is what §15.12 says the flag does.
     const next =
       (sidecar ? writeSidecarPin(updated, data, info, field) : null) ??
-      writeIntoDevEngines(updated, data, info, field);
+      (devEnginesTarget.write ? writeIntoDevEngines(updated, data, info, field) : null);
     if (next !== null) {
       updated = next;
       wroteDevEngines = true;
@@ -216,6 +269,7 @@ export function writePin(
   // landed, quoting `info.reference` would name a suffixed string that is
   // nowhere in the file. The top-level field is the one that keeps the suffix,
   // and only while it is still being written.
+  // §15.23 — a range has no digest suffix to strip, so it passes through whole.
   const cleanReference = (): string => parse(info.reference)?.version ?? info.reference;
   let written = info.reference;
   // §15.39 — the fallback below is `packageManager`, and a runtime may not go
@@ -242,7 +296,7 @@ export function writePin(
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
   writeManifest(target, updated);
 
-  // `target` goes back to the caller because §15.23's `.jup.lock` lives
+  // `target` goes back to the caller because §15.23's `jup.lock` lives
   // beside *this* file, not beside the cwd — in a monorepo those differ, and a
   // resolution recorded next to the wrong manifest would never be found again.
   // §15.27 also requires it to be *printed*, and printing is the caller's job.
@@ -321,7 +375,7 @@ function writeManifest(target: string, content: string): void {
 function devEnginesWriteTarget(
   data: Manifest,
   declared: DevEnginesDeclaration | undefined,
-  info: { name: string; reference: string },
+  info: PinInfo,
   field: DevEnginesField = "packageManager",
 ): { write: boolean; exclusive: boolean; replacesDeclaredVersion: boolean } {
   const none = { write: false, exclusive: false, replacesDeclaredVersion: false };
@@ -336,7 +390,7 @@ function devEnginesWriteTarget(
   // is validated as a semver range — and it is `writePin`'s error rather than a
   // silent fallback, because for a runtime there is nowhere to fall back to.
   if (field === "runtime") {
-    if (parse(info.reference) === null) return none;
+    if (pinText(info.reference) === undefined) return none;
     return {
       write: true,
       exclusive: true,
@@ -348,8 +402,9 @@ function devEnginesWriteTarget(
   // the mismatch is reported through `onFail` and the pin goes to the top level,
   // where a reader can still see both statements.
   if (declared === undefined || declared.name !== info.name) return none;
-  // A URL reference has no semver to record in a semver field.
-  if (parse(info.reference) === null) return none;
+  // A URL reference has no semver to record in a semver field; §15.23's range
+  // does, and goes in as written.
+  if (pinText(info.reference) === undefined) return none;
 
   // A `packageManager` key that is present but not a string is a spec error the
   // user is about to have overwritten — write it at the top level, as before.
@@ -387,9 +442,12 @@ export type PinStyle = "suffix" | "sidecar";
 function writeSidecarPin(
   content: string,
   data: Manifest,
-  info: { name: string; reference: string; hash?: string },
+  info: PinInfo,
   field: DevEnginesField = "packageManager",
 ): string | null {
+  // A range pin carries no digest to move out of the version string (§15.23
+  // keeps its digest in `jup.lock`), so there is no sidecar to write and the
+  // ordinary member write below lands the range instead.
   const version = parse(info.reference)?.version;
   if (version === undefined || info.hash === undefined) return null;
 
@@ -507,9 +565,24 @@ function createDevEnginesMember(
  * The version written is the **plain** semver version and the digest goes to
  * `integrity` beside it (§15.12's shape), because a `devEngines` member's
  * `version` is validated as a semver *range* by §03.3 and a `+sha512.…` suffix
- * has no business in one. `integrity` is only written when a usable digest is
- * available, and it is never left behind pointing at a version that has moved,
- * because it is rewritten in the same edit as the version it describes.
+ * has no business in one.
+ *
+ * `integrity` is written when a usable digest is available, and it is never left
+ * behind pointing at a version that has moved: the version and the digest that
+ * describes it are settled in the same edit, and when the new version arrives
+ * without one — §15.23's range pin keeps its digest in `jup.lock`, and §15.28's
+ * per-host tool has none at all — the key is **removed** rather than skipped.
+ *
+ * That distinction is the whole point of the two branches at the end. "No digest
+ * to write" and "the digest that is there is now wrong" are different states:
+ * re-pinning the same exact version with no digest to hand must leave a good
+ * `integrity` alone, while moving the version — to another release, or to a
+ * range no single digest can describe — invalidates it. Skipping both cases
+ * alike leaves a digest for a release the project no longer uses, and it is
+ * *inert* while the field holds a range, so nothing reports it; the moment
+ * anyone (a person, Renovate) narrows the version back to an exact release,
+ * §15.12's reader folds that digest into the spec and every install fails a hash
+ * check whose cause is several commits away.
  *
  * §15.39 — the member may not exist. For `devEngines.packageManager` that only
  * happened under §15.12's sidecar, which created it explicitly; for a runtime it
@@ -521,10 +594,10 @@ function createDevEnginesMember(
 function writeIntoDevEngines(
   content: string,
   data: Manifest,
-  info: { name: string; reference: string; hash?: string },
+  info: PinInfo,
   field: DevEnginesField = "packageManager",
 ): string | null {
-  const version = parse(info.reference)?.version;
+  const version = pinText(info.reference);
   if (version === undefined) return null;
 
   const integrity = info.hash === undefined ? undefined : integrityFromHash(info.hash);
@@ -555,7 +628,116 @@ function writeIntoDevEngines(
     updated = setNestedString(updated, ["devEngines", field, "name"], info.name) ?? updated;
   }
 
-  if (integrity === undefined) return updated;
+  if (integrity !== undefined) {
+    return setNestedString(updated, ["devEngines", field, "integrity"], integrity) ?? updated;
+  }
 
-  return setNestedString(updated, ["devEngines", field, "integrity"], integrity) ?? updated;
+  // No digest to write. One already there describes the version it sat beside,
+  // so it survives only when that version has not moved — and only when what is
+  // being written is an exact version, since a digest beside a range describes
+  // nothing §15.12 can read back. Anything else is stale and comes out.
+  const stale =
+    Object.hasOwn(member as object, "integrity") &&
+    !(isValidVersion(version) && (member as { version?: unknown }).version === version);
+  if (!stale) return updated;
+
+  // A member left half-corrected is the trap this branch exists to defuse, so a
+  // removal that cannot be made surgically is a failed edit like any other: the
+  // caller falls back to the top-level field (§15.26) or reports the failure
+  // (§15.39), and `devEngines` keeps a version and a digest that still agree.
+  return removeDevEnginesKey(updated, field, "integrity");
+}
+
+/**
+ * Delete one key from a `devEngines` member, preserving indentation, line
+ * endings, key order and the BOM — the removal half of `json-write.ts`'s
+ * surgical edit, which has only ever needed to *set* keys (§16.4).
+ *
+ * The entry is taken together with one separator so what is left is still one
+ * object: the comma that follows it when there is one — which keeps the leading
+ * whitespace of the next entry, so the survivors do not shift — and the comma
+ * that precedes it otherwise.
+ *
+ * Returns `null` when the edit cannot be made, including when it produced
+ * something that does not parse or that still carries the key, so a caller can
+ * fall back rather than write back a manifest this did not understand.
+ */
+function removeDevEnginesKey(content: string, field: DevEnginesField, key: string): string | null {
+  const prefix = content.startsWith(BOM) ? BOM : "";
+  const body = stripBom(content);
+
+  // Walk to the member's text span, exactly as `createDevEnginesMember` does.
+  const outer = scanTopLevelKey(body, "devEngines");
+  if (outer === null) return null;
+  const inner = scanTopLevelKey(body.slice(outer.start, outer.end), field);
+  if (inner === null) return null;
+  const start = outer.start + inner.start;
+  const end = outer.start + inner.end;
+
+  const member = body.slice(start, end);
+  const value = scanTopLevelKey(member, key);
+  if (value === null) return content; // Absent: already in the desired state.
+
+  // `scanTopLevelKey` reports the *value*; the entry starts at its key, which is
+  // the string literal behind the colon.
+  const colon = lastNonSpace(member, value.start);
+  if (member.charCodeAt(colon) !== CH_COLON) return null;
+  const close = lastNonSpace(member, colon);
+  if (member.charCodeAt(close) !== CH_QUOTE) return null;
+  const keyStart = openingQuote(member, close);
+  if (keyStart < 0) return null;
+
+  let from = keyStart;
+  let to = value.end;
+  const next = skipWhitespace(member, value.end);
+  if (member.charCodeAt(next) === CH_COMMA) {
+    to = skipWhitespace(member, next + 1);
+  } else {
+    const previous = lastNonSpace(member, keyStart);
+    const code = member.charCodeAt(previous);
+    // The last entry takes the comma before it; the *only* entry takes nothing
+    // and leaves an empty object behind.
+    if (code === CH_COMMA) from = previous;
+    else if (code !== CH_LBRACE) return null;
+  }
+
+  const result =
+    prefix + body.slice(0, start) + member.slice(0, from) + member.slice(to) + body.slice(end);
+
+  // §16.4 — validate by re-reading our own output: it has to parse, and the key
+  // the next reader looks for has to be gone.
+  try {
+    const parsed = parseManifest(result);
+    if (typeof parsed !== "object" || parsed === null) return null;
+    const rewritten = memberOf(parsed as Manifest, field);
+    if (typeof rewritten !== "object" || rewritten === null) return null;
+    if (Object.hasOwn(rewritten, key)) return null;
+  } catch {
+    return null;
+  }
+  return result;
+}
+
+/** Index of the last non-whitespace byte before `index`, or -1. */
+function lastNonSpace(text: string, index: number): number {
+  let i = index - 1;
+  while (i >= 0 && isWhitespace(text.charCodeAt(i))) i--;
+  return i;
+}
+
+/**
+ * Index of the quote that opens the string literal closed at `close`, or -1.
+ *
+ * The nearest preceding quote is the opening one — nothing but the key's own
+ * bytes lie between them — as long as it is not itself escaped, which an odd
+ * run of backslashes in front of it is what says.
+ */
+function openingQuote(text: string, close: number): number {
+  for (let i = close - 1; i >= 0; i--) {
+    if (text.charCodeAt(i) !== CH_QUOTE) continue;
+    let slashes = 0;
+    while (i - slashes - 1 >= 0 && text.charCodeAt(i - slashes - 1) === CH_BACKSLASH) slashes++;
+    if (slashes % 2 === 0) return i;
+  }
+  return -1;
 }

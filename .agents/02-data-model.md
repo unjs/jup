@@ -221,7 +221,7 @@ described by §15.28:
 Linux `<platform>-<arch>-musl`. Linux is the one platform where the pair alone does
 not name a binary interface, and publishers that ship both say so in the artifact
 name (`@oven/bun-linux-x64-musl`, `@nubjs/nub-linux-x64-musl`). glibc stays
-unsuffixed, so an existing `targets` map and an existing `.jup.lock` key keep meaning
+unsuffixed, so an existing `targets` map and an existing `jup.lock` key keep meaning
 what they meant; a musl host is the only one that sees a new key, and it is the host
 that was previously being handed a glibc binary that could not start.
 
@@ -257,7 +257,8 @@ Consequences a conforming implementation MUST follow, all of them following from
 * The digest MUST NOT be folded into the locator's reference (§07.6 step 3), because
   that reference is what `use`/`up` write into `packageManager`. A per-host digest
   committed there fails every colleague on another platform with a hash mismatch.
-* §15.23's `.jup.lock` records such a digest **per host** (see §15.23).
+* §15.23's `jup.lock` records such a digest **per host**, one key added per host
+  that runs `use` or `up` (see §15.23).
 * The store marker still records the hash: the store is host-local, so there it is
   exactly the right fact.
 

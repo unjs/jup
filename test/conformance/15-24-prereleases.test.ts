@@ -32,6 +32,16 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
   return (fixture.json("package.json") as { packageManager?: string }).packageManager;
 }
 
+/**
+ * §15.23 — what `use <name>@<range>` recorded, since a typed range stays in the
+ * field and the version it resolved to goes here instead.
+ */
+function resolvedOf(fixture: { json(relative: string): unknown }, key: string): string | undefined {
+  return (
+    fixture.json("jup.lock") as { resolutions: Record<string, { resolved: string } | undefined> }
+  ).resolutions[key]?.resolved;
+}
+
 beforeAll(async () => {
   await registry.start();
 
@@ -69,7 +79,10 @@ describe("§15.24 prereleases in implicit resolution", () => {
     const result = await run(["use", "pnpm@>=11"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toMatch(/^pnpm@11\.1\.2\+sha512\./);
+    // §15.23 — the range is what the user typed, so it is what the field keeps;
+    // which version it picked out of the band is `jup.lock`'s business.
+    expect(pinOf(fixture)).toBe("pnpm@>=11");
+    expect(resolvedOf(fixture, "pnpm@>=11")).toBe("11.1.2");
   });
 
   it("184: takes the semver maximum, not `latest` — §15.24's SHOULD is not implemented", async () => {
@@ -160,7 +173,8 @@ describe("§15.24 prereleases in implicit resolution", () => {
     const result = await run(["use", "pnpm@>=11.0.0-0"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toMatch(/^pnpm@11\.2\.0-dev\.1005\+sha512\./);
+    expect(pinOf(fixture)).toBe("pnpm@>=11.0.0-0");
+    expect(resolvedOf(fixture, "pnpm@>=11.0.0-0")).toBe("11.2.0-dev.1005");
   });
 
   it("186: a pinned prerelease keeps running from the cache on later runs", async () => {

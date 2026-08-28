@@ -32,7 +32,7 @@ export const ENV_FILE_PREFIX = COREPACK_PREFIX;
 export const DEFAULT_ENV_FILE_NAME = ".jup.env";
 
 /**
- * §03.2 — corepack's spelling, still read. Unlike `.jup.lock` (§15.23) this file
+ * §03.2 — corepack's spelling, still read. Unlike `jup.lock` (§15.23) this file
  * exists in repositories today, so §14.24's rename keeps the read side.
  */
 export const LEGACY_ENV_FILE_NAME = ".corepack.env";
@@ -500,21 +500,19 @@ export function isCI(): boolean {
 }
 
 /**
- * §15.23 / §15.37 — whether `.jup.lock` may be written or refreshed.
+ * §15.23 / §15.37 — whether the project's `jup.lock` may be written.
  *
- * `COREPACK_FROZEN_LOCKFILE` wins in **both** directions when it is set: `1`
- * freezes, anything else thaws, including inside CI. With it unset, CI defaults
- * to frozen — the convention every package manager's own `--frozen-lockfile`
- * follows, and the behaviour that makes a CI run fail loudly instead of quietly
- * resolving a range to something the developer never saw.
+ * Only `COREPACK_FROZEN_LOCKFILE=1` freezes it, and there is no CI default any
+ * more, because there is no longer an *implicit* write for one to guard: running
+ * a package manager never edits the recorded file, so the only writers left are
+ * `use` and `up` — commands somebody typed in order to change it. A default that
+ * every remaining caller had to be exempted from would be a setting that does
+ * nothing while reading as though it does something.
  *
- * @param options `refresh` marks a command the user ran *in order to* update the
- * resolution (`corepack up`). The CI default must not block that — it exists to
- * stop an *implicit* update — but an explicit `COREPACK_FROZEN_LOCKFILE=1` still
- * does, because §15.37 defines it as "refuse to write/refresh".
+ * The cache in `node_modules` is outside this entirely (§15.23). It is not a
+ * committed record, freezing it would only cost a request per run, and a job
+ * that wants no writes at all has a read-only filesystem for that.
  */
-export function isFrozenLockfile(options?: { refresh?: boolean }): boolean {
-  const raw = readEnv(ENV.FROZEN_LOCKFILE);
-  if (raw !== undefined && raw !== "") return raw === "1";
-  return options?.refresh === true ? false : isCI();
+export function isFrozenLockfile(): boolean {
+  return readEnv(ENV.FROZEN_LOCKFILE) === "1";
 }

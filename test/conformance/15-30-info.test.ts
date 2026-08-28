@@ -65,6 +65,12 @@ interface Report {
     resolution: { resolved: string; integrity?: string } | null;
     frozen: boolean;
     frozenSource: string;
+    cache: {
+      path: string;
+      present: boolean;
+      resolution: { resolved: string; expires?: number } | null;
+      expired: boolean;
+    };
   };
   envFile: {
     path: string;
@@ -226,7 +232,7 @@ describe("§15.30 corepack info", () => {
     expect(report.project.kind).toBe("range");
     expect(report.project.spec).toBe("pnpm@^11.0.0");
     expect(report.lockfile).toMatchObject({
-      path: join(fixture.cwd, ".jup.lock"),
+      path: join(fixture.cwd, "jup.lock"),
       present: false,
       key: "pnpm@^11.0.0",
       resolution: null,
@@ -240,7 +246,7 @@ describe("§15.30 corepack info", () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({
         version: 1,
         resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2", integrity: "sha512-AQI=" } },
@@ -250,7 +256,7 @@ describe("§15.30 corepack info", () => {
     const report = await info(fixture);
 
     expect(report.lockfile).toMatchObject({
-      path: join(fixture.cwd, ".jup.lock"),
+      path: join(fixture.cwd, "jup.lock"),
       present: true,
       key: "pnpm@^11.0.0",
       resolution: { resolved: "11.1.2", integrity: "sha512-AQI=" },
@@ -259,7 +265,7 @@ describe("§15.30 corepack info", () => {
       status: "locked",
       version: "11.1.2",
       hash: "sha512.0102",
-      source: join(fixture.cwd, ".jup.lock"),
+      source: join(fixture.cwd, "jup.lock"),
       installed: true,
     });
   });
@@ -267,30 +273,94 @@ describe("§15.30 corepack info", () => {
   it("196: reports the frozen-lockfile state and where it came from", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
+    // §15.23 — CI no longer freezes anything on its own: with no implicit write
+    // left to guard, the only writers are `use` and `up`, and only an explicit
+    // `1` stops them.
     const ci = await info(fixture, { env: { CI: "1" } });
-    expect(ci.lockfile).toMatchObject({ frozen: true, frozenSource: "CI" });
-    expect(ci.resolution.status).toBe("frozen");
-    expect(ci.resolution.reason).toContain("lockfile updates are disabled");
+    expect(ci.lockfile).toMatchObject({ frozen: false, frozenSource: "default" });
 
-    const explicit = await info(fixture, { env: { CI: "1", COREPACK_FROZEN_LOCKFILE: "0" } });
+    const explicit = await info(fixture, { env: { COREPACK_FROZEN_LOCKFILE: "1" } });
     expect(explicit.lockfile).toMatchObject({
-      frozen: false,
+      frozen: true,
       frozenSource: "COREPACK_FROZEN_LOCKFILE",
     });
+  });
+
+  it("196: reports the memo in node_modules/.jup, and whether it still stands", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    fixture.write(
+      "node_modules/.jup/jup.lock",
+      `${JSON.stringify({
+        version: 1,
+        resolutions: {
+          "pnpm@^11.0.0": { resolved: "11.1.2", expires: Date.now() + 60_000 },
+        },
+      })}\n`,
+    );
+
+    const report = await info(fixture);
+
+    expect(report.lockfile.cache).toMatchObject({
+      path: join(fixture.cwd, "node_modules", ".jup", "jup.lock"),
+      present: true,
+      expired: false,
+    });
+    expect(report.resolution).toMatchObject({
+      status: "cached",
+      version: "11.1.2",
+      source: join(fixture.cwd, "node_modules", ".jup", "jup.lock"),
+      installed: true,
+    });
+  });
+
+  it("196: reports neither file when its entry no longer satisfies the range", async () => {
+    // §15.23 — a recorded resolution or a memo that has fallen outside its range
+    // is skipped by the run, which resolves around it. `info` reports what the
+    // next run would use, so it has to apply the same gate: a hand edit, a bad
+    // merge or a restored `node_modules` must not make this command name a
+    // version the very next invocation refuses.
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    seedPackageManager(fixture.home, "pnpm", "10.0.0");
+    fixture.write(
+      "jup.lock",
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "10.0.0" } },
+      })}\n`,
+    );
+    fixture.write(
+      "node_modules/.jup/jup.lock",
+      `${JSON.stringify({
+        version: 1,
+        resolutions: {
+          "pnpm@^11.0.0": { resolved: "10.0.0", expires: Date.now() + 60_000 },
+        },
+      })}\n`,
+    );
+
+    const report = await info(fixture);
+
+    // Both files are present and both are keyed correctly; neither holds an
+    // answer, and the honest report is that resolving needs a request.
+    expect(report.lockfile).toMatchObject({ present: true, resolution: null });
+    expect(report.lockfile.cache).toMatchObject({ present: true, resolution: null });
+    expect(report.resolution.status).toBe("network");
+    expect(report.resolution.version).toBeNull();
   });
 
   it("196: finds the lockfile beside the manifest, from a nested directory", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     fixture.write("packages/app/keep.txt", "");
     fixture.write(
-      ".jup.lock",
+      "jup.lock",
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.1.2" } } })}\n`,
     );
 
     const report = await info(fixture, { cwd: fixture.path("packages/app") });
 
     expect(report.project.manifest).toBe(join(fixture.cwd, "package.json"));
-    expect(report.lockfile.path).toBe(join(fixture.cwd, ".jup.lock"));
+    expect(report.lockfile.path).toBe(join(fixture.cwd, "jup.lock"));
     expect(report.resolution.version).toBe("11.1.2");
   });
 

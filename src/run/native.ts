@@ -61,15 +61,26 @@ const FORWARDED_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGHUP", "SIGQUIT", "SI
  * value the caller inherited is passed through untouched. Overwriting it at
  * every level — the `??=` shape — would replace the one path worth carrying with
  * a store path at the first hop.
+ *
+ * A **new** object rather than a write into the caller's: {@link execNative}'s
+ * `env` defaults to `process.env`, so mutating it would put
+ * `COREPACK_HOST_RUNTIME` into our own environment for the rest of the process —
+ * §14.5 refuses the same value from an env file, and this is the only other way
+ * in. The one caller today hands over a copy, which makes that latent; the
+ * signature is what has to make it impossible.
  */
-function forwardHostRuntime(env: NodeJS.ProcessEnv): void {
+function forwardHostRuntime(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   let own: string;
   try {
     own = realpathSync(process.execPath);
   } catch {
     own = process.execPath;
   }
-  if (!isInsideHome(own)) writeEnvInto(env, ENV.HOST_RUNTIME, own);
+  if (isInsideHome(own)) return env;
+
+  const forwarded = { ...env };
+  writeEnvInto(forwarded, ENV.HOST_RUNTIME, own);
+  return forwarded;
 }
 
 /**
@@ -110,12 +121,17 @@ export function execNative(
   env: NodeJS.ProcessEnv = process.env,
   argv0?: string,
 ): Promise<number> {
-  forwardHostRuntime(env);
+  const childEnv = forwardHostRuntime(env);
 
   // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
   // package manager's cwd (§08.3.2), and the child stays in our process group so
   // terminal job control keeps working.
-  const child = spawn(binPath, args, { stdio: "inherit", windowsHide: false, env, argv0 });
+  const child = spawn(binPath, args, {
+    stdio: "inherit",
+    windowsHide: false,
+    env: childEnv,
+    argv0,
+  });
 
   const listeners = new Map<NodeJS.Signals, () => void>();
 

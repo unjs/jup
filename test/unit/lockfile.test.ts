@@ -1,5 +1,5 @@
 /**
- * §15.23 — `.jup.lock`.
+ * §15.23 — `jup.lock`.
  *
  * The conformance rows prove the pipeline end to end; these prove the rules the
  * pipeline leans on, in particular the two that are invisible from outside: an
@@ -7,21 +7,35 @@
  * throws.
  */
 
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { hostTarget } from "../../src/config/table.ts";
 import {
+  CACHE_DIRECTORY,
+  CACHE_TTL_MS,
   hashFromIntegrity,
   integrityForHost,
   integrityFromHash,
   LOCKFILE_NAME,
+  readCachedResolution,
+  readKnownResolution,
   readLockfile,
   readResolution,
+  removeCachedResolution,
   removeResolution,
   resolutionKey,
   usesLockfile,
+  writeCachedResolution,
   writeResolution,
 } from "../../src/project/lockfile.ts";
 
@@ -38,6 +52,13 @@ function write(content: string): void {
 
 function read(): string {
   return readFileSync(join(dir, LOCKFILE_NAME), "utf8");
+}
+
+/** `<project>/node_modules/.jup`, the only place the memo is written. */
+function modules(): string {
+  const path = join(dir, CACHE_DIRECTORY);
+  mkdirSync(path, { recursive: true });
+  return path;
 }
 
 beforeEach(() => {
@@ -399,5 +420,194 @@ describe("per-host resolutions — §15.28 within §15.23", () => {
     // The default, and the shape every existing file and every other entry uses.
     writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
     expect(typeof readLockfile(dir)!.resolutions[resolutionKey(RANGE)]!.integrity).toBe("string");
+  });
+});
+
+describe("the resolution cache — §15.23", () => {
+  it("writes into node_modules/.jup, with an expiry a day out", () => {
+    const now = 1_700_000_000_000;
+    modules();
+
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH, false, now);
+
+    // The path is the whole point of the directory: npm reads a visible entry in
+    // `node_modules` as an installed package and deletes it on the next
+    // `install`, so a memo at `node_modules/jup.lock` never survives to expire.
+    expect(existsSync(join(dir, "node_modules", ".jup", LOCKFILE_NAME))).toBe(true);
+    expect(existsSync(join(dir, "node_modules", LOCKFILE_NAME))).toBe(false);
+
+    expect(readLockfile(join(dir, CACHE_DIRECTORY))?.resolutions["pnpm@^11.0.0"]).toEqual({
+      resolved: "11.1.2",
+      integrity: integrityFromHash(HASH),
+      expires: now + CACHE_TTL_MS,
+    });
+    // The project's own file is not what this writes.
+    expect(readLockfile(dir)).toBeNull();
+  });
+
+  it("creates its own .jup directory inside a node_modules that is already there", () => {
+    mkdirSync(join(dir, "node_modules"));
+
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+
+    expect(readCachedResolution(dir, RANGE)?.locator.reference).toBe(`11.1.2+${HASH}`);
+  });
+
+  it("leaves no stray temp file beside the memo it wrote", () => {
+    modules();
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+
+    // The rename is only atomic within one directory, so the temp must be in
+    // `.jup` too — and must be gone once the write has landed.
+    expect(readdirSync(join(dir, "node_modules", ".jup"))).toEqual([LOCKFILE_NAME]);
+  });
+
+  it("writes nothing at all when node_modules is absent", () => {
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+
+    expect(readCachedResolution(dir, RANGE)).toBeNull();
+    // Not the directory either: it belongs to the package manager.
+    expect(existsSync(join(dir, "node_modules"))).toBe(false);
+  });
+
+  it("declines a node_modules that is a file rather than a directory", () => {
+    writeFileSync(join(dir, "node_modules"), "not a directory\n");
+
+    expect(() =>
+      writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH),
+    ).not.toThrow();
+    expect(readCachedResolution(dir, RANGE)).toBeNull();
+  });
+
+  it("declines a .jup that is a file rather than a directory", () => {
+    mkdirSync(join(dir, "node_modules"));
+    writeFileSync(join(dir, CACHE_DIRECTORY), "not a directory\n");
+
+    expect(() =>
+      writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH),
+    ).not.toThrow();
+    expect(readCachedResolution(dir, RANGE)).toBeNull();
+  });
+
+  it("reads back a live entry, and reports an aged-out one as expired", () => {
+    const now = 1_700_000_000_000;
+    modules();
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH, false, now);
+
+    expect(readCachedResolution(dir, RANGE, now + 1000)).toEqual({
+      locator: { name: "pnpm", reference: `11.1.2+${HASH}` },
+      expired: false,
+    });
+    // Still returned once it ages out: an expired memo beats no answer when the
+    // registry cannot be reached, and the caller decides what to do with it.
+    expect(readCachedResolution(dir, RANGE, now + CACHE_TTL_MS + 1)?.expired).toBe(true);
+  });
+
+  it("treats a stamp further out than one window as expired", () => {
+    // A `node_modules` restored from an image, or written under a clock that ran
+    // fast: this build never writes such a stamp, and believing one would pin the
+    // range with no request for as long as it says.
+    const now = 1_700_000_000_000;
+    writeFileSync(
+      join(modules(), LOCKFILE_NAME),
+      `${JSON.stringify({
+        version: 1,
+        resolutions: {
+          "pnpm@^11.0.0": { resolved: "11.1.2", expires: now + CACHE_TTL_MS + 1 },
+        },
+      })}\n`,
+    );
+
+    expect(readCachedResolution(dir, RANGE, now)?.expired).toBe(true);
+    // Still the answer of last resort, exactly like any other expired memo.
+    expect(readCachedResolution(dir, RANGE, now)?.locator.reference).toBe("11.1.2");
+    // The boundary itself is what a write made at `now` produces, and stands.
+    expect(readCachedResolution(dir, RANGE, now + 1)?.expired).toBe(false);
+  });
+
+  it("treats an entry with no expiry as already expired", () => {
+    writeFileSync(
+      join(modules(), LOCKFILE_NAME),
+      `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.1.2"}}}\n`,
+    );
+
+    expect(readCachedResolution(dir, RANGE)?.expired).toBe(true);
+  });
+
+  it("applies the same range test as the recorded file", () => {
+    const now = 1_700_000_000_000;
+    modules();
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "10.5.0" }, undefined, false, now);
+
+    expect(readCachedResolution(dir, RANGE, now + 1000)).toBeNull();
+  });
+
+  it("is dropped alongside the recorded entry it shadows", () => {
+    modules();
+    writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+
+    removeResolution(dir, resolutionKey(RANGE));
+
+    expect(readLockfile(dir)).toBeNull();
+    expect(readCachedResolution(dir, RANGE)).toBeNull();
+  });
+
+  it("can be dropped on its own, leaving the recorded decision standing", () => {
+    // What `use` and `up` do to the key they have just recorded: the memo is a
+    // note about what the registry said *before* that decision, and it answers
+    // alone wherever the committed file is not visible.
+    modules();
+    writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.0.0" }, undefined);
+
+    removeCachedResolution(dir, resolutionKey(RANGE));
+
+    expect(readCachedResolution(dir, RANGE)).toBeNull();
+    expect(readResolution(dir, RANGE)?.reference).toBe(`11.1.2+${HASH}`);
+  });
+});
+
+describe("readKnownResolution — §15.23's read order", () => {
+  const LOCATOR = { name: "pnpm", reference: "11.1.2" };
+
+  it("prefers the recorded resolution and does not read the memo at all", () => {
+    modules();
+    writeResolution(dir, RANGE, LOCATOR, HASH);
+    writeCachedResolution(dir, RANGE, { name: "pnpm", reference: "11.0.0" }, undefined);
+
+    const known = readKnownResolution(dir, RANGE);
+
+    expect(known.locator?.reference).toBe(`11.1.2+${HASH}`);
+    // A committed decision outranks a memo, so the memo is not even reported.
+    expect(known.cached).toBeNull();
+  });
+
+  it("falls back to a live memo", () => {
+    const now = 1_700_000_000_000;
+    modules();
+    writeCachedResolution(dir, RANGE, LOCATOR, HASH, false, now);
+
+    expect(readKnownResolution(dir, RANGE, now + 1000).locator?.reference).toBe(`11.1.2+${HASH}`);
+  });
+
+  it("answers null for an expired memo, and still hands it back", () => {
+    const now = 1_700_000_000_000;
+    modules();
+    writeCachedResolution(dir, RANGE, LOCATOR, HASH, false, now);
+
+    const known = readKnownResolution(dir, RANGE, now + CACHE_TTL_MS + 1);
+
+    // Nothing to run on without asking — but the stale answer survives for the
+    // caller that has to degrade rather than block (§15.23, §04.4).
+    expect(known.locator).toBeNull();
+    expect(known.cached).toEqual({
+      locator: { ...LOCATOR, reference: `11.1.2+${HASH}` },
+      expired: true,
+    });
+  });
+
+  it("answers null for a project with neither file", () => {
+    expect(readKnownResolution(dir, RANGE)).toEqual({ locator: null, cached: null });
   });
 });

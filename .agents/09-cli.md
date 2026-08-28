@@ -111,6 +111,14 @@ ensureInstalled(highest)
 writePin(highest)  and run the package manager's `use` command (§09.5)
 ```
 
+§15.23 amends this for a **declared range**: when the pin the project declares
+holds one — in `packageManager`, or in `devEngines.packageManager.version` where
+there is no top-level field (§15.26: one logical pin) — `up` refreshes the recorded
+resolution in `jup.lock` and leaves that field alone — the range is the user's statement of intent, and there is no second,
+major-confining resolve, because a range already says how far the user will move. A
+dist-tag pin is still refused by the error above, and `COREPACK_FROZEN_LOCKFILE=1`
+turns the refresh into a hard error (§15.23).
+
 The two-step resolve is what confines the update to the current major line. But note
 the interaction with §09.1: if `devEngines.packageManager.version` declares a range
 like `"1.x || 2.x"`, the *first* resolve already picks the highest version in that
@@ -145,6 +153,13 @@ So `jup use yarn@4` prints the banner, a blank line, then everything `yarn
 install` prints. If `commands.use` is absent the command returns 0 immediately after
 writing the pin — which is every `use` of a runtime (§02.3), so `jup use node@22`
 writes `devEngines.runtime` (§03.7) and stops there.
+
+§15.23 amends this too: when the pattern names a **semver range** — typed, so neither
+a bare `jup use pnpm` nor a dist-tag counts — the range goes into the field as written
+and the version it resolved to is recorded in `jup.lock` beside the manifest. Both
+paths are printed (§15.27), the digest goes to the recorded file rather than the field,
+and `COREPACK_FROZEN_LOCKFILE=1` refuses the command *before* it resolves. Every other
+pattern pins exactly, as below.
 
 Notable behaviours, all test-asserted:
 

@@ -13,10 +13,16 @@ import {
   isSupportedPackageManager,
   resolveSpecBin,
 } from "./config/table.ts";
-import { envDisabled, envFlag, isFrozenLockfile } from "./project/env.ts";
-import { messages, UsageError } from "./errors.ts";
+import { envDisabled, envFlag } from "./project/env.ts";
+import { advisory, messages, UsageError } from "./errors.ts";
 import { execPackageManager } from "./run/exec.ts";
-import { readResolution, usesLockfile, writeResolution } from "./project/lockfile.ts";
+import {
+  type CachedResolution,
+  type KnownResolution,
+  readKnownResolution,
+  usesLockfile,
+  writeCachedResolution,
+} from "./project/lockfile.ts";
 import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./project/manifest.ts";
 import { isValidVersion, parse } from "./version/semver.ts";
 import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./cache/store.ts";
@@ -218,44 +224,50 @@ export async function runProxy(
     });
   }
 
-  // §15.23 — a project spec that is a range or a tag resolves through
-  // `.jup.lock`; an exact pin never touches it at all.
-  const lockDir = lockfileDirFor(specResult, reconciled, descriptor, binaryVersion);
+  // §15.23 — a project spec that is a range or a tag is answered by the recorded
+  // `jup.lock`, then by the cache beside it; an exact pin never touches either.
+  const projectDir = resolutionDirFor(specResult, reconciled, descriptor, binaryVersion);
 
-  // Step 5 — resolution. For an exact pin this is answered inline by
-  // {@link resolveExactPin}; for a recorded range it is one `.jup.lock`
-  // read and nothing else.
-  const recorded = lockDir === undefined ? null : readResolution(lockDir, descriptor);
-  if (recorded === null && lockDir !== undefined && isFrozenLockfile()) {
-    throw new UsageError(messages.lockfileUnresolved(descriptor.name, descriptor.range));
-  }
+  // Step 5 — resolution, in the order §15.23 fixes: the committed decision, the
+  // cached memo, the exact pin, and only then a request. For an exact pin this
+  // is answered inline by {@link resolveExactPin}; for a recorded range it is
+  // one `jup.lock` read and nothing else.
+  // §15.23's order — recorded, then unexpired memo — is `readKnownResolution`,
+  // shared with `install` (§09.2) so a warmed layer and the run it warms cannot
+  // disagree about which version the files already name.
+  const files: KnownResolution =
+    projectDir === undefined
+      ? { locator: null, cached: null }
+      : readKnownResolution(projectDir, descriptor);
 
-  const locator = recorded ?? resolveExactPin(descriptor) ?? (await resolveOrExplain(descriptor));
-  if (locator === null) {
-    throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
-  }
+  // The memo, expired or not: `resolveWithFallback` needs it as the stale answer
+  // of last resort.
+  const cached = files.cached;
 
-  const perHost = isPerHost(locator);
+  // What a file (or the pin itself) already said. `null` here is what marks a
+  // run as having had to go out and ask, which is the only kind worth memoing.
+  const known = files.locator ?? resolveExactPin(descriptor);
 
-  // §15.28 — a recorded resolution for a per-host package manager holds one
-  // digest per host (§15.23), and this host's may be missing because the record
-  // was written on somebody else's machine. Completing it is not a
-  // *re*-resolution: the version is unchanged, nothing is requested for it, and
-  // the only new fact is the one this host is uniquely able to contribute. So it
-  // is not what §15.23 gates behind `up` — but it is still a write, which is
-  // what frozen mode refuses. Without this the map would never grow past its
-  // first writer.
-  const completesRecord =
-    recorded !== null && perHost && parse(locator.reference)?.build.length === 0;
+  // {@link Resolved.fromRegistry} is the memo-write condition, decided where the
+  // answer is produced rather than inferred back here — see the type.
+  const resolved: Resolved =
+    known === null
+      ? await resolveWithFallback(descriptor, cached)
+      : { locator: known, fromRegistry: false };
+  const locator = resolved.locator;
 
   // Step 6 — one `.jup` read on a hit; download, verify and promote on a miss.
   const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
-  // §15.23 — record only what we had to go and resolve. The hash comes from the
-  // artifact that is now on disk, whether it was downloaded here or already in
-  // the store, so the recorded resolution pins the same bytes either way.
-  if (lockDir !== undefined && (recorded === null || (completesRecord && !isFrozenLockfile()))) {
-    writeResolution(lockDir, descriptor, locator, installSpec.hash, perHost);
+  // §15.23 — this path never writes the project's recorded resolution: that file
+  // changes only when the user runs `jup use` or `jup up`. What it may write is
+  // the memo in `node_modules`, and only when the answer came from the registry
+  // — re-stamping an unexpired entry would churn a file for no new fact, and
+  // re-stamping an *expired* one that only stood in because the network was down
+  // would quietly turn an outage into a pin. The hash comes from the artifact
+  // now on disk, so the memo names the same bytes either way.
+  if (projectDir !== undefined && resolved.fromRegistry) {
+    writeCachedResolution(projectDir, descriptor, locator, installSpec.hash, isPerHost(locator));
   }
 
   // Step 7 — hand over. Nothing after this point may write to the store: the
@@ -441,7 +453,138 @@ async function usageLineFor(command: string | undefined): Promise<string> {
 }
 
 /**
- * §15.23 — the directory whose `.jup.lock` governs this run, or `undefined`
+ * What step 5 settled on, and whether the **registry** is what settled it.
+ *
+ * `fromRegistry` is the memo-write condition, stated on the branch that knows
+ * the answer. It replaces an inference made at the call site — `locator !==
+ * cached?.locator`, object identity on a value returned three frames away — and
+ * the explicit form is not a matter of taste: any normalisation on the way back
+ * (a digest re-attached, a reference rebuilt for §15.28's host map) makes that
+ * test permanently true, which re-stamps the expired memo the registry never
+ * confirmed and turns an outage into a 24-hour pin — the very thing the comment
+ * above the write says it is preventing.
+ */
+interface Resolved {
+  locator: Locator;
+  fromRegistry: boolean;
+}
+
+/**
+ * §15.5's availability statuses — `http.ts`'s retry set, for its reason.
+ *
+ * Everything else in the 4xx range is a statement about the *request* — 401 and
+ * 403 about the credential, 404 about the version — and an older answer does not
+ * make such a statement less true.
+ */
+function isAvailabilityStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || (status >= 500 && status <= 599);
+}
+
+/**
+ * A stand-in URL, used to cut §12.6's template at the slot its URL fills.
+ *
+ * NUL occurs in the template exactly once and survives `redactUserinfo` — it is
+ * not a parseable URL and matches no `scheme://userinfo@` — so the text before
+ * it is that sentence's literal prefix, read off the one definition of it rather
+ * than copied into a second one.
+ */
+const URL_SLOT = "\u0000";
+
+/**
+ * §15.23 — whether an expired memo may answer *for this failure*.
+ *
+ * §15.23 scopes the fallback to "an unreachable or degraded registry", so this
+ * is a positive allowlist of §12.6's two transport shapes and everything else
+ * propagates. Failing open here is worse than failing outright, because the
+ * stamp is not extended: a swallowed error recurs silently on every run, and the
+ * project stays on yesterday's version with no diagnostic ever printed.
+ *
+ * What must therefore never reach the fallback: `COREPACK_ENABLE_NETWORK=0` and
+ * `COREPACK_MINIMUM_RELEASE_AGE`, which are security controls — `net/registry.ts`
+ * states the rule for both, that a control reporting success without having been
+ * applied is worse than one that stops; **401 and 403**, where a rotated
+ * credential is a permanent failure and the fallback would pin the project on it
+ * indefinitely; and **404** and §15.4's TLS sentences, which are true about what
+ * was asked for however old the memo is.
+ */
+async function isRegistryUnavailable(error: unknown): Promise<boolean> {
+  // A `UsageError` is jup answering "you asked for something that cannot be
+  // done", never "the registry is down": §12.4's tag and range failures,
+  // §15.19's offline diagnostic (which {@link resolveOrExplain} has already made
+  // one through `explainFetchFailure`), §15.35e's two release-age refusals.
+  if (!(error instanceof Error) || error instanceof UsageError) return false;
+
+  // Cold, and only on a failure: `errors-cold.ts` must stay off the warm graph
+  // (§16.3), which is also why this cannot be a synchronous predicate.
+  const { messages: coldMessages, parseBadStatus } = await import("./errors-cold.ts");
+
+  // `parseBadStatus` is `messages.badStatus` read back — an inverse the errors
+  // module already maintains and tests — and the prefix below is taken from its
+  // template, so neither can drift from the sentence it matches.
+  const bad = parseBadStatus(error);
+  if (bad !== null) return isAvailabilityStatus(bad.status);
+
+  const [prefix] = coldMessages.requestFailed(URL_SLOT).split(URL_SLOT);
+  return prefix !== undefined && prefix.length > 0 && error.message.startsWith(prefix);
+}
+
+/** The memo's version as a user would write it: §07.2's digest suffix is ours. */
+function versionOf(cached: CachedResolution): string {
+  const { reference } = cached.locator;
+  return parse(reference)?.version ?? reference;
+}
+
+/**
+ * Resolve for real, falling back to an expired memo when the **registry** fails.
+ *
+ * The TTL exists so a range keeps moving, not so a laptop stops working on a
+ * train: an entry that has aged out is still the last thing the registry
+ * actually said, and answering with it beats failing a run that succeeded an
+ * hour ago. This is §04.4's rule for `lastKnownGood.json`, applied to the file
+ * that plays the same part for a project.
+ *
+ * It is a rule about *availability* and nothing else, which is what
+ * {@link isRegistryUnavailable} scopes it to, and it says so out loud when it
+ * engages. `cached` is non-null here only when expired: an entry inside its
+ * window has already answered as `known`.
+ */
+async function resolveWithFallback(
+  descriptor: Descriptor,
+  cached: CachedResolution | null,
+): Promise<Resolved> {
+  let resolved: Locator | null = null;
+  try {
+    resolved = await resolveOrExplain(descriptor);
+  } catch (error) {
+    if (cached === null || !(await isRegistryUnavailable(error))) throw error;
+    // Cold: the text lives in `errors-cold.ts` for the reason that file exists,
+    // and this branch has already taken that import to classify the failure.
+    const { messages: coldMessages } = await import("./errors-cold.ts");
+    advisory(
+      coldMessages.staleResolutionUnreachable(descriptor.name, descriptor.range, versionOf(cached)),
+    );
+    return { locator: cached.locator, fromRegistry: false };
+  }
+
+  if (resolved !== null) return { locator: resolved, fromRegistry: true };
+
+  // `null` is the registry answering with nothing that matches — a truncated
+  // packument, a band that lost its releases — which is the "degraded" half of
+  // §15.23's condition. The memo is range-gated on the way in, so it still
+  // satisfies what the registry no longer offers.
+  if (cached !== null) {
+    const { messages: coldMessages } = await import("./errors-cold.ts");
+    advisory(
+      coldMessages.staleResolutionUnmatched(descriptor.name, descriptor.range, versionOf(cached)),
+    );
+    return { locator: cached.locator, fromRegistry: false };
+  }
+
+  throw new UsageError(messages.failedToResolve(descriptor.range, descriptor.name));
+}
+
+/**
+ * §15.23 — the directory whose `jup.lock` files govern this run, or `undefined`
  * when no lockfile is involved.
  *
  * Three conditions, all necessary:
@@ -459,7 +602,7 @@ async function usageLineFor(command: string | undefined): Promise<string> {
  * The directory is the manifest's own, not the cwd: in a monorepo those differ,
  * and §03.7 already places project-level writes beside the selected manifest.
  */
-function lockfileDirFor(
+function resolutionDirFor(
   specResult: SpecResult,
   reconciled: Descriptor | LazyLocator,
   descriptor: Descriptor,

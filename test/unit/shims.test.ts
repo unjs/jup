@@ -56,6 +56,7 @@ import {
   verifyOnPath,
   whichFile,
 } from "../../src/commands/shims.ts";
+import { isOurShim } from "../../src/run/exec.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -546,6 +547,33 @@ describe("enable (§10.2)", () => {
       expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
       expect(statSync(stub).ctimeMs).toBe(before);
+    },
+  );
+
+  // §15.45 says "only when the execute bits are missing", and a stub the caller
+  // can already run has none missing that matter. Demanding all three (`mode &
+  // 0o111) === 0o111`) turned every mode a non-zero umask produces — `chmod +x`
+  // under `umask 077` lands exactly here — into either a write on every warm
+  // `enable` or, on an install owned by somebody else, an `EPERM` that fails the
+  // whole command over a stub that works.
+  it.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+    "254: leaves a stub the caller can execute alone, whatever the group and other bits",
+    async () => {
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+      const stub = join(dist, PROXY_STUB_NAME);
+      for (const mode of [0o744, 0o750, 0o700]) {
+        chmodSync(stub, mode);
+        const before = statSync(stub).ctimeMs;
+
+        expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+
+        // Neither chmod'd nor rewritten: the bit that decides whether the name
+        // runs is already there.
+        expectMode(stub, mode);
+        expect(statSync(stub).ctimeMs).toBe(before);
+      }
+      expect(warn).not.toHaveBeenCalled();
     },
   );
 
@@ -1203,6 +1231,71 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
     expect(await bakedInterpreter({ distFolder: dist })).toBe(host);
   });
 
+  it("reads the shims that are installed, not this copy's own stub (§15.44)", async () => {
+    // The install `cache clean` has to protect is frequently not the copy of the
+    // tool that is running: an `npx jup enable`, or a global that has since been
+    // reinstalled, leaves shims linked to *its* stub. Reading only our own
+    // `dist/` would find the relocatable shebang, spare nothing, and delete the
+    // runtime the installed shims are pointing at.
+    const store = join(corepackHome, "v1", "node", "22.14.0", "bin", "node");
+    mkdirSync(dirname(store), { recursive: true });
+    write(store, "#!/bin/sh\nexit 0\n", 0o755);
+
+    // Our own copy: the shipped, relocatable spelling, and nothing installed yet.
+    expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+    const otherBin = join(root, "other-copy-bin");
+    mkdirSync(otherBin);
+    expect(await bakedInterpreter({ distFolder: dist, installDirectory: otherBin })).toBe(
+      "/usr/bin/env node",
+    );
+
+    // The other copy's stub, and a shim of the shape §10.2 leaves pointing at it.
+    const otherDist = join(root, "other-dist");
+    mkdirSync(otherDist);
+    const otherStub = join(otherDist, PROXY_STUB_NAME);
+    write(otherStub, `#!${store}\n// ${SHIM_MARKER}\n`, 0o755);
+    symlinkSync(relative(otherBin, otherStub), join(otherBin, "yarn"));
+
+    expect(await bakedInterpreter({ distFolder: dist, installDirectory: otherBin })).toBe(store);
+
+    // A foreign binary wearing one of our names contributes nothing: the shim
+    // directory is full of other programs (§15.32) and only a stub carrying the
+    // marker is a record of what an `enable` wrote.
+    rmSync(join(otherBin, "yarn"), { force: true });
+    write(join(otherBin, "yarn"), `#!${store}\nexit 0\n`, 0o755);
+    expect(await bakedInterpreter({ distFolder: dist, installDirectory: otherBin })).toBe(
+      "/usr/bin/env node",
+    );
+  });
+
+  /**
+   * §15.43 tier 2 filters the `PATH` walk with `isOurShim`, and the filter has to
+   * see every shape §10.3 writes. It used to match the marker or — on Windows
+   * alone — a `#!/bin/sh` head, which is the one wrapper `whichAll` can never
+   * hand it there: the Windows walk iterates `PATHEXT` (`.COM;.EXE;.BAT;.CMD`)
+   * and yields `node.cmd`, never the extensionless sh script. So a nested
+   * `enable` under a store runtime, with a shim directory outside `<home>`, took
+   * its own `node.cmd` for a host runtime and baked it into every wrapper it
+   * wrote — §14.26's exec loop, by hand.
+   *
+   * §10.3's writers are platform-independent on purpose, so this runs the real
+   * bodies through the real recogniser on any platform.
+   */
+  it("recognises all three Windows wrapper shapes as ours (§15.43)", async () => {
+    const host = hostNode("host");
+    await generateWin32Link(binDir, dist, "node", {}, host);
+
+    for (const extension of ["", ".cmd", ".ps1"]) {
+      expect(isOurShim(join(binDir, `node${extension}`), "node")).toBe(true);
+    }
+
+    // And nothing else: a wrapper is ours by its head *and* the per-name stub it
+    // invokes, so somebody else's `node.cmd` is still somebody else's.
+    const foreign = join(binDir, "foreign.cmd");
+    write(foreign, `@SETLOCAL\r\n"C:\\other\\node.exe" "%~dp0\\thing.mjs" %*\r\n`);
+    expect(isOurShim(foreign, "node")).toBe(false);
+  });
+
   it("reads the Windows wrappers, which name the interpreter each (§15.44)", async () => {
     // §10.3's writers are platform-independent on purpose, so the *reader* is
     // exercised the same way: generate the wrappers here and parse them back.
@@ -1363,6 +1456,29 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
     // target that came back without its execute bit is §15.45 one file over.
     expect(body(entry)).toBe(`\n${BODY}`);
     expectMode(entry, 0o755);
+  });
+
+  // §15.46's last bullet: "an entry that comes back without its execute bit is
+  // §15.45's silent failure one file over". `open`'s mode argument is masked by
+  // the umask, so the `mode:` on the temp write is a floor rather than the mode —
+  // a `sudo npm i -g jup` followed by `jup enable node` from a `umask 077` shell
+  // used to leave `bin.mjs` at `0o700`, and every other user's `jup` on `PATH`
+  // became a file the lookup passes over in silence.
+  it("carries the mode across even under a restrictive umask", async () => {
+    const entry = writeEntry();
+    const previous = process.umask(0o077);
+
+    try {
+      expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+    } finally {
+      process.umask(previous);
+    }
+
+    expect(firstLine(entry)).toBe(`#!${HOST}`);
+    expectMode(entry, 0o755);
+    // The stub the shims link to is the same property one file over, and it
+    // goes through a `chmod` of its own.
+    expectMode(join(dist, PROXY_STUB_NAME), 0o755);
   });
 
   it("leaves it byte-identical when no `node` shim is claimed (§10.7)", async () => {

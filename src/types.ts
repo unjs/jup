@@ -384,7 +384,7 @@ export interface DevEnginesDeclaration {
  * `yarn` is still the "No version specified" error), but that version may now be
  * a semver range or a dist-tag as well as an exact release. Nothing in the
  * pipeline demands an exact version any more; what a range costs instead is a
- * recorded resolution in `.jup.lock`.
+ * recorded resolution in `jup.lock`.
  */
 export interface ParseSpecOptions {
   requireVersion: boolean;

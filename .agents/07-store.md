@@ -337,7 +337,8 @@ rethrowing on the last attempt.
    §15.28 — **not** for a per-host band (§02.4), where the digest describes this
    machine's artifact and no other. Committed to `packageManager`, it is a pin no
    other platform can satisfy. The marker written in step 5 still records it, because
-   the store is host-local; §15.23's `.jup.lock` records it keyed by host.
+   the store is host-local; §15.23's `jup.lock` records it keyed by host when a
+   `use` or an `up` runs there.
 4. Auto-bump last-known-good if applicable (§04.7).
 
 ## 7.7 Resolving `bin`

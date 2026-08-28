@@ -395,6 +395,12 @@ When `devEngines.packageManager.integrity` is present it is an SRI string and is
 treated exactly like a build-suffix hash (§06.1). `--pin-style=sidecar` makes
 `use`/`up` write that form instead. Both forms MUST be accepted on read.
 
+The sidecar describes the `version` beside it, and only that. An `integrity` declared
+beside a version that is a **range** describes no single release: it MUST NOT be folded
+into the spec, whether the spec comes from that member or from a `packageManager` field
+that wins over it (§03.3). Writers MUST remove such a digest rather than leave it
+(§15.26).
+
 ---
 
 # Part C — Shims, PATH, and platform integration
@@ -886,12 +892,89 @@ ranges. Both halves are obtainable:
 
 * `packageManager` and `devEngines.packageManager.version` MUST accept a semver range
   or a dist-tag as well as an exact version.
-* When the spec is not an exact version, the resolved concrete version **and its hash**
-  are recorded in a resolution file at the project root, `.jup.lock`:
+* The resolved concrete version **and its hash** are recorded in a resolution file at
+  the project root, `jup.lock`:
   ```json
   {"version": 1,
    "resolutions": {"pnpm@^11.0.0": {"resolved": "11.1.2", "integrity": "sha512-…"}}}
   ```
+* **Only an explicit command writes that file**, and there are exactly two:
+  * `jup use <name>@<range>` — a typed semver range stays in the field, and the
+    version it resolved to is recorded. The `use` output names both files (§15.27).
+    A typed exact version, a dist-tag and a bare name pin exactly, as before: the
+    first is its own record, and neither of the others is a standing constraint the
+    field can keep.
+  * `jup up` — refreshes the recorded resolution for a declared range, leaving the
+    field alone (§09.4). A range is a declared range wherever it is declared:
+    `packageManager`, or `devEngines.packageManager.version` when no top-level field
+    exists. That is the field `use <name>@<range>` writes on such a project (§15.26),
+    and the shape pnpm 11.21 generates — an `up` that read only the top-level field
+    would collapse the range it had just written and delete its own record with it.
+  * A command that writes the recorded resolution for a key MUST drop the **memo**
+    entry for that same key. The memo is a note about what the registry answered
+    before the decision; where the recorded file is not visible — an uncommitted
+    write, a `git stash`, a CI cache restoring `node_modules` without the lockfile —
+    it would otherwise answer alone, with the version just superseded.
+
+  Running a package manager MUST NOT write, refresh or repair it. The file is a
+  reviewed decision about what a project runs on, and a decision nobody made is not
+  one: an implicit write means `git status` reporting a change the user did not ask
+  for, a CI job committing a version nobody chose, and — the shape §15.37 used to need
+  a frozen-lockfile default for — a build silently moving because a release landed.
+* Ordinary runs instead memo their resolution in **`<project>/node_modules/.jup/jup.lock`**,
+  the resolution *cache*, in the same format plus an `expires` stamp:
+  ```json
+  {"version": 1,
+   "resolutions": {"pnpm@^11.0.0": {"resolved": "11.1.2", "integrity": "sha512-…",
+                                    "expires": 1788000000000}}}
+  ```
+  * The memo stands for **24 hours** (epoch milliseconds in `expires`), then the range
+    is resolved again. It keeps a range off the network without freezing it there,
+    which is the recorded file's job; an entry reaching the cache with no `expires`
+    reads as already expired, and so does one whose `expires` is further out than 24
+    hours from now. A conforming implementation never writes such a stamp, so one that
+    exists came from a hand edit, a clock that ran fast, or a `node_modules` restored
+    from an image; believed as written it would pin the range with no request for as
+    long as it says. The clamp is applied on read, and the entry stays available as the
+    stale answer below.
+  * It is written only when `node_modules` **already exists**. That directory belongs
+    to the package manager, and a repository holding nothing but an `.nvmrc` must not
+    acquire one because somebody ran `node --version`. Not caching costs one
+    resolution, which §04.1 step 4's store probe usually answers offline anyway. The
+    `.jup` directory inside it is jup's own and MUST be created on demand;
+    `node_modules` itself MUST NOT be.
+  * The memo lives in a **dot-prefixed directory** inside `node_modules`, never
+    directly in it. npm reads every visible entry in `node_modules` as an installed
+    package: a file at `node_modules/jup.lock` is reported by `npm ls --all` as
+    `jup.lock@ extraneous`, and the next `npm install` deletes it and prints
+    `removed 1 package`. Written that way the memo is destroyed by the very command jup
+    proxies — its 24-hour window never closes on its own, every run re-resolves against
+    the registry, and the user is shown a line about a package nobody installed. Every
+    peer tool keeping state there hides it the same way: `.package-lock.json`,
+    `.modules.yaml`, `.pnpm-workspace-state-v1.json`. An implementation MUST NOT read
+    or write `node_modules/jup.lock`.
+  * An **expired** memo is still the last answer the registry gave, so when the
+    re-resolution fails — an unreachable or degraded registry — it answers instead of
+    the run failing, and its stamp is *not* extended. This is §04.4's "degrade, never
+    block" rule for `lastKnownGood.json`, applied to a project's own file.
+    * "Unreachable or degraded" is the **whole** scope, and an implementation MUST
+      NOT widen it. Only a transport failure (§12.6's `Error when performing the
+      request to …`) and an availability status — 408, 425, 429, 5xx, §15.5's retry
+      set — may be answered from the memo; a registry that answers and matches
+      nothing is degraded in the same sense and also may. Everything else MUST
+      propagate: the network-disabled refusal (§12.6, §15.19), §15.35e's two
+      minimum-release-age errors, **401 and 403**, 404 (§15.35j), §15.4's TLS
+      failures, and any error the implementation does not recognise. A security
+      control that reports success without having been applied is worse than one
+      that stops — and because the stamp is not extended, the downgrade would recur
+      on every later run, so a rotated credential would pin the project
+      indefinitely with nothing ever printed.
+    * When the memo does answer, the run MUST print an advisory `!` line on stderr
+      naming the version it fell back to and why, subject to
+      `COREPACK_QUIET_ADVISORIES` (§11.5, §14.23). A fallback that prints nothing is
+      indistinguishable from a normal run.
+  * `COREPACK_FROZEN_LOCKFILE` does not govern it: it is not a committed record, and
+    freezing it would only buy a request per run.
 * §15.28 — for a package manager whose artifact is per-host there is no single hash,
   so `integrity` is instead an object keyed by the normalised `<platform>-<arch>`:
   ```json
@@ -904,36 +987,74 @@ ranges. Both halves are obtainable:
   each host reads and writes only its own key. Rules:
   * A host with no key yet still resolves the recorded version with **no network
     request**, and verifies its download through §06.3's signature — the tier a
-    native artifact always has. It then records its own key.
-  * Adding a host's key is not a *re*-resolution and is not gated behind `up`: the
-    version is unchanged and nothing was requested for it. It is gated by
-    `COREPACK_FROZEN_LOCKFILE`, because it is still a write.
+    native artifact always has.
+  * A host's key is added when `use` or `up` runs *on that host*; an ordinary run
+    leaves the file alone like any other. So the map fills in as the hosts that make
+    decisions make them, and a host that never records still runs.
   * Other hosts' keys are carried forward while the recorded version stands, and
     dropped when it moves — a digest for 1.3.0 says nothing about 1.4.0 anywhere.
   * Keys are serialised sorted, so a new host is a one-line diff.
   * A build that does not know this shape reads `typeof integrity === "string"`, finds
     it false, and treats the entry as version-only. That is the correct degradation,
     and is why the file's `version` did not have to change.
-* On every subsequent run, a recorded resolution that still satisfies the range is used
-  **without any network access** — the fast path (§01.3) is preserved for ranges too.
-* The resolution is refreshed only by an explicit `jup up`, or when the recorded
-  version no longer satisfies the range.
-* When the file is absent and the spec is a range, resolution hits the registry and
-  writes the file. `COREPACK_FROZEN_LOCKFILE=1` (and CI defaults, matching package
-  manager convention) makes that a hard error instead:
-  `<name>@<range> is not resolved in .jup.lock and lockfile updates are disabled.`
-* An exact-version spec continues to work with no lockfile involvement whatsoever.
-  Projects that want corepack's current guarantees change nothing.
+* Resolution order for a non-exact project spec, and it is fixed: the **recorded**
+  resolution, then an unexpired **memo**, then §04.1 — whose step 4 store probe comes
+  before any request. A recorded resolution or a live memo that still satisfies the
+  range is used **without any network access**, so the fast path (§01.3) is preserved
+  for ranges too. A recorded resolution outranks a memo always: a committed decision
+  beats a note about what the registry said yesterday.
+* A recorded resolution that no longer satisfies its range is skipped, not corrected —
+  the run resolves around it and memoes what it found. Correcting it is `up`'s.
+* `COREPACK_FROZEN_LOCKFILE=1` makes `use` with a range, `up`, and any command that
+  would **remove** a recorded resolution — an exact `use` retiring the range it
+  replaces — hard errors. A deletion is a write, and the flag governs the file, not
+  one syntax of pin. The check is made before resolving, and only where the committed
+  file actually holds the entry: a project with nothing recorded has nothing to
+  freeze. The message:
+  `<name>@<range> is not resolved in jup.lock and lockfile updates are disabled.`
+  `use` MUST refuse before resolving, so a frozen job fails on its own setting rather
+  than after a download it may not record. There is **no CI default** — with no
+  implicit write left, a default every remaining writer had to be exempted from would
+  be a setting that reads as though it does something and does not.
+* Both files are derived state and neither is load-bearing: unreadable, unparseable,
+  or carrying an unknown `version`, each reads as "nothing recorded" and the run
+  resolves normally (§04.4's precedent). A damaged **recorded** file is left exactly
+  as it is — repairing somebody's committed file unasked is the implicit write this
+  section exists to remove.
+* An exact-version spec continues to work with no lockfile involvement whatsoever —
+  not a read, not a `stat`. Projects that want corepack's current guarantees change
+  nothing.
 
 The file is jup's own, and is named for the tool that writes it. Corepack has no
 resolution file — no lockfile of any kind, and no `COREPACK_FROZEN_LOCKFILE`; it rejects
 ranges outright (§03.4), so it has nothing to record. There is therefore no
 Corepack-era spelling to stay compatible with, and an implementation MUST NOT read a
-`.corepack.lock`: no released tool has ever written a file by that name, so accepting it
-would be compatibility with nothing.
+`.corepack.lock`, nor the `.jup.lock` an unreleased jup briefly wrote: no tool in
+anyone's hands has ever written a file by either name, so accepting one would be
+compatibility with nothing. That is `.corepack.env`'s rule in reverse (§14.24) — a
+legacy read earns its extra `openat` per walked directory when it rescues files real
+repositories have, and not otherwise.
+
+The name carries **no leading dot**, unlike every other path §14.24 renames. That is
+the difference between a record and a setting: `package-lock.json`, `pnpm-lock.yaml`,
+`yarn.lock` and `Cargo.lock` are all visible because they are committed artefacts
+people read, diff and review, and this file exists to be reviewed. `.jup.env`
+configures a machine and stays hidden. The memo takes the same name — the directory,
+not the spelling, is what says which file is which — and that directory *is*
+dot-prefixed, because npm deletes a visible entry in `node_modules` that is not a
+package.
+
+Both files carry the same name because they are the same thing at two different
+temperatures, and the directory says which: `<project>/jup.lock` is committed and
+reviewed, `<project>/node_modules/.jup/jup.lock` is neither. That is also why the cache
+needs no ignore rule — `node_modules` already has one everywhere. Being ignored by git
+is not the only thing the cache needs from that directory, though: it must also survive
+the package manager that owns it, which is what the `.jup` directory above is for.
 
 This is the reconciliation the #300 discussion circled for three years without
-landing: ranges for humans, a recorded hash for reproducibility and integrity.
+landing: ranges for humans, a recorded hash for reproducibility and integrity — and,
+because the recording is a command rather than a side effect, no tool editing a
+committed file on its way to running `pnpm install`.
 
 ## 15.24 Never resolve an unspecified version to a prerelease — [required, bug]
 
@@ -999,7 +1120,13 @@ rejects.
 
 * A command that writes a pin MUST update **every field that encodes it**. If
   `devEngines.packageManager` exists, its `version` (and `integrity`, per §15.12) is
-  updated alongside `packageManager`.
+  updated alongside `packageManager`. "Updated" includes **removal**: when the write
+  supplies no digest and the version it writes is not the exact version the existing
+  `integrity` sat beside — §15.23's range pin, or any move to another release — the
+  `integrity` key MUST be deleted, not skipped. A digest left beside a version that has
+  moved is inert while the field holds a range, so nothing ever reports it, and it
+  becomes a hash mismatch on every install the moment somebody narrows the version back
+  to an exact release.
 * If only `devEngines.packageManager` exists, the pin is written **there**, and no
   top-level `packageManager` is created. Creating one is what breaks #874.
 * The post-write validation in §03.7 MUST run against the state being written, not the
@@ -1056,7 +1183,7 @@ This assumption is load-bearing across corepack: one URL template per version
   build does not start on Alpine, and a publisher shipping both says so in the
   artifact name (`@oven/bun-linux-x64-musl`, `@endevco/aube-linux-x64-musl`). glibc
   MUST stay unsuffixed, so every existing `targets` map and every recorded
-  `.jup.lock` key keeps its meaning and only a musl host sees a new one. How the
+  `jup.lock` key keeps its meaning and only a musl host sees a new one. How the
   libc is detected is unspecified — it MUST describe the host rather than the build
   machine; the reference implementation stats the two loader paths and reads musl
   only when glibc's is absent, so that a glibc distribution with `musl` merely
@@ -1101,7 +1228,7 @@ implementation MUST NOT let a digest taken on one host escape onto another:
   that reference is what `use`/`up` write into `packageManager`. A committed
   `bun@1.4.0+sha512.…` is a pin no other platform's artifact can satisfy, and it fails
   as a hash mismatch — the one outcome a pin exists to prevent.
-* §15.23's `.jup.lock` records the digest **per host** (see there).
+* §15.23's `jup.lock` records the digest **per host** (see there).
 * The compiled-in `default` is a bare version (§02.3).
 * §04.5's default-version lookup MUST return a bare version too, and MUST NOT read
   the launcher's `dist` at all. This is the same mistake in its least visible place:
@@ -1175,6 +1302,12 @@ one command.
 * the effective registry for each package manager, and the source of that setting
   (env var, `.npmrc` path, or built-in);
 * the store path, whether it is writable, and the cached versions present;
+* §15.23's two files — the recorded resolution for this project's spec, the memo in
+  `node_modules/.jup` and whether it has expired, and whether `COREPACK_FROZEN_LOCKFILE`
+  freezes the recorded one. Both MUST be reported through §15.23's own read rules: an
+  entry that no longer satisfies its range, or whose stamp has aged out, is reported as
+  **absent**, because that is what the next run would do with it. `info` MUST NOT name
+  a resolution the next run would refuse;
 * the recorded global defaults;
 * for each supported binary name: whether a shim is installed, and what that name
   currently resolves to on `PATH`.
@@ -1269,7 +1402,7 @@ const fallbackReference = isTransparentCommand
 |---|---|---|
 | **#57** `corepack run <script>` (26 comments, 9👍) | Out of scope — *"each package manager has different implementations of run… which Corepack couldn't replicate without becoming a package manager"* | **Adopted.** The semantic divergence is real (Yarn resolves scripts workspace-wide, npm does not). `node --run` and `$npm_execpath` are the right mechanisms. |
 | **#352** `corepack manager <verb>` passthrough (14 comments) | Out of scope — *"its only purpose is to change how they are installed"* | **Adopted.** Userland wrappers are the right home. |
-| **#465** pin duplicated into the package manager's lockfile | Belongs in the package manager | **Adopted**, and §15.23's `.jup.lock` serves the underlying Docker-layer-caching need without touching another tool's file format. |
+| **#465** pin duplicated into the package manager's lockfile | Belongs in the package manager | **Adopted**, and §15.23's `jup.lock` serves the underlying Docker-layer-caching need without touching another tool's file format. |
 | **#683** extend pinning to monorepo task runners | Same boundary | **Adopted.** |
 
 One narrower request is accepted:
@@ -1351,7 +1484,7 @@ Introduced by this section. All follow §11.6's precedence.
 | `COREPACK_REQUIRE_SIGNATURES` | `1` | Turn §15.7's soft-fail into a hard failure | yes |
 | `COREPACK_ALLOW_UNVERIFIED` | `1` | Permit an artifact with no verification tier (§15.11) | **no** |
 | `COREPACK_SHIM_DIRECTORY` | path | Default shim install directory (§15.13) | **no** (§14.5) |
-| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write/refresh `.jup.lock` (§15.23) | yes |
+| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse to write, refresh **or delete** `jup.lock` — `use` with a range, `up`, and an exact `use` that would retire a recorded range (§15.23). No CI default; the memo in `node_modules/.jup` is unaffected | yes |
 | `COREPACK_ENABLE_PRERELEASES` | `1` | Allow implicit resolution to select a prerelease (§15.24) | yes |
 | `COREPACK_SPEC_FILE` | path | External file supplying the project spec (§15.35d) | **no** |
 | `COREPACK_MINIMUM_RELEASE_AGE` | hours | Minimum publish age for implicit resolution (§15.35e) | yes |
@@ -1396,9 +1529,9 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 178 | Uncached version with `COREPACK_ENABLE_NETWORK=0` | the error names the seeding command (§15.19) |
 | 179 | `cache list --json` | installed pairs and recorded defaults (§15.19) |
 | 180 | `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` via a shim entry point | fully silent (§15.20) |
-| 181 | `packageManager: "pnpm@^11.0.0"` | resolves; `.jup.lock` records version + integrity (§15.23) |
-| 182 | Second run with that lockfile present | **no** network request (§15.23, §01.3) |
-| 183 | Range with no lockfile and `COREPACK_FROZEN_LOCKFILE=1` | refused (§15.23) |
+| 181 | `jup use pnpm@^11.0.0` | the field keeps `^11.0.0`; `jup.lock` records version + integrity, and both paths are named (§15.23) |
+| 182 | A run with that lockfile present | **no** network request, and nothing written (§15.23, §01.3) |
+| 183 | Range with no recorded resolution, `node_modules` present | resolves; the memo is written to `node_modules/.jup/jup.lock` with an `expires`, nothing is written at `node_modules/jup.lock`, and `jup.lock` is not created (§15.23) |
 | 184 | Registry publishes `11.0.0-dev.1005` above stable `10.x`; `jup use pnpm` | resolves to the **stable** release (§15.24) |
 | 185 | Same with `COREPACK_ENABLE_PRERELEASES=1` | resolves to the prerelease (§15.24) |
 | 186 | Explicitly pinned prerelease | still resolves and matches its range band (§15.24, §14.2) |
@@ -1432,7 +1565,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 214 | `bunx <args>` | reaches the same cached file as `bun`, under `argv[0]` = `bunx` (§15.28) |
 | 215 | `packageManager: "deno@<v>"` | runs; the marker's `bin` names the package-root executable, from the table, because the artifact package declares none (§07.7, §15.28) |
 | 216 | `jup use bun@<v>` | `packageManager` holds a **bare** version; no digest is written to a committed file (§15.28) |
-| 217 | `packageManager: "bun@^1.4.0"` with a `.jup.lock` recorded on another host | resolves offline; this host's digest is added and the other host's is left intact (§15.23, §15.28) |
+| 217 | `packageManager: "bun@^1.4.0"` with a `jup.lock` recorded on another host | a run resolves offline and writes nothing; `use` adds this host's digest and leaves the other host's intact (§15.23, §15.28) |
 | 218 | `enable` with no names, then `enable bun`, then `disable` with no names | no bun/deno shim first; both after naming bun; none after the bare disable (§10.5, §15.21) |
 | 219 | A version whose band declares no artifact for this host (e.g. `bun@1.2.0` on Windows arm64) | fails before any request, naming the host and what that version ships for (§12, §15.28) |
 | 220 | `deno` in a directory with no project spec, `JUP_DEFAULT_TO_LATEST=1` | runs; no digest is pinned from the launcher package, and the recorded default is a bare version (§04.5, §15.28) |
@@ -1453,7 +1586,7 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 235 | `jup enable` with no names, then `jup enable node` | no `node` shim first, one after — a runtime is never in the default set (§10.5, §15.39) |
 | 236 | `jup node@22` on a musl Linux host, and on `linux-armv7l` | `unsupportedTarget` naming `linux-x64-musl` in the first, `unsupportedArch` in the second; both before any request (§02.5, §15.28) |
 | 237 | `.nvmrc` reading `v22.23.2` beside a manifest pinning `packageManager: "pnpm@…"` and no `devEngines.runtime` | `node` resolves within it and installs per-host as usual; `pnpm` in the same directory is unaffected; neither file is written (§15.40) |
-| 238 | `.nvmrc` in a parent and another in `packages/app` reading `22.x`, with comments, blank lines and a `key=value` line | the nearer file speaks, read through the comments and the setting; its `.jup.lock` is written beside it, not at the root (§15.40, §15.23) |
+| 238 | `.nvmrc` in a parent and another in `packages/app` reading `22.x`, with comments, blank lines and a `key=value` line | the nearer file speaks, read through the comments and the setting; its memo is written beside it, not at the root, and no `jup.lock` is created (§15.40, §15.23) |
 | 239 | `.nvmrc` and `devEngines.runtime` naming different versions | `devEngines.runtime` wins, with no warning and no comparison between them (§15.40) |
 | 240 | `.nvmrc` reading `lts/*`, `lts/<codename>`, `system`, `iojs` or `default`; then one reading `node` or `stable` | the first five are refused, naming the word and `devEngines.runtime`, before any request; the last two resolve to the `latest` dist-tag (§15.40) |
 | 241 | `.nvmrc` carrying two versions, only comments, or nothing | `Invalid <path>`; no request, and no fall back to the compiled-in default (§15.40) |
@@ -1471,6 +1604,14 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 253 | The same tree with `cache clean --all`, and then a correctly pinned stub (interpreter outside `<home>`) with a plain `cache clean` | `--all` removes the interpreter too, warning on stderr *before* it does; the pinned tree prints exactly `Removed <n> cached version(s) from <path>` with an empty stderr and nothing spared (§15.44, §15.43) |
 | 254 | A published-shaped install — the stub back to `0o644`, as `npm pack` leaves it — then `enable`, then the installed shim run through `execve`; then a warm `enable` over the repaired stub | the first exits 0, the stub the shim points at carries the execute bit, and running the shim by path works; the second changes nothing at all, `chmod` included (§15.45, §10.2 properties 4 and 5) |
 | 255 | A built install whose CLI entry opens `#!/usr/bin/env node`: `enable pnpm`, then `enable node`, then `enable node` again; and, with the entry read-only, `enable node` once more | the first leaves the entry byte-identical, the second rewrites its **first line only** to the absolute interpreter and leaves every later byte and the mode alone, the third writes nothing at all; the read-only run fails naming that file and not the stub, and `jup --version` under a project pinning an uncached runtime never downloads one (§15.46, §10.1, §10.7) |
+| 256 | A second run inside the memo's 24-hour window | **no** network request, and the memo is not re-stamped — nothing was learned to write down (§15.23) |
+| 257 | An expired memo, resolved again; then an expired memo while the packument 5xxs and version documents and tarballs serve normally | the first re-resolves and re-stamps; the second runs on the stale memo and leaves its stamp where it was — an outage is not a reason to believe an old answer for another day (§15.23) |
+| 258 | A range in a project with no `node_modules` directory | resolves and runs; nothing is created — not the directory, not either lockfile (§15.23) |
+| 259 | A memo whose `expires` is a year out | read as **expired**; the range is resolved again, and the memo still answers if that resolution fails — a stamp further out than the 24-hour window is clamped, not believed (§15.23) |
+| 260 | `jup info` with a `jup.lock` entry, and separately a fresh memo entry, that no longer satisfies the declared range | neither is reported as the resolution; the status is the one the next run would actually reach (§15.23, §15.30) |
+| 261 | An expired memo with `JUP_ENABLE_NETWORK=0` | the run fails with §15.19's diagnostic; the memo does **not** answer (§15.23) |
+| 262 | An expired memo while the registry answers 401 | the run fails naming the status; the memo does **not** answer — an authentication failure is not an outage (§15.23) |
+| 263 | An expired memo while the registry is unreachable | the memo answers, an advisory `!` line names the version and the reason, the stamp is unchanged, and `JUP_QUIET_ADVISORIES=1` mutes only the line (§15.23, §11.5) |
 
 ## 15.39 Tools, not only package managers — [required]
 
@@ -1561,7 +1702,7 @@ manager (§10.5).
 * When it speaks, the result is a `Found` targeting the version file, carrying no
   `devEngines` declaration and no pin — so §03.6's auto-pin does not fire, and
   §15.23's `up` treats it as it treats a synthesised spec. A range declared in it resolves through
-  `.jup.lock` as any range does, written beside the version file.
+  `jup.lock` as any range does, written beside the version file.
 * Parsing is lazy, and both failure modes — a file carrying no single version, and
   one carrying a word that is not a version — are errors (§12.12). Neither may fall
   back to the compiled-in default.
@@ -1804,10 +1945,15 @@ cannot help an install that was written before the guard existed.
 
 * Before removing anything, `cache clean` MUST read the interpreter the installed
   shims actually run under. It is read from the shims themselves, never from a
-  sidecar record: on POSIX the shebang of the shared stub (§10.2), on Windows the
-  wrappers, which name it each (§10.3). The Windows lookup uses §15.13 point 7's
-  resolver — the one that does not consult `PATH` — and answers "none" rather than
-  failing when there is no shim directory to read.
+  sidecar record: on POSIX the shebang of the stub each installed shim links to —
+  read *through* the shim, so that shims written by another copy of the tool (an
+  `npx` run, a global since reinstalled) answer with the interpreter they will
+  really exec rather than with this copy's; on Windows the wrappers, which name it
+  each (§10.3). **Both** lookups use §15.13 point 7's resolver — the one that does
+  not consult `PATH` — and answer "none" rather than failing when there is no shim
+  directory to read. Where POSIX finds no shim of its own there, it MAY fall back
+  to this installation's own shared stub, which is the same record one directory
+  over.
 * When that interpreter lies inside `<home>` (§15.43's path-boundary test), a plain
   `cache clean` MUST spare the **version directory containing it** and remove
   everything else under `<home>/v1`, including every other version of the same tool
@@ -1819,8 +1965,11 @@ cannot help an install that was written before the guard existed.
   would leave the shims failing, and points at re-running `enable` under a runtime
   installed outside `<home>` — which is both the repair and, under §15.43, a state
   the tool will not produce again. It goes to **stderr** (§09.11: it is a notice
-  about an abnormal state, not the command's result), and it is not suppressible:
-  it explains a count on stdout that is otherwise inexplicably low.
+  about an abnormal state, not the command's result) as a `!` line, through the same
+  advisory gate as every other line this spec adds, so `COREPACK_QUIET_ADVISORIES=1`
+  silences it (§11.5) — that flag is a blanket promise §11 makes about all of them,
+  and one exemption would make it mean "quiet, mostly". The count on stdout is
+  command output and is unaffected.
 * The count on stdout MUST be the number of versions actually removed, so the
   spared one is excluded from it. Everything else about the §15.35l line is
   unchanged, `Nothing to remove` included — a store holding nothing but the spared
@@ -1833,9 +1982,18 @@ cannot help an install that was written before the guard existed.
 * An install whose interpreter is outside `<home>` — the only state §15.43 now
   produces — MUST be indistinguishable from an implementation without this section:
   the same single removal, the same one line of stdout, an empty stderr, and no
-  per-version work. An implementation SHOULD skip the lookup entirely when the
-  store holds no versions, which is sound because a runtime `enable` could have
-  named was installed by this tool and therefore carries a §07.2 marker.
+  per-version work. An implementation MUST NOT gate the lookup on the store's
+  *installed list*: that list skips any version directory without a §07.2 marker, and
+  a marker lost to an interrupted install, a disk cleaner or a hand-edited store
+  leaves a store that lists as empty while still holding the interpreter the shims
+  name. Removing it then prints `Nothing to remove` while every shim starts failing
+  with `bad interpreter`, and `enable` — the repair — is itself behind the broken
+  `node` shim. The lookup costs one open of a file whose first line answers, on a
+  command that is about to delete the whole store.
+* A removal that fails — `EACCES`, `EPERM`, a handle another process holds — MUST NOT
+  abort the command. The clean continues, each path it could not remove is named on
+  stderr as a `!` line, and the count on stdout excludes it. A fail-fast clean leaves
+  the user with a raw error, no count, and no way to tell what was removed.
 
 ## 15.45 `enable` guarantees the stub it links to is executable — [required, bug]
 
@@ -1865,11 +2023,14 @@ alone.
 
 * `enable` MUST guarantee that the stub each shim it writes points at is
   executable, whether or not it rewrote that stub. This is §10.2 property 5.
-* It MUST establish that by testing the mode first and `chmod`ing `0755` **only**
-  when the execute bits are missing. An unconditional `chmod` is a write, and
-  §10.2 property 4 and §10.7 both require a warm `enable` over a correct
-  installation to write nothing at all — the `stat` is what keeps "already
-  correct" free.
+* It MUST establish that by testing whether the stub **can be executed** —
+  `access(X_OK)`, or the equivalent — and `chmod`ing `0755` only when it cannot.
+  The test is on executability, not on a particular mode: a stub at `0744`, `0750`
+  or `0700` is one its owner can already run, and demanding all three execute bits
+  turns it into either a refused `chmod` on a foreign-owned install or a write on
+  every warm run. An unconditional `chmod` is a write, and §10.2 property 4 and
+  §10.7 both require a warm `enable` over a correct installation to write nothing
+  at all — the test is what keeps "already correct" free.
 * When the stub is not executable and the `chmod` is itself refused —
   `EROFS`/`EACCES`/`EPERM`, the read-only image or the root-owned global install —
   `enable` MUST **fail**. It MUST NOT warn and exit 0: no working shim can be
@@ -1923,12 +2084,23 @@ the same way, for the same reason, from the same line of text.
   §10.1 already states for the stub: the absolute path chosen by §15.43's three
   tiers, and no separate selection path. A store runtime is refused there, so it
   is refused here.
-* It MUST apply under the **same condition** as the stub's pin — always on
-  Windows, and on POSIX only when the install directory claims the interpreter's
-  own name (§10.1's *When it applies*). An `enable` that claims no such name MUST
-  leave the entry **byte-identical**, because §10.7's read-only installation and
-  §10.2's idempotency both depend on `enable` writing nothing when nothing is
-  wrong.
+* It MUST apply on **either platform only when the install directory claims the
+  interpreter's own name** — this run enables `node`, or an earlier one already
+  installed a shim of ours at that name (§10.1's *When it applies*). That is the
+  POSIX half of the stub's condition, and deliberately not the Windows half:
+  §10.3's wrappers bake the path in unconditionally because `cmd.exe` resolves a
+  bare name from the current directory first, and that hazard belongs to the
+  wrappers the tool *writes*, not to its own entry — which Windows never reaches
+  through a shebang at all, since the `bin` target is invoked through npm's
+  `cmd-shim`, which names the runtime itself and never reads the entry's first
+  line. Pinning unconditionally there buys nothing and costs an `enable <package
+  manager>` against an admin-owned or read-only package directory (Chocolatey,
+  Scoop, `C:\Program Files`, a container image): the rewrite is refused, the
+  command fails with no shims written, and the refusal's own remedy — stop
+  claiming the name — cannot be acted on, because the trigger was the platform.
+  An `enable` that claims no such name MUST leave the entry **byte-identical**,
+  because §10.7's read-only installation and §10.2's idempotency both depend on
+  `enable` writing nothing when nothing is wrong.
 * The entry is a **build artifact**, not a file the tool generates. Only its first
   line may be rewritten, and only when that line is not already the line wanted:
   the implementation reads the head, compares, and returns without writing when it
