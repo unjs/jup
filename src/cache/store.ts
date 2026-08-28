@@ -416,12 +416,19 @@ export function promote(tmp: string, dest: string): void {
     } catch (error) {
       const code = errorCode(error);
 
-      // Lost a benign race: the winner's tree is content-identical to ours.
+      // Something is already at `dest`. That is a benign lost race *only* when
+      // it proves to be a completed install: the marker is written into the
+      // staging tree before the rename, so a winner always has one. A directory
+      // without one is not a winner — it is a foreign or half-copied tree (a
+      // store seeded by an rsync that filtered dotfiles, say) — and discarding
+      // our verified bytes for it would hand the caller unchecked content and
+      // leave a cache entry that re-downloads on every run and never repairs.
       if (
         code === "EEXIST" ||
         code === "ENOTEMPTY" ||
         (isWindows && code === "EPERM" && isDirectory(dest))
       ) {
+        if (readMarker(dest) === null) throw new UsageError(messages.occupiedInstallDir(dest));
         rmSync(tmp, { recursive: true, force: true });
         return;
       }

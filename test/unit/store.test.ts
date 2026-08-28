@@ -558,6 +558,14 @@ describe("promote — §07.5", () => {
     const dest = join(getInstallFolder(), "yarn", "4.1.0");
     mkdirSync(dest, { recursive: true });
     writeFileSync(join(dest, "yarn.js"), "winner");
+    // The marker is what makes the winner a winner: `ensureInstalled` writes it
+    // into the staging tree *before* the rename, so every tree that can win the
+    // race carries one.
+    writeMarker(dest, {
+      locator: { name: "yarn", reference: "4.1.0" },
+      bin: { yarn: "./yarn.js" },
+      hash: "sha256.aaaa",
+    });
 
     const tmp = createTempDir();
     writeFileSync(join(tmp, "yarn.js"), "loser");
@@ -566,6 +574,22 @@ describe("promote — §07.5", () => {
 
     expect(readFileSync(join(dest, "yarn.js"), "utf8")).toBe("winner");
     expect(() => statSync(tmp)).toThrow();
+  });
+
+  it("refuses a destination that is occupied but carries no marker", () => {
+    // Not a race at all: a foreign or half-copied tree — a store seeded by an
+    // rsync that filtered dotfiles is the realistic way to get one. Discarding
+    // the verified download for it would run unchecked bytes and leave an entry
+    // that re-downloads on every run and never repairs itself.
+    const dest = join(getInstallFolder(), "yarn", "4.1.0");
+    mkdirSync(dest, { recursive: true });
+    writeFileSync(join(dest, "yarn.js"), "stale");
+
+    const tmp = createTempDir();
+    writeFileSync(join(tmp, "yarn.js"), "verified");
+
+    expect(() => promote(tmp, dest)).toThrow(UsageError);
+    expect(readFileSync(join(dest, "yarn.js"), "utf8")).toBe("stale");
   });
 
   it("never creates a lockfile (§07.5, §16.6)", () => {
