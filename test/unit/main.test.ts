@@ -1175,6 +1175,42 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * Held at 238,000 rather than the 235,651 this leaves, on the same terms as
    * every raise above.
+   *
+   * And then **up again, 238,000 -> 256,000**, for a run of ten commits rather
+   * than one change. 235,651 -> 253,712, **+18,061 or +7.7%**, and no single
+   * entry in it is arguable on its own:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | §04.2's version prefix and x-range grammar narrowed | `version/semver.ts` | +2,853 |
+   * | §14.5's three location variables denied in a project env file | `project/env.ts` | +2,055 |
+   * | §03.2's env-file search stopped at the project boundary | `project/manifest.ts` | +4,181 |
+   * | §02.1's spec name refused when it cannot be a store directory | `project/manifest.ts` | +2,855 |
+   * | §07.2's marker shape validated before it is trusted | `cache/store.ts` | +964 |
+   * | §07.4's fixed mode ceiling on the extractor and the store | `cache/store.ts` | +964 |
+   * | §15.32's shim directory promoted only on our own banner | `run/exec.ts` | +2,637 |
+   * | §15.11's pin reasoning moved out to the spec | `cache/store.ts` | −1,705 |
+   * | §15.41's whole table moved onto the npm registry | `config/table.ts`, `run/exec.ts` | +2,341 |
+   * | §15.42's `node@lts` table constant | `config/table.ts` | +916 |
+   *
+   * Eight of the ten are hardening: each replaces a check that trusted a shape,
+   * a name or a boundary with one that verifies it, and every one of them sits
+   * on the warm path because that is where the untrusted input arrives — a
+   * manifest, an env file, a store marker, a `PATH` entry. There is no seam to
+   * move them behind, for the reason the version-file entry above gives: a warm
+   * run is exactly the run that reads these.
+   *
+   * The ratio is the thing to read, on the terms this comment has used
+   * throughout. Source grew 7.7% and the largest single contributor,
+   * `project/manifest.ts`, grew 21.8% — the signature of added code, not added
+   * prose, which is what a run of validators is. That is the argument for
+   * accepting it and the reason not to accept another like it silently: the next
+   * lowering is owed, and `config/table.ts` at 43,434 bytes is now the largest
+   * resident, most of it data that a warm run parses and a `yarn --version`
+   * never reads past one entry of.
+   *
+   * Held at 256,000 rather than the 253,712 this leaves, on the same terms as
+   * every raise above.
    */
   it("stays inside the warm chunk's byte ceiling", () => {
     const sizes = ["shim.ts", ...WARM_MODULES]
@@ -1186,6 +1222,6 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(238_000);
+    ).toBeLessThanOrEqual(256_000);
   });
 });
