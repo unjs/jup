@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { messages } from "../../src/errors.ts";
 import { pathWith, resolveBinPath, SHIM_MARKER } from "../../src/run/exec.ts";
-import type { BinSpec, LegacyBinList } from "../../src/types.ts";
+import type { BinSpec } from "../../src/types.ts";
 
 /**
  * §08.4's contract is about how a *process* ends, so every one of these cases is
@@ -29,11 +29,6 @@ const REPO_ROOT = fileURLToPath(new URL("../../", import.meta.url)).replace(
   "",
 );
 const EXEC_URL = pathToFileURL(join(REPO_ROOT, "src", "run", "exec.ts")).href;
-
-/** A single-file download's URL, whose basename is what a `bin` list resolves to. */
-const YARN_URL = "https://repo.yarnpkg.com/4.0.0/packages/yarnpkg-cli/bin/yarn.js";
-/** A tarball URL, so the `bin` map branch is the one under test. */
-const TGZ_URL = "https://registry.npmjs.org/yarn/-/yarn-1.0.0.tgz";
 
 let root: string;
 let driver: string;
@@ -53,13 +48,12 @@ function fixture(name: string, files: Record<string, string>, version = "1.0.0")
 function run(
   location: string,
   binName: string,
-  specUrl: string,
-  bin: BinSpec | LegacyBinList,
+  bin: BinSpec,
   args: string[] = [],
 ): { status: number | null; stdout: string; stderr: string } {
   const result = spawnSync(
     process.execPath,
-    [driver, location, binName, specUrl, JSON.stringify(bin), ...args],
+    [driver, location, binName, JSON.stringify(bin), ...args],
     { encoding: "utf8" },
   );
   return { status: result.status, stdout: result.stdout, stderr: result.stderr };
@@ -75,8 +69,8 @@ beforeAll(() => {
     driver,
     [
       `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
-      `const [location, binName, specUrl, binJson, ...args] = process.argv.slice(2);`,
-      `execPackageManager(binName, { location, bin: JSON.parse(binJson), hash: "" }, args, specUrl);`,
+      `const [location, binName, binJson, ...args] = process.argv.slice(2);`,
+      `execPackageManager(binName, { location, bin: JSON.parse(binJson), hash: "" }, args);`,
       ``,
     ].join("\n"),
   );
@@ -93,24 +87,19 @@ describe("resolveBinPath — §08.1", () => {
       bin: { yarn: "./bin/yarn.js" },
       hash: "",
     };
-    expect(resolveBinPath("yarn", spec, TGZ_URL)).toBe(join(spec.location, "bin", "yarn.js"));
+    expect(resolveBinPath("yarn", spec)).toBe(join(spec.location, "bin", "yarn.js"));
   });
 
-  it("resolves a bin list entry to the basename of the spec URL path", () => {
+  // §02.4 — "one file, two names" is a map with two keys, which is also the
+  // shape a single-file URL install records (§07.7).
+  it("resolves two declared names to the same file", () => {
     const spec = {
-      location: join(root, "list", "yarn", "4.0.0"),
-      bin: ["yarn", "yarnpkg"],
+      location: join(root, "single", "yarn", "4.0.0"),
+      bin: { yarn: "./yarn.js", yarnpkg: "./yarn.js" },
       hash: "",
     };
-    expect(resolveBinPath("yarn", spec, YARN_URL)).toBe(join(spec.location, "yarn.js"));
-    expect(resolveBinPath("yarnpkg", spec, YARN_URL)).toBe(join(spec.location, "yarn.js"));
-  });
-
-  it("leaves the path unset for a bin list whose URL is not a .js file", () => {
-    const spec = { location: join(root, "list", "yarn", "1.22.0"), bin: ["yarn"], hash: "" };
-    expect(() => resolveBinPath("yarn", spec, TGZ_URL)).toThrow(
-      messages.assertUnableToLocateBinPath("yarn"),
-    );
+    expect(resolveBinPath("yarn", spec)).toBe(join(spec.location, "yarn.js"));
+    expect(resolveBinPath("yarnpkg", spec)).toBe(join(spec.location, "yarn.js"));
   });
 
   it("leaves the path unset for a bin name that is not declared", () => {
@@ -119,54 +108,36 @@ describe("resolveBinPath — §08.1", () => {
       bin: { yarn: "./bin/yarn.js" },
       hash: "",
     };
-    expect(() => resolveBinPath("yarnpkg", spec, TGZ_URL)).toThrow(
+    expect(() => resolveBinPath("yarnpkg", spec)).toThrow(
       messages.assertUnableToLocateBinPath("yarnpkg"),
-    );
-    expect(() => resolveBinPath("yarn", { ...spec, bin: ["yarnpkg"] }, YARN_URL)).toThrow(
-      messages.assertUnableToLocateBinPath("yarn"),
     );
   });
 
   it("does not treat inherited object properties as declared bins", () => {
     const spec = { location: join(root, "map", "yarn", "1.0.0"), bin: {} as BinSpec, hash: "" };
-    expect(() => resolveBinPath("constructor", spec, TGZ_URL)).toThrow(
+    expect(() => resolveBinPath("constructor", spec)).toThrow(
       messages.assertUnableToLocateBinPath("constructor"),
     );
   });
 
   /*
-   * §08.1's first line is `bin := installSpec.bin ?? spec.bin`. Markers written
-   * by older corepack releases carry no `bin`, and §07.1 requires the store to
-   * stay compatible with them.
+   * §08.1's first line is `bin := installSpec.bin ?? spec.bin`. §07.7 always
+   * records a `bin`, so the fallback stands in for a marker jup did not write —
+   * §07.10 promotes those out of somebody else's archive.
    */
   describe("a marker without a bin (§08.1's `?? spec.bin`)", () => {
     it("falls back to the table spec's bin map", () => {
       const spec = { location: join(root, "map", "yarn", "1.0.0"), hash: "" };
-      expect(resolveBinPath("yarn", spec, TGZ_URL, { yarn: "./bin/yarn.js" })).toBe(
+      expect(resolveBinPath("yarn", spec, { yarn: "./bin/yarn.js" })).toBe(
         join(spec.location, "bin", "yarn.js"),
       );
-    });
-
-    it("reads a LegacyBinList out of a marker an older build wrote (§07.1)", () => {
-      // Not the *fallback* any more: since §15.41 no band declares a list, so the
-      // table can never supply one. What still exists is the marker already
-      // sitting in a store — a machine that installed Berry under an earlier
-      // release has `["yarn", "yarnpkg"]` on disk — and that install has to keep
-      // running. The file is recovered from the URL, as it always was.
-      const spec = {
-        location: join(root, "list", "yarn", "4.0.0"),
-        bin: ["yarn", "yarnpkg"] as LegacyBinList,
-        hash: "",
-      };
-      expect(resolveBinPath("yarn", spec, YARN_URL)).toBe(join(spec.location, "yarn.js"));
-      expect(resolveBinPath("yarnpkg", spec, YARN_URL)).toBe(join(spec.location, "yarn.js"));
     });
 
     it("asserts rather than crashing when there is no fallback either", () => {
       const spec = { location: join(root, "map", "yarn", "1.0.0"), hash: "" };
       // Not a `TypeError` from reading a property of `undefined`: §12.8's
       // assertion, which says which bin could not be located.
-      expect(() => resolveBinPath("yarn", spec, TGZ_URL)).toThrow(
+      expect(() => resolveBinPath("yarn", spec)).toThrow(
         messages.assertUnableToLocateBinPath("yarn"),
       );
     });
@@ -177,7 +148,7 @@ describe("resolveBinPath — §08.1", () => {
         bin: { yarn: "./bin/yarn.js" },
         hash: "",
       };
-      expect(resolveBinPath("yarn", spec, TGZ_URL, { yarn: "./other.js" })).toBe(
+      expect(resolveBinPath("yarn", spec, { yarn: "./other.js" })).toBe(
         join(spec.location, "bin", "yarn.js"),
       );
     });
@@ -187,7 +158,7 @@ describe("resolveBinPath — §08.1", () => {
 describe("execPackageManager — §08.4 exit codes", () => {
   it("test 132 — a synchronously set exit code 42 is the tool's exit code", () => {
     const location = fixture("sync", { "bin/yarn.js": `process.exitCode = 42;\n` });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(42);
   });
 
@@ -195,7 +166,7 @@ describe("execPackageManager — §08.4 exit codes", () => {
     const location = fixture("throw", {
       "bin/yarn.js": `process.exitCode = 42;\nthrow new Error("kaboom-from-the-package-manager");\n`,
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     // The runtime's own rule, which the tool must not override (corepack 0.18.1).
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("kaboom-from-the-package-manager");
@@ -205,7 +176,7 @@ describe("execPackageManager — §08.4 exit codes", () => {
     const location = fixture("throw-async", {
       "bin/yarn.js": `process.exitCode = 42;\nsetTimeout(() => { throw new Error("late-kaboom"); }, 0);\n`,
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("late-kaboom");
   });
@@ -214,13 +185,13 @@ describe("execPackageManager — §08.4 exit codes", () => {
     const location = fixture("before-exit", {
       "bin/yarn.js": `process.on("beforeExit", () => { process.exitCode = 42; });\n`,
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(42);
   });
 
   it("a package manager that returns normally exits 0", () => {
     const location = fixture("clean", { "bin/yarn.js": `console.log("ran");\n` });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("ran\n");
   });
@@ -236,7 +207,7 @@ describe("execPackageManager — §08.2 handover", () => {
         ``,
       ].join("\n"),
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
     expect(result.stdout).toBe("esm-ok true\n");
@@ -246,19 +217,20 @@ describe("execPackageManager — §08.2 handover", () => {
     const location = fixture("cjs", {
       "bin/yarn.js": `console.log("main:", require.main.filename, "execArgv:", JSON.stringify(process.execArgv));\n`,
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`main: ${join(location, "bin", "yarn.js")} execArgv: []\n`);
   });
 
-  it("test 136 — a bin list resolves every declared name to the same file", () => {
+  it("test 136 — every name a bin map declares runs the same file", () => {
     const location = fixture(
-      "binlist",
+      "twonames",
       { "yarn.js": `console.log(process.argv[1], JSON.stringify(process.argv.slice(2)));\n` },
       "4.0.0",
     );
-    const yarn = run(location, "yarn", YARN_URL, ["yarn", "yarnpkg"], ["--version"]);
-    const yarnpkg = run(location, "yarnpkg", YARN_URL, ["yarn", "yarnpkg"], ["--version"]);
+    const bin = { yarn: "./yarn.js", yarnpkg: "./yarn.js" };
+    const yarn = run(location, "yarn", bin, ["--version"]);
+    const yarnpkg = run(location, "yarnpkg", bin, ["--version"]);
     expect(yarn.status).toBe(0);
     expect(yarnpkg.status).toBe(0);
     expect(yarn.stdout).toBe(`${join(location, "yarn.js")} ["--version"]\n`);
@@ -270,12 +242,7 @@ describe("execPackageManager — §08.2 handover", () => {
     const location = fixture("argv", {
       "bin/yarn.js": `console.log(JSON.stringify([process.argv[0] === process.execPath, process.argv.slice(1)]));\n`,
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" }, [
-      "add",
-      "-D",
-      "--",
-      "x y",
-    ]);
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" }, ["add", "-D", "--", "x y"]);
     expect(result.status).toBe(0);
     expect(JSON.parse(result.stdout)).toEqual([
       true,
@@ -289,7 +256,7 @@ describe("execPackageManager — §08.7 environment", () => {
     const location = fixture("env", {
       "bin/yarn.js": `console.log(process.env.COREPACK_ROOT);\n`,
     });
-    const result = run(location, "yarn", TGZ_URL, { yarn: "./bin/yarn.js" });
+    const result = run(location, "yarn", { yarn: "./bin/yarn.js" });
     expect(result.status).toBe(0);
     expect(result.stdout.trim()).toBe(REPO_ROOT);
   });
@@ -302,7 +269,7 @@ describe("resolveBinPath — §14.13 confinement", () => {
       bin: { yarn: "../../../evil" },
       hash: "",
     };
-    expect(() => resolveBinPath("yarn", spec, TGZ_URL)).toThrow(
+    expect(() => resolveBinPath("yarn", spec)).toThrow(
       messages.binEscapes("../../../evil", "yarn", "1.0.0"),
     );
   });
@@ -312,7 +279,7 @@ describe("resolveBinPath — §14.13 confinement", () => {
     // Plant the file the malicious bin points at, so a missing target cannot be
     // what makes this test pass.
     writeFileSync(join(root, "evil.js"), `console.log("pwned");\n`);
-    const result = run(location, "yarn", TGZ_URL, { yarn: "../../../evil.js" });
+    const result = run(location, "yarn", { yarn: "../../../evil.js" });
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toContain(messages.binEscapes("../../../evil.js", "yarn", "1.0.0"));
@@ -324,7 +291,7 @@ describe("resolveBinPath — §14.13 confinement", () => {
       bin: { yarn: "/etc/passwd" },
       hash: "",
     };
-    expect(() => resolveBinPath("yarn", spec, TGZ_URL)).toThrow(
+    expect(() => resolveBinPath("yarn", spec)).toThrow(
       messages.binEscapes("/etc/passwd", "yarn", "1.0.0"),
     );
   });
@@ -335,9 +302,7 @@ describe("resolveBinPath — §14.13 confinement", () => {
       bin: { yarn: "./bin/../bin/yarn.js" },
       hash: "",
     };
-    expect(resolveBinPath("yarn", spec, TGZ_URL)).toBe(
-      join(spec.location, "bin", "..", "bin", "yarn.js"),
-    );
+    expect(resolveBinPath("yarn", spec)).toBe(join(spec.location, "bin", "..", "bin", "yarn.js"));
   });
 });
 
@@ -410,14 +375,10 @@ describe("§15.32 — PATH", () => {
     bin: BinSpec,
     env: Record<string, string>,
   ): { status: number | null; stdout: string; stderr: string } {
-    const result = spawnSync(
-      process.execPath,
-      [driver, location, binName, TGZ_URL, JSON.stringify(bin)],
-      {
-        encoding: "utf8",
-        env: { HOME: join(root, "nowhere"), USERPROFILE: join(root, "nowhere"), ...env },
-      },
-    );
+    const result = spawnSync(process.execPath, [driver, location, binName, JSON.stringify(bin)], {
+      encoding: "utf8",
+      env: { HOME: join(root, "nowhere"), USERPROFILE: join(root, "nowhere"), ...env },
+    });
     return { status: result.status, stdout: result.stdout, stderr: result.stderr };
   }
 
@@ -470,7 +431,7 @@ describe("§15.32 — PATH", () => {
 
     const result = spawnSync(
       process.execPath,
-      [entry, location, "yarn", TGZ_URL, JSON.stringify({ yarn: "./bin/yarn.js" })],
+      [entry, location, "yarn", JSON.stringify({ yarn: "./bin/yarn.js" })],
       {
         encoding: "utf8",
         env: {
@@ -496,7 +457,7 @@ describe("§15.32 — PATH", () => {
 
     const result = spawnSync(
       process.execPath,
-      [entry, location, "yarn", TGZ_URL, JSON.stringify({ yarn: "./bin/yarn.js" })],
+      [entry, location, "yarn", JSON.stringify({ yarn: "./bin/yarn.js" })],
       {
         encoding: "utf8",
         env: {
@@ -583,7 +544,7 @@ describe("§15.32 — PATH", () => {
         [
           `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
           `const [location, binJson] = process.argv.slice(2);`,
-          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], ${JSON.stringify(TGZ_URL)}, undefined, "native");`,
+          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], undefined, "native");`,
           `console.log("parent:" + process.env.PATH);`,
           ``,
         ].join("\n"),
@@ -649,7 +610,7 @@ describe("§15.32 — PATH", () => {
           `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
           `const [location, binName] = process.argv.slice(2);`,
           `const bin = { bunny: "./bin/bunny", bunnyx: "./bin/bunny" };`,
-          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], ${JSON.stringify(TGZ_URL)}, undefined, "native");`,
+          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], undefined, "native");`,
           ``,
         ].join("\n"),
       );

@@ -264,13 +264,14 @@ Consequences a conforming implementation MUST follow, all of them following from
 **`bin` has one shape:** `BinSpec` = `{ [binaryName]: relativePathInPackage }`,
 e.g. `{"pnpm": "./bin/pnpm.mjs", "pnpx": "./bin/pnpx.mjs"}`.
 
-There used to be a second, `BinList` = `[binaryName, …]`, for a download that was a
-single `.js` file: the file landed at `<location>/<basename of url path>` and every
-listed name mapped to it, which is how Yarn 2+ declared `["yarn", "yarnpkg"]`.
-§15.41 moved Berry to a tarball and no band declares a single file any more. Two
-remnants are deliberate: a **URL reference** to a `.js` (§04.1 step 1) still
-produces one, recording a `BinSpec` that names the file; and a `bin` **array** in a
-marker an earlier release wrote MUST still be read (§07.1).
+Corepack has a second, `BinList` = `[binaryName, …]`, for a download that is a
+single `.js` file: the file lands at `<location>/<basename of url path>` and every
+listed name maps to it, which is how Yarn 2+ declares `["yarn", "yarnpkg"]`. §15.41
+moved Berry to a tarball and no band declares a single file, so jup does not have
+that form at all — not in the table, not in a marker, not on the execution path. A
+**URL reference** to a `.js` (§04.1 step 1) is the one single-file case left, and it
+records a `BinSpec` naming the file. An array where a `bin` is expected is not a
+`bin`: §07.2 reads such a marker as absent.
 
 The table's `BinSpec` is a fallback rather than the authority: §07.7 reads the
 package's own `bin` first (§15.17), so a band whose paths have gone stale cannot

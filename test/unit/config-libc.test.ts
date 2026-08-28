@@ -34,7 +34,15 @@ vi.mock("node:fs", async (importOriginal) => {
   };
 });
 
-const { getSpecUrl, hostTarget } = await import("../../src/config/table.ts");
+const { getTableSpec, hostTarget, resolveSpecUrl } = await import("../../src/config/table.ts");
+const { parse } = await import("../../src/version/semver.ts");
+
+/** As in `config.test.ts`: the locator-level spelling of `resolveSpecUrl`. */
+function getSpecUrl(locator: { name: string; reference: string }): string {
+  const spec = getTableSpec(locator);
+  if (spec === undefined) return locator.reference;
+  return resolveSpecUrl(spec, locator, parse(locator.reference)!.version);
+}
 
 const REAL_PLATFORM = process.platform;
 const REAL_ARCH = process.arch;

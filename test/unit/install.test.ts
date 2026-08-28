@@ -279,7 +279,7 @@ describe("marker hit (§07.2, test 96)", () => {
       // pin.
       JSON.stringify({
         locator: { name: "pnpm", reference: "9.1.0+sha256.deadbeef" },
-        bin: ["pnpm"],
+        bin: { pnpm: "./bin/pnpm.cjs" },
         hash: "sha256.deadbeef",
       }),
     );
@@ -302,7 +302,7 @@ describe("marker hit (§07.2, test 96)", () => {
       join(location, ".jup"),
       JSON.stringify({
         locator: { name: "pnpm", reference: "9.1.0+sha256.aaaa" },
-        bin: ["pnpm"],
+        bin: { pnpm: "./bin/pnpm.cjs" },
         hash: "sha256.aaaa",
       }),
     );
@@ -384,9 +384,9 @@ describe("download shapes (§07.3, §07.4)", () => {
     });
 
     expect(await readFile(join(spec.location, "yarn.js"), "utf8")).toBe(script);
-    // §07.7 — the marker names the *file*. The retired `BinList` recorded only
+    // §07.7 — the marker names the *file*. Corepack's `BinList` recorded only
     // the binary names and left `resolveBinPath` to recover the file from the
-    // download URL a second time.
+    // download URL a second time; §02.4 gives jup no such form.
     expect(spec.bin).toEqual({ yarn: "yarn.js" });
     expect(spec.hash).toBe(`sha512.${hashOf(Buffer.from(script))}`);
     // Nothing was fetched beyond the artifact: a URL reference has no packument.

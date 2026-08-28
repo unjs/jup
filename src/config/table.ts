@@ -787,19 +787,6 @@ export function resolveSpecUrl(spec: ToolSpec, locator: Locator, version: string
 }
 
 /**
- * §08.1 — the package manager spec's **download URL**, with `{}` substituted.
- *
- * `exec.ts` needs the whole URL, not just its extension: a `bin` *list* resolves
- * to `<location>/<basename of the URL path>`. A URL reference is its own spec
- * URL, exactly as §07.3 treats it.
- */
-export function getSpecUrl(locator: Locator): string {
-  const spec = getTableSpec(locator);
-  if (spec === undefined) return locator.reference;
-  return resolveSpecUrl(spec, locator, parse(locator.reference)!.version);
-}
-
-/**
  * Is this exact reference one the embedded table ships?
  *
  * Used to scope §06.2's weak-algorithm warning. Every built-in default is
@@ -825,7 +812,7 @@ const NAME_BY_BINARY = new Map<string, string>();
 for (const [name, definition] of Object.entries(DEFINITIONS)) {
   const binNames = new Set<string>();
   for (const [, spec] of definition.ranges) {
-    for (const binName of Array.isArray(spec.bin) ? spec.bin : Object.keys(spec.bin)) {
+    for (const binName of Object.keys(spec.bin)) {
       binNames.add(binName);
       if (!NAME_BY_BINARY.has(binName)) NAME_BY_BINARY.set(binName, name);
     }

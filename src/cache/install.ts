@@ -547,12 +547,11 @@ export function resolveBin(
     // behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` for a known name). A URL
     // reference has no version, so it is never `known` and never banded — which
     // is why the table is not consulted at all. The artifact is one file and the
-    // locator's own name is what the user asked to run, exactly as the retired
-    // `BinList` resolved it.
+    // locator's own name is what the user asked to run, which is what corepack's
+    // `BinList` expressed as a bare list of names.
     //
-    // What changed is only that the marker now names the *file*, rather than a
-    // bare list of names leaving `resolveBinPath` to recover it from the
-    // download URL a second time.
+    // The marker names the *file* instead, so §08.1 needs nothing but the
+    // location — no second pass over the download URL to recover the basename.
     return { [locator.name]: singleFileName };
   }
 

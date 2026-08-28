@@ -20,7 +20,6 @@ import { basename, dirname, join, relative, resolve as resolvePath } from "node:
 import { Readable } from "node:stream";
 import { ENV, writeEnv } from "../config/env-vars.ts";
 import {
-  getSpecUrl,
   getTableSpec,
   isPerHost,
   isSupportedPackageManager,
@@ -657,8 +656,7 @@ async function applyToProject(
     useCommand[0]!,
     spec,
     useCommand.slice(1),
-    getSpecUrl(pinned),
-    // §08.1 — `installSpec.bin ?? spec.bin`; the marker may predate `bin`.
+    // §08.1 — `installSpec.bin ?? spec.bin`; the marker may carry no `bin`.
     // §15.28 — `{exe}`-substituted, per `resolveSpecBin`.
     tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,

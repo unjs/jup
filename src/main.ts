@@ -8,7 +8,6 @@ import { ENV } from "./config/env-vars.ts";
 import {
   getDefinition,
   getPackageManagerFor,
-  getSpecUrl,
   getTableSpec,
   isPerHost,
   isSupportedPackageManager,
@@ -261,8 +260,8 @@ export async function runProxy(
 
   // Step 7 — hand over. Nothing after this point may write to the store: the
   // package manager owns the process from here (§08.2).
-  // §08.1 — `installSpec.bin ?? spec.bin`: a marker written by an older corepack
-  // carries no `bin`, and the embedded table's entry is what stands in for it.
+  // §08.1 — `installSpec.bin ?? spec.bin`: the embedded table's entry stands in
+  // for a marker that carries no `bin` of its own (§07.10).
   const tableSpec = getTableSpec(locator);
 
   // On the JavaScript path this resolves with 0 immediately and the package
@@ -274,7 +273,6 @@ export async function runProxy(
     binaryName,
     installSpec,
     args,
-    getSpecUrl(locator),
     // §15.28 — `{exe}`-substituted, so a Windows fallback names `bin\\bun.exe`.
     tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,

@@ -6,20 +6,25 @@ package manager itself can tell a trampoline was involved.
 ## 8.1 Locating the entry point
 
 ```
-bin := installSpec.bin ?? spec.bin
+bin := installSpec.bin ?? spec.bin       # always a MAP (§02.4)
 
-if bin is a LIST:
-    if binName is in the list:
-        ext := extension of the spec.url path
-        if ext === ".js":
-            binPath := <location>/<basename of the spec.url path>
-        # any other extension leaves binPath unset → assertion failure below
-else:                                   # bin is a MAP
-    binPath := <location>/<bin[binName]>   for the matching key
+if bin has an OWN key binName:
+    binPath := <location>/<bin[binName]>
 
 if binPath is unset:
     → Error `Assertion failed: Unable to locate path for bin '<binName>'`
 ```
+
+Corepack has a second branch here, for a `bin` declared as a **list** of names: it
+takes the basename of `spec.url`'s path when that path ends in `.js`, so a run needs
+the download URL as well as the install location. §15.41 leaves no band declaring a
+list and §02.4 leaves jup no such form, so the branch and the URL it needed are both
+gone — `resolveBinPath` takes the location and the `bin`, and nothing more.
+
+`installSpec.bin` is the marker's own `bin`, which §07.7 always records. The `??`
+stands in for a marker jup did not write: §07.10 promotes markers out of an archive
+another machine produced, and one that omits `bin` MUST reach the assertion above
+rather than a type error.
 
 `bin[binName]` values are relative paths that may begin with `./` — join them
 naively, do not normalise away the possibility that they escape (they come from a

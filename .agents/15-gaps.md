@@ -1636,9 +1636,10 @@ to teach on a first run.
   `Cannot locate '<binPath>' in downloaded tarball`. A single-file artifact remains
   reachable only through a URL reference (§04.1 step 1) and records a `BinSpec`
   naming the file.
-* A marker written by an earlier release may still carry a `bin` **array**. §07.1's
-  cross-release compatibility applies: it MUST still be read, resolving the file
-  from the download URL as before. Nothing writes that shape.
+* Nothing writes or reads a `bin` **array**. §07.1's cross-release compatibility is
+  about caches jup itself wrote, and jup has never shipped a release that wrote one,
+  so §08.1's list branch and the spec URL it needed are removed rather than retained
+  unreachable. §07.2 reads a marker carrying an array as absent.
 
 Berry then clears §15.11 on npm's signature like every other entry, so the first
 run works with nothing configured; `COREPACK_NPM_REGISTRY` mirrors the whole table;

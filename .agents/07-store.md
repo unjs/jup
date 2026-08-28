@@ -369,9 +369,9 @@ reach the marker.
 **The single-file branch no longer consults the table at all.** Since §15.41 no band
 produces a single file, so the branch is reached only by a URL reference naming a
 `.js` (§04.1 step 1), which carries no version and is therefore never banded. The
-marker records the **file**; the retired `BinList` recorded only the binary names and
-left §08.1 to recover the file from the download URL a second time. A `bin` array in
-a marker written by an earlier release MUST still be read that older way (§07.1).
+marker records the **file**; Corepack's `BinList` recorded only the binary names and
+left §08.1 to recover the file from the download URL a second time. jup has no such
+form to record or read (§02.4).
 
 One consequence: `Unable to locate bin in package.json` is now reachable only for an
 unbanded version or a URL reference. Every declared band supplies a usable `BinSpec`

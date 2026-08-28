@@ -217,7 +217,7 @@ row under either name. Row 41b covers the pair itself.
 | 133 | Sets 42 then throws | exits 1, stderr contains the message |
 | 134 | Sets 42 only in a `beforeExit` hook | exits 42 |
 | 135 | Entry point is ESM (`"type": "module"` beside it) | runs |
-| 136 | `bin` declared as a list (`yarn`, `yarnpkg`) | both names run the same file |
+| 136 | `bin` maps two names (`yarn`, `yarnpkg`) to one path | both names run the same file. Corepack spells this case as a **list**; §02.4 gives jup only the map |
 | 137 | `yarn --version` for a real classic yarn | stdout exactly `1.22.4\n` — no decoration |
 | 138 ⊕ | Package manager killed by `SIGINT` | tool dies by signal, not a plain exit code (§08.5) |
 | 139 ⊕ | `echo x \| <tool> npm <cmd reading stdin>` | stdin passes through intact (§08.6) |

@@ -78,7 +78,11 @@ function seedInstall(name: string, version: string, marker?: unknown): string {
   writeFileSync(
     join(dir, ".jup"),
     JSON.stringify(
-      marker ?? { locator: { name, reference: version }, bin: [name], hash: "sha1.ab" },
+      marker ?? {
+        locator: { name, reference: version },
+        bin: { [name]: `./${name}.js` },
+        hash: "sha1.ab",
+      },
     ),
   );
   return dir;
@@ -397,7 +401,7 @@ describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
     // how two references differing only in their hash came to share one install.
     seedInstall("yarn", "4.1.0", {
       locator: { name: "yarn", reference: "4.1.0+sha224.deadbeef" },
-      bin: ["yarn"],
+      bin: { yarn: "./yarn.js" },
       hash: "sha224.deadbeef",
     });
 
@@ -418,7 +422,7 @@ describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
     seedInstall("yarn", "4.1.0");
     seedInstall("yarn", "4.1.0+sha224.deadbeef", {
       locator: { name: "yarn", reference: "4.1.0+sha224.deadbeef" },
-      bin: ["yarn"],
+      bin: { yarn: "./yarn.js" },
       hash: "sha224.deadbeef",
     });
 
@@ -707,8 +711,8 @@ describe("resolveBin — §07.7", () => {
   it("single file: names the file under the locator's own name", () => {
     // §15.41 retired the last band that produced a single file, so this branch is
     // reached only by a URL reference to a `.js`. The marker names the file, not
-    // just the binary — the retired `BinList` left `resolveBinPath` to recover
-    // it from the download URL a second time.
+    // just the binary — corepack's `BinList` left `resolveBinPath` to recover it
+    // from the download URL a second time; §02.4 gives jup no such form.
     expect(
       resolveBin(tmp, { name: "yarn", reference: "https://example.com/yarn.js" }, "yarn.js"),
     ).toEqual({ yarn: "yarn.js" });

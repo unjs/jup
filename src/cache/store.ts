@@ -148,10 +148,11 @@ export function readMarker(dir: string): CorepackMarker | null {
   // is the missing marker every caller already handles (§07.2).
   const hash: unknown = (marker as { hash?: unknown } | null)?.hash;
   if (typeof hash !== "string" || !/^[a-z0-9]{1,32}\.[0-9a-z]{1,128}$/.test(hash)) return null;
-  // §08.1 — `bin` is optional; §02.4's `{name: path}` map or its `[name, …]`.
+  // §08.1 — `bin` is optional, and when present it is §02.4's one form: a
+  // `{name: path}` map. An array is not that shape and reads as no marker.
   const bin: unknown = (marker as { bin?: unknown }).bin;
   if (bin !== undefined) {
-    if (typeof bin !== "object" || bin === null) return null;
+    if (typeof bin !== "object" || bin === null || Array.isArray(bin)) return null;
     if (!Object.values(bin).every((entry) => typeof entry === "string")) return null;
   }
   return marker as CorepackMarker;

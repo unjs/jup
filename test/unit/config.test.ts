@@ -6,7 +6,7 @@ import {
   getDefinition,
   getPackageManagerFor,
   getSpecFor,
-  getSpecUrl,
+  getTableSpec,
   hasRangeBand,
   hostTarget,
   isPerHost,
@@ -22,8 +22,20 @@ import {
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
-import { satisfiesWithPrereleases } from "../../src/version/semver.ts";
-import type { BinSpec, ToolSpec, TrustedKey, TrustStore } from "../../src/types.ts";
+import { parse, satisfiesWithPrereleases } from "../../src/version/semver.ts";
+import type { BinSpec, Locator, ToolSpec, TrustedKey, TrustStore } from "../../src/types.ts";
+
+/**
+ * A locator's download URL, with `{}` substituted — `resolveSpecUrl` with the
+ * band and version looked up first, which is what `install` does at the one call
+ * site (§07.3). Local to the tests: nothing in `src` needs the locator-level
+ * spelling now that §08.1 no longer recovers a bin path from the URL.
+ */
+function getSpecUrl(locator: Locator): string {
+  const spec = getTableSpec(locator);
+  if (spec === undefined) return locator.reference;
+  return resolveSpecUrl(spec, locator, parse(locator.reference)!.version);
+}
 
 describe("registry table — shape (§02.5)", () => {
   it("supports exactly npm, pnpm, yarn, bun, deno, aube, nub and node", () => {

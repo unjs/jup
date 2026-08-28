@@ -8,7 +8,7 @@
 import { closeSync, openSync, readSync } from "node:fs";
 import { runMain } from "node:module";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, extname, join, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, resolve, sep } from "node:path";
 import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
@@ -221,28 +221,7 @@ function setPath(env: Record<string, string | undefined>, value: string): void {
 }
 
 /**
- * The URL's path component, without query or fragment.
- *
- * `specUrl` comes from the embedded table (`ToolSpec.url`, with `{}`
- * already substituted), so it parses as an absolute URL; the fallback keeps a
- * hand-built spec from throwing here rather than at the assertion below.
- */
-function urlPathname(specUrl: string): string {
-  try {
-    return new URL(specUrl).pathname;
-  } catch {
-    return specUrl;
-  }
-}
-
-/**
  * §08.1 — locate the entry point.
- *
- * `specUrl` is the package manager spec's **download URL**, not just its
- * extension: a `bin` list resolves to `<location>/<basename of the URL path>`,
- * which needs the whole path. The `.js` extension check is what makes the list
- * form meaningful — a list only ever describes a single-file download (§07.4),
- * and any other extension leaves the path unset, i.e. an assertion failure.
  *
  * Per §14.13, when `bin` came from a downloaded `package.json` rather than the
  * embedded table its values are attacker-controlled: resolve the joined path and
@@ -251,38 +230,15 @@ function urlPathname(specUrl: string): string {
  * the embedded table's own values never escape, so nothing legitimate is lost.
  *
  * `fallbackBin` is §08.1's `installSpec.bin ?? spec.bin`: the embedded table's
- * `bin` for this locator. Markers written by older corepack releases carry no
- * `bin` at all, and §07.1 requires the store to stay compatible with them, so
- * without the fallback a run the spec says must succeed dies on a `TypeError`
- * instead.
+ * `bin` for this locator. §07.7 always records a `bin`, so this stands in only
+ * for a marker jup did not write — §07.10 promotes those out of an archive —
+ * where without it a run dies on a `TypeError` rather than the §08.1 assertion.
  */
-export function resolveBinPath(
-  binName: string,
-  spec: InstallSpec,
-  specUrl: string,
-  fallbackBin?: BinSpec,
-): string {
+export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?: BinSpec): string {
   const location = resolve(spec.location);
   const bin = spec.bin ?? fallbackBin;
 
-  let declared: string | undefined;
-  if (Array.isArray(bin)) {
-    // §07.1 — a `LegacyBinList` out of a marker an older build wrote. Nothing
-    // produces this shape any more: §15.41 retired the only band that declared
-    // one, and a single-file install now records the file's name in a `BinSpec`
-    // (see `resolveBin`). It is still read, because the markers are already on
-    // disk — a machine that installed Yarn Berry under an earlier release has
-    // `["yarn", "yarnpkg"]` in its store, and that install must keep running.
-    // The file is recovered the way it always was, from the download URL.
-    if (bin.includes(binName)) {
-      const pathname = urlPathname(specUrl);
-      // Dispatch on the URL path's extension, exactly as the download did (§07.4).
-      if (extname(pathname) === ".js") declared = basename(pathname);
-    }
-  } else if (bin !== undefined && Object.hasOwn(bin, binName)) {
-    declared = bin[binName];
-  }
-
+  const declared = bin !== undefined && Object.hasOwn(bin, binName) ? bin[binName] : undefined;
   if (declared === undefined) throw new Error(messages.assertUnableToLocateBinPath(binName));
 
   const binPath = resolve(location, declared);
@@ -338,11 +294,10 @@ export function execPackageManager(
   binName: string,
   spec: InstallSpec,
   args: string[],
-  specUrl: string,
   fallbackBin?: BinSpec,
   execMode?: "js" | "native",
 ): number | Promise<number> {
-  const binPath = resolveBinPath(binName, spec, specUrl, fallbackBin);
+  const binPath = resolveBinPath(binName, spec, fallbackBin);
 
   // §08.7 — the only variable we add, and it is added the same way for both
   // models: a native child inherits `process.env` wholesale. Package managers

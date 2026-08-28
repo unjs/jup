@@ -111,7 +111,7 @@ describe("§13.12 execution", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("136: a bin declared as a list runs the same file under every name", async () => {
+  it("136: two bin names mapped to one path run the same file", async () => {
     const fixture = createFixture({ packageManager: "yarn@2.2.2" });
     seedPackageManager(fixture.home, "yarn", "2.2.2", {
       script: `process.stdout.write(process.argv[1] + "\\n");\n`,

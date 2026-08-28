@@ -76,44 +76,23 @@ export interface LazyLocator {
 /** §02.4 — `{ [binaryName]: relativePathInPackage }`. The only form a `bin` takes. */
 export type BinSpec = Record<string, string>;
 
-/**
- * §07.1 — a `bin` **array** in a marker this build did not write.
- *
- * §02.4 used to have a second form, `[binaryName, …]`, for a download that was
- * one `.js` file rather than a tarball: a list of names, with the file itself
- * recovered from the download URL's basename at execution time. Yarn Berry from
- * `repo.yarnpkg.com` was the only band that ever declared one, and §15.41 moved
- * it to `@yarnpkg/cli-dist`, so nothing declares or writes this shape any more —
- * a single-file install now records a {@link BinSpec} naming the file directly,
- * which is self-describing and does not need the URL a second time.
- *
- * It survives as a **read** type only. §07.1 requires the store to keep working
- * across releases, and a machine that installed Berry under an older build has
- * markers holding `["yarn", "yarnpkg"]` sitting in its cache right now. Dropping
- * the branch that understands them would not simplify anything — it would make
- * those installs throw `assertUnableToLocateBinPath` on the next run.
- *
- * Never widen a *table* or *install* type with this. The one place it is legal
- * is what `resolveBinPath` reads out of a marker.
- */
-export type LegacyBinList = string[];
-
 /** §07.2 — the parsed `.jup` marker plus the directory it was found in. */
 export interface InstallSpec {
   location: string;
   /**
-   * Optional: a marker written by an older corepack may not carry one (§08.1),
-   * and one written by an older *jup* may carry a {@link LegacyBinList}.
+   * Optional: §07.7 always records one, but §07.10 promotes markers that arrived
+   * inside somebody else's archive, and one of those may omit it. §08.1's
+   * `installSpec.bin ?? spec.bin` is what stands in when it does.
    */
-  bin?: BinSpec | LegacyBinList;
+  bin?: BinSpec;
   hash: string;
 }
 
 /** §07.2 — the on-disk shape of the `.jup` marker file. */
 export interface CorepackMarker {
   locator: Locator;
-  /** Optional: markers written by older corepack releases omit it (§08.1). */
-  bin?: BinSpec | LegacyBinList;
+  /** Optional, per §08.1 — see {@link InstallSpec.bin}. */
+  bin?: BinSpec;
   hash: string;
 }
 
