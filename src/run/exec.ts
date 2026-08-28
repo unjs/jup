@@ -72,11 +72,33 @@ export function perUserShimDirectory(): string | undefined {
   return home === "" ? undefined : join(home, ".local", "bin");
 }
 
-/** §15.13 point 1 — `COREPACK_SHIM_DIRECTORY`, else the per-user default. */
-function defaultShimDirectory(): string | undefined {
-  const configured = readEnv(ENV.SHIM_DIRECTORY);
-  if (configured !== undefined && configured !== "") return resolve(configured);
-  return perUserShimDirectory();
+/**
+ * §15.13 point 6 — the **closed list** of directories `enable` may choose from:
+ * the default first, then the alternates. Nothing here comes from `PATH`, which
+ * only decides *among* these, and only under `enable`. Deduped, since the default
+ * is one of the alternates on every platform but macOS-without-XDG.
+ */
+export function shimDirectoryCandidates(): string[] {
+  const list: string[] = [];
+  const add = (directory: string | undefined): void => {
+    if (directory !== undefined && directory !== "" && !list.includes(directory)) {
+      list.push(directory);
+    }
+  };
+
+  add(perUserShimDirectory());
+  if (process.platform === "win32") return list;
+
+  // `XDG_BIN_HOME` is an alternate on macOS though never its default: no XDG
+  // convention to default to, but a user who set it has still named a directory.
+  const xdg = process.env[SYSTEM_ENV.XDG_BIN_HOME];
+  if (xdg !== undefined && xdg !== "") add(resolve(xdg));
+  const home = homedir();
+  if (home !== "") {
+    add(join(home, ".local", "bin"));
+    add(join(home, "bin"));
+  }
+  return list;
 }
 
 /**
@@ -114,7 +136,7 @@ function readHeadSync(file: string, length: number): string | undefined {
  * bodies are byte-exact), so there they are recognised the way `shims.ts`
  * recognises them, by shebang plus the `<binName>.js` stub they invoke.
  */
-function isOurShim(file: string, binName: string): boolean {
+export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
   if (head === undefined) return false;
   if (head.includes(SHIM_MARKER)) return true;
@@ -145,11 +167,22 @@ function isOurShim(file: string, binName: string): boolean {
  * `PATH` on the strength of a name. Reading the banner costs one open+read on a
  * path we were about to `stat` anyway (§16.3) and makes the promotion mean what
  * it says.
+ *
+ * §15.13 point 7 makes that same read the *selector*: `enable` may have chosen an
+ * alternate, and this promotion MUST NOT read `PATH` to find out which. The extra
+ * opens land only when the default holds no shim — when there is nothing to
+ * promote anyway.
  */
 function shimDirectoryFor(binName: string): string | undefined {
-  const directory = defaultShimDirectory();
-  if (directory === undefined) return undefined;
-  return isOurShim(join(directory, binName), binName) ? directory : undefined;
+  const configured = readEnv(ENV.SHIM_DIRECTORY);
+  if (configured !== undefined && configured !== "") {
+    const directory = resolve(configured);
+    return isOurShim(join(directory, binName), binName) ? directory : undefined;
+  }
+  for (const directory of shimDirectoryCandidates()) {
+    if (isOurShim(join(directory, binName), binName)) return directory;
+  }
+  return undefined;
 }
 
 /**

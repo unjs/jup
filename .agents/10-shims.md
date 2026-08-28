@@ -298,6 +298,16 @@ earlier on `PATH`, and fails outright when nothing named `<tool>` is on `PATH`.
 `disable` deliberately does **not** `realpath` the directory — removal does not need
 a correct relative-path computation.
 
+> **§15.13 replaces this chain wholesale**, because `dirname(which(...))` is #71.
+> Points 1 and 6 give the replacement: a named directory first, then a **closed
+> list** of per-user candidates among which `PATH` membership only *chooses* —
+> `enable` will not adopt a directory merely because it is writable and on `PATH`,
+> which is how a scan lands back beside `node`, inside Homebrew's prefix, or in a
+> version manager's managed shim directory. Point 7 is the other half: `disable`,
+> `info` (§15.30) and §15.32's promotion resolve the same list **without** reading
+> `PATH`, preferring whichever candidate already holds a shim of ours, so the
+> directory a removal looks in cannot drift from the one an install wrote to.
+
 ## 10.5 Target set
 
 Default targets: every supported tool **except npm** and the `shimByDefault: false`

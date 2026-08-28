@@ -13,6 +13,7 @@
  * | 174 | §15.15 | #112 (10👍) — `disable` deletes the real yarn `enable` ate |
  * | 175 | §15.16 | #138 — npm is not shimmed, so `npm install` bypasses the pin |
  * | 195 | §15.29 | #507 (12👍) — `enable` exits 0 and nothing changed |
+ * | 246–249 | §15.13 | the per-user default is not on macOS's `PATH` at all, and is on Debian's only after the next login |
  *
  * Every row runs the real entry point through a throwaway copy of the tool
  * (`copyTool`) with `HOME` redirected into the fixture, because §15.13's default
@@ -33,6 +34,7 @@ import { chmod } from "node:fs/promises";
 import { basename, delimiter, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  alternateShims,
   cleanupFixtures,
   copyTool,
   createFixture,
@@ -182,6 +184,142 @@ describe("§15.13 — never require elevation", () => {
     expect(result.stderr).toContain("hash -r");
     expect(existsSync(join(shimDir, "yarn"))).toBe(true);
   });
+
+  /**
+   * Rows 246–249 — §15.13 point 6, the `PATH` preference.
+   *
+   * Windows is skipped throughout, and not for the usual reason: its candidate
+   * list has exactly one entry (§15.13 point 6), so there is no preference to
+   * exercise and a row that invented an alternate would be testing something the
+   * spec does not require.
+   */
+  it.skipIf(IS_WINDOWS)(
+    "246: an off-PATH default yields to <home>/bin when that is on PATH",
+    async () => {
+      const { fixture, shimDir, options } = shimFixture({ offPath: true });
+      const alternate = alternateShims(fixture.root);
+      mkdirSync(alternate, { recursive: true });
+
+      const withAlternate = {
+        ...options,
+        env: { ...options.env, PATH: `${alternate}${delimiter}${options.env.PATH ?? ""}` },
+      };
+      const result = await run(["enable", "yarn"], withAlternate);
+
+      expect(result.exitCode).toBe(0);
+      // Byte-exact (§15.13 point 6), and the *only* line: the chosen directory is
+      // on `PATH` by construction, so point 3's advisory has nothing to say.
+      expect(result.stderr).toBe(
+        `! ${shimDir} is not on your PATH; installing shims to ${alternate} instead\n`,
+      );
+      expect(existsSync(join(alternate, "yarn"))).toBe(true);
+      expect(existsSync(join(shimDir, "yarn"))).toBe(false);
+
+      // §15.13 point 7 — removal does not read `PATH`, so a `disable` from a
+      // shell that never had the alternate on it still finds the shims.
+      const removed = await run(["disable", "yarn"], options);
+      expect(removed.exitCode).toBe(0);
+      expect(existsSync(join(alternate, "yarn"))).toBe(false);
+    },
+  );
+
+  it.skipIf(IS_WINDOWS)(
+    "247: a writable non-candidate on PATH is ignored, however early it sits",
+    async () => {
+      const { fixture, shimDir, options } = shimFixture({ offPath: true });
+      // #71's shape: a writable directory on `PATH` holding the tool's own
+      // binary. Corepack would install beside it; a "first writable entry on
+      // PATH" rule would land back there too.
+      const beside = join(fixture.root, "usr-local-bin");
+      mkdirSync(beside, { recursive: true });
+      writeFileSync(join(beside, "jup"), "#!/bin/sh\n");
+      await chmod(join(beside, "jup"), 0o755);
+
+      const result = await run(["enable", "yarn"], {
+        ...options,
+        env: {
+          ...options.env,
+          SHELL: "/bin/bash",
+          PATH: `${beside}${delimiter}${options.env.PATH ?? ""}`,
+        },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(existsSync(join(beside, "yarn"))).toBe(false);
+      expect(existsSync(join(shimDir, "yarn"))).toBe(true);
+      // No preference was available, so this is row 172's outcome unchanged.
+      expect(result.stderr).toContain(`! ${shimDir} is not on your PATH`);
+      expect(result.stderr).not.toContain("installing shims to");
+    },
+  );
+
+  it.skipIf(IS_WINDOWS)(
+    "248: <home>/bin is skipped when group-writable, and never created",
+    async () => {
+      const { fixture, shimDir, options } = shimFixture({ offPath: true });
+      const alternate = alternateShims(fixture.root);
+      mkdirSync(alternate, { recursive: true });
+      await chmod(alternate, 0o775);
+
+      const onPath = {
+        ...options,
+        env: { ...options.env, PATH: `${alternate}${delimiter}${options.env.PATH ?? ""}` },
+      };
+      const groupWritable = await run(["enable", "yarn"], onPath);
+
+      expect(groupWritable.exitCode).toBe(0);
+      expect(existsSync(join(alternate, "yarn"))).toBe(false);
+      expect(existsSync(join(shimDir, "yarn"))).toBe(true);
+      expect(groupWritable.stderr).toContain(`! ${shimDir} is not on your PATH`);
+
+      // And absent altogether: a `PATH` entry naming a directory that is not
+      // there is inert, and `enable` does not manufacture one.
+      const second = shimFixture({ offPath: true });
+      const missing = alternateShims(second.fixture.root);
+      const absent = await run(["enable", "yarn"], {
+        ...second.options,
+        env: {
+          ...second.options.env,
+          PATH: `${missing}${delimiter}${second.options.env.PATH ?? ""}`,
+        },
+      });
+
+      expect(absent.exitCode).toBe(0);
+      expect(existsSync(missing)).toBe(false);
+      expect(existsSync(join(second.shimDir, "yarn"))).toBe(true);
+    },
+  );
+
+  it.skipIf(IS_WINDOWS)(
+    "249: continuity outranks the preference, and info agrees without reading PATH",
+    async () => {
+      const { fixture, shimDir, options } = shimFixture({ offPath: true });
+      // A first `enable`, before the alternate existed: the shims are in the
+      // default, which is off `PATH`.
+      expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);
+      expect(existsSync(join(shimDir, "yarn"))).toBe(true);
+
+      const alternate = alternateShims(fixture.root);
+      mkdirSync(alternate, { recursive: true });
+      const withAlternate = {
+        ...options,
+        env: { ...options.env, PATH: `${alternate}${delimiter}${options.env.PATH ?? ""}` },
+      };
+
+      const again = await run(["enable", "yarn"], withAlternate);
+
+      // No second set. Moving them is `disable` then `enable`.
+      expect(again.exitCode).toBe(0);
+      expect(existsSync(join(alternate, "yarn"))).toBe(false);
+      expect(again.stderr).not.toContain("installing shims to");
+
+      const report = await run(["info", "--json"], withAlternate);
+      expect(report.exitCode).toBe(0);
+      expect((JSON.parse(report.stdout) as { shims: { directory: string } }).shims.directory).toBe(
+        shimDir,
+      );
+    },
+  );
 
   it("172: the line is spelled for the detected shell", async () => {
     const { shimDir, options } = shimFixture({ offPath: true });

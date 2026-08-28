@@ -64,7 +64,10 @@ function shimFixture() {
   const fixture = createFixture();
   // §15.13's per-user default, spelled for this platform — see `perUserShims`.
   const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
-  const binDir = join(fixture.root, "bin");
+  // Not `<root>/bin`: `HOME` is the fixture root, so that name would be
+  // §15.13 point 6's `~/bin` alternate rather than the unrelated second
+  // directory these rows want.
+  const binDir = join(fixture.root, "other-bin");
   mkdirSync(shimDir, { recursive: true });
   mkdirSync(binDir, { recursive: true });
 

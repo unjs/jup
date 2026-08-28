@@ -19,6 +19,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors-cold.ts";
 import {
+  chooseInstallDirectory,
   cmdDisable,
   cmdEnable,
   type DisplacedEntry,
@@ -36,6 +37,7 @@ import {
   restoreFailed,
   shimDirectoryFallback,
   shimDirectoryNotOnPath,
+  shimDirectoryPreferred,
   shimDirectoryNotWritable,
   shimShadowed,
   shimSource,
@@ -138,7 +140,10 @@ beforeEach(() => {
   // resolves the install directory (§10.4) before computing relative targets.
   root = realpathSync(mkdtempSync(join(tmpdir(), "jup-shims-")));
   dist = join(root, "dist");
-  binDir = join(root, "bin");
+  // Not `<root>/bin`: `HOME` is stubbed to `root` below, so that name is
+  // §15.13 point 6's `~/bin` alternate and this directory is meant to be an
+  // unrelated one the `--install-directory` rows point at.
+  binDir = join(root, "other-bin");
   // §15.13's per-user default is platform-specific, and so is the variable that
   // moves it: Linux and the BSDs honour `XDG_BIN_HOME`, macOS has no XDG
   // convention and is always `~/.local/bin`, Windows reads `%LOCALAPPDATA%`.
@@ -275,6 +280,118 @@ describe("install directory resolution (§15.13)", () => {
     // reachable only by naming the directory.
     write(join(binDir, "jup"), "#!/bin/sh\n", 0o755);
     expect(resolveInstallDirectory({}, false)).toBe(perUserBin);
+  });
+});
+
+/**
+ * §15.13 point 6 — `PATH` chooses among a closed list; it never supplies a
+ * candidate. Windows has one candidate and therefore no preference at all, which
+ * is why every row here skips it.
+ */
+describe.skipIf(process.platform === "win32")("the PATH preference (§15.13 point 6)", () => {
+  /** The `<home>/bin` alternate. `HOME` is stubbed to `root`. */
+  let homeBin: string;
+
+  beforeEach(() => {
+    homeBin = join(root, "bin");
+  });
+
+  it("does nothing at all while the default is on PATH", () => {
+    mkdirSync(homeBin);
+    vi.stubEnv("PATH", `${homeBin}${delimiter}${perUserBin}`);
+
+    expect(chooseInstallDirectory({})).toEqual({ directory: perUserBin });
+  });
+
+  it("246: prefers <home>/bin when the default is not on PATH and it is", () => {
+    mkdirSync(homeBin);
+    vi.stubEnv("PATH", homeBin);
+
+    expect(chooseInstallDirectory({})).toEqual({
+      directory: homeBin,
+      preferredOver: perUserBin,
+    });
+    expect(shimDirectoryPreferred(perUserBin, homeBin)).toBe(
+      `! ${perUserBin} is not on your PATH; installing shims to ${homeBin} instead`,
+    );
+  });
+
+  it("247: never adopts a writable non-candidate, however early it sits (#71)", () => {
+    // `binDir` is writable, exists, and is the only thing on `PATH` — which is
+    // exactly the shape "the first writable directory on PATH" would take, and
+    // exactly the shape that put corepack's shims beside `node`.
+    write(join(binDir, "jup"), "#!/bin/sh\n", 0o755);
+    vi.stubEnv("PATH", binDir);
+
+    expect(chooseInstallDirectory({})).toEqual({ directory: perUserBin });
+  });
+
+  it("248: skips an alternate that is absent, and creates nothing", () => {
+    vi.stubEnv("PATH", homeBin);
+
+    expect(chooseInstallDirectory({})).toEqual({ directory: perUserBin });
+    expect(existsSync(homeBin)).toBe(false);
+  });
+
+  it("248: skips an alternate that is group- or world-writable", () => {
+    mkdirSync(homeBin);
+    vi.stubEnv("PATH", homeBin);
+
+    for (const mode of [0o775, 0o777]) {
+      chmodSync(homeBin, mode);
+      expect(chooseInstallDirectory({})).toEqual({ directory: perUserBin });
+    }
+
+    chmodSync(homeBin, 0o755);
+    expect(chooseInstallDirectory({}).directory).toBe(homeBin);
+  });
+
+  it("does not count an empty or relative PATH entry", () => {
+    mkdirSync(homeBin);
+    const cwd = process.cwd();
+    try {
+      // An empty entry means the cwd and `bin` means a directory that moves with
+      // it. From `$HOME` both *resolve* to the alternate, and neither may count.
+      process.chdir(root);
+      vi.stubEnv("PATH", `${delimiter}bin`);
+      expect(chooseInstallDirectory({})).toEqual({ directory: perUserBin });
+    } finally {
+      process.chdir(cwd);
+    }
+  });
+
+  it("--install-directory and COREPACK_SHIM_DIRECTORY still outrank it", () => {
+    mkdirSync(homeBin);
+    vi.stubEnv("PATH", homeBin);
+
+    expect(chooseInstallDirectory({ installDirectory: binDir })).toEqual({ directory: binDir });
+    vi.stubEnv("COREPACK_SHIM_DIRECTORY", binDir);
+    expect(chooseInstallDirectory({})).toEqual({ directory: binDir });
+  });
+
+  it("249: continuity outranks it, and point 7 reads no PATH at all", async () => {
+    mkdirSync(homeBin);
+    // A first `enable`, while nothing was on `PATH` to prefer.
+    vi.stubEnv("PATH", "");
+    expect(await cmdEnable(["yarn"], dist)).toBe(0);
+    expect(existsSync(join(perUserBin, "yarn"))).toBe(true);
+
+    // Now the alternate appears on `PATH`. The shims do not move: a second set
+    // is worse than one set in a suboptimal place.
+    vi.stubEnv("PATH", homeBin);
+    expect(chooseInstallDirectory({})).toEqual({ directory: perUserBin });
+
+    // And `disable`/`info` find them with no `PATH` whatsoever.
+    vi.stubEnv("PATH", "");
+    expect(resolveInstallDirectory({}, false)).toBe(perUserBin);
+  });
+
+  it("249: and finds them in the alternate, from a shell that never had it on PATH", async () => {
+    mkdirSync(homeBin);
+    expect(await cmdEnable([`--install-directory=${homeBin}`, "yarn"], dist)).toBe(0);
+
+    vi.stubEnv("PATH", perUserBin);
+    expect(resolveInstallDirectory({}, false)).toBe(homeBin);
   });
 });
 

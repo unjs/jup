@@ -76,6 +76,17 @@ export function perUserShims(root: string): {
 }
 
 /**
+ * §15.13 point 6's `<home>/bin` alternate, for a fixture whose home is `root`.
+ *
+ * There is no Windows counterpart — the candidate list has one entry there, so a
+ * row that exercises the preference skips that platform rather than spelling the
+ * directory differently.
+ */
+export function alternateShims(root: string): string {
+  return join(root, "bin");
+}
+
+/**
  * A temporary directory, by its **real** path.
  *
  * `realpath`, because macOS puts `$TMPDIR` behind a symlink (`/var` ->

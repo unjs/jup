@@ -422,16 +422,134 @@ Verified in source: `enable` resolves its target as `dirname(which("corepack"))`
    * macOS: `~/.local/bin`
    * Windows: `%LOCALAPPDATA%\jup\bin` (no `node\` segment — §07.1)
 2. **Probe writability before writing anything.** On `EROFS`/`EACCES`/`EPERM`, fall
-   back to the per-user default and say so:
+   back to the per-user directory a bare `enable` would have chosen (point 6) and
+   say so:
    `! <dir> is not writable; installing shims to <fallback> instead`
-3. If the chosen directory is not on `PATH`, print exactly what to add, for the
-   detected shell, and exit 0 — do not silently install somewhere inert.
+3. If the chosen directory is not on `PATH` — which, after point 6 has run, means
+   no candidate was — print exactly what to add, for the detected shell, and exit
+   0. Do not silently install somewhere inert.
 4. `--install-directory=<the directory containing the tool>` remains available for
    anyone who wants the old behaviour.
 5. **`LOCALAPPDATA` MUST only be consulted on Windows** (closes #673). This narrows
    §07.1's documented chain; it is the one place this spec breaks store-location
    compatibility with corepack, and it is correct — a Linux process inheriting
    `LOCALAPPDATA` from WSL interop should not put its cache on `/mnt/c`.
+
+6. **Prefer a per-user directory that is already on `PATH` — chosen from a closed
+   list, never taken from `PATH`.** Point 1's default is always writable, and on
+   some hosts it is also **inert**. `~/.local/bin` is absent from macOS's default
+   `PATH` — `/etc/paths` ships `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin`
+   and `/sbin`, and neither Apple's zsh nor Homebrew adds it — and on Debian and
+   Ubuntu `~/.profile` adds it only `if [ -d … ]`, evaluated at **login**, so the
+   very `enable` that creates the directory is a re-login away from being found.
+   Point 3's advisory is then the output of every first `enable` on a new machine,
+   which is a remedy the user performs by hand on every machine they own.
+
+   `enable` therefore resolves its target as:
+
+   1. `--install-directory`, else `COREPACK_SHIM_DIRECTORY` (point 1) — a named
+      directory is never second-guessed, and nothing below can displace it.
+   2. the **default**, when it is on `PATH`. There is nothing to improve on, so
+      nothing moves.
+   3. the first **candidate** that already holds a shim of ours — continuity.
+   4. the first **alternate** that is on `PATH` and eligible, announcing it:
+      `! <default> is not on your PATH; installing shims to <alternate> instead`
+   5. the default, with point 3's advisory — unchanged from today.
+
+   The **candidates** are a closed list: point 1's **default** first, then the
+   **alternates**, deduplicated, in this order —
+
+   * `$XDG_BIN_HOME`, when set and resolved absolute. On Linux and the BSDs it
+     already *is* the default (point 1); macOS has no XDG convention to default
+     to, but takes the variable at its word when a user has set one.
+   * `<home>/.local/bin`.
+   * `<home>/bin`.
+
+   On Windows the list is `%LOCALAPPDATA%\jup\bin` and nothing else: one candidate
+   means no alternates and no selection, so the rule is POSIX in effect.
+
+   An **alternate is eligible** only when all of the following hold. The default is
+   not subject to the gate: it is what jup would have used anyway, and refusing it
+   would leave `enable` with nowhere to go. The gate exists to stop the *new*
+   mechanism from choosing a worse target than the old one, not to audit the old
+   one.
+
+   * It is named by an **absolute** entry of `PATH`. An empty entry means the
+     current directory and a relative entry means one that moves with it; neither
+     puts anything durably on `PATH`, and matching one would let a `PATH` of `bin`
+     claim `~/bin` for any process whose working directory happened to be `$HOME`.
+   * It **already exists** as a directory. jup creates the default and nothing
+     else. A `PATH` entry naming a directory that is not there is as inert as no
+     entry at all, and manufacturing `~/bin` because a string mentioned it is not a
+     decision `enable` gets to make.
+   * It is owned by the effective user and is **neither group- nor world-writable**.
+     A shim is a file every `yarn`, `npm` and `pnpm` on the machine runs through;
+     installing one where another account can replace it is local privilege
+     escalation, and on a shared host the group-writable directories are precisely
+     the ones a `PATH` scan turns up. This is §07.4's posture on modes applied to
+     the one directory `enable` picks for itself — and the same reason point 2's
+     probe creates the default `0o755` rather than at the ambient default, so that
+     a `umask 000` container cannot make it world-writable.
+   * Point 2's probe succeeds on it, before anything is announced. A message naming
+     a directory the shims then fall back out of would be worse than no message.
+
+   **What this deliberately does not do: it never takes a candidate from `PATH`.**
+   "The first writable directory on `PATH`" is the obvious rule and it is the wrong
+   one, because it walks straight back into #71 — the issue this entire section
+   exists to answer:
+
+   * In a `node:*` container, and in any `root` shell, the first writable entry is
+     `/usr/local/bin`, the directory `node` itself lives in. That is corepack's
+     behaviour restored exactly, baked into an image layer.
+   * Homebrew chowns `/usr/local/bin` to the installing admin user on Intel, and
+     `/opt/homebrew/bin` likewise on Apple Silicon. Both are writable, both come
+     first on `PATH`, and both belong to another package manager that reports our
+     files as unexpected and removes them on its own schedule.
+   * `~/.nvm/versions/node/v22.x/bin`, `~/.volta/bin` and `~/.asdf/shims` are
+     user-owned, on `PATH`, and **managed**: a shim written there disappears on the
+     next `nvm install` or is overwritten by the next `volta install`, which is
+     #751's shape (§15.14) arriving by a different route.
+   * `~/.cargo/bin` and `~/go/bin` are user-owned, on `PATH`, and not ours.
+
+   No inspection separates "a general-purpose per-user bin directory" from "another
+   tool's install prefix": ownership, mode and writability are identical across
+   every entry above, and a blocklist of the second kind is a list that rots. The
+   only reliable signal is the **name**, and the names that mean the first thing
+   are few, conventional, and already written down — so they are written down here
+   instead. A closed list is also what makes the outcome predictable: a reader of
+   this section can name every directory `enable` might choose on their machine
+   before running it, which is the property a `PATH` scan cannot have.
+
+   Windows has no entry in that list beyond its own default for the same test.
+   `%APPDATA%\npm` is npm's *global prefix* — where an `npm i -g jup` puts jup
+   itself, so choosing it is #71 again, and §15.16 would then have us write an
+   `npm` shim inside npm's own directory — while Scoop's shim directory and
+   nvm-windows' are managed in the sense above. Windows also persists `PATH` in
+   the registry rather than in a shell profile, so point 3's advisory is a
+   different kind of remedy there and not a recurring one.
+
+7. **The chosen directory is neither recorded nor recomputed from `PATH`.**
+   `disable` (§10.6), `info` (§15.30) and §15.32's `PATH` promotion MUST resolve
+   the shim directory as: the explicit setting, else the first candidate that holds
+   a shim of ours, else the default. They **MUST NOT** consult `PATH`. A removal
+   that depended on the `PATH` of the moment would strand shims installed from a
+   shell with a different one — `cron`, a GUI-launched terminal, `sudo -i` — and a
+   report that did would name a directory the shims are not in.
+
+   A sidecar recording the choice was the alternative, and §15.15's
+   `<home>/shims.json` already exists to be extended. It is rejected: it is state
+   that can disagree with the filesystem, it is keyed on a `<home>` that
+   `COREPACK_HOME` may move between the two runs, and it answers a question the
+   shims already answer. **The shims are the record.** Scanning for them costs one
+   `open` per candidate on paths that were going to be `stat`ed anyway (§16.3), and
+   it is self-correcting across an upgrade, a changed home, and a
+   `COREPACK_SHIM_DIRECTORY` the user has since stopped setting.
+
+   Continuity outranking the `PATH` preference (step 3 above step 4) follows from
+   the same reading: a second `enable` that *moved* the shims would leave the first
+   set behind, on `PATH` or not, and two sets of shims for one set of names is
+   worse than one set in a suboptimal place. Moving them is `jup disable` followed
+   by `jup enable`, or `--install-directory`.
 
 ## 15.14 Native shims — [required]
 
@@ -1254,9 +1372,9 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 167 | ~~Yarn Berry from `repo.yarnpkg.com`, no hash pinned~~ | **removed by §15.41** — no table source can fail a tier; the invariant on the table replaces it |
 | 168 | Yarn Berry via a custom npm registry, no hash | tarball-stream digest verified against signed `integrity` (§15.11, §14.10) |
 | 169 | `devEngines.packageManager.integrity` present, `packageManager` clean semver | integrity enforced (§15.12) |
-| 170 | `enable` where the tool's directory is read-only | falls back to the per-user directory and says so (§15.13) |
+| 170 | `enable` where the tool's directory is read-only | falls back to the per-user directory point 6 chose, and says so (§15.13) |
 | 171 | `LOCALAPPDATA` set on Linux | **ignored** for store resolution (§15.13) |
-| 172 | Shim directory not on `PATH` | prints the exact line to add; exit 0 (§15.13) |
+| 172 | Shim directory not on `PATH`, and no candidate is | prints the exact line to add; exit 0 (§15.13 points 3 and 6) |
 | 173 | Shim pointing at a nonexistent target | `enable` replaces it; `disable` removes it (§15.14) |
 | 174 | `enable --force` over a real binary, then `disable` | the original is restored (§15.15) |
 | 175 | `enable` with no arguments | npm shims are created; `--exclude npm` omits them (§15.16) |
@@ -1330,6 +1448,10 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 243 | `.nvmrc` present with `JUP_ENABLE_PROJECT_SPEC=0`, then `jup use node@22` in that same directory | not read in either case; `use` writes `devEngines.runtime` and leaves the file untouched (§15.40, §11.1, §15.27) |
 | 244 | `enable yarn pnpm`, then run each shim | both links point at the **same** stub, and each still reaches its own package manager; no file in the dist folder is named after a binary (§14.15, §10.2) |
 | 245 | Registry presents a certificate that is expired, and one that is not yet valid, each trusted through `JUP_CAFILE` | the validity message naming the clock, not the unknown-authority one; the runtime's own code survives beside it (§15.4) |
+| 246 | The default shim directory is off `PATH` while `<home>/bin` is on it | shims land in `<home>/bin`, announced on stderr; point 3's advisory does **not** fire, and a `disable` run with `<home>/bin` *absent* from `PATH` still removes them (§15.13 points 6 and 7) |
+| 247 | The same, plus a writable directory on `PATH` that is not a candidate — the one holding the tool's own binary | that directory is **ignored**; shims go to the default and point 3's advisory fires. `PATH` chooses among the list, it never supplies it (§15.13 point 6, #71) |
+| 248 | `<home>/bin` on `PATH` but group-writable, and then absent altogether | not chosen in either case; the default is used and `enable` creates no `<home>/bin` (§15.13 point 6) |
+| 249 | Shims already in the default, which is off `PATH`, and `<home>/bin` now on it | `enable` refreshes the default and writes no second set; `info` names the same directory without reading `PATH` (§15.13 point 7) |
 
 ## 15.39 Tools, not only package managers — [required]
 
