@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -127,7 +135,10 @@ const scratch: string[] = [];
 
 /** A throwaway `COREPACK_HOME` plus project directory, cleaned up afterwards. */
 function makeProject(manifest: unknown): { cwd: string; home: string } {
-  const root = mkdtempSync(join(tmpdir(), "jup-main-"));
+  // realpath: macOS puts `$TMPDIR` behind a symlink (`/var` -> `/private/var`),
+  // and the tool reports the paths it resolves — every assertion here that quotes
+  // one back would compare the two spellings.
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "jup-main-")));
   scratch.push(root);
   const cwd = join(root, "project");
   const home = join(root, "home");

@@ -13,6 +13,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -40,6 +41,23 @@ export interface Fixture {
 }
 
 /**
+ * A temporary directory, by its **real** path.
+ *
+ * `realpath`, because macOS puts `$TMPDIR` behind a symlink (`/var` ->
+ * `/private/var`) and the tool resolves the paths it reports and compares:
+ * §10.4 realpaths the install directory, §03.1 realpaths the manifest it
+ * names. Without this every assertion that quotes a path back compares
+ * `/var/folders/...` against `/private/var/folders/...` and fails on macOS
+ * alone. `test/unit/shims.test.ts` has done this since it was written; the
+ * shared harness had not.
+ */
+function tempRoot(prefix: string): string {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+  roots.push(root);
+  return root;
+}
+
+/**
  * A project directory and a private store.
  *
  * `manifest` is written as `package.json` unless it is `undefined` (no manifest
@@ -47,8 +65,7 @@ export interface Fixture {
  * and BOM rows get their fixtures.
  */
 export function createFixture(manifest?: unknown): Fixture {
-  const root = mkdtempSync(join(tmpdir(), "jup-conf-"));
-  roots.push(root);
+  const root = tempRoot("jup-conf-");
 
   const cwd = join(root, "project");
   const home = join(root, "home");
@@ -98,8 +115,7 @@ export function cleanupFixtures(): void {
  * indistinguishable — the copy is the same source, type-stripped the same way.
  */
 export function copyTool(): string {
-  const root = mkdtempSync(join(tmpdir(), "jup-tool-"));
-  roots.push(root);
+  const root = tempRoot("jup-tool-");
   cpSync(new URL("../../../src", import.meta.url), join(root, "src"), { recursive: true });
   // The published package has one, and two things depend on it: `.js` files —
   // which is what `enable` writes (§10.1) — are only ESM when it says so, and

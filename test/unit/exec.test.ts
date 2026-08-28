@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -57,7 +65,10 @@ function run(
 }
 
 beforeAll(() => {
-  root = mkdtempSync(join(tmpdir(), "jup-exec-"));
+  // realpath: macOS puts `$TMPDIR` behind a symlink (`/var` -> `/private/var`),
+  // and the tool reports the paths it resolves — every assertion here that quotes
+  // one back would compare the two spellings.
+  root = realpathSync(mkdtempSync(join(tmpdir(), "jup-exec-")));
   driver = join(root, "driver.mjs");
   writeFileSync(
     driver,
