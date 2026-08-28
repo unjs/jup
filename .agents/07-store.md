@@ -189,8 +189,28 @@ attacker-controlled input.
 5. **Never follow an existing symlink when creating a file** — open with
    `O_NOFOLLOW`-equivalent semantics, since a prior malicious entry could have
    planted one.
-6. **Apply a sane mode mask**: take only the executable bit from the tar header,
-   `mode & 0o777 & ~umask`, and never honour setuid/setgid/sticky bits.
+6. **Write a fixed mode, not the header's.** The header contributes exactly one
+   bit — whether any of `0o111` is set — and nothing else. The mode written is
+
+   ```
+   file:       (header & 0o111 ? 0o755 : 0o644) & ~umask
+   directory:  0o755 & ~umask
+   ```
+
+   That is the whole rule. setuid, setgid and sticky cannot survive it because
+   they are not in either base; no bit an archive sets can widen the result;
+   and the umask may only *narrow* it. In particular the ceiling **MUST NOT**
+   depend on the umask for its upper bound: `0o666`/`0o777 & ~umask` is not a
+   conforming implementation of this rule, because under `umask 0` — the
+   default in a good many container images and CI runners — it makes every
+   extracted file and directory world-writable, and §08.2's warm path loads
+   `bin/*.cjs` out of the store with no second hash check.
+
+   The same ceiling governs the directories the store creates for itself
+   (§07.5): the staging directory is `0o700` while it is being filled and is
+   widened to `0o755 & ~umask` by the rename that publishes it, and every other
+   `mkdir` under the store home passes `0o755` rather than taking `mkdir`'s
+   `0o777 & ~umask` default.
 
    The mask is a ceiling, not a grant, and for a `native` band (§15.28) the
    ceiling alone is not enough: the implementation **MUST** additionally set

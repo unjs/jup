@@ -511,16 +511,32 @@ async function walk(
 /* -------------------------------------------------------------------------- */
 
 /**
- * §07.4 rule 6 — only the executable bit is taken from the header; setuid,
- * setgid and sticky never survive.
+ * §07.4 rule 6 — one rule, stated once: the header contributes **only** its
+ * executable bit, and the mode written is that bit applied to a fixed ceiling.
+ * setuid, setgid and sticky can never survive, because they are not in the
+ * ceiling to begin with.
+ *
+ * The ceiling is a constant, not `0o666`/`0o777` narrowed by the umask. A umask
+ * is a process-local preference an attacker can arrange to be `0` — Docker base
+ * images and some CI runners run with exactly that — and under it the old
+ * formula made every extracted file and directory world-writable. That is not a
+ * cosmetic problem here: §08.2's warm path `import()`s `bin/*.cjs` straight out
+ * of the store with no second hash check, so a group- or world-writable install
+ * lets any local user choose what the next `pnpm` run executes. The umask still
+ * narrows the result — a stricter umask is honoured — but it can only ever
+ * subtract.
  */
+const FILE_MODE_EXECUTABLE = 0o755;
+const FILE_MODE_PLAIN = 0o644;
+const DIR_MODE = 0o755;
+
 function fileMode(headerMode: number): number {
   const executable = (headerMode & 0o111) !== 0;
-  return (executable ? 0o777 : 0o666) & 0o777 & ~getUmask();
+  return (executable ? FILE_MODE_EXECUTABLE : FILE_MODE_PLAIN) & ~getUmask();
 }
 
 function dirMode(): number {
-  return 0o777 & ~getUmask();
+  return DIR_MODE & ~getUmask();
 }
 
 /**
@@ -576,8 +592,9 @@ async function writeFile(target: string, mode: number, body: EntryBody): Promise
 /**
  * Extract into `destDir`, enforcing every §07.4 rule: no absolute/drive/UNC
  * paths, no path escaping the root, link entries skipped, non file/dir types
- * rejected, `O_NOFOLLOW` on create, mode masked to `mode & 0o777 & ~umask` with
- * no setuid/setgid/sticky, and byte/entry/ratio caps checked **as you go**
+ * rejected, `O_NOFOLLOW` on create, mode clamped to `0o755`/`0o644` (`0o755` for
+ * directories) minus the umask with no setuid/setgid/sticky, and
+ * byte/entry/ratio caps checked **as you go**
  * rather than afterwards.
  */
 export async function extract(

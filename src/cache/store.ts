@@ -7,6 +7,7 @@
  */
 
 import {
+  chmodSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -359,7 +360,11 @@ export function referenceWithHash(name: string, reference: string, hash: string)
  */
 function ensureDir(dir: string, target: string): void {
   try {
-    mkdirSync(dir, { recursive: true });
+    // §07.4 rule 6's ceiling, applied to the store's own directories: `mkdir`
+    // defaults to `0o777 & ~umask`, and a `0` umask — the default in a good
+    // many container images — would make the store world-writable. `mkdirSync`
+    // narrows this by the umask itself, so it is a ceiling and not a grant.
+    mkdirSync(dir, { recursive: true, mode: 0o755 });
   } catch (error) {
     if (errorCode(error) === "EACCES") {
       throw new UsageError(messages.failedToCreateCacheDir(target));
@@ -377,7 +382,10 @@ export function createTempDir(): string {
   for (;;) {
     const dir = join(installFolder, `jup-${process.pid}-${randomSuffix()}`);
     try {
-      mkdirSync(dir);
+      // `0o700` while it fills: under a `0` umask the default would let any
+      // local user edit the tree between the digest check and the rename that
+      // publishes it. `promote` widens it to the ceiling at that rename.
+      mkdirSync(dir, { mode: 0o700 });
       return dir;
     } catch (error) {
       const code = errorCode(error);
@@ -409,6 +417,14 @@ function isDirectory(path: string): boolean {
  */
 export function promote(tmp: string, dest: string): void {
   ensureDir(dirname(dest), getInstallFolder());
+
+  // The rename publishes the staging tree, so `0o700` widens to the ceiling the
+  // extractor gave the directories inside it: a store seeded by one user for
+  // another to run (§15.19) has to be traversable. Best-effort, and a
+  // filesystem without modes simply keeps the stricter one.
+  try {
+    chmodSync(tmp, 0o755 & ~process.umask());
+  } catch {}
 
   const isWindows = process.platform === "win32";
   const attempts = isWindows ? 5 : 1;
@@ -562,7 +578,7 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
 
   let tmp: string | undefined;
   try {
-    mkdirSync(home, { recursive: true });
+    mkdirSync(home, { recursive: true, mode: 0o755 });
 
     // Same directory, so the rename is atomic: a concurrent reader sees either
     // the old file or the new one, never a truncated interleaving (§14.3).
