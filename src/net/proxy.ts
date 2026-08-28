@@ -637,6 +637,12 @@ function decompressed(message: IncomingMessage, encoding: string): Readable {
           ? zlib.createBrotliDecompress()
           : undefined;
   if (stream === undefined) return message;
+  // `pipe` forwards data but not failures, and `webStream` listens on the
+  // decompressor alone. Without this hop a socket reset mid-body leaves the
+  // gunzip stream neither ended nor errored, so the `ReadableStream` never
+  // settles and the download awaits forever — and the idle watchdog cannot save
+  // it, since aborting the request errors the source it is not listening to.
+  message.on("error", (error) => stream.destroy(error));
   message.pipe(stream);
   return stream;
 }
