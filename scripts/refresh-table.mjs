@@ -289,6 +289,28 @@ table = rewriteDefault(table, "nub", "default", nub);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 
+/**
+ * §15.42 — `node`'s `lts` is the one table value this script cannot compute.
+ *
+ * npm's `node` dist-tags stop at `v20-lts` (20.11.1) while the same package
+ * publishes 22.x and 24.x, so no query over them yields the line actually in
+ * maintenance, and §15.21 rules out reaching for `nodejs.org/dist/index.json` to
+ * get it. So it is flagged, never rewritten: a human checks it against Node's
+ * release schedule, exactly as §16.9 says a human checks a `ranges` change.
+ */
+function reviewNodeLts(source) {
+  const current = /tags:\s*\{\s*lts:\s*"([^"]+)"/.exec(source)?.[1];
+  if (current === undefined) {
+    console.warn("! node has no `tags.lts`; §15.42 requires one.");
+    return;
+  }
+  console.log(
+    `review: node tags.lts is ${current} — confirm against Node's LTS schedule (§15.42).`,
+  );
+}
+
+reviewNodeLts(table);
+
 if (changes.length === 0) {
   console.log("The embedded table and trust store are current.");
   process.exit(0);

@@ -84,6 +84,8 @@ Each supported tool has one definition:
 {
   kind?: "package-manager" | "runtime", // §15.39; absent means "package-manager"
   default: string,              // built-in fallback version, hash-pinned
+  tags?: Record<string,string>, // §15.42 — dist-tags the table answers itself,
+                                // before the registry is asked and never age-capped
   fetchLatestFrom: RegistrySpec,// where "what's the newest stable?" is answered
   transparent: {
     default?: string,           // fallback version for transparent commands only
@@ -563,6 +565,7 @@ Single range `*`:
 |---|---|
 | `kind` | `runtime` |
 | `default` | `24.20.0` — bare, per §2.3 |
+| `tags` | `{lts: "24.20.0"}` — §15.42; npm's own tags cannot answer `lts` |
 | `fetchLatestFrom` | `{type: npm, package: node}` |
 | `transparent.commands` | `[]` — a runtime is never enforced against (§2.3) |
 | `transparent.default` | — |

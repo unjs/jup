@@ -250,6 +250,29 @@ export interface ToolDefinition {
   kind?: ToolKind;
   /** Compiled-in fallback version, hash-pinned. */
   default: string;
+  /**
+   * §04.1 step 3 — dist-tags this table answers **itself**, checked before the
+   * registry is asked and never age-capped.
+   *
+   * For the one case it exists for, node's `lts`, the registry's own tags are
+   * not merely stale but structurally unable to say it: npm's `node` package
+   * publishes 22.x and 24.x yet stopped adding `v<N>-lts` tags after `v20-lts`
+   * (20.11.1), so the newest tag naming an LTS line points two majors behind the
+   * line that is actually in maintenance. There is no query over those tags that
+   * reaches the right answer, and §15.21 rules out reaching for a second source
+   * to get it.
+   *
+   * So the value is a literal on the same footing as {@link ToolDefinition.default}:
+   * a human-reviewed constant, resolved with no request at all — which also makes
+   * `node@lts` work offline. It rots the way `default` rots, and
+   * `scripts/refresh-table.mjs` flags it for review for the same reason it does
+   * not auto-merge one (§16.9, §15.33).
+   *
+   * A name here shadows the registry's tag of the same name. Nothing in the
+   * table currently shadows one; node's `lts` fills a gap rather than
+   * overriding an answer.
+   */
+  tags?: Record<string, string>;
   /** Where "what's the newest stable?" is answered. */
   fetchLatestFrom: RegistrySpec;
   transparent: {

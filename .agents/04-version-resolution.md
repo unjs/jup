@@ -20,10 +20,13 @@ Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}
 
  3. If range is neither a valid exact version nor a valid semver range → it is a TAG:
         if !allowTags → UsageError `Packages managers can't be referenced via tags in this context`
-        registry := registry of the LAST range entry in the definition   (§02.3)
-        tags     := fetchAvailableTags(registry)                          [NETWORK]
-        if !(range in tags) → UsageError `Tag not found (<range>)`
-        range := tags[range]        # now an exact version
+        if definition.tags has own property `range` →                     (§15.42)
+            range := definition.tags[range]   # compiled-in, NO request, no age cap
+        else:
+            registry := registry of the LAST range entry in the definition   (§02.3)
+            tags     := fetchAvailableTags(registry)                          [NETWORK]
+            if !(range in tags) → UsageError `Tag not found (<range>)`
+            range := tags[range]        # now an exact version
 
  4. Cache probe:  cached := findInstalledVersion(store, {name, range})
         if cached !== null and useCache → Locator { name, reference: cached }   ← FAST PATH
@@ -41,7 +44,13 @@ Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}
 
 Notes a re-implementation MUST get right:
 
-* **Step 3 uses the *last* range entry's registry, not a per-version one.**
+* **A table `tags` entry is answered first, and without a request.** §15.42's
+  compiled-in dist-tags are consulted before the registry and are not subject to
+  §15.35e's minimum-release-age gate: the value is this table choosing, exactly as
+  `default` is, rather than the registry choosing on the user's behalf. Ownership
+  must be checked (`Object.hasOwn`) — `node@constructor` is a tag as far as step 3
+  is concerned, and an inherited property is not an answer.
+* **Otherwise step 3 uses the *last* range entry's registry, not a per-version one.**
   Tags are a property of the newest distribution channel. For Yarn this means
   `@yarnpkg/cli-dist`'s dist-tags, so `yarn@latest` resolves to a Berry version even
   though `yarn@1.22.22` would come from the `yarn` package. Before §15.41 the two

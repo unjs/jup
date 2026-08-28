@@ -472,6 +472,20 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
     // there is no portable digest to pin and the registry signature over this
     // host's own `node-<target>` is what clears §15.11's tier.
     default: "24.20.0",
+    // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
+    //
+    // The `node` package's dist-tags are `v4-lts` … `v20-lts` plus `latest`:
+    // there is no bare `lts`, and the newest line they name is v20 (20.11.1)
+    // even though the same package publishes 22.x and 24.x. So every reading of
+    // those tags is wrong — the highest `v<N>-lts` is two LTS majors behind, and
+    // its value is nine patches behind its own line. nodejs.org/dist/index.json
+    // knows the answer and is exactly the second source §15.21 refuses.
+    //
+    // A literal is the honest remaining option, and it is the same kind of
+    // literal as `default` above: human-reviewed, refreshed by §16.9's script,
+    // and correct at the moment someone looked. Bare, for the reason `default`
+    // is bare — node's artifact is per-host, so there is no portable digest.
+    tags: { lts: "24.20.0" },
     fetchLatestFrom: { type: "npm", package: "node" },
     // Empty, and not an oversight: §01.4's transparency exists to let a
     // bootstrapping command escape §03.5's enforcement, and a runtime is never

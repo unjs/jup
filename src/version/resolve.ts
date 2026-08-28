@@ -88,22 +88,36 @@ export async function resolveDescriptor(
       throw new UsageError(messages.tagsNotAllowed());
     }
 
-    // §02.3 — dist-tags are a property of the newest distribution channel, so
-    // they always resolve against the **last** range entry's registry, never a
-    // per-version one. This is why `yarn@latest` consults repo.yarnpkg.com even
-    // though `yarn@1.22.22` would come from npm.
-    const lastEntry = definition.ranges[definition.ranges.length - 1]!;
-    const tagRegistry = lastEntry[1].registry;
-    const { capToReleaseAge, fetchAvailableTags } = await loadRegistry();
-    const tags = await fetchAvailableTags(tagRegistry);
-    if (!Object.hasOwn(tags, range)) {
-      throw new UsageError(messages.tagNotFound(range));
+    // A tag the **table** answers is settled here, before any request is made.
+    // `node@lts` is the only one, and `ToolDefinition.tags` records why npm's own
+    // tags cannot answer it. Two consequences worth naming: the value skips
+    // §15.35e's age gate, because a compiled-in literal is this table choosing —
+    // the same act as `default`, which is likewise never gated — rather than the
+    // registry choosing on the user's behalf; and `node@lts` resolves with zero
+    // requests, so it works offline and inside §01.3's cold budget.
+    //
+    // `Object.hasOwn`, not a bare index: `node@constructor` is a tag as far as
+    // step 3 is concerned, and an inherited property is not an answer.
+    const table = definition.tags;
+    if (table !== undefined && Object.hasOwn(table, range)) {
+      range = table[range]!;
+    } else {
+      // §02.3 — dist-tags are a property of the newest distribution channel, so
+      // they always resolve against the **last** range entry's registry, never a
+      // per-version one.
+      const lastEntry = definition.ranges[definition.ranges.length - 1]!;
+      const tagRegistry = lastEntry[1].registry;
+      const { capToReleaseAge, fetchAvailableTags } = await loadRegistry();
+      const tags = await fetchAvailableTags(tagRegistry);
+      if (!Object.hasOwn(tags, range)) {
+        throw new UsageError(messages.tagNotFound(range));
+      }
+      // §15.35e — a tag is the registry choosing on the user's behalf, so the
+      // minimum-release-age gate applies to it just as it does to step 6's range
+      // query; only step 5's exact version is exempt. `capToReleaseAge` returns
+      // its argument, and makes no request at all, when the gate is off.
+      range = await capToReleaseAge(tagRegistry, tags[range]!);
     }
-    // §15.35e — a tag is the registry choosing on the user's behalf, so the
-    // minimum-release-age gate applies to it just as it does to step 6's range
-    // query; only step 5's exact version is exempt. `capToReleaseAge` returns
-    // its argument, and makes no request at all, when the gate is off.
-    range = await capToReleaseAge(tagRegistry, tags[range]!);
   }
 
   // 4 — the cache probe, and it comes **before** step 5. For an exact version

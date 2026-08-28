@@ -1528,3 +1528,35 @@ every band's `url` origin is `https://registry.npmjs.org`, its `registry.type` i
 `"npm"`, and it declares no `npmRegistry`. A future band that breaks the rule fails
 there, which is the regression the deleted rows existed to catch.
 
+
+## 15.42 Dist-tags the table answers itself — [required]
+
+**The problem, concretely.** `node@lts` cannot be resolved from npm. The `node`
+package's dist-tags are `v4-lts` … `v20-lts` plus `latest`: there is no bare `lts`,
+so `node@lts` is `Tag not found (lts)`, and the newest line they name is v20
+(20.11.1) even though the same package publishes 22.x and 24.x. Every reading of
+those tags is wrong — the highest `v<N>-lts` is two LTS majors behind, and its value
+is nine patches behind its own line. `nodejs.org/dist/index.json` knows the answer
+and is exactly the second source §15.21 refuses to add.
+
+**Required:**
+
+* §02.3 gains an optional per-entry `tags: Record<string, string>` mapping a tag
+  name to an exact version. `node` declares `{lts: "<current LTS>"}`; no other entry
+  declares anything.
+* §04.1 step 3 consults it **before** the registry, using an own-property check.
+  A name found there resolves with **no request at all**, so `node@lts` works
+  offline and inside §01.3's cold budget.
+* It is **not** subject to §15.35e's minimum-release-age gate. The gate exists
+  because a dist-tag is the registry choosing on the user's behalf; a compiled-in
+  literal is this table choosing, which is what `default` is, and `default` is
+  likewise never gated.
+* A name here shadows the registry's tag of the same name. Nothing in the table
+  currently shadows one — node's `lts` fills a gap rather than overriding an answer.
+
+**The cost, and why it is accepted.** The value rots exactly as `default` rots: it
+is correct at the moment a human looked. §16.9's refresh script MUST flag it for
+review, and MUST NOT update it automatically — no query over npm's tags can derive
+it, which is the whole reason it is a literal. The alternative was to leave
+`node@lts` erroring, and a tag every other version manager answers is worth a line
+in the table that a release keeps honest.
