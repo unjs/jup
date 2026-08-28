@@ -199,6 +199,12 @@ you pack what you intend to run.
 > **§15.35l requires output here** — a command that deletes things silently gives the
 > user no way to tell a successful clean from a no-op.
 
+> **§15.44 spares one directory.** When the interpreter baked into the installed
+> shims lies inside `<home>/v1`, `cache clean` keeps the version directory holding
+> it and removes everything else, reporting what it kept on stderr. `--all` removes
+> it too, warning first. §15.43 stops `enable` from producing that state; this is
+> the backstop for the installs that already have.
+
 ## 9.8 `enable` / `disable`
 
 See §10. Summary of the CLI contract:

@@ -7,6 +7,21 @@ import { join } from "node:path";
 import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
+/**
+ * §15.44 — `cache clean` asks `shims.ts` what interpreter the installed shims
+ * run under. Reproducing that for real would mean a shim directory and a
+ * rewritten stub in this process's own package (rows 252 and 253 do exactly
+ * that, out of process); here the answer is injected, so the assertions are
+ * about what `cache clean` *does* with it. Everything else in the module is the
+ * real thing.
+ */
+const shimState = vi.hoisted(() => ({ interpreter: undefined as string | undefined }));
+
+vi.mock("../../src/commands/shims.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/commands/shims.ts")>()),
+  bakedInterpreter: async () => shimState.interpreter,
+}));
+
 // `exec.ts` hands the process over to the package manager for real — it rewrites
 // `process.argv` and imports the entry point on `nextTick`. Every assertion here
 // is about *what* would be run, so the handover itself is mocked out.
@@ -147,6 +162,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  // §15.44's injected answer is per-test; anything else would leak a spared
+  // version into the next `cache clean`.
+  shimState.interpreter = undefined;
   // `applyEnvFile` replaces `process.env` wholesale (§11.6), so restore the
   // object itself rather than patching keys back onto a replacement.
   process.env = savedEnv;
@@ -651,6 +669,98 @@ describe("cache clean / clear (§09.7, test 95)", () => {
 
   it("rejects an unknown subcommand", async () => {
     await expect(cmdCache(["nuke"])).rejects.toBeInstanceOf(UsageError);
+  });
+
+  /* §15.44 — the backstop for §15.43 ------------------------------------- */
+
+  it("spares the version holding the shims' interpreter, and says so", async () => {
+    const interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    shimState.interpreter = interpreter;
+    await seed("node", "22.14.0");
+    await seed("yarn", "2.2.2");
+    await seed("pnpm", "9.0.0");
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    // The count is what was removed, not what was there.
+    expect(stdout).toBe(`Removed 2 cached version(s) from ${join(home, "v1")}\n`);
+    // One line on stderr: what survived, why, and the way out of the state.
+    expect(stderr).toBe(`${messages.interpreterKept("node", "22.14.0", interpreter, home)}\n`);
+    expect(existsSync(join(home, "v1", "node", "22.14.0", ".jup"))).toBe(true);
+    expect(existsSync(join(home, "v1", "yarn"))).toBe(false);
+    expect(existsSync(join(home, "v1", "pnpm"))).toBe(false);
+  });
+
+  it("reports `Nothing to remove` when the interpreter was all there was", async () => {
+    shimState.interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    await seed("node", "22.14.0");
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    expect(stdout).toBe("Nothing to remove\n");
+    expect(stderr).toContain("Kept node@22.14.0");
+    expect(existsSync(join(home, "v1", "node", "22.14.0", ".jup"))).toBe(true);
+  });
+
+  it("`--all` removes it and warns first", async () => {
+    const interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    shimState.interpreter = interpreter;
+    await seed("node", "22.14.0");
+    await writeLastKnownGood({ node: "22.14.0" });
+
+    await expect(cmdCache(["clean", "--all"])).resolves.toBe(0);
+
+    expect(stdout).toBe(`Removed 1 cached version(s) and 1 recorded default(s) from ${home}\n`);
+    expect(stderr).toBe(`${messages.interpreterRemoved("node", "22.14.0", interpreter, home)}\n`);
+    expect(existsSync(join(home, "v1"))).toBe(false);
+  });
+
+  it("removes the other versions of the same tool, and the temp folders", async () => {
+    shimState.interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
+    await seed("node", "22.14.0");
+    await seed("node", "24.0.0");
+    // §07.5 leaves one of these behind when a race is lost; sparing one version
+    // is not a licence to keep anything else.
+    await mkdir(join(home, "v1", "jup-1-abcd"), { recursive: true });
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    expect(existsSync(join(home, "v1", "node", "22.14.0", ".jup"))).toBe(true);
+    expect(existsSync(join(home, "v1", "node", "24.0.0"))).toBe(false);
+    expect(existsSync(join(home, "v1", "jup-1-abcd"))).toBe(false);
+  });
+
+  it("spares nothing for a path that is near the store without being in it", async () => {
+    // Three shapes that a `startsWith` would get wrong, and one that is inside
+    // the store but is not a file *in* a version directory.
+    for (const interpreter of [
+      `${home}iter/v1/node/22.14.0/bin/node`,
+      join(home, "v1", "node"),
+      join(home, "v1", "node", "22.14.0"),
+      join(home, "lastKnownGood.json"),
+    ]) {
+      shimState.interpreter = interpreter;
+      await seed("node", "22.14.0");
+
+      await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+      expect(existsSync(join(home, "v1"))).toBe(false);
+      expect(stderr).toBe("");
+      stdout = "";
+    }
+  });
+
+  it("an interpreter outside the store changes nothing at all", async () => {
+    // The only state §15.43 now produces, and §15.35l's row 206 fixes its
+    // output byte for byte: one line on stdout, an empty stderr, `v1` gone.
+    shimState.interpreter = process.execPath;
+    await seed("yarn", "2.2.2");
+
+    await expect(cmdCache(["clean"])).resolves.toBe(0);
+
+    expect(stdout).toBe(`Removed 1 cached version(s) from ${join(home, "v1")}\n`);
+    expect(stderr).toBe("");
+    expect(existsSync(join(home, "v1"))).toBe(false);
   });
 });
 

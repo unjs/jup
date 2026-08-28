@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors-cold.ts";
 import {
+  bakedInterpreter,
   chooseInstallDirectory,
   cmdDisable,
   cmdEnable,
@@ -1033,7 +1034,7 @@ describe("restoring what enable displaced (§15.15)", () => {
  * position exactly, with no 126 MB copy of the runtime involved.
  * ------------------------------------------------------------------ */
 
-describe.skipIf(process.platform === "win32")("§15.43 — the baked-in interpreter", () => {
+describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in interpreter", () => {
   /**
    * A `node` under `COREPACK_HOME` that `process.execPath` then names — the
    * runtime a chain through our own `node` shim would be running under.
@@ -1133,6 +1134,35 @@ describe.skipIf(process.platform === "win32")("§15.43 — the baked-in interpre
     // The property, stated the way the bug is: nothing `cache clean` removes.
     expect(stub).not.toContain(store);
     expect(stub).not.toContain(corepackHome);
+  });
+
+  it("reads back the interpreter an install already has (§15.44)", async () => {
+    // No stub yet: there is nothing installed to read an answer out of.
+    expect(await bakedInterpreter({ distFolder: dist })).toBeUndefined();
+
+    // The relocatable spelling the shipped stubs keep is not a path in the
+    // store, and `cache clean` will find nothing to spare in it.
+    expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
+    expect(await bakedInterpreter({ distFolder: dist })).toBe("/usr/bin/env node");
+
+    // What an `enable node` writes, which is what the backstop acts on.
+    const host = hostNode("host");
+    vi.stubEnv("JUP_HOST_RUNTIME", host);
+    runFromStore();
+    expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
+    expect(await bakedInterpreter({ distFolder: dist })).toBe(host);
+  });
+
+  it("reads the Windows wrappers, which name the interpreter each (§15.44)", async () => {
+    // §10.3's writers are platform-independent on purpose, so the *reader* is
+    // exercised the same way: generate the wrappers here and parse them back.
+    // The `win32` branch of `bakedInterpreter` cannot be reached on POSIX, so
+    // this asserts the shape it looks for rather than dispatching to it.
+    const host = hostNode("host");
+    await generateWin32Link(binDir, dist, "yarn", {}, host);
+
+    const cmd = readFileSync(join(binDir, "yarn.cmd"), "utf8");
+    expect(/^\s*"((?!%~dp0)[^"\n]+)"\s\s"%~dp0[\\/]/m.exec(cmd)?.[1]).toBe(host);
   });
 
   it("refuses rather than baking a store path, and writes nothing", async () => {

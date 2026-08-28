@@ -668,6 +668,13 @@ documentation disagree.
 **Required:** keep the default behaviour; document it precisely; add
 `cache clean --all` to remove the recorded defaults as well, printing what it removed.
 
+`lastKnownGood.json` is no longer the only thing a plain `cache clean` may leave
+behind: §15.44 spares the version directory holding the interpreter the installed
+shims run under, when that interpreter is inside `<home>/v1`. The two survivals are
+different in kind and the wording above still binds — a preference is not a cache
+entry, and §15.44's is a cache entry the command is deliberately not allowed to
+remove out from under the shims. Both are reported, and `--all` takes both.
+
 ## 15.19 Offline and airgapped installs as a first-class path — [required]
 
 > Driven by **#448** and **#414**, two separate open issues reporting the same thing:
@@ -1460,6 +1467,8 @@ Appended to §13. All are ⊕ (they would fail against corepack today).
 | 249 | Shims already in the default, which is off `PATH`, and `<home>/bin` now on it | `enable` refreshes the default and writes no second set; `info` names the same directory without reading `PATH` (§15.13 point 7) |
 | 250 | `enable node`, then `enable` again from a process whose own runtime is inside `<home>` — once with `JUP_HOST_RUNTIME` naming a runtime outside it, once with only `PATH` to go on | the shebang names the outside runtime in both cases, and never a path under `<home>` — so nothing `cache clean` removes can invalidate it. The `PATH` case skips the tool's own `node` shim sitting ahead of it (§10.1, §15.43) |
 | 251 | The same, with no runtime outside `<home>` reachable by either route; then `enable node` with the tool's own package directory read-only | the first fails, naming the cache and `cache clean`, and writes nothing — no `#!/usr/bin/env node` and no store path. The second names the **stub** it could not rewrite, not the shim directory, while `enable pnpm` in the same tree still exits 0 in silence (§10.1, §10.7, §15.43) |
+| 252 | A stub whose shebang names `<home>/v1/node/<v>/bin/node` — what an older `enable` left — beside three other cached versions, then `cache clean` | `node@<v>` survives, the other three are gone, the count on stdout is `3`, and one line on stderr names what was kept, why, and the re-`enable` that clears it (§15.44, §15.35l) |
+| 253 | The same tree with `cache clean --all`, and then a correctly pinned stub (interpreter outside `<home>`) with a plain `cache clean` | `--all` removes the interpreter too, warning on stderr *before* it does; the pinned tree prints exactly `Removed <n> cached version(s) from <path>` with an empty stderr and nothing spared (§15.44, §15.43) |
 
 ## 15.39 Tools, not only package managers — [required]
 
@@ -1773,3 +1782,55 @@ case names the stub, says that shimming `node` is what requires it to be
 rewritten, and says that the shim-directory options do not apply. `enable`
 without `node` MUST still succeed in silence there, which it does because the
 stub is compared before it is written (§10.2's idempotency, §10.7).
+
+## 15.44 `cache clean` never deletes the interpreter under the shims — [required, bug]
+
+> The backstop for §15.43, which closes the same failure at its source. Read that
+> section first: it has the mechanism, the exit codes, and why the failure takes
+> its own repair down with it. This section is about the two cases a rule applied
+> at `enable` time cannot reach — an install whose shebang was written by an older
+> build, and any future route that writes a store interpreter without passing
+> through §15.43's guard.
+
+§09.7 is `rm -rf <home>/v1` and knows nothing about §10.1's baked-in interpreter.
+Where that interpreter is inside `<home>/v1`, the two commands compose into a
+machine with no working shims and no working `jup`, and the user's next move —
+`jup enable` — is the thing that stopped working. A guard at the point of *writing*
+cannot help an install that was written before the guard existed.
+
+**Required.**
+
+* Before removing anything, `cache clean` MUST read the interpreter the installed
+  shims actually run under. It is read from the shims themselves, never from a
+  sidecar record: on POSIX the shebang of the shared stub (§10.2), on Windows the
+  wrappers, which name it each (§10.3). The Windows lookup uses §15.13 point 7's
+  resolver — the one that does not consult `PATH` — and answers "none" rather than
+  failing when there is no shim directory to read.
+* When that interpreter lies inside `<home>` (§15.43's path-boundary test), a plain
+  `cache clean` MUST spare the **version directory containing it** and remove
+  everything else under `<home>/v1`, including every other version of the same tool
+  and every temp folder §07.5 left behind. An interpreter that is inside `<home>`
+  without being inside a version directory names nothing this tool installed, so
+  there is no directory to spare and the command proceeds unchanged.
+* It MUST then print one line saying what it kept and why. The line names the
+  `<name>@<version>` that survived and the interpreter path, says that removing it
+  would leave the shims failing, and points at re-running `enable` under a runtime
+  installed outside `<home>` — which is both the repair and, under §15.43, a state
+  the tool will not produce again. It goes to **stderr** (§09.11: it is a notice
+  about an abnormal state, not the command's result), and it is not suppressible:
+  it explains a count on stdout that is otherwise inexplicably low.
+* The count on stdout MUST be the number of versions actually removed, so the
+  spared one is excluded from it. Everything else about the §15.35l line is
+  unchanged, `Nothing to remove` included — a store holding nothing but the spared
+  interpreter removed nothing.
+* `--all` MUST remove it. That flag is the explicit "yes, everything", and a flag
+  that silently declined would leave no way to empty the cache at all. It MUST warn
+  **before** the removal, on stderr, naming the same version and interpreter and
+  saying that the shims will fail until `enable` is re-run — after the fact there
+  is no `jup` left to say it.
+* An install whose interpreter is outside `<home>` — the only state §15.43 now
+  produces — MUST be indistinguishable from an implementation without this section:
+  the same single removal, the same one line of stdout, an empty stderr, and no
+  per-version work. An implementation SHOULD skip the lookup entirely when the
+  store holds no versions, which is sound because a runtime `enable` could have
+  named was installed by this tool and therefore carries a §07.2 marker.

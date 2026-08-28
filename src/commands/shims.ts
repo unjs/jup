@@ -200,6 +200,86 @@ function requireInterpreterPath(): string {
   return interpreter;
 }
 
+/**
+ * §15.44 — the interpreter an *installed* set of shims actually runs under, or
+ * `undefined` when there is none to read.
+ *
+ * This is {@link interpreterPath} asked backwards. That one answers "what should
+ * `enable` bake in?"; this one answers "what did some earlier `enable` already
+ * bake in?", which is the only question `cache clean` can act on. The two are
+ * deliberately not the same call: §15.43 makes the *new* answer safe, and the
+ * whole point of the backstop is the installs whose answer was written before
+ * that rule existed, or by some route that never went through it.
+ *
+ * The shims themselves are the record, exactly as §15.13 point 7 has it — a
+ * sidecar naming the interpreter could disagree with the file the kernel will
+ * actually exec. On POSIX that file is the shared stub, whose shebang every shim
+ * in the directory reaches through a symlink; on Windows it is the wrappers,
+ * which name the interpreter each (§10.3) because the stub's own shebang is dead
+ * weight there.
+ *
+ * Both seams exist for the tests, which drive a temporary dist folder and a
+ * temporary shim directory; production passes neither.
+ */
+export async function bakedInterpreter(options?: {
+  distFolder?: string;
+  installDirectory?: string;
+}): Promise<string | undefined> {
+  if (process.platform === "win32") return win32BakedInterpreter(options?.installDirectory);
+
+  const stub = join(options?.distFolder ?? resolveDistFolder(), PROXY_STUB_NAME);
+  // 1 KiB covers a shebang naming any path a filesystem will hold; the first
+  // line is all that is read out of it.
+  const head = await readHead(stub, 1024);
+  if (head === undefined || !head.startsWith("#!")) return undefined;
+
+  // `#!/usr/bin/env node` — the relocatable spelling the shipped stubs keep —
+  // lands here too and is simply not a path any caller will find in the store.
+  // `trim` takes the `\r` off a stub that has been through a CRLF checkout.
+  const interpreter = (head.split("\n", 1)[0] ?? "").slice(2).trim();
+  return interpreter === "" ? undefined : interpreter;
+}
+
+/**
+ * The §10.3 `.cmd` wrapper's **fallback** branch: `"<interpreter>"  "%~dp0\<rel>" %*`.
+ *
+ * The lookahead is what separates it from the branch above it, which has the
+ * same shape with `"%~dp0\node.exe"` in the interpreter's place — the relocatable
+ * case, where the shim directory *is* a Node install and there is no absolute
+ * path to read.
+ */
+const WIN32_CMD_INTERPRETER_RE = /^\s*"((?!%~dp0)[^"\n]+)"\s\s"%~dp0[\\/]/m;
+
+/**
+ * {@link bakedInterpreter} on Windows, where the answer lives in the shim
+ * directory rather than beside the tool.
+ *
+ * `resolveInstallDirectory` rather than `chooseInstallDirectory`: this is not
+ * `enable` choosing where to write, it is a read of where the shims already are,
+ * and §15.13 point 7 forbids that read from consulting `PATH`. It throws when
+ * there is no home directory to default to (§14.17), and a `cache clean` has no
+ * business failing over that — there are then no shims to protect either.
+ *
+ * Every name is tried rather than just `node`, because §10.3 bakes the
+ * interpreter into all three wrappers of every name unconditionally; the first
+ * one that answers answers for the set.
+ */
+async function win32BakedInterpreter(installDirectory?: string): Promise<string | undefined> {
+  let directory: string;
+  try {
+    directory = installDirectory ?? resolveInstallDirectory({}, false);
+  } catch {
+    return undefined;
+  }
+
+  for (const binName of targetBinaries([], [], { includeOptOut: true })) {
+    const head = await readHead(join(directory, `${binName}.cmd`), 1024);
+    const match = head === undefined ? null : WIN32_CMD_INTERPRETER_RE.exec(head);
+    if (match !== null) return match[1];
+  }
+  return undefined;
+}
+
 /** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;
 

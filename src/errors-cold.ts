@@ -384,6 +384,24 @@ export const messages = {
   nothingToRemove: () => `Nothing to remove`,
 
   /**
+   * §15.44 — one line saying why the count is lower than the user expected.
+   *
+   * It has to carry three things or it is not worth printing: *what* survived,
+   * *why* (the shims run through it, and `bad interpreter` is what removing it
+   * would produce), and the way out — a re-`enable` under a runtime that will
+   * outlive the cache, which §15.43 then pins outside `<home>` for good.
+   */
+  interpreterKept: (name: string, version: string, interpreter: string, home: string) =>
+    `! Kept ${name}@${version}: jup's shims name ${interpreter} as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside ${home} to repin them, then clean again.`,
+
+  /**
+   * §15.44 — the `--all` counterpart. Present tense, because it is printed
+   * *before* the removal: afterwards there is no working `jup` left to print it.
+   */
+  interpreterRemoved: (name: string, version: string, interpreter: string, home: string) =>
+    `! Removing ${name}@${version}, which jup's shims name as their interpreter (${interpreter}): they will fail with 'bad interpreter' until 'jup enable' is re-run under a node installed outside ${home}.`,
+
+  /**
    * §15.35c — a deprecated command names its replacement and still works.
    *
    * #624: corepack prints nothing, so `prepare` looks current in every CI log

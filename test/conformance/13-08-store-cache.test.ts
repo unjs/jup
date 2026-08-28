@@ -1,16 +1,18 @@
 /**
- * §13.8 — store, cache and offline operation (rows 86–96).
+ * §13.8 — store, cache and offline operation (rows 86–96), plus §15.44's rows
+ * 252 and 253.
  *
  * The store's whole concurrency story is "rename is atomic and losing the race is
  * a success" (§07.5), and its whole offline story is "a `.jup` marker is
  * enough" (§07.2). Both are asserted here against real processes.
  */
 
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
+  copyTool,
   createFixture,
   hashOf,
   makeTarball,
@@ -18,6 +20,7 @@ import {
   packageManagerTarball,
   publishBerry,
   run,
+  seedPackageManager,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -291,5 +294,118 @@ describe("§13.8 store, cache and offline", () => {
     // `opendir` — is proved with an fs spy inside the child process by
     // test/unit/main.test.ts, "the warm fast path — §01.3 (test 96)"; it is not
     // duplicated here.
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §15.44 — rows 252 and 253
+ *
+ * The backstop for §15.43. An install shimmed by an older build has
+ * the store path §14.26 used to bake in still sitting in its stub's
+ * shebang, and `cache clean` deleting the file underneath it leaves
+ * every shim dying with `bad interpreter` (exit 126) and `jup` itself
+ * unreachable behind the broken `node` shim (exit 127).
+ *
+ * The state is reproduced by rewriting the stub's first line in a
+ * private copy of the tool, which is exactly what such an install
+ * looks like on disk — and the only way to reach it now that §15.43
+ * refuses to write it.
+ * ------------------------------------------------------------------ */
+
+describe.skipIf(process.platform === "win32")("§15.44 cache clean spares the interpreter", () => {
+  /**
+   * A copy of the tool per row: these rewrite the shared stub, and the
+   * repository's own `src/shim-proxy.mjs` is a file every other suite reads.
+   */
+  function toolWithShebang(interpreter: string): string {
+    const bin = copyTool();
+    const stub = join(dirname(bin), "shim-proxy.mjs");
+    const source = readFileSync(stub, "utf8");
+    writeFileSync(stub, `#!${interpreter}\n${source.slice(source.indexOf("\n") + 1)}`);
+    return bin;
+  }
+
+  /**
+   * The runtime an older `enable` would have baked in: a real file, in the
+   * layout §07.2 gives it, carrying a marker so `cache list` counts it.
+   */
+  function seedRuntime(home: string, version: string): string {
+    const location = join(home, "v1", "node", version);
+    mkdirSync(join(location, "bin"), { recursive: true });
+    writeFileSync(join(location, "bin", "node"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(location, "bin", "node"), 0o755);
+    writeFileSync(
+      join(location, ".jup"),
+      JSON.stringify({ locator: { name: "node", reference: version }, hash: "sha512.seeded" }),
+    );
+    return join(location, "bin", "node");
+  }
+
+  it("252: keeps the version the shebang names, removes the rest, and says why", async () => {
+    const fixture = createFixture();
+    const interpreter = seedRuntime(fixture.home, "22.14.0");
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+    seedPackageManager(fixture.home, "npm", "9.8.1");
+
+    const result = await run(["cache", "clean"], {
+      ...fixture,
+      registry,
+      bin: toolWithShebang(interpreter),
+    });
+
+    expect(result.exitCode).toBe(0);
+    // The count is what was actually removed — the spared version is not in it.
+    expect(result.stdout).toBe(`Removed 3 cached version(s) from ${join(fixture.home, "v1")}\n`);
+    // One line, on stderr, naming what survived, why, and the way out.
+    expect(result.stderr.split("\n").filter(Boolean)).toHaveLength(1);
+    expect(result.stderr).toContain("Kept node@22.14.0");
+    expect(result.stderr).toContain(interpreter);
+    expect(result.stderr).toContain("bad interpreter");
+    expect(result.stderr).toContain("jup enable");
+
+    // The property the whole section is for: the file the shims exec is still
+    // there, and nothing else is.
+    expect(existsSync(interpreter)).toBe(true);
+    expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
+    expect(existsSync(join(fixture.home, "v1", "yarn"))).toBe(false);
+    expect(existsSync(join(fixture.home, "v1", "npm"))).toBe(false);
+  });
+
+  it("253: --all takes it after warning, and a pinned stub is untouched", async () => {
+    const fixture = createFixture();
+    const interpreter = seedRuntime(fixture.home, "22.14.0");
+    seedPackageManager(fixture.home, "pnpm", "11.1.2");
+
+    const all = await run(["cache", "clean", "--all"], {
+      ...fixture,
+      registry,
+      bin: toolWithShebang(interpreter),
+    });
+
+    expect(all.exitCode).toBe(0);
+    expect(all.stdout).toContain("Removed 2 cached version(s)");
+    // Warned, and then done: `--all` is the explicit "yes, everything".
+    expect(all.stderr).toContain("Removing node@22.14.0");
+    expect(all.stderr).toContain("jup enable");
+    expect(existsSync(join(fixture.home, "v1"))).toBe(false);
+
+    // The other half of the row: a stub whose interpreter is outside `<home>` —
+    // the only state §15.43 now produces — behaves exactly as §15.35l fixed it,
+    // with nothing added to either stream.
+    const pinned = createFixture();
+    seedPackageManager(pinned.home, "pnpm", "11.1.2");
+    seedPackageManager(pinned.home, "yarn", "1.22.4");
+
+    const clean = await run(["cache", "clean"], {
+      ...pinned,
+      registry,
+      bin: toolWithShebang(process.execPath),
+    });
+
+    expect(clean.exitCode).toBe(0);
+    expect(clean.stdout).toBe(`Removed 2 cached version(s) from ${join(pinned.home, "v1")}\n`);
+    expect(clean.stderr).toBe("");
+    expect(existsSync(join(pinned.home, "v1"))).toBe(false);
   });
 });

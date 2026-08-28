@@ -14,9 +14,9 @@
  *   {@link setLastKnownGood}.
  */
 
-import { createReadStream } from "node:fs";
-import { rm } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve as resolvePath } from "node:path";
+import { createReadStream, realpathSync } from "node:fs";
+import { readdir, rm } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve as resolvePath, sep } from "node:path";
 import { Readable } from "node:stream";
 import { ENV, writeEnv } from "../config/env-vars.ts";
 import {
@@ -47,6 +47,7 @@ import {
   createTempDir,
   getHomeFolder,
   getInstallFolder,
+  isInsideHome,
   listInstalled,
   MARKER_NAME,
   promote,
@@ -830,16 +831,64 @@ export async function cmdCache(args: string[]): Promise<number> {
   // The count is taken *before* the removal, because afterwards there is nothing
   // left to count.
   const all = hasFlag(parsed, "--all");
-  const removed = listInstalled().length;
+  const installed = listInstalled();
+
+  // §15.44 — the backstop for §15.43. An install shimmed by an older build, or
+  // by any route that did not go through §15.43's guard, has an interpreter path
+  // baked into its shims that points *into* this cache; removing it leaves every
+  // shim dying with `bad interpreter` and `enable`, the repair, unreachable
+  // behind the broken `node` shim. So the version holding it is spared.
+  //
+  // The lookup is skipped when there is nothing installed, which is both the
+  // no-op case and the second `cache clean` in a row: nothing can be spared out
+  // of an empty store, so the read of the stub — and the import of the shim
+  // module that does it — is not paid for. That skip cannot hide the state this
+  // guards against, because a runtime `enable` could bake in was installed by
+  // this tool and therefore carries a marker. On the ordinary install, where
+  // §15.43 has already put the interpreter outside `<home>`, the lookup costs
+  // one open of a file whose first line answers, and nothing more.
+  const pinned = installed.length === 0 ? undefined : await interpreterInStore();
 
   if (!all) {
-    cacheClean();
+    // Nothing pinned is the overwhelmingly common case, and it takes the
+    // unchanged single-`rm` path with the unchanged single line of output
+    // (§15.35l).
+    if (pinned === undefined) {
+      cacheClean();
+      out(
+        `${installed.length === 0 ? messages.nothingToRemove() : messages.removedFromCache(installed.length, getInstallFolder())}\n`,
+      );
+      return 0;
+    }
+
+    const { name, version } = pinned.installed;
+    await cleanSparing(pinned.installed);
+    process.stderr.write(
+      `${messages.interpreterKept(name, version, pinned.interpreter, getHomeFolder())}\n`,
+    );
+    // Counted by exclusion rather than as `length - 1`: the spared directory is
+    // not necessarily one of the versions `listInstalled` counts (§07.2 wants a
+    // marker), and the number printed has to be the number actually removed.
+    const removed = installed.filter(
+      (entry) => entry.name !== name || entry.version !== version,
+    ).length;
     out(
       `${removed === 0 ? messages.nothingToRemove() : messages.removedFromCache(removed, getInstallFolder())}\n`,
     );
     return 0;
   }
 
+  // §15.44 — `--all` is the explicit "yes, everything", so it does remove the
+  // interpreter. It says so first: the shims are about to stop working, and a
+  // user who reads it after the fact has already lost the `jup` that would tell
+  // them why.
+  if (pinned !== undefined) {
+    process.stderr.write(
+      `${messages.interpreterRemoved(pinned.installed.name, pinned.installed.version, pinned.interpreter, getHomeFolder())}\n`,
+    );
+  }
+
+  const removed = installed.length;
   const defaults = Object.keys(readLastKnownGood()).length;
   cacheClean({ all: true });
 
@@ -851,6 +900,95 @@ export async function cmdCache(args: string[]): Promise<number> {
     }\n`,
   );
   return 0;
+}
+
+/**
+ * §15.44 — the interpreter the installed shims run under, when it lives in this
+ * cache, together with the version directory holding it.
+ *
+ * `undefined` covers every ordinary install: no shims, a relocatable
+ * `#!/usr/bin/env node`, or — since §15.43 — an interpreter deliberately pinned
+ * outside `<home>`. The shim module is imported lazily because that is the only
+ * thing `cache` needs from it, and §09.7 is not worth ~40 kB of shim machinery
+ * on the runs that have nothing to protect.
+ */
+async function interpreterInStore(): Promise<
+  { interpreter: string; installed: { name: string; version: string } } | undefined
+> {
+  const { bakedInterpreter } = await import("./shims.ts");
+  const interpreter = await bakedInterpreter();
+  // §15.43's boundary test answers the question first, and it is the same one
+  // `enable` refuses on, so the two halves cannot disagree about what "inside"
+  // means: `~/.cache/jup` does not contain `~/.cache/jupiter`.
+  if (interpreter === undefined || !isInsideHome(interpreter)) return undefined;
+
+  const installed = storeVersionOf(interpreter);
+  return installed === undefined ? undefined : { interpreter, installed };
+}
+
+/**
+ * §15.44 — the `<name>/<version>` pair whose install directory holds `file`.
+ *
+ * The pair rather than the path, because {@link cleanSparing} walks its own
+ * spelling of the install folder and two spellings of one directory — a
+ * symlinked `<home>`, a trailing separator — would never compare equal. Joining
+ * the segments there cannot disagree with what the walk is looking at.
+ *
+ * Depth is the whole test: `<install>/node/22.14.0/bin/node` is three segments
+ * or more below the install folder, while `<install>/node/22.14.0` itself is a
+ * version directory rather than a file *in* one, and something directly under
+ * `<install>` belongs to no version at all.
+ *
+ * It lives here rather than in `cache/store.ts` for the reason §16.3 gives: the
+ * only caller is a management command, and the store module is in the warm
+ * chunk a `yarn --version` parses in full.
+ */
+function storeVersionOf(file: string): { name: string; version: string } | undefined {
+  let installFolder = getInstallFolder();
+  try {
+    installFolder = realpathSync(installFolder);
+  } catch {
+    // Not created yet: the literal spelling is the best there is, and nothing
+    // is inside a directory that does not exist.
+  }
+
+  const segments = relative(installFolder, file).split(sep);
+  const [name, version] = segments;
+  if (segments.length < 3 || name === undefined || version === undefined) return undefined;
+  // `..` is the escape `relative` reports, and a `.` prefix is a marker or one
+  // of §07.5's temp folders — neither is a cached version (§07.2).
+  if (name.startsWith(".") || version.startsWith(".")) return undefined;
+  return { name, version };
+}
+
+/**
+ * §15.44 — `cacheClean()`, minus one version directory.
+ *
+ * Per-entry rather than one `rm -rf`, because `<install>` and
+ * `<install>/<name>` both have to survive for the spared version to. Everything
+ * else goes, other versions of the same tool and §07.5's temp folders included:
+ * sparing one directory is not a licence to keep anything else.
+ */
+async function cleanSparing(spare: { name: string; version: string }): Promise<void> {
+  const installFolder = getInstallFolder();
+  const keep = join(installFolder, spare.name, spare.version);
+
+  const entries = await readdir(installFolder).catch(() => []);
+  await Promise.all(
+    entries.map(async (name) => {
+      const toolFolder = join(installFolder, name);
+      if (name !== spare.name) return rm(toolFolder, { recursive: true, force: true });
+
+      const versions = await readdir(toolFolder).catch(() => []);
+      await Promise.all(
+        versions
+          .map((version) => join(toolFolder, version))
+          .filter((versionFolder) => versionFolder !== keep)
+          .map((versionFolder) => rm(versionFolder, { recursive: true, force: true })),
+      );
+      return undefined;
+    }),
+  );
 }
 
 /* -------------------------------------------------------------------------- */
