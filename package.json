@@ -38,7 +38,7 @@
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
     "prepack": "pnpm build",
-    "release": "pnpm test && pnpm build && changelogen --release && npm publish && git push --follow-tags",
+    "release": "pnpm test && pnpm build && changelogen --release && pnpm publish && git push --follow-tags",
     "test": "pnpm lint && pnpm typecheck && vitest run --coverage",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test:corepack": "JUP_COREPACK_COMPAT=1 vitest run --config test/corepack/vitest.config.ts"
