@@ -5,10 +5,10 @@ This is the complete surface. Anything not here is out of scope (§01.7).
 ```
 <tool> <binary>[@<version>] [...args]     proxy mode (§01.2)
 
-<tool> cache clean
-<tool> cache clear
-<tool> disable [--install-directory <path>] [...name]
-<tool> enable  [--install-directory <path>] [...name]
+<tool> cache clean [--all]
+<tool> cache clear [--all]
+<tool> disable [--install-directory <path>|--system] [...name]
+<tool> enable  [--install-directory <path>|--system] [--force] [--exclude npm] [...name]
 <tool> install
 <tool> install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 <tool> pack [--json] [-o|--output <path>] [...name[@<version>]]
@@ -50,8 +50,8 @@ Note `lookup.range ?? lookup.getSpec()` — when `devEngines.packageManager.vers
 present it is preferred over the exact `packageManager` pin. This is what makes
 `jup up` follow a declared range across majors (§09.4).
 
-(The messages say "to pack" in all four commands. That is a copy-paste artefact in
-the reference implementation, but it is test-asserted; see §14.14.)
+The exact messages retain the words `to pack`; §12 and conformance tests are
+authoritative.
 
 ## 9.2 `install`
 
@@ -111,13 +111,13 @@ ensureInstalled(highest)
 writePin(highest)  and run the package manager's `use` command (§09.5)
 ```
 
-§15.23 amends this for a **declared range**: when the pin the project declares
+For a **declared range**, when the pin the project declares
 holds one — in `packageManager`, or in `devEngines.packageManager.version` where
-there is no top-level field (§15.26: one logical pin) — `up` refreshes the recorded
+there is no top-level field — `up` refreshes the recorded
 resolution in `jup.lock` and leaves that field alone — the range is the user's statement of intent, and there is no second,
 major-confining resolve, because a range already says how far the user will move. A
 dist-tag pin is still refused by the error above, and `COREPACK_FROZEN_LOCKFILE=1`
-turns the refresh into a hard error (§15.23).
+turns the refresh into a hard error.
 
 The two-step resolve is what confines the update to the current major line. But note
 the interaction with §09.1: if `devEngines.packageManager.version` declares a range
@@ -154,10 +154,10 @@ install` prints. If `commands.use` is absent the command returns 0 immediately a
 writing the pin — which is every `use` of a runtime (§02.3), so `jup use node@22`
 writes `devEngines.runtime` (§03.7) and stops there.
 
-§15.23 amends this too: when the pattern names a **semver range** — typed, so neither
+When the pattern names a **semver range** — typed, so neither
 a bare `jup use pnpm` nor a dist-tag counts — the range goes into the field as written
 and the version it resolved to is recorded in `jup.lock` beside the manifest. Both
-paths are printed (§15.27), the digest goes to the recorded file rather than the field,
+paths are printed, the digest goes to the recorded file rather than the field,
 and `COREPACK_FROZEN_LOCKFILE=1` refuses the command *before* it resolves. Every other
 pattern pins exactly, as below.
 
@@ -170,10 +170,9 @@ Notable behaviours, all test-asserted:
 * If the project root is an ancestor of `cwd`, the **ancestor's** manifest is updated.
 * The written pin always carries a `sha512` hash computed from the actual downloaded
   bytes, regardless of what algorithm the input pattern used.
-* Only the top-level `packageManager` field is written, even when
-  `devEngines.packageManager` exists — which can *create* the mismatch §03.3 then
-  refuses to read. **§15.26 requires every field encoding the pin to be updated
-  atomically**, and §15.27 requires the modified path to be printed.
+* Update every existing field that encodes the package-manager pin atomically and
+  print each modified path. Do not create a top-level field that conflicts with an
+  existing `devEngines.packageManager` declaration.
 * A `devEngines` mismatch surfaces here through `writePin`'s check, which routes
   through `onFail` (§03.7). With the default `onFail`, the banner has *already* been
   printed to stdout, so the failure output is:
@@ -209,39 +208,19 @@ you pack what you intend to run.
 
 ## 9.7 `cache clean` / `cache clear`
 
-`rm -rf <home>/v1`, forced. No output. Both spellings are the same command (§07.9).
-
-> **§15.35l requires output here** — a command that deletes things silently gives the
-> user no way to tell a successful clean from a no-op.
-
-> **§15.44 spares one directory.** When the interpreter baked into the installed
-> shims lies inside `<home>/v1`, `cache clean` keeps the version directory holding
-> it and removes everything else, reporting what it kept on stderr. `--all` removes
-> it too, warning first. §15.43 stops `enable` from producing that state; this is
-> the backstop for the installs that already have.
+Both aliases use the cache-clean behavior and exact output defined in §07.9.
 
 ## 9.8 `enable` / `disable`
 
-See §10. Summary of the CLI contract:
+Syntax:
 
 ```
-enable  [--install-directory <path>] [...name]
-disable [--install-directory <path>] [...name]
+enable  [--install-directory <path> | --system] [--force] [--exclude npm] [...name]
+disable [--install-directory <path> | --system] [...name]
 ```
 
-> §15.13 point 8 adds `--system` to both, which names the machine-wide directory
-> (`/usr/local/bin`; `%ProgramData%\jup\bin` on Windows) instead of a per-user one.
-> It is mutually exclusive with `--install-directory`, and it is the one named
-> directory `enable` never falls back out of.
-
-* With no names, the target set is **every supported tool except `npm`**, minus the
-  `shimByDefault: false` opt-outs — which is every runtime (§02.3, §10.5).
-* Each name is validated: `Invalid package manager name '<name>'` for anything not in
-  the supported set. The message keeps its wording for byte compatibility (§14.24);
-  the set it validates against is the whole table.
-* Each name expands to all of its binary names across all range entries
-  (`yarn` → `yarn`, `yarnpkg`).
-* Both commands are idempotent and both exit 0 with empty stdout/stderr on success.
+§10 defines directory selection, validation, target expansion, ownership,
+replacement, restoration, output, and idempotency.
 
 ## 9.9 `--version`, `--help`
 

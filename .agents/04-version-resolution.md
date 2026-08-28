@@ -20,7 +20,7 @@ Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}
 
  3. If range is neither a valid exact version nor a valid semver range → it is a TAG:
         if !allowTags → UsageError `Packages managers can't be referenced via tags in this context`
-        if definition.tags has own property `range` →                     (§15.42)
+        if definition.tags has own property `range` →
             range := definition.tags[range]   # compiled-in, NO request, no age cap
         else:
             registry := registry of the LAST range entry in the definition   (§02.3)
@@ -28,50 +28,24 @@ Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}
             if !(range in tags) → UsageError `Tag not found (<range>)`
             range := tags[range]        # now an exact version
 
- 4. Cache probe:  cached := findInstalledVersion(store, {name, range})
-        if cached !== null and useCache → Locator { name, reference: cached }   ← FAST PATH
+ 4. If range is exact:
+        if useCache, probe its one marker path; return the cached reference if valid
+        otherwise return Locator {name, reference: range}
 
- 5. If range is now a valid exact version → Locator { name, reference: range }
+ 5. If useCache, find the highest installed version satisfying the range and return it.
 
- 6. Range query:                                                        [NETWORK]
-        for each (rangeKey, spec) in definition.ranges, IN PARALLEL:
-            versions := fetchAvailableVersions(spec.registry)
-            keep those satisfying `range` under prerelease-tolerant satisfaction (§4.2)
-        candidates := dedup(flatten(all))
-        sort descending by semver
-        → candidates.length ? Locator { name, reference: candidates[0] } : null
+ 6. Query every range band in parallel and union versions satisfying the requested
+    range under §4.2 band semantics. Unless `JUP_ENABLE_PRERELEASES=1`, exclude
+    prereleases not named explicitly. Apply `JUP_MINIMUM_RELEASE_AGE` to implicit
+    candidates; exact pins and compiled-in tags are exempt. Sort descending and
+    return the highest candidate, or null.
 ```
 
-Notes a re-implementation MUST get right:
-
-* **A table `tags` entry is answered first, and without a request.** §15.42's
-  compiled-in dist-tags are consulted before the registry and are not subject to
-  §15.35e's minimum-release-age gate: the value is this table choosing, exactly as
-  `default` is, rather than the registry choosing on the user's behalf. Ownership
-  must be checked (`Object.hasOwn`) — `node@constructor` is a tag as far as step 3
-  is concerned, and an inherited property is not an answer.
-* **Otherwise step 3 uses the *last* range entry's registry, not a per-version one.**
-  Tags are a property of the newest distribution channel. For Yarn this means
-  `@yarnpkg/cli-dist`'s dist-tags, so `yarn@latest` resolves to a Berry version even
-  though `yarn@1.22.22` would come from the `yarn` package. Before §15.41 the two
-  bands differed in *protocol* as well, the last being `https://repo.yarnpkg.com/tags`.
-* **Step 5 returns an exact version without verifying it exists.** A typo'd or
-  yanked version therefore surfaces much later, as a bare
-  `Server answered with HTTP 404` naming a tarball URL the user never typed.
-  §15.35j requires that 404 to be reported as a nonexistent version.
-* **Step 4 comes *before* step 5.** So an exact-version descriptor still probes the
-  cache first — but since steps 4 and 5 would return the same reference for an exact
-  version, the cache probe is pure overhead there. See §14.1.
-* **Step 6 queries every range band in parallel** and unions the results, because a
-  range like `>=1` legitimately spans Yarn Classic (the `yarn` package) and Yarn
-  Berry (`@yarnpkg/cli-dist`).
-* **Step 6 leaks prereleases — see §15.24.** Because the filter uses
-  `satisfiesWithPrereleases`, which strips the prerelease tag before testing, a
-  published `11.0.0-dev.1005` satisfies `*` and then sorts above every stable release.
-  So `jup use pnpm` installs a dev build whenever one is the semver maximum.
-  §15.24 requires prereleases to be excluded from *implicit* resolution.
-* `useCache: false` is used by `use` and `up` so that "give me the latest" actually
-  consults the registry rather than returning whatever is already installed.
+A compiled-in tag is checked with an own-property test and uses no network or age
+filter. Other tags use the registry of the last range band. Range queries span every
+band because one requested range may cross package channels. `useCache: false` is
+used by `use` and `up`. If artifact download returns 404 for an exact version, report
+`<name>@<version> does not exist in <registry>. Run 'jup info' to see the resolved spec and where it came from.`
 
 ## 4.2 The semver subset
 
@@ -118,10 +92,9 @@ satisfiesWithPrereleases(version, range, loose = false):
         }))
 ```
 
-i.e. **strip the prerelease tag from both sides, then test normally**. Note this is
-*not* the same as semver's `includePrerelease` flag, whose behaviour corepack
-explicitly rejected (see `yarnpkg/berry#575`). Build metadata is ignored throughout,
-per semver, so `4.1.0+sha224.abc` compares equal to `4.1.0`.
+That is: **strip the prerelease tag from both sides, then test normally**. This is
+not semver's `includePrerelease` behavior. Build metadata is ignored throughout, per
+semver, so `4.1.0+sha224.abc` compares equal to `4.1.0`.
 
 Returns `false` — never throws — on any malformed input.
 
@@ -144,16 +117,11 @@ for each entry name E in dir:
 return best
 ```
 
-Three things to preserve:
-
-* Dot-entries are skipped (macOS `.DS_Store`).
-* The comparison is `maxSV?.compare(name) !== 1`, i.e. **accept when the candidate is
-  greater than *or equal to* the current best** — ties keep the later directory entry.
-  Immaterial in practice (names are unique) but harmless to mirror.
-* This uses **strict** `range.test`, not `satisfiesWithPrereleases`. A directory named
-  `4.0.0-rc.1` therefore will **not** satisfy a `>=2.0.0` probe, and the tool falls
-  through to the registry. See §14.2 — this is an inconsistency worth fixing, since it
-  makes prerelease installs re-hit the network on every run.
+Dot-entries such as `.DS_Store` are skipped. The comparison accepts a candidate
+that is greater than or equal to the current best, so an equal candidate replaces
+the earlier directory entry. The probe uses prerelease-tolerant range matching, so
+an installed prerelease that satisfies the requested range is returned without a
+registry request.
 
 ## 4.4 The last-known-good file
 
@@ -176,10 +144,10 @@ map. It is the *global* default: the version used when a project has no spec.
 `JSON.stringify(lkg, null, 2) + "\n"` in UTF-8. Not atomic. Writes are skipped
 entirely when the value is unchanged.
 
-> **Divergence (§14.3):** the write is a plain non-atomic `writeFile`, so two
+> **Requirement:** the write is a plain non-atomic `writeFile`, so two
 > concurrent processes can interleave and produce a truncated file. Because reads
 > tolerate corruption by returning `{}`, the failure is silent-but-degrading (the
-> global default is lost). This spec requires a **write-temp-then-rename** here.
+> global default is lost). Use **write-temp-then-rename** here.
 
 ## 4.5 Default version selection
 
@@ -189,8 +157,6 @@ usable spec:
 ```
 1. lkg := readLastKnownGood()
    if lkg has an entry for this package manager → return it              [NO NETWORK]
-      (§15.28 — for a per-host entry, drop any build suffix first and
-       rewrite the file best-effort; still no network)
 
 2. if COREPACK_DEFAULT_TO_LATEST === "0" → return definition.default     [NO NETWORK]
       (the compiled-in, hash-pinned version)
@@ -210,7 +176,7 @@ without a project spec.
   a hash-bearing reference:
   * if `dist.integrity` is present → `` `${version}+sha512.${hex(base64decode(integrity.slice(7)))}` ``
   * else (legacy registries) → `` `${version}+sha1.${dist.shasum}` ``
-* **npm, per-host entry (§15.28)** — `GET` as above, but return the **bare
+* **npm, per-host entry** — `GET` as above, but return the **bare
   `version`**, attaching no hash and consulting no `dist`. A per-host entry's
   `fetchLatestFrom` names its *launcher* package (§02.4), so everything in `dist`
   here describes a tarball that is never downloaded; pinning it makes §06.1 row 1
@@ -221,14 +187,7 @@ without a project spec.
 * **url** — `GET spec.url`, return `data[spec.fields.tags].stable`. Note **`stable`**,
   not `latest`. No hash is attached on this path.
 
-On any failure in the npm path the error is re-thrown wrapped, verbatim:
-
-> `Corepack cannot download the latest stable version of <packageName>; you can disable signature verification by setting COREPACK_INTEGRITY_KEYS to 0 in your env, or instruct Corepack to use the latest stable release known by this version of Corepack by setting COREPACK_DEFAULT_TO_LATEST to 0`
-
-(Both env var names in that message are load-bearing — the test suite asserts they
-are exactly `COREPACK_INTEGRITY_KEYS` and `COREPACK_DEFAULT_TO_LATEST`, and asserts
-that the never-existing names `COREPACK_INTEGRITY_CHECK` / `COREPACK_USE_LATEST` do
-**not** appear.)
+On failure in the npm path, rethrow with the exact jup message in §12.6.
 
 ### Fallback reference for transparent commands
 
@@ -236,12 +195,8 @@ When the invocation is a transparent command (§01.4) and the definition declare
 `transparent.default`, that literal string is the fallback reference and
 `getDefaultVersion` is **not** consulted at all — no LKG read, no network.
 
-> **Defect — see §15.33.** The expression is
-> `definition.transparent.default ?? defaultVersion`, so a compile-time constant
-> unconditionally outranks the user's own recorded default. After
-> `corepack install -g yarn@4.9.0`, `yarn dlx` still runs the table's pinned version,
-> with no way to override. §15.33 makes `transparent.default` a floor rather than an
-> override.
+`transparent.default` is a floor, not an override: a newer compatible user-recorded
+default wins.
 
 ## 4.6 CLI version override
 

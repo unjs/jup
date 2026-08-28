@@ -15,11 +15,8 @@ if binPath is unset:
     → Error `Assertion failed: Unable to locate path for bin '<binName>'`
 ```
 
-Corepack has a second branch here, for a `bin` declared as a **list** of names: it
-takes the basename of `spec.url`'s path when that path ends in `.js`, so a run needs
-the download URL as well as the install location. §15.41 leaves no band declaring a
-list and §02.4 leaves jup no such form, so the branch and the URL it needed are both
-gone — `resolveBinPath` takes the location and the `bin`, and nothing more.
+`bin` follows the single `BinSpec` map rule in §02.4; `resolveBinPath` needs only the
+install location and that map.
 
 `installSpec.bin` is the marker's own `bin`, which §07.7 always records. The `??`
 stands in for a marker jup did not write: §07.10 promotes markers out of an archive
@@ -30,10 +27,9 @@ rather than a type error.
 naively, do not normalise away the possibility that they escape (they come from a
 downloaded `package.json` in the untrusted-tarball case).
 
-> **Divergence (§14.13):** when `bin` comes from an extracted `package.json` rather
-> than the embedded table, `bin[binName]` is attacker-controlled. A conforming
-> implementation MUST resolve it and verify the result stays inside `<location>`,
-> erroring otherwise. Corepack does not check this.
+> **Requirement:** when `bin` comes from an extracted `package.json` rather
+> than the embedded table, `bin[binName]` is attacker-controlled. Resolve it and
+> verify the result stays inside `<location>`, erroring otherwise.
 
 ## 8.2 The reference execution model: in-process
 
@@ -61,15 +57,6 @@ Why each line exists:
 
 This model is why the observable exit-code semantics in §8.4 are what they are.
 
-### Compile cache
-
-If the runtime exposes a module compile cache, it is enabled — except for
-`npm >= 9.7.0`, where the older userland compile-cache package segfaulted. The guard
-is `locator.name !== "npm" || semverLt(locator.reference, "9.7.0")`.
-
-This is a Node-specific performance detail with **no observable contract**. A
-re-implementation ignores it.
-
 ## 8.3 The execution model for a native implementation
 
 A native implementation cannot load a JavaScript module into itself. It **MUST**
@@ -79,22 +66,22 @@ specified precisely.
 
 ### 8.3.1 Choosing the interpreter
 
-> §15.28 — this whole step is **skipped** for a band declaring `"exec": "native"`.
+> this whole step is **skipped** for a band declaring `"exec": "native"`.
 > Its `bin` targets are real executables and are run directly, which makes a native
 > package manager the *cheaper* handover, not the more expensive one. On that path
 > `argv[0]` is the binary name the user invoked rather than the artifact's path; see
-> §15.28 for why (`bunx` and `bun` are one file).
+> §02.4 for the shared-path `BinSpec` rule (`bunx` and `bun` are one file).
 
 The package manager entry points are JavaScript. The tool must locate a JavaScript
 runtime:
 
-1. If `COREPACK_NODE_EXECPATH` is set, use it. *(New in this spec — see §11.)*
+1. If `COREPACK_NODE_EXECPATH` is set, use it. *(Additional settings — see §11.)*
 2. Otherwise search `PATH` for `node`.
 3. If not found → error:
    `Unable to locate a Node.js runtime to execute <binName>; set COREPACK_NODE_EXECPATH to point at one`
 
-A tool distributed *alongside* a runtime (the way corepack ships inside Node) SHOULD
-prefer the sibling runtime binary before consulting `PATH`.
+A tool distributed alongside a runtime SHOULD prefer the sibling runtime binary
+before consulting `PATH`.
 
 ### 8.3.2 Spawning
 
@@ -135,7 +122,7 @@ Requirements:
 
 ## 8.4 Exit codes
 
-The contract, verified by the conformance suite:
+Required exit behavior, verified by the conformance suite:
 
 | Package manager does | Tool exits with |
 |---|---|
@@ -145,9 +132,8 @@ The contract, verified by the conformance suite:
 | exits normally | **0** |
 | is killed by signal N | killed by signal N (POSIX), or `128+N` if the runtime cannot re-raise |
 
-The second row is the runtime's own rule — an uncaught exception resets the pending
-exit code to 1 — and the tool must **not** override it. Corepack's changelog records
-a bug where it did (`don't override process.exitCode`, 0.18.1).
+An uncaught exception resets the pending exit code to 1; the tool MUST NOT override
+that runtime behavior.
 
 For the tool's **own** errors:
 
@@ -183,29 +169,28 @@ With the `exec` model, none of this applies — the kernel does it.
 
 ## 8.6 stdin
 
-stdin MUST be passed through untouched. Two cases matter:
+stdin MUST be passed through untouched, including for:
 
 * Package managers read stdin for prompts (`npm init`, `yarn init`).
 * Package managers are frequently used in pipelines (`echo … | npm publish`).
 
-The one place the tool itself reads stdin is the download prompt (§05.5), which
+The tool itself reads stdin only for the download prompt (§05.5), which
 happens strictly *before* handover and only when stdin is a TTY. A conforming
 implementation MUST NOT consume buffered stdin bytes it did not need — read exactly
 one chunk, and only under the TTY condition.
 
 ## 8.7 Environment passed to the package manager
 
-Only one variable is added: `COREPACK_ROOT`, set to the directory containing the
-tool's own manifest/installation root. Package managers use it purely as a "am I
+Add `COREPACK_ROOT`, set to the directory containing the tool's own
+manifest/installation root. Package managers use it purely as an "am I
 running under a version manager?" flag.
 
 Additionally, during `use`/`up` only, `COREPACK_MIGRATE_FROM` is set to the previous
 `packageManager` value (or the literal `unknown`) before running the package
 manager's install command (§09.5).
 
-`PATH` is **not** modified, so a script the package manager spawns may resolve a
-*different* copy of that package manager, or none at all. **§15.32 requires prepending
-the resolved package manager's directory to `PATH`** in the child environment.
+Prepend the resolved package manager's directory to `PATH` in the child environment,
+so scripts it spawns resolve the same package manager.
 
 Variables the tool consumed for its own configuration are **not** stripped — the
 package manager sees the full ambient environment, including any values that came

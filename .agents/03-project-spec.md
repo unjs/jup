@@ -8,61 +8,31 @@ Which manifest field carries the answer depends on the tool's `kind` (§02.3):
 `devEngines.runtime` for a runtime. Everything else in this file — the walk, the env
 file, the parse, the reconciliation — is one code path over both.
 
-A tool whose table entry declares a `versionFile` (§02.3, §15.40) has one more place
-to look, and it is the last one: the manifest is asked first, and the version file
-answers only where the manifest said nothing about that tool.
+A tool whose table entry declares a `versionFile` (§02.3) also checks that file.
+A manifest wins; the version file answers only when no manifest field names
+that tool.
 
 ## 3.1 The upward walk
 
 Starting at `cwd`, walk toward the filesystem root. At each directory `d`:
 
-1. **Skip** `d` entirely (for manifest purposes) if `d` matches
-   `/[\\/]node_modules[\\/](@[^\\/]*[\\/])?([^@\\/][^\\/]*)$/` — i.e. `d` is a
-   package directory *inside* a `node_modules`. This prevents a dependency's own
-   `packageManager` field from hijacking the host project. Note the regex matches
-   only the *last* segment pair, so `…/node_modules/foo/src` is **not** skipped;
-   only `…/node_modules/foo` and `…/node_modules/@scope/foo` are.
-2. If no env file has been loaded yet and env files are enabled, attempt to load one
-   from `d` (§3.2).
-3. If the requested tool declares a `versionFile` (§02.3) and none has been recorded
-   yet, attempt to read `d/<versionFile.path>`. `ENOENT` means absent; any other I/O
-   error propagates. Only the **nearest** one is ever kept, and finding one does not
-   stop the walk. See *Version files* below.
-4. Read `d/package.json`.
-   * `ENOENT` → continue to parent.
-   * Any other I/O error → propagate.
-   * Content parses to a non-object or fails to parse → **fatal**:
-     > `Invalid package.json in <path relative to d>`
-   * Otherwise → record it as the *selection* and stop walking **iff** it has a
-     `packageManager` key.
+1. Skip a package directory directly inside `node_modules`, including scoped
+   packages. Do not skip its descendants.
+2. Load the nearest eligible env file once (§3.2).
+3. For a tool that declares `versionFile`, record the nearest such file. `ENOENT`
+   means absent; other I/O errors propagate. It does not stop the walk.
+4. Read `d/package.json`. `ENOENT` means continue; other I/O errors propagate.
+   Invalid JSON or a non-object is fatal with the message in §12.2.
+5. Stop at the nearest manifest that declares the field for the requested kind:
+   either `packageManager` or `devEngines.packageManager` for a package manager,
+   and `devEngines.runtime` for a runtime.
 
-The loop condition is `while (nextCwd !== currCwd && (!selection || !selection.data.packageManager))`.
+Stop at the filesystem root. If no manifest declares the relevant field, retain the
+outermost manifest found as the mutation target and return `NoSpec`; return
+`NoProject` only when no manifest was found. This makes stop conditions symmetric
+and keeps a nested `devEngines` declaration from being bypassed by an ancestor.
 
-> **Defect — see §15.25.** Only `packageManager` stops the walk. A nested manifest
-> declaring *only* `devEngines.packageManager` does **not**, so the walk climbs past it
-> and a parent's spec (or the global default) silently wins. §15.25 requires both
-> fields to be stop conditions; the description below records corepack's current
-> behaviour.
-
-Two consequences a re-implementation MUST reproduce:
-
-* The walk terminates at the root (when `dirname(d) === d`).
-* A `package.json` **without** `packageManager` does **not** stop the walk. The tool
-  keeps climbing, and a *later* (more distant) ancestor that does declare
-  `packageManager` wins. But the *last* manifest seen is what gets recorded — so in a
-  monorepo where `packages/app/package.json` has no `packageManager` and the root
-  does, the root is selected. If **no** ancestor declares it, the selection is the
-  outermost `package.json` found, and the result is `NoSpec` pointing at that file.
-
-> **Consequence worth knowing.** In a monorepo where neither `packages/app/package.json`
-> nor the root manifest declares `packageManager`, running from `packages/app` yields
-> `NoSpec` targeting the **root** manifest — so auto-pin (§3.6) and `jup use`
-> write the pin at the repository root, not next to the package you were standing in.
-> That is usually the right answer for a monorepo, but it is surprising and
-> undocumented. A conforming implementation MUST reproduce it, and SHOULD name the
-> file it is about to modify in the auto-pin notice.
-
-### Version files (§15.40)
+### Version files
 
 Step 3 is skipped entirely — no `stat`, no open — unless the requested tool's table
 entry declares a `versionFile`, which no package manager does. A conforming
@@ -70,7 +40,7 @@ implementation MUST:
 
 * look for it in the directories the walk visits anyway, keep the **first** (nearest)
   one found, and not let it stop the walk;
-* skip it on a **mutating** walk (§15.27). §3.7 writes the `devEngines` member and
+* skip it on a **mutating** walk. §3.7 writes the `devEngines` member and
   nothing else, so the file a command is about to edit is always the manifest, and an
   unreadable version file must not block the command that would replace it;
 * skip it wherever the manifest would also be skipped — `COREPACK_ENABLE_PROJECT_SPEC=0`
@@ -86,12 +56,11 @@ pin. Because it is a `Found`, §3.6's auto-pin does not fire: the project has al
 said what it wants.
 
 The target being the version file has one visible consequence: a version file
-carrying a **range** resolves through `jup.lock` like any other range (§15.23), and
+carrying a **range** resolves through `jup.lock` like any other range, and
 both that file and the memo in `node_modules` are looked for **beside the version
 file** — `dirname(target)`, as for a manifest. In a monorepo that is next to the
 `.nvmrc` that declared the range, not at the repository root. An exact version needs
-no lockfile and writes none; a range writes only the memo, since §15.23 leaves the
-recorded file to `use` and `up`.
+no lockfile and writes none; a range writes only the memo; only `use` and `up` write the recorded file.
 
 The contents are parsed **lazily**, exactly as `parseSpec` is: a version file that
 cannot be read must fail the request that needed it, not the walk. Both failures are
@@ -111,10 +80,8 @@ The grammar of `.nvmrc`, as nvm itself reads it (`nvm_process_nvmrc_content`):
 3. Every other non-empty line is a candidate **version**. Exactly one MUST remain; a
    file with two, or with none, is an error.
 
-> Step 2 narrows nvm's rule, which is "the line contains an `=`". That is exact for
-> nvm's vocabulary and wrong for jup's, because `>=18 <21` is a range this reader
-> accepts. The empty-key case (`=20`) stays nvm's: it is the version line, not a
-> setting, and it happens to round-trip since §04.2's grammar accepts a leading `=`.
+> A setting requires a non-empty identifier before `=`. This leaves `>=18 <21` and
+> the empty-key form `=20` as version lines accepted by §04.2.
 
 The surviving line becomes the descriptor's `range`:
 
@@ -137,7 +104,7 @@ than for tidiness:
   publishes `latest` and `v4-lts` … `v20-lts`, and the series tags stop there — so
   `lts/*` cannot be answered at all, and `lts/<codename>` would need a compiled-in
   codename-to-major table growing by one release per LTS line, which is the shape
-  §15.21 exists to refuse.
+  the accepted grammar deliberately refuses.
 * `system` asks for a node jup did not install and cannot vouch for (§06). `iojs`,
   `default` and any user-defined alias name state in someone's `$NVM_DIR`, not a
   requirement of the project.
@@ -182,15 +149,13 @@ Before reading each directory's manifest, and only until one is found:
   environment, then merge.
 * `ENOENT` → not an error, continue walking. Any other error → propagate.
 * Only the **closest** env file is loaded; once one is found, no further directories
-  are checked for env files (`!localEnv` guard). *(This is the behaviour of commit
-  `70bb9c5`/#891 "only load closest env file, for every commands".)*
+  are checked for env files (`!localEnv` guard).
 
-### Legacy name
+### Supported fallback name
 
-Corepack's spelling is `.corepack.env`, and unlike `jup.lock` (§15.23) it is a file
-that exists in real repositories today. §14.24 renames it; this is the read side of
-that rename, and it follows §11.6's rule for the variables exactly: `.jup.env` is the
-name, `.corepack.env` is still *read*, and the jup spelling wins.
+`.jup.env` is preferred and `.corepack.env` remains a supported fallback. Apply
+§11.6's variable-name rules identically to either file; when both exist in a
+directory, `.jup.env` wins.
 
 * The fallback applies **only** when `JUP_ENV_FILE`/`COREPACK_ENV_FILE` is unset. An
   explicitly configured path is used as given, with no second candidate — naming a
@@ -203,9 +168,9 @@ name, `.corepack.env` is still *read*, and the jup spelling wins.
   deprecation, and the walk is on the cold path of every run in a project that has
   no pin yet — a line printed there would be printed constantly.
 
-The cost is one extra `openat` per walked directory in the common case where neither
-file exists (§01.3, §16.1 carry the revised budgets). It is confined to the directory
-walk, which the exact-pin fast path already stops at the first manifest.
+The fallback costs one extra `openat` per walked directory when neither file exists
+(§01.3). It is confined to the directory walk, which the exact-pin fast path already
+stops at the first manifest.
 
 Variables that MUST NOT be honoured from an env file, even though they carry a
 prefix. The list is keyed by the `COREPACK_` spelling and a key MUST be
@@ -218,16 +183,9 @@ from useless:
 | `COREPACK_ENV_FILE` | Chicken-and-egg: it selects the file being read. |
 | `COREPACK_ENABLE_DOWNLOAD_PROMPT` | Its default depends on *how the tool was invoked*, which a project file must not be able to override — otherwise a repo could silently suppress the download confirmation. |
 
-> **Security note.** The env file is read from directories the tool walks, which in a
-> `cd`-into-untrusted-repo scenario is attacker-controlled. The two-prefix
-> filter is the whole sandbox. A conforming implementation MUST apply the filter
-> before merging, and MUST NOT allow the file to set proxy/registry variables that
-> carry neither prefix (`HTTP_PROXY` etc. are therefore *not* settable this
-> way — correct, and MUST be preserved).
->
-> **See §14.5** — this spec additionally recommends refusing to honour
-> `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`, `COREPACK_INTEGRITY_KEYS`, and
-> `COREPACK_NPM_TOKEN` from an env file, which corepack currently permits.
+Treat project env files as untrusted. Filter before merging and reject unprefixed
+proxy variables. Ignore and warn on every setting marked **no** in §11, after
+canonicalizing its `JUP_`/`COREPACK_` name.
 
 The merged environment replaces the process environment for the remainder of the run
 (`process.env = localEnv.env`).
@@ -280,7 +238,7 @@ anything else (incl. "warn")   → console.warn(`! jup validation warning: ${mes
 
 `<JSON x>` denotes `JSON.stringify(x)` — so strings appear quoted in the message.
 
-### Runtimes read `devEngines.runtime` (§15.39)
+### Runtimes read `devEngines.runtime`
 
 Everything above describes a **package manager** — the `kind` §02.3 gives an entry by
 default, and the only kind that existed before jup managed anything else. When the
@@ -297,7 +255,7 @@ field, and the rules collapse accordingly:
 * the result is `` `${de.name}@${de.version ?? "*"}` `` — the `pm`-absent branch,
   which is the only branch a runtime has.
 * `devEngines.runtime` absent, or naming a different tool, yields `NoSpec` for this
-  request — and that is the outcome §15.40's version file may then answer, for an
+  request — and that is the outcome a declared version file may then answer, for an
   entry that declares one. Failing that, §03.5 falls back exactly as it does for a
   package manager in an unpinned project.
 
@@ -346,7 +304,7 @@ two answers rather than a conflict.
 Note that `name` is the substring before the **first** `@`. `@scope/pkg@1.0.0` yields
 `name = ""`, which fails the supported-package-manager check.
 
-### §15.39 — a runtime is never a `packageManager` value
+### a runtime is never a `packageManager` value
 
 When the string being parsed came from a manifest's `packageManager` field, a `name`
 whose table entry declares `kind: "runtime"` (§02.3) is a UsageError:
@@ -388,14 +346,14 @@ switch (specResult.type):
               else → spec
 ```
 
-**§15.40 — a version file arrives here as a `Found`.** It is resolved during
+**a version file arrives here as a `Found`.** It is resolved during
 discovery (§3.1), not here: by the time reconciliation runs, a version file that
 spoke has already become the spec result, so this table is unchanged and the name
 mismatch it guards cannot arise (the name comes from the entry that declared the
 file). The `NoSpec` branch — and with it auto-pin — is reached only when the version
 file was absent, unreadable, or not looked for.
 
-**§15.39 — the spec being reconciled is the one for the requested tool.**
+**the spec being reconciled is the one for the requested tool.**
 `specResult` is what §03.1 and §03.3 produced *for this request*: the
 `packageManager` / `devEngines.packageManager` pair when the requested name is a
 package manager, `devEngines.runtime` when it is a runtime. A project's
@@ -411,14 +369,13 @@ Then, unconditionally: **if `binaryVersion` was given on the CLI, it overwrites
 project pinned to Yarn 4 — but note that the *name* still has to match, so
 `jup pnpm@9 install` in a Yarn project still errors.
 
-> `COREPACK_ENABLE_STRICT=0` "treats it like transparent" (changelog 0.15.0): the
-> effect is that using a *different* package manager than the project's falls back to
+> With `COREPACK_ENABLE_STRICT=0`, using a *different* package manager than the project's falls back to
 > the system-wide default version of that other package manager, while using the
 > project's *own* package manager still honours the pinned version.
 
 ## 3.6 Auto-pin (`COREPACK_ENABLE_AUTO_PIN=1`)
 
-Only in the `NoSpec` case, only in proxy mode, and — per §15.39 — only for a package
+Only in the `NoSpec` case, only in proxy mode, and — per only for a package
 manager. Its notice is verbatim about the `packageManager` field, and writing a
 runtime into a project nobody asked to pin a runtime in is a larger claim than
 recording which package manager a project already uses.
@@ -437,12 +394,11 @@ recording which package manager a project already uses.
 
 `setLocalPackageManager(cwd, info)`:
 
-For a `kind: "runtime"` locator (§15.39) the steps below read `devEngines.runtime` in
+For a `kind: "runtime"` locator the steps below read `devEngines.runtime` in
 place of the `packageManager` field: step 2's check and step 6's `previousPackageManager`
 come from that member, and step 7 sets `devEngines.runtime.version` to the resolved
 `reference` — creating the member if absent — instead of a top-level field. Nothing
-else changes; in particular §15.26's "update every field that encodes the pin" has
-only ever one field to update for a runtime.
+else changes; a runtime pin is stored only in `devEngines.runtime`.
 
 1. Re-run the discovery walk from `cwd`.
 2. If a `devEngines.packageManager.version` range was found, check the version being
@@ -462,12 +418,10 @@ only ever one field to update for a runtime.
    CRLF strictly outnumbers LF use `\r\n`, else `\n`. If the original had no newlines
    at all, use the platform EOL.
 9. Write to `lookup.target`. In the `NoProject` case that path is
-   `<cwd>/package.json`, so an empty directory gets a new manifest created — this is
-   required behaviour (changelog 0.24.1).
+   `<cwd>/package.json`, so an empty directory gets a new manifest.
 
 Returns `{previousPackageManager}`, which the caller exports as
 `COREPACK_MIGRATE_FROM` before running the package manager's `use` command (§09.5).
 
-> **Note.** The BOM is stripped for parsing but **not** re-emitted. A file that had a
-> BOM loses it. This spec keeps that behaviour for byte-compatibility but flags it in
-> §14.7 as a candidate fix.
+> **Note.** The BOM is stripped for parsing and is not re-emitted, so a file that had
+> a BOM loses it.

@@ -14,20 +14,11 @@ homeFolder :=
 installFolder := join(homeFolder, "v1")
 ```
 
-Note the order: `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA`, which is a
-quirk of Corepack's fallback chain rather than design. It is kept because nothing
-recommends changing it, not for compatibility — the last segment is `jup`, so a
-Corepack cache under `node/corepack` is never read either way (§14.24). §15.13
-point 5 narrows the other half of the chain: `LOCALAPPDATA` is consulted **only on
-Windows**, where Corepack reads it on POSIX too.
+Apply the fallback order shown above, but consult `LOCALAPPDATA` only on Windows.
+The store root ends in `jup`; there is no `node/` segment.
 
-There is no `node/` segment. Corepack has one because it ships inside Node; jup
-does not, and the store holds package managers rather than anything Node owns.
-
-`v1` is a layout-version segment. Incrementing it abandons old caches wholesale
-rather than migrating them. Keep this mechanism — it is the cheapest possible
-migration story, and the move off `node/corepack` is that mechanism applied to the
-root instead of the segment below it.
+`v1` is a layout-version segment. Incrementing it abandons incompatible caches
+rather than migrating them.
 
 ## 7.2 Layout
 
@@ -48,8 +39,7 @@ root instead of the segment below it.
             ├── .jup
             ├── package.json
             └── bin/
-                └── yarn.js          # @yarnpkg/cli-dist, an ordinary tarball
-                                     # (a lone yarn.js here, before §15.41)
+                └── yarn.js          # @yarnpkg/cli-dist
 ```
 
 The version directory name is the **plain semver version with the build suffix
@@ -104,15 +94,12 @@ A marker that fails either check **MUST** be treated exactly as a missing one �
 over. A marker that is not parseable JSON still propagates: that is a broken
 install, not an untrusted one.
 
-#### Pin-qualified directories (§15.11)
+#### Pin-qualified directories
 
 The directory name is the plain semver version, so `pnpm@9.0.0+sha512.<A>` and
-`pnpm@9.0.0+sha512.<B>` name one directory and the second reference would silently
-get whatever the first installed. Corepack behaves the same way — the marker's hash
-is *re-attached* to the locator (§07.6 step 3), never compared against it — which is
-the one place §15.11's tier is recorded and then not enforced. Enforcing it costs one
-string comparison against the marker already being read: no network, no store scan,
-no second file.
+`pnpm@9.0.0+sha512.<B>` would otherwise name one directory and silently reuse the
+first artifact. Compare the requested pin against the marker already being read. A
+mismatch is not a usable cache entry for that reference.
 
 When the marker does not prove the pin, the entry is not usable for *that* reference,
 and there are three possible answers: run the wrong bytes, refuse, or install the
@@ -136,23 +123,22 @@ checking the download, and it is exactly why §07.10's note below matters.
 ```
 if the locator is a supported (non-URL) package manager:
     url := spec.url with "{}" replaced by <version>
-                     and "{platform}"/"{arch}"/"{target}" resolved (§15.28)
+                     and "{platform}"/"{arch}"/"{target}" resolved
     if COREPACK_NPM_REGISTRY is set:
         registry := spec.artifactRegistry ?? spec.npmRegistry ?? spec.registry
         if registry.type === "npm":
             {tarball, signatures, integrity} := GET {registry}/{package}/{version}
             url := tarball
-        url := url with the prefix "https://registry.npmjs.org"
-                    replaced by COREPACK_NPM_REGISTRY
+        url := apply the parsed-origin override from §05.2
 else:                                    # URL reference
     url := decodeURIComponent(version)   # the encoded directory name, decoded back
-    if COREPACK_NPM_REGISTRY is set and url starts with "https://registry.npmjs.org":
-        url := url with that prefix replaced by COREPACK_NPM_REGISTRY
+    if COREPACK_NPM_REGISTRY is set:
+        url := apply the parsed-origin override from §05.2
 ```
 
 The signature/integrity data fetched here is reused by §06.3 rather than re-fetched.
 
-§15.28 — a band declaring `artifactRegistry` uses it in place of `registry` for
+a band declaring `artifactRegistry` uses it in place of `registry` for
 **everything on this path and in §06**: the tarball URL, the `dist.integrity`, and the
 signature over it. `registry` continues to answer §04's "which versions exist?". The
 two differ only when a package manager publishes a launcher package and its real
@@ -184,21 +170,11 @@ npm tarballs wrap everything in `package/`. Exactly one leading path component i
 removed from every entry, so `package/bin/yarn.js` lands at `<tmp>/bin/yarn.js`.
 Entries with no leading component are dropped.
 
-### The single-file filter — removed (§15.41)
+### Archive and direct-file handling
 
-A `.tgz` could once be filtered down to one entry, named by `registry.bin`: only the
-entry whose post-strip path matched was extracted, it was renamed to its basename,
-and the recorded hash came from **re-reading that file** rather than from the
-download stream. A missing entry was `Cannot locate '<binPath>' in downloaded
-tarball` (§12.8).
-
-It existed so Yarn Berry could arrive as a lone `yarn.js` when a custom npm registry
-served `@yarnpkg/cli-dist`. §15.41 made that package the band outright, so nothing
-sets `registry.bin`, `NpmRegistrySpec` no longer has the field, and a tarball is
-always extracted whole. The error string is gone from §12.
-
-The one remaining non-archive shape is a `.js` URL reference, whose bytes are written
-verbatim — so the hashed bytes are always the bytes as received (§06.2).
+Always extract a `.tgz` archive in full; `NpmRegistrySpec` has no file-filter field.
+A direct `.js` URL reference is written verbatim. In both cases, hash the downloaded
+bytes as received (§06.2). The authoritative `bin` shape is defined in §02.4.
 
 ### Extraction safety — NORMATIVE
 
@@ -245,7 +221,7 @@ attacker-controlled input.
    `mkdir` under the store home passes `0o755` rather than taking `mkdir`'s
    `0o777 & ~umask` default.
 
-   The mask is a ceiling, not a grant, and for a `native` band (§15.28) the
+   The mask is a ceiling, not a grant, and for a `native` band the
    ceiling alone is not enough: the implementation **MUST** additionally set
    `+x` — `mode | (0o111 & ~umask)` — on each path the resolved `bin` names,
    after §7.7 has decided what that is. `@nubjs/nub-<host>` publishes its
@@ -258,7 +234,7 @@ attacker-controlled input.
 
    * only a `native` band — a JavaScript one is loaded, not executed;
    * only the paths in the resolved `bin`, which are confined to the install by
-     §14.13 and named by the band or the package manifest, never by a tar
+     §08.1 and named by the band or package manifest, never by a tar
      header;
    * only a file whose first bytes are a **program image** — `#!`, ELF, or one
      of Mach-O's magics. This bound keeps the grant from destroying information:
@@ -291,20 +267,21 @@ gzip-compressed. No need for sparse files, no need for other compressors.
 ## 7.5 Atomic promotion
 
 ```
+targetDirectory := <installFolder>/<name>/<reference-directory>
 write tmp/.jup
-mkdir -p dirname(installFolder)
-rename tmp → installFolder
+mkdir -p dirname(targetDirectory)
+rename tmp → targetDirectory
 ```
 
-The rename is the commit point. Because `tmp` was created *inside* the install tree,
-it is guaranteed to be on the same filesystem, so the rename is atomic.
+The rename is the commit point. `tmp` is created inside the install tree on the same
+filesystem, so promotion is atomic.
 
 ### Losing the race
 
 ```
 on rename failure:
     if EEXIST or ENOTEMPTY
-       or (win32 and EPERM and installFolder is a directory):
+       or (win32 and EPERM and targetDirectory is a directory):
         # another process installed the same version first — that's fine
         rm -rf tmp
         continue as if we had won
@@ -334,10 +311,10 @@ rethrowing on the last attempt.
    `<version without build>+<algo>.<actualHexDigest>`. This is what `use`/`up`
    write into `package.json` and what makes the written pin trustworthy.
 
-   §15.28 — **not** for a per-host band (§02.4), where the digest describes this
+   **not** for a per-host band (§02.4), where the digest describes this
    machine's artifact and no other. Committed to `packageManager`, it is a pin no
    other platform can satisfy. The marker written in step 5 still records it, because
-   the store is host-local; §15.23's `jup.lock` records it keyed by host when a
+   the store is host-local; §03.7's `jup.lock` records it keyed by host when a
    `use` or an `up` runs there.
 4. Auto-bump last-known-good if applicable (§04.7).
 
@@ -356,27 +333,23 @@ else:                                     # extracted tarball
         otherwise                     → Error `Unable to locate bin in package.json`
 ```
 
-**The package's own `bin` is the source of truth** (§15.17). An entry point is a
+**The package's own `bin` is the source of truth**. An entry point is a
 property of the package, not of the tool that downloads it, and by the time this
-runs the `package.json` being read has cleared §15.11's verification tier — it is no
+runs the `package.json` being read has cleared §06.1's verification tier — it is no
 more attacker-controlled than the code about to be executed beside it. The values it
-yields MUST be confined per §14.13.
+yields MUST be confined by rule.
 
 The embedded table's `bin` is a **fallback**. It is consulted only when the package
 declares no usable `bin` at all, and only when a *declared* range band covers the
 version — the fall-forward guess §02.3 produces for an uncovered version MUST NOT
 reach the marker.
 
-**The single-file branch no longer consults the table at all.** Since §15.41 no band
-produces a single file, so the branch is reached only by a URL reference naming a
-`.js` (§04.1 step 1), which carries no version and is therefore never banded. The
-marker records the **file**; Corepack's `BinList` recorded only the binary names and
-left §08.1 to recover the file from the download URL a second time. jup has no such
-form to record or read (§02.4).
+A direct `.js` URL reference carries no version band. Its marker records a `BinSpec`
+that names the downloaded file, following the single data-model rule in §02.4.
 
-One consequence: `Unable to locate bin in package.json` is now reachable only for an
-unbanded version or a URL reference. Every declared band supplies a usable `BinSpec`
-fallback, where Yarn Berry's used to supply an array and so could not.
+`Unable to locate bin in package.json` is reachable only for an unbanded version or
+a URL reference without a valid recorded `BinSpec`. Every declared band supplies a
+usable `BinSpec` fallback.
 
 ## 7.8 Error tolerance
 
@@ -398,9 +371,11 @@ cached package manager successfully and print nothing to stderr.
 
 ## 7.9 `cache clean` / `cache clear`
 
-Both names are aliases for one action: `rm -rf <home>/v1`, `force`-style (missing
-directory is not an error). `lastKnownGood.json` is **not** removed, so the recorded
-default version survives and is simply re-downloaded on next use.
+Both names remove cached versions but preserve `lastKnownGood.json`. If an installed
+legacy shim names an interpreter inside `<home>/v1`, preserve that version directory
+unless `--all` is passed; warn before removing it with `--all`. Report
+`Removed <n> cached version(s) from <path>` or `Nothing to remove`. A failed removal
+warns with the exact message in §12.12.
 
 ## 7.10 Portable archives (`pack` / `install -g <file>.tgz`)
 
@@ -432,20 +407,7 @@ for each (name, reference):
 > same extractor and therefore the §07.4 safety rules apply in full. A conforming
 > implementation MUST NOT relax extraction safety for "our own" archives.
 
-> **Note (open).** "Not a security boundary" and §15.11's "**every** artifact MUST
-> clear one of three verification tiers" do not currently meet. The markers in the
-> archive are promoted into the store verbatim, and a marker's `hash` is a
-> self-assertion (§07.2); the store cannot re-derive it, because the digest covers a
-> downloaded artifact the store never keeps. So an archive that asserts the digest a
-> later `packageManager` pin names satisfies that pin on a string comparison, and the
-> pin's tier is cleared by bytes nothing verified. Extraction safety is unaffected —
-> nothing escapes the store — and the user did ask for this archive to be installed,
-> which is why this is a note rather than a rule today.
->
-> Closing it belongs at the promotion, not in the store: `install -g <file>.tgz`
-> should, for each `<name>/<reference>` it promotes, either re-derive the digest of a
-> single-file artifact and refuse a marker that disagrees, or drop the `hash` from a
-> marker it cannot attribute so the entry is usable only by references that pin
-> nothing. Doing it in `readMarker` instead would break `pack` → `install -g`, the
-> §15.19 workflow this section exists for: a marker written by *another machine's*
-> jup is indistinguishable from one written by an attacker's.
+> During portable-archive promotion, re-derive and verify the digest when the
+> artifact bytes are available. Otherwise remove an unattributable marker `hash`, so
+> the promoted entry is usable only by an unpinned reference. Do not weaken
+> `readMarker`: a marker produced on another machine is not inherently trusted.

@@ -24,11 +24,11 @@ Every entry in the table is a **tool**, and §02.3's `kind` says which sort:
 * a **runtime** — `node` — is declared in `devEngines.runtime`, is never enforced
   against, and is never a legal `packageManager` value.
 
-§15.39 states the model and what it deliberately does not extend to. Everything from
+The model remains deliberately narrow. Everything from
 §04 through §08 is one pipeline over both kinds: `jup node@22 --version` resolves,
 downloads, verifies, caches and executes by the same rules as `jup yarn@4`.
 
-## 1.2 The two entry modes
+## 1.2 Entry dispatch
 
 The binary dispatches on `argv[0]`-equivalent (the name it was invoked as) and on
 `argv[1]`.
@@ -50,8 +50,6 @@ The binary dispatches on `argv[0]`-equivalent (the name it was invoked as) and o
 ```
 
 ### Proxy mode trigger
-
-Normative rule (from corepack `main.ts::getPackageManagerRequestFromCli`):
 
 Let `arg0` be the first CLI argument. Match it against `/^([^@]*)(?:@(.*))?$/`,
 yielding `binaryName` and optional `binaryVersion`.
@@ -126,16 +124,9 @@ A conforming implementation **MUST** be able to complete a warm proxy invocation
   `.corepack.env` only if the first is `ENOENT` (§03.2) — one `package.json` read,
   one `.jup` read, plus the execution syscalls.
 
-Corepack itself satisfies this because `findInstalledVersion` short-circuits before
-any registry call and `installVersion` returns early on a marker hit. Any
-re-implementation that, for example, always reads `lastKnownGood.json` or always
-lists the store directory violates the budget.
-
-> **Divergence (see §14.1):** corepack's warm path still `opendir`s the whole
-> `<store>/<name>/` directory whenever the descriptor is a *range*. When the
-> descriptor is an exact version (the overwhelmingly common case, since
-> `packageManager` normally pins exactly) an implementation SHOULD `stat`
-> `<store>/<name>/<version>/.jup` directly and skip the directory scan.
+For an exact descriptor, probe `<store>/<name>/<version>/.jup` directly. Do not list
+the tool directory. Do not read `lastKnownGood.json` before the project path proves a
+fallback is needed.
 
 ## 1.4 Transparent commands
 
@@ -163,10 +154,8 @@ Effects of a command being transparent:
 
 1. A name mismatch against the project spec is **not** an error — the tool falls
    back to the requested package manager (this is `transparent = true` in §03.5).
-2. If the package manager declares `transparent.default`, that version is used as
-   the fallback instead of the normal default. Only `yarn` does this today, pinning
-   `4.14.1+sha224.…` so that `yarn dlx` in a non-Yarn project gets a modern Yarn
-   rather than the classic 1.x default.
+2. If the package manager declares `transparent.default`, that value replaces the
+   normal fallback. See the current tool table in §02.
 
 ## 1.5 Management mode
 
@@ -176,7 +165,7 @@ the newly-pinned package manager's install command as their last act.
 
 ## 1.6 State
 
-The tool owns exactly one directory (`COREPACK_HOME`, §07.1) containing:
+The tool's managed state lives under `COREPACK_HOME` (§07.1):
 
 ```
 <home>/
@@ -206,8 +195,5 @@ A conforming implementation MUST NOT:
 * phone home, collect telemetry, or auto-update itself,
 * rewrite any project file other than the pin fields listed in §1.6.
 
-> **Superseded (§15.39).** This list previously read *"manage Node.js versions"*. The
-> boundary that ruling was protecting is the one above it — a closed, compiled-in
-> table, changed only by a release — and `node` is now an entry in that table like
-> any other. What stays out of scope is unchanged: jup manages the tools it ships,
-> and there is no mechanism to add one at runtime.
+The compiled-in table is closed and changes only in a release; users cannot add
+tools at runtime.

@@ -1,7 +1,6 @@
 # 06 — Integrity & Trust
 
-Three independent mechanisms, applied in a specific order. Understanding *which one
-fires when* is the single most security-relevant part of this spec.
+Every artifact must pass an authentication check before promotion.
 
 ## 6.1 The decision table
 
@@ -11,41 +10,26 @@ Let `build[1]` be the hex digest from the reference's build suffix (§02.1), if 
 |---|---|---|---|
 | yes | any | any | **Hash check only.** Signature verification is skipped entirely. |
 | no | `npm` | no | **Signature verification**, then the registry's signed `integrity` becomes the expected hash, then hash check. |
-| no | `url` | — | **Nothing.** No signature, no hash. |
-| no | any | **yes** | **Nothing.** |
+| no | `url` | — | Refuse unless the ambient environment sets `JUP_ALLOW_UNVERIFIED=1`. |
+| no | any | **yes** | Refuse unless the ambient environment sets `JUP_ALLOW_UNVERIFIED=1`. |
 
-The table had a fourth input, `registry.bin`, and a row where an `npm` registry with
-it set verified **nothing**. That was Corepack's `!registry.bin` guard and §14.10's
-subject. §15.41 removed the field, so the row is gone: an `npm` registry is now always
-row 2. Since §15.41 the `url` row is also unreachable from the table, though §15.11
-means it would refuse rather than install unverified.
+Every artifact MUST clear a user-pinned hash, a verified registry signature, or a
+verified detached signature from its distribution channel. Verified TLS alone is not
+a verification tier. When none is available, fail with the exact message:
 
-"Registry type" here means the **artifact** registry: a band declaring
-`artifactRegistry` (§02.4, §15.28) is verified against *that* package's packument, not
-the one `registry` names. For bun and deno the difference is decisive — the launcher's
-`dist.integrity` describes a 15 kB `postinstall` stub, while the per-host package's
-describes the bytes about to be executed. A row-2 verification against the wrong one
-would be a signature check that proves nothing about what ran.
+`Refusing to install <name>@<version>: <source> provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.`
 
-That row is also the whole verification story for a per-host artifact: §15.28 forbids a
-compiled-in or committed digest for one (there is no portable answer), so nothing puts
-such an install on row 1 unless §15.23 recorded a digest for *this* host. This is
-stronger than a stale pin, not weaker — the signature is checked on every install and
-covers exactly the artifact this machine fetched.
+An ambient `JUP_ALLOW_UNVERIFIED=1` or compatibility
+`COREPACK_ALLOW_UNVERIFIED=1` permits that artifact for the current run and MUST
+emit an advisory warning naming the artifact and source. Project env files MUST NOT
+set this opt-out; ignore the attempted setting and warn as required by §11.6.
 
-Two consequences a re-implementation MUST NOT accidentally "fix":
+Use `artifactRegistry`, when present, as the source of artifact metadata. Its signed
+integrity must describe the bytes fetched for this host. Never put a host-specific
+digest in a portable locator or manifest pin; host lock and marker data may carry it.
 
-* **A user-supplied hash overrides signature verification.** Pinning
-  `yarn@1.9998.9999+sha1.deadbeef` against a registry serving a *bad signature* fails
-  with a hash mismatch, not a signature error — and once the correct hash is supplied
-  it installs successfully despite the invalid signature. This is intended: an
-  explicit hash is a stronger, user-chosen assertion than the registry's own claim.
-* **Yarn Berry used to be verified by neither mechanism** when it came through
-  `npmRegistry` (which set `registry.bin`), unless the user pinned a hash: the single
-  extracted file's digest could not be compared against the whole-tarball
-  `dist.integrity`. §14.10 required closing that hole and §15.41 closed it at the
-  source — Berry is an ordinary `@yarnpkg/cli-dist` tarball on row 2, like every
-  other entry.
+A user-supplied hash takes precedence over registry signatures. It is an explicit
+assertion and is checked directly against the downloaded bytes.
 
 ## 6.2 Hash verification
 
@@ -63,20 +47,9 @@ if build[1] and actual !== build[1]:
 | `.tgz` full extraction | the **raw tarball stream** as received (compressed bytes) |
 | `.js` single file | the **file bytes** as received |
 
-Both are the bytes as received, so hashing is always inline with the download. There
-used to be a third case — a `.tgz` filtered by `registry.bin` down to one file, whose
-digest was that **extracted file** re-read from disk — and it is the reason this table
-once had to say when hashing could not be inline. §15.41 removed the filter.
-
-`algo` is any digest name the host's crypto supports — there is no allowlist.
-`sha1`, `sha224`, `sha256`, `sha384`, `sha512` all appear in real `packageManager`
-fields in the wild. A conforming implementation MUST support at minimum
-`sha1`, `sha256`, `sha512`, and `sha224` (the last is what Yarn's own tooling emits).
-
-> **Divergence (§14.11):** the comparison is a plain string `!==`. A conforming
-> implementation MUST use a constant-time comparison. It MUST also **reject unknown
-> or weak-by-request algorithms** rather than crashing, and SHOULD warn when a
-> `packageManager` field pins `sha1` or `md5`.
+Hash inline as bytes arrive. Support at least SHA-1, SHA-224, SHA-256, and SHA-512.
+Validate the requested algorithm, reject unsupported or unsafe choices cleanly, warn
+for weak user pins, and compare equal-length decoded digests in constant time.
 
 On mismatch, the temp folder is discarded and **nothing is cached**. Re-running
 reproduces the same error — the bad artifact must never be promoted into the store.
@@ -151,10 +124,8 @@ build[1] := hex(base64decode(integrity.slice("sha512-".length)))
 which is then checked against the downloaded bytes by §6.2. This gives an
 end-to-end chain: trusted key → signature → `integrity` → tarball bytes.
 
-> **Note.** The `.slice(7)` assumes the SRI algorithm is exactly `sha512`. A
-> conforming implementation MUST parse the SRI string properly (`<algo>-<base64>`),
-> use that algorithm for the digest, and reject SRI algorithms it does not support —
-> rather than blindly stripping seven characters. See §14.12.
+Parse SRI as `<algo>-<base64>`, use its declared supported algorithm, and reject
+invalid or unsupported algorithms.
 
 ## 6.4 Disabling and overriding
 
@@ -172,35 +143,20 @@ must match the embedded `keys` object:
 
 A malformed JSON value causes a parse error at verification time, not at startup.
 
-> **Divergence (§14.5):** because `COREPACK_INTEGRITY_KEYS` can be set from a
-> project-local `.jup.env`, a hostile repository can currently substitute its own
-> trust store or disable verification entirely by committing a file. A conforming
-> implementation MUST ignore this variable when it originates from an env file.
+Trust overrides and verification opt-outs MUST come from the ambient environment;
+ignore and warn about attempts from project env files.
 
 ## 6.5 Key expiry
 
-Each trust-store entry carries `expires`: either `null` (never expires) or an ISO-8601
-timestamp. The reference implementation **stores this field and never reads it**.
+`expires` is `null` or an ISO-8601 timestamp evaluated against the system clock.
+Try matching unexpired keys first. If none match, verify with a matching expired key:
 
-> **Divergence (§14.4):** a conforming implementation MUST evaluate expiry:
-> * A key whose `expires` is in the past MUST NOT be selected in step 3.
-> * If the *only* matching key is expired, the error MUST name it:
->   `The package was signed with an expired key (<keyid>, expired <expires>)`.
-> * Expiry is evaluated against the system clock. Since a wrong clock could then
->   reject valid keys, an implementation SHOULD fall back to accepting an expired key
->   with a warning rather than hard-failing when *no* unexpired key matches and the
->   signature is otherwise valid — but MUST NOT do so silently. §14.4 records why
->   this SHOULD is not optional in practice: npm rotated its signing key on
->   2025-01-29 and `dist.signatures` is never rewritten, so refusing an expired key
->   refuses every package manager published before that date. The error above
->   therefore fires only when the signature does **not** verify under the expired
->   key.
->
-> The embedded table's first key expired on 2025-01-29 and is dead weight today; a
-> re-implementation should ship only unexpired keys and refresh them the way the
-> reference does (a scheduled job comparing `keys.npm` against
-> `GET https://registry.npmjs.org/-/npm/v1/keys`). The conformance suite (§13)
-> includes that comparison as a live test.
+- if its signature is valid, accept it and emit the exact warning in §12.12;
+- if it is invalid, raise
+  `The package was signed with an expired key (<keyid>, expired <expires>)`.
+
+Never accept an expired key silently. Refresh embedded npm keys from
+`https://registry.npmjs.org/-/npm/v1/keys` through the reviewed maintenance workflow.
 
 ## 6.6 Threat model summary
 
@@ -210,10 +166,8 @@ What this design defends against, and what it does not:
 |---|---|
 | Registry serves a modified tarball for a hash-pinned version | **Yes** — hash check |
 | Registry serves a modified tarball for an unpinned version, npm registry | **Yes** — signature chain, provided npm's key is not compromised |
-| Compromised **mirror** (`COREPACK_NPM_REGISTRY`) serving unpinned versions | **Yes** — the signature is over the package name + version + integrity, and the mirror does not have npm's key |
-| Compromised mirror serving unpinned **Yarn Berry** | **Yes** — since §15.41 Berry is `@yarnpkg/cli-dist`, on the same signature chain as every other entry. This row read **No** while §14.10's filtered path skipped the check |
-| Compromised `repo.yarnpkg.com` serving unpinned Yarn Berry | **N/A** — §15.41 removed the last table reference to that origin, and to url-type registries generally |
-| Man-in-the-middle on the wire | Via TLS only |
-| Hostile repository disabling verification via `.jup.env` | **No** — see §14.5 |
-| Hostile repository pointing `packageManager` at an arbitrary URL | **Yes** for known package managers (blocked unless `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1`); **no** for unknown names |
-| Tarball path traversal / symlink escape during extraction | Delegated to the tar library; see §07.4 |
+| Compromised mirror serving unpinned versions | **Yes** — the signature covers package, version, and integrity |
+| Man-in-the-middle on the wire | Via verified TLS |
+| Hostile repository changing trust or disabling verification | **Yes** — project env sources cannot set those controls |
+| Hostile repository pointing a known tool at an arbitrary URL | **Yes** — blocked unless ambient `JUP_ENABLE_UNSAFE_CUSTOM_URLS=1` |
+| Tar path traversal, unsafe links, or special files | **Yes** — extraction rules in §07.4 |

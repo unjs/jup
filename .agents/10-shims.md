@@ -1,7 +1,7 @@
 # 10 — Shims & PATH Integration
 
 `enable` puts the tool's names on `PATH`; `disable` takes them off. Everything else in
-this spec assumes `enable` has already run (or that the user types the tool's name
+these rules assume `enable` has already run (or that the user types the tool's name
 explicitly).
 
 ## 10.1 What a shim must do
@@ -10,94 +10,24 @@ A shim for binary `B` must invoke the tool as if the user had typed
 `<tool> B <args…>`, and must set the download-prompt default to `1` (§05.5) because
 the user asked for `B`, not for a download.
 
-The reference implementation bakes the name into a generated file rather than
-sniffing `argv[0]`:
+On POSIX, every name points to one executable proxy stub. The stub resolves the
+jup entry point from the stub's own realpath and dispatches from the name used to
+invoke it. It sets the download-prompt default to `1` for a known binary name and to
+`0` for jup's own name. The explicit `<tool> <binary>` form remains available.
 
-```js
-// dist/<B>.js
-#!/usr/bin/env node
-process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT??='1'
-require('module').enableCompileCache?.();
-require('./lib/corepack.cjs').runMain(['<B>', ...process.argv.slice(2)]);
-```
-
-versus its own entry point:
-
-```js
-// dist/corepack.js
-#!/usr/bin/env node
-process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT??='0';
-require('module').enableCompileCache?.();
-require('./lib/corepack.cjs').runMain(process.argv.slice(2));
-```
-
-Both `chmod 0o755`.
-
-> **Divergence (§14.25).** The relative specifier above resolves correctly only
-> because the runtime resolves the main module through its realpath, and the name
-> on `PATH` is a symlink to the stub (§10.2). A conforming implementation MUST
-> resolve the entry against the stub's **own realpath** instead, so the shim also
-> works under `node --preserve-symlinks-main` and on runtimes that resolve from
-> the link:
->
-> ```js
-> import { realpathSync } from "node:fs";
-> import { pathToFileURL } from "node:url";
-> const entry = new URL("<entry>", pathToFileURL(realpathSync(import.meta.filename)));
-> const { runMain } = await import(entry.href);
-> ```
->
-> `<entry>` is the bare file name from §10.4's candidate list. See §14.25 for the
-> failure this avoids and its measured cost.
-
-> **Divergence (§14.15).** The shim MUST NOT bake the binary name into a per-name
-> file **on POSIX**. It reads the name it was invoked under instead:
->
-> ```
-> name := basename(argv[0]), with a trailing ".exe" removed on Windows
-> if name is one of the known binary names and name != <tool's own name>:
->     downloadPromptDefault := "1"
->     proxy-mode with binaryName = name, args = argv[1..]
-> else:
->     downloadPromptDefault := "0"
->     normal dispatch on argv[1..]
-> ```
->
-> The reference implementation avoided this because a runtime `realpath`s the module
-> it executes and so loses the invocation name. It does — but the *invocation path*
-> survives in `argv[1]`, which is not `realpath`'d, under a direct `PATH` execution,
-> under `<runtime> <shim>`, and under `--preserve-symlinks-main`. A hosted
-> implementation therefore gets the same dispatch a native one gets from `argv[0]`,
-> and §10.2's target becomes one stub rather than one per name.
->
-> It MUST NOT be used to *replace* the explicit `<tool> <binary>` form, which stays
-> available.
->
-> **Windows is excluded**, and the exclusion is not a limitation of this rule but of
-> §10.3: a `.cmd` or `.ps1` wrapper invokes `<runtime> <stub>`, so by the time the
-> tool runs the invocation name is genuinely gone. Windows keeps one stub per name.
+Windows wrappers preserve the binary name explicitly because their runtime does not
+receive the wrapper's invocation name. Every generated stub and wrapper has mode
+`0755`.
 
 ### Baking in the interpreter
 
-> **Divergence (§14.26).** Wherever a shim names the interpreter as a bare `node`,
+> **Requirement.** Wherever a shim names the interpreter as a bare `node`,
 > a conforming implementation MUST instead name it by **absolute path**: the
 > `realpath` of the runtime executing `enable`, resolved at `enable` time. This
-> covers §10.3's three Windows wrappers, conditionally the POSIX stub's shebang,
-> and — for the same reason, and under the *stub's* condition on both platforms —
-> the tool's **own CLI entry** (§15.46). Two failures make the bare name unusable:
->
-> 1. **`cmd.exe` resolves a bare name from the current directory first.** `cd` into
->    any repository that ships a `node.bat`, `node.cmd` or `node.exe`, type
->    `yarn --version`, and that file runs. Corepack was shielded by accident — its
->    shims sat beside `node.exe` in the Node install directory, so the `IF EXIST`
->    branch was the one that fired. §15.13 moves ours to `%LOCALAPPDATA%\jup\bin`,
->    where there is no `node.exe`, which makes the fallback the *default* Windows
->    path. Git Bash has the same problem in the extensionless wrapper.
-> 2. **`#!/usr/bin/env node` re-searches `PATH`,** which §15.32 asks the user to put
->    the shim directory *first* on. Once `enable node` (§10.5) has claimed the name
->    `node` there, `env` finds the shim rather than the runtime and the stub execs
->    itself until the machine gives up — on Windows a new `cmd.exe` per level rather
->    than one spinning process.
+> covers the Windows wrappers, conditionally the POSIX stub's shebang, and under the
+> same condition the tool's own CLI entry. A bare name is unsafe because `cmd.exe`
+> searches the current directory and `#!/usr/bin/env node` re-searches `PATH`. If the
+> shim directory claims `node`, either lookup can recurse into the shim.
 >
 > `realpath`, because `process.execPath` is frequently a symlink into a version
 > manager's store and the point of baking a path in is that it names one file rather
@@ -111,20 +41,22 @@ Both `chmod 0o755`.
 > never asked for a `node` shim. A *foreign* `node` in the directory does not count.
 >
 > **The stub's condition governs the tool's own CLI entry on every platform** — the
-> file `package.json`'s `bin` names, which opens `#!/usr/bin/env node` like any
-> published Node program. Windows's unconditional rule is the wrappers' alone;
-> §15.46 says why the entry does not share it.
-> Consequence 2 reaches it exactly as it reaches the stub, and §15.46 has the rewrite:
-> its first line and nothing else, tested before it is written, skipped entirely where
-> the installation has no built entry to pin.
+> file named by `package.json`'s `bin`. Windows's unconditional rule applies only to
+> generated wrappers. When pinning is required, read the entry and replace only its
+> first line if needed. Write a temporary file in the same directory, preserve the
+> entry's mode, and atomically rename it over the entry. If no built entry exists,
+> do nothing. On `EROFS`, `EACCES`, or `EPERM`, fail before writing any shims and
+> name the entry and the remedies: install the tool somewhere writable or stop
+> claiming the runtime name. `disable` MUST NOT restore the old shebang or otherwise
+> modify the entry.
 >
 > The `%~dp0\node.exe` and `$basedir/node` branches are kept: they cost nothing, and
 > they are what keeps a shim directory that *is* the Node install directory
 > relocatable.
 
-> **Which runtime (§15.43).** "The runtime executing `enable`" is not always a
-> runtime `enable` may name. `node` is a table entry (§15.39), so once `enable node`
-> has claimed that name on the `PATH` §15.32 asks the user to prepend, the tool's own
+> **Which runtime.** "The runtime executing `enable`" is not always a
+> runtime `enable` may name. `node` is a table entry, so once `enable node`
+> has claimed that name on the prepended shim directory on `PATH`, the tool's own
 > entry point resolves through the shim, downloads the project's runtime and runs
 > under it — and `process.execPath` is then a path inside `<home>`, which
 > `cache clean` (§09.7) exists to delete. An implementation MUST NOT bake in an
@@ -133,7 +65,7 @@ Both `chmod 0o755`.
 > 1. `realpath(process.execPath)`, when that is **not** inside `<home>`.
 > 2. The forwarded host runtime — the value of `COREPACK_HOST_RUNTIME` (§11.5),
 >    which a run outside `<home>` writes into the environment of every native child
->    it spawns (§08.3, §15.28). It is used only when it names an executable file
+>    it spawns (§08.3). It is used only when it names an executable file
 >    that is neither inside `<home>` nor a shim of this tool's own.
 > 3. The first `node` on `PATH` that is neither inside `<home>` nor one of this
 >    tool's shims, resolved through `realpath`.
@@ -163,20 +95,24 @@ generatePosixLink(installDirectory, distFolder, binName):
                 return                                    # exit 0, leave it alone
             if readlink(file) === target:
                 return                                    # already correct — no write
+        if entry is not jup-owned and not --force:
+            print the foreign-entry message and return
+        if entry is not jup-owned:
+            atomically back up and record it in <home>/shims.json
         unlink(file)
 
     symlink(target, file)
 ```
 
-`<proxy stub>` is **one file for every binary name** (§14.15): it carries no name of
+`<proxy stub>` is **one file for every binary name**: it carries no name of
 its own and reads the one it was invoked under from `argv[1]`. An implementation MUST
 NOT make the target depend on `binName` — that is what leaves a per-name file behind
-to go stale when the tool is upgraded or removed (§15.14, #751).
+to go stale when the tool is upgraded or removed.
 
-Four properties this MUST have:
+Required properties:
 
 1. **`lstat`, not `stat`.** A dangling symlink must be detected as a symlink, not as
-   a missing file. (Corepack fixed exactly this bug in 0.34.4.)
+   a missing file.
 2. **The link target is relative.** So the whole installation tree stays relocatable.
    This is why the install directory is `realpath`'d first (§10.4) — a relative path
    computed from a symlinked directory would be wrong.
@@ -184,25 +120,28 @@ Four properties this MUST have:
    unchanged across repeated `enable` runs. The conformance suite asserts this.
 4. **The stub is written at most once per `enable`**, whatever the number of names,
    and not at all when it is already current — so `enable` still succeeds against a
-   read-only `distFolder` that shipped it (§10.7, §14.18).
+   read-only `distFolder` that shipped it (§10.7).
 5. **The stub is executable when `enable` returns.** A symlink carries no mode of
    its own, so the bit the kernel checks is the stub's; a shim pointing at a
    non-executable stub is skipped by the `PATH` lookup without a word. `enable`
    therefore tests the stub it links to for executability and `chmod`s it `0755`
    only when it is not executable — **only** then, so property 4's "writes nothing"
-   still holds for the ordinary warm run. §15.45 has the case this exists for and what happens
-   when the `chmod` itself is refused.
+   still holds for the ordinary warm run. §10.7 defines the failure when `chmod` is refused.
 
-Anything else occupying the name — a plain file, a wrong symlink, a real binary — is
-**unlinked and replaced without warning**. The only exception is the Yarn Switch
-guard.
+Before replacing an entry, `enable` MUST establish that it is a jup-owned shim. A
+POSIX entry is owned only when it points to jup's proxy stub. A Windows entry is
+owned only when its complete generated contents or native executable identity match
+jup's shim format. A dangling jup link remains owned; a name or file extension alone
+is never proof of ownership.
 
-> **Divergence (§14.16):** silently clobbering a real, non-tool binary is hostile.
-> A conforming implementation SHOULD detect that the existing entry is a regular file
-> that is not one of its own shims and refuse, printing:
-> `<binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)`
-> and SHOULD add `--force`. The Yarn Switch special case then becomes one instance of
-> a general rule rather than a hard-coded exception.
+Without `--force`, `enable` MUST leave a foreign entry unchanged and print exactly:
+`<binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)`
+
+With `--force`, `enable` MUST move every displaced entry to a private backup under
+`<home>` and record its path, type, mode, backup path, and symlink target when
+applicable in `<home>/shims.json` before installing the shim. The record and backup
+write MUST complete atomically before replacement. Existing unresolved records MUST
+NOT be overwritten.
 
 ### Yarn Switch
 
@@ -214,7 +153,8 @@ POSIX only — on Windows the check is not performed and `disable` removes the f
 ## 10.3 Windows shim creation
 
 Windows has no usable symlink story for this purpose (it needs elevation or developer
-mode), so three files are written per binary name:
+mode), so write the shell, cmd.exe, and PowerShell wrappers shown below for each
+binary name:
 
 | File | Purpose |
 |---|---|
@@ -222,20 +162,20 @@ mode), so three files are written per binary name:
 | `<B>.cmd` | cmd.exe |
 | `<B>.ps1` | PowerShell |
 
-All three are created unconditionally (the generator is invoked with
-`createCmdFile: true` so the Windows shims can be produced from a POSIX build
-machine), all `chmod 0o755`, and all **overwrite unconditionally** — there is no
-idempotency short-circuit on Windows.
+Create every listed wrapper unconditionally (the generator is invoked with
+`createCmdFile: true` so Windows shims can be produced from a POSIX build machine),
+set mode `0o755`, and overwrite unconditionally — there is no idempotency
+short-circuit on Windows.
 
 Each existing entry MUST be **removed** before its replacement is written, never
-written through. §14.16 and §15.15 still decide *whether* the name may be taken
-at all, so what reaches the write is one of our own entries — or any entry, under
-`--force` — and one of ours can be a symlink: left by an earlier POSIX-style
-`enable`, or pointing at a `dist/` that no longer exists (§15.14). A write that
+written through. The ownership and `--force` rules decide whether the name may be
+taken, so what reaches the write is one of our own entries — or any entry under
+`--force` — and one of ours can be a symlink left by an earlier POSIX-style
+`enable`, or pointing at a `dist/` that no longer exists. A write that
 follows the link edits the link's target instead of replacing the shim, and
 fails with `ENOENT` when that target is gone.
 
-Let `<rel>` be the path from the shim directory to `dist/<B>.mjs` (§14.27),
+Let `<rel>` be the path from the shim directory to `dist/<B>.mjs`,
 backslash-separated for `.cmd` and forward-slash-separated for the other two.
 
 Let `<node>` be the **absolute** path of the runtime `enable` is itself running
@@ -304,81 +244,50 @@ if (Test-Path "$basedir/node$exe") {
 exit $ret
 ```
 
-> **Divergence (§14.15 cont.):** a native single-binary implementation writes a
-> `<B>.exe` **copy or hardlink of itself** plus nothing else, and dispatches on
-> `argv[0]`. That removes three generated scripts per binary, the `PATHEXT` hack, the
-> PowerShell pipeline special-casing, and the dependency on a JS runtime being on
-> `PATH` at shim time. It is strictly smaller and faster. `.cmd`/`.ps1` variants are
-> then unnecessary because a real `.exe` is directly executable from every Windows
-> shell.
+> **Requirement:** a native single-binary implementation writes a
+> `<B>.exe` **copy or hardlink of itself** and dispatches on `argv[0]`. It does not
+> create shell, cmd.exe, or PowerShell wrappers.
 
 ## 10.4 Install directory resolution
 
-```
-if --install-directory was given:
-    dir := that path
-else:
-    dir := dirname(which("<tool name>"))      # PATH lookup
+`--install-directory` wins. `--system` is mutually exclusive and selects
+`/usr/local/bin` on POSIX or `%ProgramData%\jup\bin` on Windows. Otherwise use
+`JUP_SHIM_DIRECTORY`, its compatibility spelling, or these deduplicated platform
+candidates in order:
 
-# enable ONLY:
-dir := realpath(dir)
-```
+* Linux and BSD default to absolute `$XDG_BIN_HOME` when set, otherwise
+  `<home>/.local/bin`; alternates are absolute `$XDG_BIN_HOME`,
+  `<home>/.local/bin`, then `<home>/bin`.
+* macOS defaults to `<home>/.local/bin`; alternates are absolute `$XDG_BIN_HOME`,
+  `<home>/.local/bin`, then `<home>/bin`.
+* Windows uses `%LOCALAPPDATA%\jup\bin` and has no alternate.
 
-The `PATH` lookup exists because the runtime `realpath`s the executed script, so the
-tool cannot see how it was invoked. A native implementation can use the platform's
-"path to my own executable" primitive (`/proc/self/exe`, `_NSGetExecutablePath`,
-`GetModuleFileNameW`) instead, which is more reliable — the `PATH` lookup picks the
-*wrong* directory when the tool was invoked by absolute path and a different copy is
-earlier on `PATH`, and fails outright when nothing named `<tool>` is on `PATH`.
+For `enable`, use the default when it is on `PATH`, otherwise the first candidate
+that already contains a jup-owned shim, otherwise the first eligible alternate on
+`PATH`, otherwise the default. Never adopt a directory merely because it appears on
+`PATH`. Every existing directory selected automatically MUST be owned by the
+effective user, be neither group- nor world-writable, and pass a writability probe.
+An alternate's matching `PATH` entry must also be absolute and the directory must
+already exist. Explicit `--install-directory` and `--system` targets are not subject
+to the ownership or mode gate, but must pass the writability probe. Announce
+alternate selection with the exact message:
+`! <default> is not on your PATH; installing shims to <alternate> instead`
 
-> **Divergence (§14.17):** use the self-path primitive, fall back to the `PATH`
-> lookup, and error clearly if both fail:
-> `Unable to determine where to install the shims; pass --install-directory`
-> Corepack currently propagates a raw rejection from its `PATH` lookup here.
-
-`disable` deliberately does **not** `realpath` the directory — removal does not need
-a correct relative-path computation.
-
-> **§15.13 replaces this chain wholesale**, because `dirname(which(...))` is #71.
-> Points 1 and 6 give the replacement: a named directory first, then a **closed
-> list** of per-user candidates among which `PATH` membership only *chooses* —
-> `enable` will not adopt a directory merely because it is writable and on `PATH`,
-> which is how a scan lands back beside `node`, inside Homebrew's prefix, or in a
-> version manager's managed shim directory. Point 7 is the other half: `disable`,
-> `info` (§15.30) and §15.32's promotion resolve the same list **without** reading
-> `PATH`, preferring whichever candidate already holds a shim of ours, so the
-> directory a removal looks in cannot drift from the one an install wrote to.
-> Point 8 adds the machine-wide directory to both halves: `--system` names it
-> outright, and it joins the closed list — last, and only for uid 0 — so a `root`
-> `enable` in a container reaches a directory that is actually on `PATH`.
+Create only the default, explicitly with mode `0755` independent of umask, then
+realpath it. Probe the selected directory before writing any shim. A bare `enable`
+that cannot write its initial selection falls back to the default and prints:
+`! <dir> is not writable; installing shims to <fallback> instead`
+A named directory and `--system` never fall back. For `disable`, `info`, and child
+PATH promotion, prefer the candidate that already contains a jup-owned shim without
+consulting `PATH`. Root may use the system candidate last. Use the messages in
+§12.12 when no candidate exists, `%ProgramData%` is absent, or options conflict.
 
 ## 10.5 Target set
 
-Default targets: every supported tool **except npm** and the `shimByDefault: false`
-opt-outs (§02.3). npm is excluded
-because it ships with Node through other means and shadowing it is more likely to
-break a machine than to help it. `enable npm` explicitly is supported.
-
-> §15.16 overturns the npm exclusion: it is inter-team policy jup is not party to,
-> and its consequence is that a yarn-pinned project correctly blocks `pnpm` while
-> `npm install` silently works anyway. `--exclude npm` restores it.
-
-An entry MAY opt out of the default set with `shimByDefault: false` (§02.3), and
-`bun`, `deno`, `nub` and `node` do — the last **MUST**, being a runtime (§02.3). Those names are ones people install deliberately and run
-outside any project, so a bare `enable` — which existing users run on upgrade, having
-asked for nothing — must not claim them on `PATH`. Naming the entry is the opt-in.
-
-The test is **whether the name means anything outside a project**, and it is neither
-old-versus-new nor a category the entry is filed under:
-
-* §15.21's `aube` is a per-host native entry exactly as `bun` and `deno` are, and
-  does **not** opt out: `aube`, `aubr` and `aubx` name nothing outside a project.
-  An entry that opted out merely for being recent would freeze the default set at
-  the three names corepack shipped.
-* §15.21's `nub` is a package manager — `nub install` is pnpm-compatible on the CLI
-  and on the lockfile — and opts out anyway, because `nub server.ts` runs a file and
-  `nub node` manages Node versions. Being a package manager is not what earns a
-  place in the default set; having no meaning outside a project is.
+With no names, `enable` includes every entry except those with
+`shimByDefault: false`; npm is included. `--exclude npm` opts out. `bun`, `deno`,
+`nub`, and `node` opt out. Naming an entry enables it explicitly. `disable` with no
+names covers every entry, including opt-outs.
 
 `disable` with no names covers **every** entry, opt-outs included: removal has no
 such hazard, and a `disable` that declined to undo an `enable bun` would be the
@@ -388,18 +297,18 @@ Each name expands to every binary name it declares across all range entries, ded
 
 | Name | Binaries | In the default set |
 |---|---|---|
-| `npm` | `npm`, `npx` | yes (§15.16) |
+| `npm` | `npm`, `npx` | yes |
 | `pnpm` | `pnpm`, `pnpx` | yes |
 | `yarn` | `yarn`, `yarnpkg` | yes |
 | `bun` | `bun`, `bunx` | no — `shimByDefault: false` |
 | `deno` | `deno` | no — `shimByDefault: false` |
 | `aube` | `aube`, `aubr`, `aubx` | yes |
 | `nub` | `nub`, `nubx` | no — `shimByDefault: false` |
-| `node` | `node` | no — required of a runtime (§02.3, §15.39) |
+| `node` | `node` | no — required of a runtime (§02.3) |
 
 All binaries are processed concurrently.
 
-`info` (§15.30) reports **every** binary name regardless, including the opt-outs: what
+`info` reports **every** binary name regardless, including the opt-outs: what
 that report answers is "what does this name currently resolve to?", and for `bun` that
 is the interesting question precisely because the answer is usually someone else's
 install.
@@ -414,30 +323,27 @@ normally the one that runs.
 
 This is why the last row of the table is a **MUST** rather than a preference. A bare
 `jup enable` never claims `node`, so the collision exists only for someone who typed
-`jup enable node`, which is a deliberate act with a predictable outcome. §15.40 is the
-other half of the same posture: jup **reads** `.nvmrc` and leaves everything else about
+`jup enable node`, which is a deliberate act with a predictable outcome. The matching rule is that jup **reads** `.nvmrc` and leaves everything else about
 a machine's version manager alone — it installs no shell hooks, writes no profile, and
 never removes or shadows another tool's directory.
 
 ## 10.6 `disable`
 
-```
-POSIX:
-    if binName contains "yarn" and realpath(file) is a Yarn Switch path:
-        warn and skip
-    unlink(file)              # ENOENT ignored, anything else propagates
+For every requested binary name, `disable` MUST apply the ownership test in §10.2
+to each platform entry. It removes only a jup-owned entry. A missing or foreign entry
+is left unchanged. The Yarn Switch guard still warns and skips.
 
-Windows:
-    for ext in ["", ".ps1", ".cmd"]:
-        unlink(installDirectory/<binName><ext>)     # ENOENT ignored
-```
+After removing an owned entry, or when the destination is absent, `disable` MUST
+restore its displaced entry from `<home>/shims.json`, including its type, contents or
+symlink target, and mode, then atomically clear that record and backup. If installing
+a shim fails after displacement, `enable` MUST roll back the displaced entry before
+returning the error. If restoration fails, report the path and retain the record and
+backup for another attempt. Never restore over a foreign entry installed after jup's
+shim.
 
-`disable` never touches a name it was not asked about — an unrelated binary in the
-same directory is left alone. It is safe to run repeatedly and on a directory with no
-shims.
-
-Note `disable yarn` removes **both** `yarn` and `yarnpkg`, because the name expands
-to its full binary set.
+`disable` never touches a name it was not asked about and is safe to repeat. Note
+`disable yarn` covers both `yarn` and `yarnpkg`, because the name expands to its full
+binary set.
 
 ## 10.7 Read-only installation directories
 
@@ -445,7 +351,7 @@ to its full binary set.
 in container images and system package installs. There is no fallback; the reference
 implementation documents shell aliases as the workaround.
 
-> **Divergence (§14.18):** a conforming implementation SHOULD detect `EROFS`/`EACCES`
+> **Requirement:** a conforming implementation SHOULD detect `EROFS`/`EACCES`
 > on the install directory and emit an actionable error naming the two real options —
 > `--install-directory <a writable dir on PATH>`, or shell aliases — rather than a raw
 > errno. It MAY offer a `--print-shell-init` subcommand emitting shell functions for
@@ -460,12 +366,10 @@ write could not work:
 
 * shimming the runtime rewrites the stub to pin the interpreter (§10.1), and the
   message names the **stub**, not the shim directory, whose remedies do not move it;
-* shimming the runtime also rewrites the tool's own CLI entry, for the same reason
-  (§15.46), and that message names **that file** and the recursion it prevents —
+* shimming the runtime also rewrites the tool's own CLI entry, for the same reason, and that message names **that file** and the recursion it prevents —
   a third read-only failure with a third diagnosis;
 * the stub is current but not executable, and the `chmod` §10.2 property 5 requires
-  is itself refused (§15.45).
+  is itself refused.
 
-Neither is the case §14.18 protects. There, nothing needed writing and the install
-worked; here the write is load-bearing, and an `enable` that exited 0 would leave the
+When nothing needs writing, the install succeeds; here the write is load-bearing, and an `enable` that exited 0 would leave the
 user with shims that are silently inert.

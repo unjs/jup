@@ -4,10 +4,7 @@ User-facing strings are part of the contract. Scripts, CI logs, and support docs
 match on them. Reproduce them **byte for byte**, including the leading `! `, the
 absence of trailing periods, and the exact interpolation.
 
-Where Corepack's own text names itself, these strings name **this** tool instead —
-`jup` for the program, `JUP_` for the variable a remedy points at (§14.24). Nothing
-else about the wording moves; a row below that differs from Corepack's differs in
-that name and nowhere else.
+Use `jup` for the program and `JUP_` for variables named by remedies.
 
 ## 12.1 Error classes
 
@@ -16,9 +13,7 @@ that name and nowhere else.
 | **UsageError** | The user asked for something impossible or contradictory | proxy mode: message on stderr, no stack, exit 1.<br>management mode: `Usage Error: <message>` on **stdout**, then a blank line, then the command's usage line, exit 1 |
 | **Error** | Anything else, including internal assertions | stderr with a stack, exit 1 |
 
-Only `UsageError` gets the friendly treatment. Corepack fixed a bug where every error
-was presented as a usage error (0.31.0); a re-implementation MUST keep the
-distinction, because a stack trace is the correct output for a bug.
+Only `UsageError` gets friendly treatment. Internal errors keep their stack trace.
 
 Management-mode format, verbatim shape:
 
@@ -42,9 +37,8 @@ $ jup use [--here] [--pin-style=suffix|sidecar] <pattern>
 
 `<source>` is `CLI arguments` or the manifest path relative to the initial cwd.
 
-§15.39's message is the only one keyed to a tool's `kind`, and it is raised only for
-a manifest's `packageManager` field. Every other message in this file is written once
-and applies to both kinds; the `devEngines` bodies in §12.3 are emitted with
+Raise the runtime/package-manager message only for a manifest's `packageManager`
+field. The `devEngines` bodies in §12.3 are emitted with
 `runtime` substituted for `packageManager` when the member being validated is
 `devEngines.runtime` (§03.3), which is new text and so not bound by the verbatim
 rule.
@@ -93,11 +87,9 @@ When thrown, the message appears bare (proxy mode) or wrapped in `Usage Error:`
 This project is configured to use <name> because <absolute path to package.json> has a "packageManager" field
 ```
 
-**§15.35k** appends a clause when that path resolves to the home directory or above:
+Append this clause when that path resolves to the home directory or above:
 `(this manifest is outside any project — a stray "packageManager" field there affects
-every directory)`. A stray `$HOME/package.json` otherwise breaks one package manager
-everywhere, with no clue as to why — the single most-repeated confusion in the
-issue thread behind that requirement.
+every directory)`. This makes the manifest's unusually broad scope explicit.
 
 The path is absolute and native-separator-formatted. This message goes to **stderr**
 and exits 1.
@@ -110,6 +102,11 @@ Network access disabled by the environment; can't reach npm repository <registry
 Error when performing the request to <url>; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting
 Server answered with HTTP <status> when performing the request to <url>; for troubleshooting help, see https://github.com/unjs/jup#troubleshooting
 <packageName>@<version> does not have a valid tarball.
+! TLS certificate verification is disabled (set by <source>)
+TLS certificate verification failed for <host>: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.
+TLS certificate for <host> is expired or not yet valid (check the system clock).
+TLS certificate for <host> does not match that hostname.
+Configured CA bundle from <setting> was not installed into the TLS trust store
 Aborted by the user
 ```
 
@@ -119,10 +116,7 @@ Plus the wrapped default-version failure:
 jup cannot download the latest stable version of <packageName>; you can disable signature verification by setting JUP_INTEGRITY_KEYS to 0 in your env, or instruct jup to use the latest stable release known by this version of jup by setting JUP_DEFAULT_TO_LATEST to 0
 ```
 
-Both env var names in that last message are asserted by the conformance suite, as is
-the *absence* of the never-existing names `INTEGRITY_CHECK` and `USE_LATEST` under
-either prefix. Corepack's own wording is the same sentence with its name in place of
-this one's, so a log scraper keyed to either half of the remedy still matches.
+The conformance suite asserts both variable names in that message.
 
 ## 12.7 Integrity (§06)
 
@@ -186,33 +180,32 @@ All done!
 | Yarn Switch skip during `enable`/`disable` | **0** — a warning, not a failure |
 | `--version`, `--help` | 0 |
 
-## 12.12 New messages required by this spec
+## 12.12 Required messages
 
-Messages for behaviours this spec adds over the reference implementation. They are
-new, so they may be worded freely, but a conforming implementation SHOULD use these:
+A conforming implementation SHOULD use these messages:
 
 ```
 The package was signed with an expired key (<keyid>, expired <expires>)                     §06.5
 ! jup integrity warning: <name>@<version> carries a valid signature from <keyid>, a key that expired <expires>; accepting it   §06.5
 Unable to locate a Node.js runtime to execute <binName>; set JUP_NODE_EXECPATH to point at one   §08.3.1
 Unable to determine where to install the shims; pass --install-directory                    §10.4
-Options --system and --install-directory both name an install directory; pass one or the other   §15.13
---system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead   §15.13
+Options --system and --install-directory both name an install directory; pass one or the other   §10.4
+--system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead   §10.4
 <binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)   §10.2
 Refusing to extract '<entry>': path escapes the extraction directory                        §07.4
 Refusing to download from <host>: it does not match the configured registry <registry>      §05.2
 The bin path '<path>' declared by <name>@<version> escapes its installation directory       §08.1
 Unsupported hash algorithm '<algo>' in the packageManager field                             §06.2
-<name>@<reference> ships per-platform artifacts, and there is none for platform '<platform>' (supported: darwin, linux, win32)   §15.28
-<name>@<reference> ships per-platform artifacts, and there is none for architecture '<arch>' (supported: arm64, x64)             §15.28
-<name>@<reference> publishes no artifact for <platform>-<arch> (this version ships: <targets>)                                   §15.28
-Unable to execute <binPath>: <reason>                                                       §15.28
-"packageManager" cannot name <name>: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead   §15.39
-Invalid <source>: expected a single version, optionally with # comments and key=value lines   §15.40
-Unsupported version "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"   §15.40
-! Unable to reach the registry to resolve <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until the registry answers again.   §15.23
-! The registry lists no release matching <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until a matching release is published.   §15.23
-! Could not remove <path>; it is still in the cache. Remove it by hand, or re-run with permission to delete it.   §09.7, §15.44
+<name>@<reference> ships per-platform artifacts, and there is none for platform '<platform>' (supported: darwin, linux, win32)   §02.4
+<name>@<reference> ships per-platform artifacts, and there is none for architecture '<arch>' (supported: arm64, x64)             §02.4
+<name>@<reference> publishes no artifact for <platform>-<arch> (this version ships: <targets>)                                   §02.4
+Unable to execute <binPath>: <reason>                                                       §08.3
+"packageManager" cannot name <name>: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead   §03.4
+Invalid <source>: expected a single version, optionally with # comments and key=value lines   §03.1
+Unsupported version "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"   §03.1
+! Unable to reach the registry to resolve <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until the registry answers again.   §04.1
+! The registry lists no release matching <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until a matching release is published.   §04.1
+! Could not remove <path>; it is still in the cache. Remove it by hand, or re-run with permission to delete it.   §09.7
 ```
 
 The two stale-resolution lines are the only output a successful fallback produces,
@@ -222,7 +215,7 @@ run is correct, just not current. Their two halves are kept distinct because the
 remedies differ: an unreachable registry is somebody's outage and will pass, while a
 range nothing matches will not fix itself. Neither may be raised for an error that is
 a statement about the *request* — a disabled network, a minimum release age, a 401,
-a 403, a 404, a certificate that did not verify — which §15.23 requires to propagate.
+a 403, a 404, or a certificate that did not verify; propagate those errors.
 
 The two version-file messages name `<source>` — the file's path relative to the
 initial cwd, the same origin §03.4 reports for a manifest — because in a monorepo
@@ -230,9 +223,8 @@ which `.nvmrc` spoke is the first thing the reader needs. Neither is a warning:
 falling back to the compiled-in default would run a version the project explicitly
 did not ask for.
 
-The three per-host messages are deliberately distinct. The first two say the **tool**
-does not cover this host — it is outside §15.28's normalised vocabulary — and the
-third says this **version** does not, which is a fact about the release and usually
-means the fix is to bump it. All three are raised before any network request, so an
-unsupported host never costs a round trip, and none of them may be replaced by a 404
-on a URL that still contains a literal placeholder.
+The per-host messages distinguish a tool that does not cover the normalized platform
+or architecture from a version that does not publish for the normalized target.
+Each is raised before any network request, so an unsupported host never costs a
+round trip. None may be replaced by a 404 on a URL that still contains a literal
+placeholder.
