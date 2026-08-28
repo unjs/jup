@@ -30,10 +30,12 @@
 import {
   accessSync,
   chmodSync,
+  closeSync,
   copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -55,7 +57,15 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { basename, delimiter, dirname, join, relative, resolve as resolvePath } from "node:path";
+import {
+  basename,
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve as resolvePath,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
@@ -92,6 +102,9 @@ const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
  * which no unrelated binary of the same name would contain.
  */
 const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
+
+/** `0` where the platform has no `O_NOFOLLOW` (Windows), exactly as `tar.ts` does it. */
+const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 
 /** §15.15 — where the record of displaced entries lives, under `<home>`. */
 const DISPLACED_RECORD_NAME = "shims.json";
@@ -358,16 +371,52 @@ export function resolveInstallDirectory(options: ShimOptions, forEnable: boolean
   }
 }
 
-/** `undefined` when the directory can be created and written to, else the errno. */
+/**
+ * Four random bytes, hex encoded, for a temp file name.
+ *
+ * `node:crypto` is reached through `process.getBuiltinModule` for the reason
+ * `store.ts` gives: importing it pulls in two dozen native modules, and nothing
+ * here is on the warm path (§16.3). The lookup loads nothing until it is called.
+ */
+function randomSuffix(): string {
+  return process.getBuiltinModule("node:crypto").randomBytes(8).toString("hex");
+}
+
+/**
+ * `undefined` when the directory can be created and written to, else the errno.
+ *
+ * The probe is a **create-exclusive, no-follow** open under an unguessable name,
+ * not a plain write to `.jup-probe-<pid>`. A shared install directory
+ * (`/usr/local/bin`, a CI prefix) is frequently group-writable, and the pid space
+ * is small enough to pre-seed: an attacker who plants
+ * `.jup-probe-<every pid>` as symlinks gets `sudo jup enable
+ * --install-directory /usr/local/bin` to truncate whatever they aimed at.
+ * `O_EXCL | O_NOFOLLOW` refuses to open through a link at all, and the random
+ * name means there is nothing to pre-seed — the same pairing `tar.ts` uses on
+ * extraction (§07.4 rule 5).
+ *
+ * The directory is created `0o755` rather than at the ambient default: under
+ * `umask 000` — containers and some CI images — the default would make
+ * `~/.local/bin` world-writable, and every `yarn` on the machine then runs
+ * through a shim any local user can replace.
+ */
 function probeWritable(directory: string): NodeJS.ErrnoException | undefined {
-  const probe = join(directory, `.${TOOL_NAME}-probe-${process.pid.toString(36)}`);
+  const probe = join(directory, `.${TOOL_NAME}-probe-${randomSuffix()}`);
+  let handle: number | undefined;
   try {
-    mkdirSync(directory, { recursive: true });
-    writeFileSync(probe, "");
+    mkdirSync(directory, { recursive: true, mode: 0o755 });
+    handle = openSync(
+      probe,
+      fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | O_NOFOLLOW,
+      0o600,
+    );
     return undefined;
   } catch (error) {
     return error as NodeJS.ErrnoException;
   } finally {
+    if (handle !== undefined) closeSync(handle);
+    // `rm` never follows a symlink, so this drops a planted link and not its
+    // target.
     rmSync(probe, { force: true });
   }
 }
@@ -646,6 +695,47 @@ function displacedRecordPath(): string {
   return join(getHomeFolder(), DISPLACED_RECORD_NAME);
 }
 
+/**
+ * §15.15 — is this parsed object an entry `disable` may act on?
+ *
+ * The record is a plain JSON file in `<home>`, and `disable` turns it straight
+ * into filesystem operations: `symlink(target, path)`, `rename(backup, path)`,
+ * `chmod(path, mode)`. Trusting its shape means an unvalidated `mode` reaching
+ * `chmodSync` — `0o4755` on a path of the record's choosing — and a `backup`
+ * pointing anywhere on the disk. None of that needs a hostile author: a
+ * truncated write or a hand-edit is enough to make `disable` do something the
+ * user cannot see coming.
+ *
+ * So every field is checked against what {@link displace} can actually have
+ * written: absolute paths, a `backup` inside `<home>/displaced/`, and a mode
+ * that is permission bits and nothing else — setuid, setgid and the sticky bit
+ * are never restored, because `displace` never records them.
+ */
+function isValidDisplacedEntry(value: unknown): value is DisplacedEntry {
+  if (typeof value !== "object" || value === null) return false;
+  const entry = value as Record<string, unknown>;
+
+  if (typeof entry.path !== "string" || !isAbsolute(entry.path)) return false;
+
+  if (entry.type === "symlink") {
+    return typeof entry.target === "string" && entry.target !== "";
+  }
+
+  if (entry.type !== "file") return false;
+  if (typeof entry.backup !== "string" || !isAbsolute(entry.backup)) return false;
+  // The only place `displace` parks content. A `backup` outside it was not
+  // written by us, and restoring from it would move a file we never saved.
+  const parked = join(getHomeFolder(), DISPLACED_BACKUP_DIR);
+  if (dirname(resolvePath(entry.backup)) !== resolvePath(parked)) return false;
+
+  return (
+    entry.mode === undefined ||
+    (typeof entry.mode === "number" &&
+      Number.isInteger(entry.mode) &&
+      entry.mode === (entry.mode & 0o777))
+  );
+}
+
 export function readDisplacedRecord(): DisplacedEntry[] {
   let raw: string;
   try {
@@ -656,7 +746,10 @@ export function readDisplacedRecord(): DisplacedEntry[] {
 
   try {
     const parsed = JSON.parse(raw) as DisplacedRecord;
-    return Array.isArray(parsed.displaced) ? parsed.displaced : [];
+    if (!Array.isArray(parsed.displaced)) return [];
+    // A single malformed entry is dropped rather than failing the file: the rest
+    // of the record is still restorable, and §15.15 asks us to continue.
+    return parsed.displaced.filter((entry) => isValidDisplacedEntry(entry));
   } catch {
     // A corrupt record is not a reason to refuse to disable; it only means there
     // is nothing we can put back.
