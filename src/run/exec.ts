@@ -223,7 +223,7 @@ function setPath(env: Record<string, string | undefined>, value: string): void {
 /**
  * The URL's path component, without query or fragment.
  *
- * `specUrl` comes from the embedded table (`PackageManagerSpec.url`, with `{}`
+ * `specUrl` comes from the embedded table (`ToolSpec.url`, with `{}`
  * already substituted), so it parses as an absolute URL; the fallback keeps a
  * hand-built spec from throwing here rather than at the assertion below.
  */

@@ -24,10 +24,10 @@ import type {
   DevEnginesField,
   Locator,
   NpmRegistrySpec,
-  PackageManagerDefinition,
-  PackageManagerSpec,
   RegistrySpec,
+  ToolDefinition,
   ToolKind,
+  ToolSpec,
   VersionFileSpec,
 } from "../types.ts";
 
@@ -55,7 +55,7 @@ const BUN_BAND = {
   artifactRegistry: { type: "npm", package: "@oven/bun-{target}" },
   exec: "native",
   commands: { use: ["bun", "install"] },
-} as const satisfies Omit<PackageManagerSpec, "targets">;
+} as const satisfies Omit<ToolSpec, "targets">;
 
 /** The four hosts every published bun artifact covers. */
 const BUN_POSIX_TARGETS = {
@@ -98,7 +98,7 @@ const AUBE_BAND = {
   artifactRegistry: { type: "npm", package: "@endevco/aube-{target}" },
   exec: "native",
   commands: { use: ["aube", "install"] },
-} as const satisfies Omit<PackageManagerSpec, "targets">;
+} as const satisfies Omit<ToolSpec, "targets">;
 
 /** aube's glibc and native hosts. Note the absent `darwin-x64`: there is none. */
 const AUBE_TARGETS = {
@@ -143,7 +143,7 @@ const NUB_BAND = {
   artifactRegistry: { type: "npm", package: "@nubjs/nub-{target}" },
   exec: "native",
   commands: { use: ["nub", "install"] },
-} as const satisfies Omit<PackageManagerSpec, "targets">;
+} as const satisfies Omit<ToolSpec, "targets">;
 
 /**
  * nub's hosts: every name the table knows, spelled the way the table spells it.
@@ -184,7 +184,7 @@ const NODE_BAND = {
   registry: { type: "npm", package: "node" },
   artifactRegistry: { type: "npm", package: "node-{target}" },
   exec: "native",
-} as const satisfies Omit<PackageManagerSpec, "targets">;
+} as const satisfies Omit<ToolSpec, "targets">;
 
 /**
  * node's six published hosts, and the three renames `{target}` exists for.
@@ -211,7 +211,7 @@ const NODE_TARGETS = {
   "win32-x64": "win-x64",
 } as const;
 
-export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
+export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default: "12.0.2+sha1.788d93dc8869000b1078e0395c60748a0aadc4f1",
     fetchLatestFrom: { type: "npm", package: "npm" },
@@ -506,7 +506,7 @@ export const DEFINITIONS: Record<string, PackageManagerDefinition> = {
 
 export const SUPPORTED_NAMES: readonly string[] = Object.keys(DEFINITIONS);
 
-export function getDefinition(name: string): PackageManagerDefinition | undefined {
+export function getDefinition(name: string): ToolDefinition | undefined {
   return Object.hasOwn(DEFINITIONS, name) ? DEFINITIONS[name] : undefined;
 }
 
@@ -554,10 +554,7 @@ export function devEnginesFieldFor(name: string): DevEnginesField {
  * §02.3 — reverse the ordered range list, first match wins, using
  * prerelease-tolerant satisfaction. `undefined` when no band covers the version.
  */
-function findBand(
-  definition: PackageManagerDefinition,
-  version: string,
-): PackageManagerSpec | undefined {
+function findBand(definition: ToolDefinition, version: string): ToolSpec | undefined {
   for (let i = definition.ranges.length - 1; i >= 0; i--) {
     const entry = definition.ranges[i]!;
     if (satisfiesWithPrereleases(version, entry[0])) return entry[1];
@@ -576,7 +573,7 @@ function findBand(
  * {@link hasRangeBand} lets `install.resolveBin` tell "the table knows this
  * version" from "the table is guessing".
  */
-export function getSpecFor(name: string, version: string): PackageManagerSpec {
+export function getSpecFor(name: string, version: string): ToolSpec {
   const definition = getDefinition(name);
   if (definition === undefined) throw new UsageError(messages.unsupportedByBuild(name));
 
@@ -593,7 +590,7 @@ export function hasRangeBand(name: string, version: string): boolean {
  * The embedded table's spec for this locator, or `undefined` when there is none
  * — an unknown package manager, or a URL reference, which is its own spec.
  */
-export function getTableSpec(locator: Locator): PackageManagerSpec | undefined {
+export function getTableSpec(locator: Locator): ToolSpec | undefined {
   const parsed = parse(locator.reference);
   if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
   return getSpecFor(locator.name, parsed.version);
@@ -726,7 +723,7 @@ const EXE = process.platform === "win32" ? ".exe" : "";
  * is listed in the message because it is short and because the user's next move
  * depends on it.
  */
-function targetFor(spec: PackageManagerSpec, locator: Locator): string {
+function targetFor(spec: ToolSpec, locator: Locator): string {
   const host = hostTarget();
   const target = spec.targets?.[host];
   if (target === undefined) {
@@ -754,11 +751,7 @@ function targetFor(spec: PackageManagerSpec, locator: Locator): string {
  * unrecognised. It is deliberately not a 404 later on: a URL that still contains
  * the literal `{arch}` blames the registry for the host's own unsupportedness.
  */
-export function resolveSpecUrl(
-  spec: PackageManagerSpec,
-  locator: Locator,
-  version: string,
-): string {
+export function resolveSpecUrl(spec: ToolSpec, locator: Locator, version: string): string {
   const url = spec.url.replace("{}", version);
 
   const wantsTarget = url.includes("{target}");
@@ -867,7 +860,7 @@ const NPM_ALTERNATIVE_BY_REGISTRY = new Map<RegistrySpec, NpmRegistrySpec>();
  * `NAME_BY_REGISTRY` under the right name, or §15.2's `JUP_REGISTRY_<NAME>`
  * would stop finding a native entry.
  */
-const NAME_BY_SPEC = new Map<PackageManagerSpec, string>();
+const NAME_BY_SPEC = new Map<ToolSpec, string>();
 
 for (const [name, definition] of Object.entries(DEFINITIONS)) {
   NAME_BY_REGISTRY.set(definition.fetchLatestFrom, name);
@@ -929,7 +922,7 @@ export function getPackageManagerFor(binName: string): string | undefined {
  * anything that makes the URL or the artifact package host-dependent makes the
  * bytes host-dependent too.
  */
-export function isPerHostSpec(spec: PackageManagerSpec): boolean {
+export function isPerHostSpec(spec: ToolSpec): boolean {
   if (spec.targets !== undefined || spec.artifactRegistry !== undefined) return true;
   return spec.url.includes("{platform}") || spec.url.includes("{arch}");
 }
@@ -948,9 +941,9 @@ export function isPerHost(locator: Locator): boolean {
  * entry. Every band declares a `BinSpec` of paths (§15.41 retired the list form),
  * so there is one shape to walk.
  */
-const BIN_CACHE = new WeakMap<PackageManagerSpec, BinSpec>();
+const BIN_CACHE = new WeakMap<ToolSpec, BinSpec>();
 
-export function resolveSpecBin(spec: PackageManagerSpec): BinSpec {
+export function resolveSpecBin(spec: ToolSpec): BinSpec {
   const cached = BIN_CACHE.get(spec);
   if (cached !== undefined) return cached;
 
@@ -976,10 +969,10 @@ export function resolveSpecBin(spec: PackageManagerSpec): BinSpec {
  * lookup on the spec object, so minting a fresh one per call would lose §15.2's
  * per-package-manager registry override on exactly the entries that need it.
  */
-const ARTIFACT_REGISTRY_CACHE = new WeakMap<PackageManagerSpec, NpmRegistrySpec>();
+const ARTIFACT_REGISTRY_CACHE = new WeakMap<ToolSpec, NpmRegistrySpec>();
 
 export function resolveArtifactRegistry(
-  spec: PackageManagerSpec,
+  spec: ToolSpec,
   locator: Locator,
 ): NpmRegistrySpec | undefined {
   const declared = spec.artifactRegistry;

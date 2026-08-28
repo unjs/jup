@@ -306,15 +306,6 @@ export interface ToolDefinition {
   shimByDefault?: boolean;
 }
 
-/**
- * @deprecated §15.39 renamed these to {@link ToolSpec} / {@link ToolDefinition}
- * when the table stopped holding only package managers. Kept as aliases so the
- * rename costs no call sites; new code should use the `Tool` spellings.
- */
-export type PackageManagerSpec = ToolSpec;
-/** @deprecated See {@link PackageManagerSpec}. */
-export type PackageManagerDefinition = ToolDefinition;
-
 /* -------------------------------------------------------------------------- */
 /* Trust store — §02.6                                                        */
 /* -------------------------------------------------------------------------- */
@@ -359,9 +350,6 @@ export interface DevEnginesEntry {
   version?: unknown;
   onFail?: unknown;
 }
-
-/** @deprecated §15.39 — the shape is the same for both members; use {@link DevEnginesEntry}. */
-export type DevEnginesPackageManager = DevEnginesEntry;
 
 export interface Manifest {
   /**

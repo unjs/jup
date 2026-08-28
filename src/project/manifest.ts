@@ -24,8 +24,8 @@ import { isValidRange, isValidVersion, parse, satisfies } from "../version/semve
 import type {
   Descriptor,
   DevEnginesDeclaration,
+  DevEnginesEntry,
   DevEnginesField,
-  DevEnginesPackageManager,
   DevEnginesRange,
   LazyLocator,
   Manifest,
@@ -679,7 +679,7 @@ export function readSpecFromManifest(
     return { raw: pm, hasPin };
   }
 
-  const { name, version, onFail } = de as DevEnginesPackageManager;
+  const { name, version, onFail } = de as DevEnginesEntry;
   // §15.12 — the sidecar spelling of the pin. Read here so the same `onFail`
   // routing governs it as governs every other field of the block.
   const integrity = (de as Record<string, unknown>).integrity;

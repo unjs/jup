@@ -222,7 +222,7 @@ let toolBin: string;
 function patchTable(bin: string, name: string, definition: unknown): void {
   const file = join(dirname(bin), "config", "table.ts");
   const source = readFileSync(file, "utf8");
-  const anchor = "export const DEFINITIONS: Record<string, PackageManagerDefinition> = {";
+  const anchor = "export const DEFINITIONS: Record<string, ToolDefinition> = {";
   if (!source.includes(anchor)) {
     throw new Error(`The table's declaration moved; this fixture patches ${file} by text`);
   }
@@ -230,7 +230,7 @@ function patchTable(bin: string, name: string, definition: unknown): void {
     file,
     source.replace(
       anchor,
-      `${anchor}\n  ${name}: ${JSON.stringify(definition, undefined, 2)} as unknown as PackageManagerDefinition,\n`,
+      `${anchor}\n  ${name}: ${JSON.stringify(definition, undefined, 2)} as unknown as ToolDefinition,\n`,
     ),
   );
 }
