@@ -7,68 +7,66 @@
 
 <!-- /automd -->
 
-**jup runs the right tool version for every project.**
+**jup (pronounced “yup”) makes sure every developer, CI job, and container runs the tool version selected by the project.**
 
-Pin a package manager in `package.json`, then use its normal command:
+jup is a fast, small tool version manager and a safer, more capable alternative to [Corepack](https://github.com/nodejs/corepack). It supports npm, pnpm, Yarn, aube, Bun, Deno, nub, and Node.js.
 
-```json
-{
-  "packageManager": "pnpm@11.22.0+sha512.abc123..."
-}
-```
+Pin a tool once, then keep using its normal command:
 
 ```sh
-pnpm install
+jup enable        # set up the familiar tool commands once
+cd my-project
+jup use pnpm@12   # pin pnpm 12 and run its install command
+pnpm add lodash   # later commands use the pinned release
 ```
 
-jup reads the pin, downloads and verifies that pnpm release, caches it, and runs it. Everyone on the project gets the same version—on developer machines, in CI, and while working offline with a prepared cache.
+This prevents different machines from silently using different versions. Existing exact Corepack pins for npm, pnpm, and Yarn usually work without changes.
 
-jup supports npm, pnpm, Yarn, Bun, Deno, aube, and nub. It can also run a project-pinned Node.js version from `devEngines.runtime`:
+## How it works
 
-```sh
-jup node@22 script.js
+With jup's command shims enabled, a familiar command such as `pnpm install` passes through jup first:
+
+```mermaid
+flowchart LR
+    command["pnpm install"] --> pin["Read the project pin"]
+    pin --> cached{"Version cached?"}
+    cached -- Yes --> run["Run the pinned pnpm"]
+    cached -- No --> download["Download and verify"]
+    download --> run
 ```
 
-It is designed as a fast, small, zero-runtime-dependency replacement for [Corepack](https://github.com/nodejs/corepack), with support for more than package managers.
+The command and its arguments stay the same. jup reads the version selected by the project, caches it for later offline use, and hands control to that version of the tool.
+
+Package managers are declared in `packageManager`; Node.js is declared in `devEngines.runtime` or, as a fallback, `.nvmrc`. Bun, Deno, nub, and Node shims are opt-in so jup does not unexpectedly replace commands already installed on your machine.
 
 ## Quick start
 
-Install jup by following the [getting started guide](./docs/1.getting-started.md), then enable its command shims:
+Follow the [Start guide](./docs/1.start.md) to install jup, or use these commands after installation:
 
 ```sh
 jup enable
+cd my-project
+jup use pnpm@12
 ```
 
-Pin a package manager in your project:
-
-```sh
-jup use pnpm@11
-```
-
-Now run `pnpm`, `npm`, or `yarn` as usual. jup selects the version pinned by the project.
-
-To run a manager without installing shims, put `jup` before the command:
+Without shims, put `jup` before the tool command:
 
 ```sh
 jup pnpm install
 ```
 
-Check which project, version, cache, and shims jup is using:
-
-```sh
-jup info
-```
+Run `jup info` to inspect the selected project, version, cache, and shims.
 
 ## Documentation
 
-- [Introduction](./docs/0.intro.md)
-- [Getting started](./docs/1.getting-started.md)
-- [Projects and workspaces](./docs/2.projects-and-workspaces.md)
-- [CI and offline](./docs/3.ci-and-offline.md)
-- [Registries and networking](./docs/4.registries-and-networking.md)
+- [Introduction](./docs/0.index.md)
+- [Getting started](./docs/1.start.md)
+- [Projects and workspaces](./docs/2.projects.md)
+- [CI and offline](./docs/3.ci.md)
+- [Registries and networking](./docs/4.registry.md)
 - [Commands](./docs/5.commands.md)
 - [Security](./docs/6.security.md)
-- [Environment](./docs/7.settings-reference.md)
+- [Environment](./docs/7.settings.md)
 - [Moving from Corepack](./docs/8.corepack.md)
 - [Troubleshooting](./docs/9.troubleshooting.md)
 
