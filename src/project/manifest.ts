@@ -58,6 +58,42 @@ const INSIDE_NODE_MODULES_RE = /[\\/]node_modules([\\/]|$)/;
  */
 const GIT_ENTRY_NAME = ".git";
 
+/**
+ * §03.4, §07.2 — the shape a tool name must have.
+ *
+ * The npm package-name shape, because a name reaches the store as a *directory
+ * segment*: `resolveInstallTarget` builds `join(getInstallFolder(), name)`, and
+ * where the reference beside it is percent-encoded by `versionDirFor`, the name
+ * is not encoded by anything. `..`, `a/b` and a NUL therefore reach the
+ * filesystem verbatim.
+ *
+ * The scoped alternative is unreachable from {@link parseSpec} as it splits
+ * today — the name is everything before the *first* `@` — and is written out
+ * anyway so the predicate answers for a scoped name what npm answers, rather
+ * than being a rule that happens to be equivalent only under one caller.
+ *
+ * Excluded beyond the npm shape, all of them because this is a path segment:
+ * `\` and `:` (a separator and a drive/ADS marker on Windows, where `a\..\..`
+ * escapes exactly as `a/../..` does on POSIX) and every control character,
+ * whose NUL truncates the path the segment is spliced into.
+ */
+const TOOL_NAME_RE = /^(?:@[^\s/@\\:]+\/)?[^\s/@\\:]+$/;
+
+/** Every Unicode control character, NUL included. */
+const CONTROL_CHAR_RE = /\p{Cc}/u;
+
+/**
+ * Is `name` usable both as a tool name and as the store directory named after it?
+ *
+ * The regex admits `.` and `..` — they are ordinary npm-name characters — so the
+ * dot segments are refused separately: `join(store, "..")` is the store's parent,
+ * which is the whole of the traversal this predicate exists to stop.
+ */
+export function isValidToolName(name: string): boolean {
+  if (!TOOL_NAME_RE.test(name) || CONTROL_CHAR_RE.test(name)) return false;
+  return !name.split("/").some((segment) => segment === "." || segment === "..");
+}
+
 /** The manifest file name the walk looks for in every directory. */
 const MANIFEST_NAME = "package.json";
 
@@ -540,6 +576,23 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
   // 3 — split on the *first* `@`.
   const name = raw.slice(0, atIndex);
   const range = raw.slice(atIndex + 1);
+
+  // §07.2 — the name has to be a *name* before anything else asks what it means,
+  // because it is what `resolveInstallTarget` joins onto the store root, and
+  // nothing between here and there escapes it. The two branches below are not
+  // symmetric and cannot be relied on for this: step 4's non-URL branch refuses
+  // an unsupported name, but the URL branch refuses only a *supported* one, so
+  // an unsupported name carrying a URL reference — `../../tmp/x@https://…` — used
+  // to reach the store unexamined and install attacker-served bytes at an
+  // attacker-chosen path (the `#sha512.…` fragment satisfies §15.11's tier, so
+  // nothing later objected either). Checking here covers both branches and the
+  // `devEngines` spellings that route through them; the name-only form in step 2
+  // is already confined to the built-in table, which admits no such name.
+  if (!isValidToolName(name)) {
+    // §12 — the existing string, deliberately: what this rejects is a spec whose
+    // name cannot name a tool, which is what "unsupported" already says.
+    throw new UsageError(messages.unsupportedSpec(raw));
+  }
 
   // §15.39 — a runtime is never a `packageManager` value. Checked here rather
   // than in `readSpecFromManifest` because §03.1's laziness is load-bearing:

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../../src/errors-cold.ts";
 import {
   discoverProjectSpec,
+  isValidToolName,
   NODE_MODULES_RE,
   parseSpec,
   readSpecFromManifest,
@@ -178,6 +179,74 @@ describe("parseSpec — §03.4", () => {
     });
   });
 
+  /* §03.4 / §07.2 — the name is a store directory segment, and nothing between
+   * `parseSpec` and `join(getInstallFolder(), name)` escapes it. The URL branch
+   * used to be the hole: it refuses a URL for a *known* name, so an unknown one
+   * was never examined at all, and `../../../../tmp/pwn@https://host/x.tgz#sha512.…`
+   * installed attacker-served bytes outside the store. */
+  describe("the name has to be a name", () => {
+    const NUL = String.fromCodePoint(0);
+
+    const REJECTED = [
+      "../../../../tmp/pwn",
+      "../x",
+      "a/b",
+      "..",
+      ".",
+      "@scope/..",
+      "",
+      "yarn x",
+      String.raw`a\b`,
+      String.raw`..\..\tmp`,
+      "a:b",
+      `a${NUL}b`,
+    ];
+
+    it("refuses a traversing name with a URL reference", () => {
+      for (const name of REJECTED) {
+        const raw = `${name}@https://evil.test/x.tgz#sha512.aa`;
+        // The existing §12 string, not a new one.
+        expectUsageError(
+          () => parseSpec(raw, "package.json", LOOSE),
+          messages.unsupportedSpec(raw),
+        );
+      }
+    });
+
+    it("refuses it with a version reference too, in both modes", () => {
+      for (const name of REJECTED) {
+        for (const options of [PINNED, LOOSE]) {
+          const raw = `${name}@1.0.0`;
+          expectUsageError(
+            () => parseSpec(raw, "package.json", options),
+            messages.unsupportedSpec(raw),
+          );
+        }
+      }
+    });
+
+    it("keeps accepting the names a custom tool plausibly has", () => {
+      for (const name of ["custom", "my-tool", "my_tool", "tool.js", "Tool2"]) {
+        expect(parseSpec(`${name}@https://example.test/x.tgz`, "CLI arguments", LOOSE)).toEqual({
+          name,
+          range: "https://example.test/x.tgz",
+        });
+      }
+    });
+
+    // The predicate is checked directly for the scoped shape: `parseSpec` splits
+    // on the *first* `@`, so a scoped name cannot reach it, and the rule must
+    // still be npm's rather than one that happens to hold for this caller.
+    it("accepts a scoped name and refuses the shapes that are not one", () => {
+      expect(isValidToolName("@scope/ok")).toBe(true);
+      expect(isValidToolName("@oven/bun-linux-x64")).toBe(true);
+      expect(isValidToolName("yarn")).toBe(true);
+
+      for (const name of [...REJECTED, "@scope/a/b", "@/x", "@scope/", `@${NUL}/x`]) {
+        expect(isValidToolName(name), name).toBe(false);
+      }
+    });
+  });
 });
 
 describe("the upward walk — §03.1", () => {
