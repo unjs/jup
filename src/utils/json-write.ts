@@ -124,9 +124,23 @@ export function setTopLevelString(text: string, key: string, value: string): str
 
   const result = prefix + rewriteBody(body, key, literal, format);
 
-  // §16.4: validate by re-scanning our own output.
+  // §16.4: validate by re-scanning our own output — the literal has to be where
+  // the next reader will look for it.
   const span = scanTopLevelKey(result, key);
   if (!span || result.slice(span.start, span.end) !== literal) {
+    throw new Error(`Failed to set "${key}" in package.json`);
+  }
+  // The re-scan alone is not validation: `scanTopLevelKey` is a *scanner*. It
+  // balances braces and brackets on one shared counter and never inspects the
+  // values it steps over, so it reports success on input that was already
+  // malformed (`{"a": ]}`, `{"a": 1]}`) and we would hand `writeFileSync` a
+  // manifest that does not parse. Parsing is the only check that proves it does.
+  // `pin.ts` deliberately swallows its own `parseManifest` failure and relies on
+  // this guard to catch a broken manifest before it is written back, and
+  // `setNestedString` has always ended the same way (§16.4).
+  try {
+    JSON.parse(stripBom(result));
+  } catch {
     throw new Error(`Failed to set "${key}" in package.json`);
   }
   return result;
