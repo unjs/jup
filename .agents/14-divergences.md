@@ -564,7 +564,7 @@ give. Re-running `enable` re-bakes it, and the surviving `%~dp0\node.exe` /
 `$basedir/node` branches still make a shim directory that *is* the Node install
 directory relocatable.
 
-## 14.27 The stubs are named `.mjs` — [perf]
+## 14.27 The stubs are named `.mjs` — [correct/perf]
 
 **Corepack:** the generated stubs are `dist/<B>.js`, and the package they sit in
 is CommonJS, so `require('./lib/corepack.cjs')` is what the extension resolves
@@ -580,17 +580,28 @@ wrapper by the stub it invokes, so both compare against `.mjs`.
 walking up from the file towards the root until a `package.json` answers, and
 reading its `"type"` — before the first line of the stub runs, on every `yarn`,
 `npm` and `pnpm` invocation on the machine, forever. `.mjs` is ESM by definition
-and skips the lookup entirely: `strace -e trace=openat` over the same stub under
-Node 24 counts **7 `package.json` opens as `.js` and 0 as `.mjs`**. Seven is the
-worst case — a stub with no manifest above it — and one is the best, in a `dist/`
-whose own manifest answers immediately; the floor is what a normal install pays. It also stops the stub depending on a
-manifest that must keep saying `"type": "module"` and must keep sitting above it:
-a packaging that relocated `dist/` away from its `package.json`, or that shipped
-a CommonJS one, would break the stub with a `SyntaxError` on its first `import`.
+and skips the lookup entirely.
 
-The entry it loads is `shim.mjs` in a build and `shim.ts` from source (§10.4's
-candidate list), so the extension is settled per file rather than assumed — this
-changes only the stub's own name.
+**The saving is real but small, and it is not a speed-up.** `strace -e
+trace=openat` over the shipped layout under Node 24 attributes exactly **two
+`openat` calls, one `read` and one JSON parse** to the `.js` spelling — a miss on
+`dist/package.json`, then a hit on the package's own manifest one level up. (A
+stub with *no* manifest above it walks to `/` and spends seven; that is the worst
+case, not what an install pays.) Against a ~32 ms warm proxy run those calls are
+under the noise floor: byte-identical stubs alternated run by run, 60 runs each,
+measure **32.00 ms p50 as `.mjs` and 31.98 ms as `.js`** — a 0.02 ms difference
+across an 8 ms spread, which is to say none.
+
+So the justification is not the clock. It is that the lookup is work with no
+possible answer but one, and that dropping it removes a dependency: the stub no
+longer needs a manifest that says `"type": "module"` to keep existing above it.
+A packaging that relocated `dist/` away from its `package.json`, or shipped a
+CommonJS one, would break the stub with a `SyntaxError` on its first `import` —
+and `.mjs` is the spelling that cannot be broken that way.
+
+The entry the stub loads is `shim.mjs` in a build and `shim.ts` from source
+(§10.4's candidate list), so that extension is settled per file rather than
+assumed — this changes only the stub's own name.
 
 **No compatibility spelling is kept for the old name**, and the two ownership
 tests that compare names rather than read the marker are where that shows. A

@@ -729,12 +729,13 @@ export const PROXY_STUB_NAME = "shim-proxy.mjs";
  *
  * `.mjs`, like {@link PROXY_STUB_NAME}: an explicit module extension is a format
  * the runtime knows from the name alone, so it never walks up looking for a
- * `package.json` to read a `"type"` out of (§14.27). That is at least one
- * `open`/`read`/parse off every `yarn`, `npm` and `pnpm` invocation on the
- * machine — measured at 7 `package.json` opens as `.js` against 0 as `.mjs`
- * where nothing answers the walk — and it makes the stub work unchanged in a
- * directory whose nearest manifest says `commonjs`, which `dist/` does not but a
- * relocated install might.
+ * `package.json` to read a `"type"` out of (§14.27). In the shipped layout that
+ * is two `openat` calls, a `read` and a parse off every `yarn`, `npm` and `pnpm`
+ * invocation on the machine — **not** a measurable speed-up, since against a
+ * ~32 ms warm run the two spellings differ by 0.02 ms at p50. The reason to
+ * prefer it is that the stub then depends on no manifest at all: a packaging
+ * that relocated `dist/` away from its `package.json`, or shipped a CommonJS
+ * one, would break a `.js` stub on its first `import`.
  */
 export function stubNameFor(binName: string): string {
   return `${binName}.mjs`;
