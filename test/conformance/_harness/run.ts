@@ -23,7 +23,14 @@ import type { MockRegistry } from "./registry.ts";
 export const REPO_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 export const BIN = join(REPO_ROOT, "src", "bin.ts");
 
-const INTERCEPT = fileURLToPath(new URL("./intercept.ts", import.meta.url));
+// A URL, not a path. Node consumes `--import` values in
+// `runEntryPointWithESMLoader`, which hands each one straight to the ESM
+// loader as a specifier resolved against the cwd URL — no `pathToFileURL` in
+// between. A POSIX absolute path has no scheme and resolves correctly; a
+// Windows one starts `D:\`, which the URL parser reads as the scheme `d:` and
+// the loader then rejects with ERR_UNSUPPORTED_ESM_URL_SCHEME before the tool
+// runs a single line. Passing the `file://` form is correct on every platform.
+const INTERCEPT = new URL("./intercept.ts", import.meta.url).href;
 
 export interface RunResult {
   exitCode: number | null;

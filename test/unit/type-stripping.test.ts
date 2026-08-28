@@ -1,12 +1,16 @@
 import { execFile } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join, relative } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
 const execFileAsync = promisify(execFile);
 
-const ROOT = new URL("../../", import.meta.url).pathname;
+// `fileURLToPath`, not `.pathname`: on Windows the latter is `/D:/…`, which
+// `join` and `readdirSync` then resolve against the current drive root as
+// `D:\D:\…`.
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const SRC = join(ROOT, "src");
 
 function sourceFiles(dir: string): string[] {
@@ -37,7 +41,7 @@ describe("every source module loads under Node's type stripping", () => {
   });
 
   it.for(files.map((file) => relative(ROOT, file)))("%s", async (relativePath) => {
-    const target = JSON.stringify(new URL(relativePath, `file://${ROOT}`).href);
+    const target = JSON.stringify(pathToFileURL(join(ROOT, relativePath)).href);
 
     // `bin.ts` runs the CLI on import, so type-check the syntax without
     // executing the module body.
