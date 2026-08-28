@@ -39,9 +39,8 @@ export const NODE_MODULES_RE = /[\\/]node_modules[\\/](@[^\\/]*[\\/])?([^@\\/][^
 /**
  * §03.2 — anything *under* a `node_modules`, for the env-file step alone.
  *
- * {@link NODE_MODULES_RE} matches only the last segment pair, which §03.1
- * requires it to (a manifest at `node_modules/foo/src` is read, and corepack
- * reads it too). That tail match is the wrong shape for the env file: a
+ * {@link NODE_MODULES_RE} matches only the last segment pair as §03.1 requires.
+ * That tail match is too narrow for the env file: a
  * dependency that cannot supply a `packageManager` from `node_modules/evil` can
  * still supply a whole *environment* from `node_modules/evil/src/.jup.env`, and
  * the env file is the more dangerous of the two — §03.2's prefix filter is the
@@ -79,7 +78,6 @@ const GIT_ENTRY_NAME = ".git";
  */
 const TOOL_NAME_RE = /^(?:@[^\s/@\\:]+\/)?[^\s/@\\:]+$/;
 
-/** Every Unicode control character, NUL included. */
 const CONTROL_CHAR_RE = /\p{Cc}/u;
 
 /**
@@ -94,13 +92,10 @@ export function isValidToolName(name: string): boolean {
   return !name.split("/").some((segment) => segment === "." || segment === "..");
 }
 
-/** The manifest file name the walk looks for in every directory. */
 const MANIFEST_NAME = "package.json";
 
-/** §03.4 — the `source` reported for anything the user typed on the command line. */
 export const CLI_SOURCE = "CLI arguments";
 
-/** §03.3 — every field of the manifest the discovery walk actually looks at. */
 const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
 
 /**
@@ -114,25 +109,11 @@ const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
  */
 const MUTATING_MANIFEST_FIELDS = [...MANIFEST_FIELDS, "workspaces"] as const;
 
-/** §15.27 — a directory containing this is a workspace root even with no `workspaces` field. */
 const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
 
 /**
- * §03.1 as amended by §15.25 — the walk's stop condition.
- *
- * Corepack's loop condition is `!selection || !selection.data.packageManager`:
- * a *truthiness* test on one field. Two consequences, both defects (#779):
- *
- * * a manifest declaring only `devEngines.packageManager` does not stop the
- *   climb, so a parent's spec — or the global default — silently wins over the
- *   nested project's own declaration;
- * * `packageManager: null` reads as "absent" rather than as "declared and
- *   invalid", so the walk sails past a manifest whose author plainly meant to
- *   say something.
- *
- * Both fields are stop conditions here, and the test is **key presence**, not
- * truthiness: a declared-but-invalid value stops the walk and is then reported
- * by `parseSpec`, which is where an invalid value belongs.
+ * Either relevant field's key presence stops discovery, including invalid
+ * values, so validation occurs at the declaring manifest.
  */
 export function stopsWalk(data: Manifest | undefined, field: DevEnginesField): boolean {
   if (data === undefined) return false;
@@ -151,19 +132,7 @@ export function stopsWalk(data: Manifest | undefined, field: DevEnginesField): b
   );
 }
 
-/**
- * §15.27 — a workspace root, where a mutating walk must stop.
- *
- * #607: `corepack use` in a nested directory of a monorepo updates the *root*
- * `package.json`, which corepack's author confirmed is intentional and agreed is
- * surprising. Climbing to the workspace root is right — a monorepo pins its
- * package manager once — but climbing *past* it is never right, and that is what
- * happens today when some ancestor of the repository (a `$HOME/package.json`,
- * §15.35k's other victim) happens to carry a pin.
- *
- * Both conventions count: `workspaces` in the manifest (npm, yarn, bun) and a
- * `pnpm-workspace.yaml` beside it (pnpm).
- */
+/** Mutating discovery stops at either workspace convention and never climbs beyond it. */
 function isWorkspaceRoot(dir: string, data: Manifest): boolean {
   if (Object.hasOwn(data, "workspaces") && data.workspaces !== undefined) return true;
   return statSync(join(dir, PNPM_WORKSPACE_FILE), { throwIfNoEntry: false }) !== undefined;
@@ -172,12 +141,8 @@ function isWorkspaceRoot(dir: string, data: Manifest): boolean {
 /**
  * §03.2 — where the env-file search stops: the outer edge of *this* project.
  *
- * A directory carrying its own `package.json` is a project, and a directory
- * carrying a `.git` is a checkout; either way what lies above it belongs to
- * somebody else and cannot be this project's configuration. Deliberately not
- * the manifest walk's stop condition (§15.25), which is about *pins*: an
- * unpinned project is still a project, and it is the unpinned case that used to
- * climb all the way to `/`.
+ * A `package.json` or `.git` marks a project boundary; configuration above it
+ * belongs to another project. This differs from the pin-based manifest stop.
  *
  * `package.json` first: it is the commoner marker, and on the directory the walk
  * is standing in it is the file about to be read anyway. `.git` may be a file
@@ -215,9 +180,8 @@ function isProjectBoundary(dir: string): boolean {
  *
  * `tool` names the tool the answer is *for*, and §15.39 is the whole of what it
  * changes: a `kind: "runtime"` name reads `devEngines.runtime` and nothing else,
- * where every other name reads `packageManager` / `devEngines.packageManager` as
- * before. Absent means the package-manager field pair, which is what every
- * caller predating the `node` entry wants and what keeps this a no-op for them.
+ * where every other name reads `packageManager` / `devEngines.packageManager`.
+ * An absent tool selects the package-manager field pair.
  *
  * §15.40 — a tool whose table entry declares a {@link VersionFileSpec} also has
  * the nearest such file recorded on the way up, and it speaks only where the
@@ -228,9 +192,8 @@ function isProjectBoundary(dir: string): boolean {
  * `projectSpecFlag` lets the caller honour `COREPACK_ENABLE_PROJECT_SPEC=0`
  * (§03.5, §11.1: "never look at the project at all"). It degrades the walk to
  * `envOnly` the moment the flag is seen, so a broken manifest cannot defeat the
- * escape hatch users reach for *because* their manifest is broken. It is opt-in
- * because corepack consults that variable only on the proxy path — `use`, `up`,
- * `install` and `pack` load the spec regardless of it.
+ * escape hatch users reach for *because* their manifest is broken. Compatibility
+ * applies it only on the proxy path; management commands always load the spec.
  */
 export function discoverProjectSpec(
   cwd: string,
@@ -243,13 +206,8 @@ export function discoverProjectSpec(
   },
 ): SpecResult {
   const initialCwd = resolve(cwd);
-  // §15.35d — an external spec file replaces the manifest, so the walk climbs
-  // for the env file alone. Read before the walk begins, which is sound because
-  // §15.37 makes the variable env-file ineligible: nothing loaded on the way up
-  // can introduce it half-way. Degrading to `envOnly` is the point rather than
-  // an optimisation — #682 and #402 are vendored trees whose `package.json`
-  // cannot be edited, sometimes because it says the *wrong* thing, and a walk
-  // that still parsed it would fail on exactly the file being bypassed.
+  // An external spec bypasses manifest parsing while discovery continues for
+  // the env file. The external-spec variable cannot be supplied by that file.
   const specFile = externalSpecFile(initialCwd);
   let envOnly = options?.envOnly === true || specFile !== undefined;
   const projectSpecFlag = options?.projectSpecFlag === true;
@@ -330,8 +288,7 @@ export function discoverProjectSpec(
     // §03.5 / §11.1 — with the project spec disabled the manifest must not be
     // read at all, let alone parsed or devEngines-validated. The test lives here,
     // *after* the env-file step, because the env file is allowed to be what
-    // sets the variable (§03.2); corepack returns before any walk and so cannot
-    // honour an env file at all. From this point the walk is exactly `envOnly`:
+    // sets the variable (§03.2). From this point the walk is exactly `envOnly`:
     // it keeps climbing for an env file and records no manifest, so the result is
     // `NoProject` and §03.5 falls back.
     if (projectSpecFlag && envDisabled(ENV.ENABLE_PROJECT_SPEC)) {
@@ -608,14 +565,9 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
       throw new UsageError(messages.illegalUrl(raw));
     }
   } else {
-    // §15.23 — an exact version, a semver range, and a dist-tag are all valid
-    // here; §04.1 classifies which is which, and a range or a tag additionally
-    // has its resolution recorded in `jup.lock`. Corepack's
-    // exact-version-only rule lived at exactly this line, and is the whole of
-    // #95 (121👍), #402 and #729 — the rule that broke Dependabot, Renovate and
-    // Netlify, and that pnpm 11.21's generated `devEngines` ranges trip over.
-    //
-    // Nothing is left to reject: what is neither a version nor a range is a tag,
+    // §15.23 — exact versions, semver ranges, and dist-tags are valid; §04.1
+    // classifies them, and non-exact references use `jup.lock` resolution.
+    // What is neither a version nor a range is a tag,
     // and a tag that names nothing fails later with §12.4's `Tag not found`,
     // which says considerably more than "expected a semver version" did.
     //
@@ -740,11 +692,8 @@ export function readSpecFromManifest(
 /**
  * §15.12 — fold `devEngines.packageManager.integrity` into the spec string.
  *
- * The sidecar exists because `<version>+<algo>.<hex>` is valid semver build
- * metadata but stops `packageManager` round-tripping through tools that treat
- * it as a version (#316, #726, #620). Both spellings MUST be accepted on read,
- * and the cheapest way to *mean the same thing* is to make them literally the
- * same thing: an SRI beside a clean `yarn@4.14.1` becomes `yarn@4.14.1+sha512.…`
+ * Both suffix and sidecar spellings MUST be accepted. An SRI beside a clean
+ * `yarn@4.14.1` becomes `yarn@4.14.1+sha512.…`
  * here, and from that point §06.1 row 1 treats it exactly as it treats a
  * hand-written suffix — including §15.11's "a pinned hash is a verification
  * tier".
@@ -769,11 +718,9 @@ function withSidecarIntegrity(
   if (integrity === undefined || integrity === null) return raw;
   if (typeof raw !== "string") return raw;
 
-  // §15.12 — the sidecar describes the `version` beside it, and only that. Where
-  // that version is a range it describes no single release, so it may not be
-  // folded into a `packageManager` pin that outranks it (§03.3): the digest and
-  // the reference would be about different versions. Writers now delete such a
-  // digest (§15.26); one still here is a hand edit or an older jup.
+  // §15.12 — the sidecar describes the `version` beside it, and only that. A
+  // range describes no single release, so its digest cannot be folded into a
+  // `packageManager` pin that outranks it (§03.3).
   if (typeof declared === "string" && !isValidVersion(declared)) return raw;
 
   if (typeof integrity !== "string") {
@@ -832,12 +779,7 @@ export function warnOrThrow(message: string, onFail?: unknown): void {
 }
 
 /**
- * §15.35k — is the governing manifest at the home directory or above?
- *
- * #424: a `packageManager` field in `$HOME/package.json` silently governs every
- * directory on the machine that has no manifest of its own. Anything at or
- * above the home directory is by definition not one project's declaration.
- *
+ * §15.35k — manifests at or above the home directory are outside a project.
  * Path comparison, not `realpath`: this only decorates an error already being
  * thrown, so a `stat` per mismatch is not worth a symlinked home directory.
  */
@@ -859,9 +801,7 @@ export function reconcile(
 ): Descriptor | LazyLocator {
   const { requestedName, binaryVersion } = options;
 
-  // An explicit CLI version replaces the *range*, never the name — which is why
-  // `corepack yarn@1.22.4 --version` works in a Yarn 4 project while
-  // `corepack pnpm@9 install` in that same project still errors.
+  // An explicit CLI version replaces the range, never the package-manager name.
   const withBinaryVersion = (descriptor: Descriptor | LazyLocator): Descriptor | LazyLocator =>
     binaryVersion === undefined ? descriptor : { name: descriptor.name, range: binaryVersion };
 

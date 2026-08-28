@@ -1,16 +1,5 @@
 /**
- * Manifest reading — §03.1, §16.3.
- *
- * A `package.json` reaches this file on **every** invocation, so what it holds
- * is only what a read needs: `JSON.parse` behind a BOM- and empty-file-tolerant
- * wrapper, and {@link scanTopLevelFields}, which answers the proxy path's
- * two-field question without building a DOM at all.
- *
- * The rewriting half — the format-preserving surgical edit `use`, `up` and §03.6
- * auto-pin need — lives in `json-write.ts`, which is loaded only by the commands
- * that write. The two are one scanner split along the warm/cold line rather than
- * along a conceptual one, which is why the primitives below are exported: they
- * are shared with that file and with nothing else.
+ * Warm-path manifest scanning extracts selected fields without a DOM and falls back to `JSON.parse` whenever correctness is uncertain.
  */
 
 /** Shared with `json-write.ts`. */
@@ -38,11 +27,6 @@ export function parseManifest(text: string): unknown {
   }
   return JSON.parse(body);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Warm-path field extraction — §16.3                                          */
-/* -------------------------------------------------------------------------- */
-
 /** Deeper than any real manifest; past it the scan gives up and defers to `JSON.parse`. */
 const MAX_SCAN_DEPTH = 64;
 

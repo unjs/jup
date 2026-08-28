@@ -1,26 +1,9 @@
 /**
- * TLS configuration and diagnostics — §15.4.
- *
- * Corepack has no TLS surface at all. A machine behind a TLS-inspecting proxy
- * therefore gets `Error when performing the request to <url>` and nothing else,
- * which is the whole of #332: the actual cause is a certificate signed by a CA
- * the trust store has never heard of, and the remedy is a runtime environment
- * variable corepack never mentions. This module is the two halves of the fix —
- * a place to put the CA, and a sentence that says which of the three TLS
- * failures happened.
- *
- * **Nothing here costs anything unless it is configured.** {@link tlsSettings}
- * is pure environment parsing, `node:tls` is reached through
- * `process.getBuiltinModule` and only when a bundle is actually being applied,
- * and the PEM file is read at most once per process. The no-configuration path
- * never leaves native `fetch` (§05.1) — which is why the CA is installed with
- * `tls.setDefaultCACertificates` rather than by routing requests through a
- * hand-rolled client: `fetch` honours the process trust store, so a custom CA
- * costs one file read and no change of transport at all.
- *
- * Disabling verification is the exception: no `fetch` option can express it, so
- * that one case is dispatched through `proxy.ts`'s `node:https` transport
- * (§14.8's dispatcher, which had to exist anyway).
+ * TLS configuration stays lazy: unconfigured requests remain on native `fetch`,
+ * PEM bundles are memoized, and `node:tls` loads only to apply a bundle.
+ * Disabling verification requires the `node:https` transport because `fetch`
+ * cannot express it. Diagnostics distinguish authority, validity, and hostname
+ * failures.
  */
 
 import { readFileSync } from "node:fs";
@@ -116,11 +99,6 @@ export function tlsConfigured(): boolean {
   const npmrc = npmrcTlsSettings();
   return npmrc.cafile !== undefined || npmrc.ca !== undefined || npmrc.strictSsl?.value === false;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Applying the configuration                                                 */
-/* -------------------------------------------------------------------------- */
-
 /** Memoised per bundle path: a PEM file is read at most once per process. */
 const bundles = new Map<string, string[]>();
 
@@ -314,18 +292,13 @@ export function tlsTransportRequired(): boolean {
   if (strictSsl !== undefined) return false;
   return npmrcTlsSettings().strictSsl?.value === false;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Diagnostics                                                                */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The certificate-verification failures worth a sentence of their own.
  *
  * These are `error.code` values, not message text: the messages are OpenSSL's
  * and change between versions, while the codes are the contract Node documents.
- * Both the historical and the OpenSSL 3 spellings are listed, because Node
- * passes the verify-error short name straight through and it was renamed.
+ * Include both documented spellings because supported OpenSSL versions expose
+ * different short names.
  */
 const UNKNOWN_AUTHORITY = new Set([
   "UNABLE_TO_GET_ISSUER_CERT",

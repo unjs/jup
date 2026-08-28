@@ -3,12 +3,8 @@
  *
  * `enable` puts our names on PATH; `disable` takes them off.
  *
- * §14.15's `argv[0]` dispatch was written as a native-binary divergence, on the
- * reading that Node `realpath`s the module it executes and so loses the
- * invocation name. It does — but it does **not** `realpath` `process.argv[1]`,
- * which still holds the path as invoked. So a POSIX shim is a relative symlink
- * to **one** name-agnostic stub that reads its own name from there, and no file
- * in `dist/` is named after a binary any more.
+ * Node preserves the invoked path in `process.argv[1]`, so POSIX shims link to
+ * one name-agnostic stub that reads its name from that path.
  *
  * Windows keeps §10.3's three script variants per name, because a `.cmd` or
  * `.ps1` wrapper invokes `node <stub>` and the invocation name is genuinely gone
@@ -134,9 +130,8 @@ const INTERPRETER_NAME = "node";
  * 126), and `enable` cannot repair them because `env node` now finds only the
  * broken `node` shim (exit 127). §15.43 has the three tiers below instead.
  *
- * Resolved at `enable` time, not at build time: the shipped stubs
- * (`scripts/generate-shims.mjs`) keep `#!/usr/bin/env node` because they are
- * published from somebody else's machine and must stay relocatable.
+ * Resolve at `enable` time; generated stubs keep `#!/usr/bin/env node` so build
+ * artifacts remain relocatable.
  *
  * Deliberately uncached. It is called once per `enable`, so a cache buys
  * nothing, and the answer now depends on the environment and on `PATH` — which
@@ -363,11 +358,6 @@ export interface ShimOptions {
   /** §14.16 — required to replace an entry we did not create. */
   force?: boolean;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Messages                                                                   */
-/* -------------------------------------------------------------------------- */
-
 /**
  * These live here rather than in `errors.ts` for the same reason `info.ts` keeps
  * its own: they are this command's vocabulary and nothing else refers to them.
@@ -501,11 +491,6 @@ export const rehashNotice = () => `! ${REHASH_ADVICE}`;
 /** §15.15 — "if a recorded entry can no longer be restored, say so and continue". */
 export const restoreFailed = (path: string, reason: string) =>
   `! Unable to restore ${path}: ${reason}`;
-
-/* -------------------------------------------------------------------------- */
-/* Argument parsing and the target set                                        */
-/* -------------------------------------------------------------------------- */
-
 interface ParsedArgs {
   options: ShimOptions;
   names: string[];
@@ -576,10 +561,8 @@ function assertKnownName(name: string): void {
  * that opts into the default set, npm included; each name then expands to its
  * full binary set, so `disable yarn` takes `yarnpkg` with it.
  *
- * npm used to be excluded on the grounds that it ships with Node. §15.16 rejects
- * that: the exclusion is inter-team policy corepack is party to and we are not,
- * and its consequence is that a yarn-pinned project correctly blocks `pnpm`
- * while `npm install` silently works anyway. `--exclude npm` restores it.
+ * npm is included for consistent project-pin enforcement; `--exclude npm`
+ * explicitly opts out.
  *
  * §15.28's native entries are the opposite case and opt *out*
  * (`shimByDefault: false`). `bun` and `deno` name runtimes that users install
@@ -614,11 +597,6 @@ export function targetBinaries(
 
   return [...binaries];
 }
-
-/* -------------------------------------------------------------------------- */
-/* Where the shims go — §10.4, §14.17, §15.13                                 */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The folder holding the library entry: `src/` from source, `dist/` from a build.
  *
@@ -771,12 +749,8 @@ function namedDirectory(options: ShimOptions): string | undefined {
  * advisory.
  *
  * `PATH` chooses among {@link shimDirectoryCandidates} and never supplies a
- * candidate of its own. "The first writable directory on `PATH`" is the rule this
- * refuses to be: in a `node:*` image that is `/usr/local/bin` beside `node`,
- * which is #71 restored; on a Mac it is Homebrew's prefix; and `~/.volta/bin`,
- * `~/.asdf/shims` and `~/.nvm/.../bin` are user-owned, on `PATH`, and managed by
- * someone else. Nothing observable separates those from a general-purpose
- * per-user bin directory except the name, so the names are the list.
+ * candidate: writable entries may belong to system or runtime-manager installs.
+ * Only the explicit candidate list is eligible.
  */
 export function chooseInstallDirectory(options: ShimOptions): {
   directory: string;
@@ -826,9 +800,8 @@ export function chooseInstallDirectory(options: ShimOptions): {
  * one, and a report that did would name a directory the shims are not in.
  * `enable`'s own chain is {@link chooseInstallDirectory}.
  *
- * The `PATH` lookup for our own binary is gone from both chains on purpose: it is
- * exactly what #71 is about. `--install-directory=<the directory containing the
- * tool>` (point 4) remains available for anyone who wants the old behaviour.
+ * Do not infer the directory from this tool's `PATH` entry; that may select a
+ * system installation. An explicit `--install-directory` remains available.
  *
  * `enable` realpaths the result so relative link targets are correct; `disable`
  * deliberately does not (§10.4).
@@ -940,11 +913,6 @@ function realpathOr(directory: string): string {
     return directory;
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Stub generation — §10.1                                                    */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §10.1 — the stub bakes in the binary name, because Node loses it: it
  * `realpath`s the executed module, so a shim cannot ask how it was called.
@@ -986,8 +954,7 @@ function realpathOr(directory: string): string {
  * {@link ENTRY_CANDIDATES} and the `realpathSync` below are for), so a symlink
  * named `yarn` still says `yarn` there — under a direct `PATH` execution, under
  * `node <shim>`, and under `--preserve-symlinks-main`. One stub therefore serves
- * every binary name, which is #751 closed at the root: there is no per-name file
- * left to go stale.
+ * every binary name, avoiding stale per-name files.
  *
  * Windows still passes a name, because §10.3's `.cmd` / `.ps1` wrappers invoke
  * `node <stub>` and the invocation name is gone by then. That is the *only*
@@ -1093,12 +1060,8 @@ async function readHead(file: string, length: number): Promise<string | undefine
  * §15.45 — make sure the stub carries the execute bit, without writing when it
  * already does.
  *
- * The shipped stubs are `chmod 0o755` by `scripts/generate-shims.mjs`, but that
- * mode does not survive publication: npm re-applies the execute bit on pack to
- * `bin` targets only, so every stub in the tarball arrives `0o644` while
- * `dist/bin.mjs` arrives `0o755`. A symlink has no mode of its own (§10.2), so
- * those shims are the ones the kernel refuses — silently, since a `PATH` lookup
- * that finds a non-executable file just keeps looking.
+ * Installed stubs may lack the execute bit, and a symlink has no mode of its
+ * own. Ensure the target is executable so `PATH` lookup cannot skip it.
  *
  * `stat` first and chmod only what needs it: a no-op chmod is still a write, and
  * §10.2 property 4 and §10.7 both want a warm `enable` against a read-only
@@ -1166,8 +1129,7 @@ async function ensureStub(
   // One byte more than the stub is long, so a longer file cannot compare equal.
   // `byteLength`, not `length`: the banner is not ASCII.
   if ((await readHead(file, Buffer.byteLength(source) + 1)) === source) {
-    // Current content is not the whole of "current": §15.45's execute bit is the
-    // other half, and it is the half a published tarball loses.
+    // Current content and executable mode are both required by §15.45.
     await ensureExecutable(file, distFolder);
     return file;
   }
@@ -1188,8 +1150,7 @@ async function ensureStub(
  * §15.46 — pin the interpreter into ${TOOL_NAME}'s **own** CLI entry, the same
  * way and for the same reason §10.1 pins it into the stub.
  *
- * `dist/bin.mjs` — what `package.json`'s `bin` points `jup` and `corepack` at —
- * opens `#!/usr/bin/env ${INTERPRETER_NAME}` like any published Node CLI, and
+ * `dist/bin.mjs` opens `#!/usr/bin/env ${INTERPRETER_NAME}`, and
  * that line is §14.26 consequence 2 waiting to happen to *us*. Once a
  * ${INTERPRETER_NAME} shim of ours is on the `PATH` §15.32 asks the user to
  * prepend the shim directory to, `env` finds the shim, the shim resolves the
@@ -1273,11 +1234,6 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
     () => cliEntryNotWritable(file),
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* Ownership — §14.16, §15.14, §15.15                                         */
-/* -------------------------------------------------------------------------- */
-
 /** §10.2 — a `yarn`-ish name whose realpath lands inside a Yarn Switch install. */
 async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
   if (!binName.includes("yarn")) return false;
@@ -1289,14 +1245,13 @@ async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
 /**
  * Is the entry at `file` one *we* created?
  *
- * §14.16 answers this for `enable`; §15.15 makes `disable` ask the same question
- * before removing anything, which is the whole of #112. The three shapes:
+ * Both `enable` and `disable` check ownership before replacing or removing an
+ * entry. The three owned shapes are:
  *
  * * a POSIX symlink whose target carries {@link SHIM_MARKER};
  * * a **dangling** symlink that still names a stub of ours — the shared
  *   {@link PROXY_STUB_NAME}, or a per-name `<binName>.mjs` from a Windows
- *   install. This is #751's stale shim, which `enable` must replace and
- *   `disable` must remove rather than skip (§15.14);
+ *   install, which `enable` replaces and `disable` removes;
  * * a regular file carrying the marker, or one of §10.3's three Windows
  *   wrappers, which cannot carry it (see {@link WIN32_WRAPPER_HEADS}).
  */
@@ -1308,8 +1263,8 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
     const link = await readlink(file).catch(() => undefined);
     if (link === undefined) return false;
     const head = await readHead(resolvePath(dirname(file), link), 1024);
-    // A live link is ours iff what it points at is ours; a dangling one is ours
-    // iff it still names our stub (§15.14 / #751).
+    // A live link is ours iff its target is ours; a dangling one is ours iff it
+    // still names our stub.
     if (head !== undefined) return head.includes(SHIM_MARKER);
     const target = basename(link);
     return target === PROXY_STUB_NAME || target === stubNameFor(binName);
@@ -1325,11 +1280,6 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
     head.includes(stubNameFor(binName))
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.15 — the record of what `enable` displaced                             */
-/* -------------------------------------------------------------------------- */
-
 /**
  * One entry `enable` moved out of the way.
  *
@@ -1459,10 +1409,8 @@ function backupPathFor(file: string): string {
  * §15.15 — move an entry that is not ours out of the way, recording enough to
  * put it back.
  *
- * The record is written whenever we displace something foreign, not only under
- * `--force`: §10.2 lets `enable` replace a *symlink* it did not create without
- * asking, and losing a symlink is exactly the complaint in #112. Returns `true`
- * when the entry has already been removed from `file`.
+ * Record every displaced foreign entry, including symlinks replaced without
+ * `--force`. Returns `true` when the entry has already been removed from `file`.
  */
 async function displace(file: string, stats: Stats, installDirectory: string): Promise<boolean> {
   if (stats.isSymbolicLink()) {
@@ -1494,7 +1442,7 @@ async function displace(file: string, stats: Stats, installDirectory: string): P
  *
  * "If a recorded entry can no longer be restored, say so and continue": every
  * failure warns and the entry is dropped, so a second `disable` does not repeat
- * a complaint the user can do nothing about.
+ * an unactionable warning.
  */
 export function restoreDisplaced(installDirectory: string, files: string[]): number {
   const wanted = new Set(files.map((file) => basename(file)));
@@ -1546,11 +1494,6 @@ function restoreOne(entry: DisplacedEntry): string | undefined {
     return (error as Error).message;
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* POSIX — §10.2, §10.6                                                       */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §10.2 — POSIX shims are relative symlinks, created with `lstat` (not `stat`,
  * so a dangling symlink is seen as a symlink) and **idempotent**: an
@@ -1575,8 +1518,8 @@ export async function generatePosixLink(
   const file = join(installDirectory, binName);
   const target = relative(installDirectory, stub);
 
-  // lstat, NOT stat: a dangling symlink must read as a symlink rather than as an
-  // absent file, or the symlink() below fails with EEXIST (corepack's 0.34.4 bug).
+  // Use lstat so a dangling symlink is handled as a link rather than an absent
+  // path that later fails with EEXIST.
   const existing = await lstat(file).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
     throw error;
@@ -1593,8 +1536,7 @@ export async function generatePosixLink(
     } else {
       if (!options.force) {
         if (await isYarnSwitch(binName, file)) {
-          // Corepack prints this one too (`Enable.ts`, `Disable.ts`), so it is
-          // not `advisory()`: §11.5 scopes the mute to the lines *we* add.
+          // This compatibility message is not suppressed with advisories.
           console.warn(messages.yarnSwitchSkip(binName, file));
           return undefined;
         }
@@ -1625,7 +1567,7 @@ export async function generatePosixLink(
  * §10.6 + §15.15 — POSIX removal: the Yarn Switch guard, then removal of the
  * entry **only if we created it**, then `unlink` with `ENOENT` ignored.
  *
- * `--force` restores corepack's unconditional behaviour for anyone who wants it.
+ * `--force` requests unconditional removal.
  */
 export async function removePosixLink(
   installDirectory: string,
@@ -1642,12 +1584,11 @@ export async function removePosixLink(
 
   if (!options.force) {
     if (await isYarnSwitch(binName, file)) {
-      // Corepack prints this one too — see `installPosixLink`.
+      // This compatibility message is not suppressed with advisories.
       console.warn(messages.yarnSwitchSkip(binName, file));
       return;
     }
-    // §15.15 — "removes only entries it created". A real package manager that
-    // predates us, or one restored by an earlier `disable`, is left alone.
+    // Leave entries not created by this tool alone.
     if (!(await isOurEntry(file, binName, existing))) return;
   }
 
@@ -1657,11 +1598,6 @@ export async function removePosixLink(
     }),
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* Windows — §10.3, §10.6                                                     */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The `.cmd` body of §10.3, byte for byte.
  *
@@ -1669,16 +1605,10 @@ export async function removePosixLink(
  * `PATHEXT` line drops `.JS` from the executable-extension list so that `node`
  * resolves to `node.exe` instead of recursing into a `node.js` file.
  *
- * **The fallback branch names the interpreter by absolute path.** §10.3's
- * original spelled it `node`, and `cmd.exe` resolves a bare name from the
- * **current directory first** — so `cd` into any repository that ships a
- * `node.bat`, `node.cmd` or `node.exe`, type `yarn --version`, and that file
- * runs. Corepack was largely shielded by accident, because its shims sat beside
- * `node.exe` in the Node install directory and the `IF` branch was the one that
- * fired; §15.13 moved ours to `%LOCALAPPDATA%\\jup\\bin`, where there is no
- * `node.exe`, which makes the unsafe branch the *default* Windows path. The
- * baked path also ends §10.5's `enable node` loop, which through `cmd.exe` is a
- * new `cmd.exe` per level rather than one spinning process.
+ * **The fallback branch names the interpreter by absolute path.** `cmd.exe`
+ * resolves a bare name from the current directory first, which could execute a
+ * repository-controlled `node.bat`, `node.cmd`, or `node.exe`. The baked path
+ * also prevents recursion after `enable node` claims `node` on `PATH`.
  *
  * The `%~dp0\\node.exe` branch is kept: it costs nothing, and it is what keeps a
  * shim directory that *is* the Node install directory relocatable.
@@ -1818,15 +1748,8 @@ export async function generateWin32Link(
 
   await guardWrites(installDirectory, async () => {
     for (const [path, source] of files) {
-      // Removed first, never written *through*. What survives to here is one of
-      // our own entries (or any entry, under `--force`), and one of ours can be
-      // a symlink: an older POSIX-style `enable` left one, or §15.14's stale
-      // shim points at a `dist/` that is gone. `writeFile` follows a symlink to
-      // its target, which resurrects the link's target instead of replacing the
-      // shim — and fails outright with `ENOENT` when that target no longer
-      // exists, which is exactly #751's shape. §10.3's "overwrite
-      // unconditionally" is about not short-circuiting, not about writing into
-      // whatever the name happens to point at.
+      // Remove first rather than writing through a symlink. Otherwise writeFile
+      // may modify its target or fail when a stale target is absent.
       await unlink(path).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "ENOENT") throw error;
       });
@@ -1858,11 +1781,6 @@ export async function removeWin32Link(
     }
   });
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.13 / §15.29 — did it take effect?                                      */
-/* -------------------------------------------------------------------------- */
-
 type Shell = "posix" | "fish" | "csh" | "powershell" | "cmd";
 
 /** Which shell is the user most likely typing into right now? */
@@ -1919,11 +1837,8 @@ function directoryOnPath(directory: string): boolean {
 /**
  * §15.29 — `enable` verifies its own post-condition.
  *
- * #507 is "corepack enable exits 0 and `yarn` is still the old one". Two causes,
- * two messages: the directory is not on `PATH` at all, or it is but something
- * earlier wins. The first subsumes the second — if the directory is missing from
- * `PATH` then *every* name is shadowed, and repeating that per binary would bury
- * the one line the user has to act on — so only one of the two is printed.
+ * Distinguish an install directory absent from `PATH` from a name shadowed by an
+ * earlier entry. The directory-level warning subsumes per-name warnings.
  *
  * Exit code stays 0: these are warnings, not failures.
  */
@@ -1946,11 +1861,6 @@ export function verifyOnPath(installDirectory: string, installed: [string, strin
 
   if (shadowed) advisory(rehashNotice());
 }
-
-/* -------------------------------------------------------------------------- */
-/* Commands — §09.8                                                           */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §10.1 — does this install directory put our own shim on the name the shebang
  * would look up?
@@ -2060,15 +1970,9 @@ export async function cmdEnable(
  * entries it created (§15.15); `disable yarn` also removes `yarnpkg`. Anything
  * `enable` displaced is then put back.
  *
- * **The §15.46 pin is deliberately left in place**, as the stub's §10.1 shebang
- * always has been. Removing the shims does make it unnecessary, but it does not
- * make it wrong: §15.43 guarantees the path names a runtime outside `<home>`, so
- * the entry keeps working exactly as before, one `PATH` lookup cheaper. Undoing
- * it would mean a write into ${TOOL_NAME}'s own package directory — the one
- * §10.7 says is routinely read-only — in the middle of a command whose whole
- * job is to take things away, and a `disable` that failed there would strand the
- * user with some shims gone and no way to finish. Re-running `enable` re-bakes
- * it, which is §14.26's stated bargain for the stub and holds here too.
+ * The §15.46 pin remains because reverting it requires writing to the commonly
+ * read-only ${TOOL_NAME} package directory and could leave a partial disable.
+ * Re-running `enable` refreshes it.
  */
 export async function cmdDisable(args: string[]): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);

@@ -95,20 +95,6 @@ export interface CorepackMarker {
   bin?: BinSpec;
   hash: string;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Registry specs — §02.2                                                     */
-/* -------------------------------------------------------------------------- */
-
-/**
- * Talk the npm registry protocol (§05.2).
- *
- * There is no `bin` here any more. It named a path *inside* the tarball and made
- * the downloader extract only that one file — machinery that existed solely so
- * Yarn Berry could arrive as a lone `yarn.js` when a custom npm registry served
- * it. §15.41 put Berry on `@yarnpkg/cli-dist` for every user, so the filtered
- * extraction had no caller left; §07.4 now always extracts the whole archive.
- */
 export interface NpmRegistrySpec {
   type: "npm";
   package: string;
@@ -129,11 +115,6 @@ export interface UrlRegistrySpec {
 }
 
 export type RegistrySpec = NpmRegistrySpec | UrlRegistrySpec;
-
-/* -------------------------------------------------------------------------- */
-/* Tool definitions — §02.3, §02.4                                            */
-/* -------------------------------------------------------------------------- */
-
 /** §02.4 — how to download and run one version band of a tool. */
 export interface ToolSpec {
   /**
@@ -194,17 +175,7 @@ export interface ToolSpec {
   /** argv to run after `jup use` / `up`. */
   commands?: { use?: string[] };
   /**
-   * §15.28 — how the `bin` targets are executed.
-   *
-   * Absent (or `"js"`) is §08.2's model: the entry point is JavaScript and is
-   * loaded into this process. `"native"` means the `bin` targets are real
-   * executables and are run **directly**, so §08.3.1's runtime lookup is skipped
-   * entirely — which makes a native package manager *faster* to hand over to
-   * than a JavaScript one, not slower.
-   *
-   * This is per **range entry**, not per package manager: a tool that ships JS
-   * up to some version and native after it is exactly the migration #295's
-   * thread describes, and a per-band flag expresses it without a code change.
+   * Execution mode is per range entry; `"native"` bypasses runtime lookup.
    */
   exec?: "js" | "native";
   /**
@@ -240,7 +211,7 @@ export interface ToolSpec {
 export interface ToolDefinition {
   /**
    * §02.3, §15.39 — what sort of tool this is. Absent means
-   * `"package-manager"`, which is every entry corepack ever had.
+   * `"package-manager"`.
    *
    * Consult it in §03 and §10 only, and only for the four questions
    * {@link ToolKind} lists. A `"runtime"` entry MUST also set
@@ -294,7 +265,7 @@ export interface ToolDefinition {
   /**
    * §10.5 — whether a bare `jup enable` installs this entry's shims.
    *
-   * Absent means yes, which is every entry corepack ever had. `false` is for an
+   * Absent means yes. `false` is for an
    * entry whose binary name is routinely a *system* install the user chose
    * deliberately — bun and deno are runtimes first and package managers second —
    * so silently taking the name over on upgrade would be a change nobody asked
@@ -305,11 +276,6 @@ export interface ToolDefinition {
    */
   shimByDefault?: boolean;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Trust store — §02.6                                                        */
-/* -------------------------------------------------------------------------- */
-
 export interface TrustedKey {
   /** ISO-8601 timestamp, or `null` for "never expires". Honoured per §14.4. */
   expires: string | null;
@@ -323,8 +289,8 @@ export interface TrustedKey {
 /**
  * §02.6, §15.10 — keyed by registry origin.
  *
- * Phase 1 populates only `https://registry.npmjs.org`. Corepack's legacy
- * `{"npm": [...]}` shape maps onto the default registry's origin on read.
+ * Phase 1 populates only `https://registry.npmjs.org`. For compatibility,
+ * `{"npm": [...]}` maps onto the default registry origin on read.
  */
 export type TrustStore = Record<string, TrustedKey[]>;
 
@@ -339,11 +305,6 @@ export interface RegistrySignature {
   keyid?: string;
   sig?: string;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Project manifest — §02.7, §03                                              */
-/* -------------------------------------------------------------------------- */
-
 /** The raw, unvalidated shape of one `devEngines` member (§02.7). */
 export interface DevEnginesEntry {
   name?: unknown;
@@ -397,16 +358,7 @@ export interface DevEnginesDeclaration {
   onFail?: string;
 }
 
-/**
- * §03.4 — how strict `parseSpec` is about the version half of a spec.
- *
- * `requireVersion` is what used to be `enforceExactVersion`, and the change of
- * meaning is §15.23: a `packageManager` pin must still *name* a version (a bare
- * `yarn` is still the "No version specified" error), but that version may now be
- * a semver range or a dist-tag as well as an exact release. Nothing in the
- * pipeline demands an exact version any more; what a range costs instead is a
- * recorded resolution in `jup.lock`.
- */
+/** Require a version component to be present; ranges and tags remain valid. */
 export interface ParseSpecOptions {
   requireVersion: boolean;
   /**
@@ -448,11 +400,6 @@ export type SpecResult =
       hasPin?: boolean;
       envFilePath?: string;
     };
-
-/* -------------------------------------------------------------------------- */
-/* Invocation — §01.2                                                         */
-/* -------------------------------------------------------------------------- */
-
 export type Invocation =
   | {
       mode: "proxy";

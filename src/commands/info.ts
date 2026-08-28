@@ -1,28 +1,5 @@
 /**
- * `corepack info` — the supportability surface (§15.30).
- *
- * The corepack tracker's recurring shape is *"the tool resolved something
- * surprising and I cannot see why"* (#180, #440, #566, #679, #686). This module
- * answers that in one command: which file and which field declared the package
- * manager, what that resolved to and from where, which registry each package
- * manager would be fetched from, what the store holds, and what the shims on
- * `PATH` actually point at.
- *
- * Two properties are the whole point of the command, and both are asserted by
- * the conformance suite rather than merely intended:
- *
- * * **It performs no network request.** Nothing here calls `resolveDescriptor`,
- *   expands a dist-tag, or touches the registry: a spec that would need the
- *   network is *reported* as unresolved-without-network. A diagnostic that hangs
- *   behind a firewall diagnoses nothing.
- * * **It never fails on a bad project spec.** Every parse error, `devEngines`
- *   mismatch and unparseable manifest is caught and reported as the diagnosis —
- *   reporting *why* the project is broken is precisely what the command is for,
- *   so exiting 1 with the same sentence every other command already prints would
- *   make it useless in exactly the case it exists for.
- *
- * `--json` is a documented, stable contract carrying its own
- * {@link INFO_REPORT_VERSION}; see the README.
+ * `jup info` produces a versioned support report without network requests and tolerates malformed project specifications.
  */
 
 import {
@@ -93,11 +70,6 @@ const SECRET_VARIABLES = new Set<string>([ENV.NPM_TOKEN, ENV.NPM_PASSWORD, ENV.N
 
 /** Long values (a trust store, a proxy list) are elided rather than dumped. */
 const MAX_VALUE_LENGTH = 120;
-
-/* -------------------------------------------------------------------------- */
-/* The report                                                                  */
-/* -------------------------------------------------------------------------- */
-
 /** What kind of thing the version half of a spec is (§04.1, §15.23). */
 export type SpecKind = "exact" | "range" | "tag" | "url";
 
@@ -273,11 +245,6 @@ export interface InfoReport {
   defaults: { path: string; entries: Record<string, string> };
   shims: { directory: string | null; problem: string | null; entries: ShimInfo[] };
 }
-
-/* -------------------------------------------------------------------------- */
-/* Builder                                                                     */
-/* -------------------------------------------------------------------------- */
-
 /**
  * Collect everything, touching only the filesystem.
  *
@@ -327,11 +294,6 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
     shims: describeShims(),
   };
 }
-
-/* -------------------------------------------------------------------------- */
-/* The project spec                                                            */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §03 — what the project declares, and why it cannot be used when it cannot.
  *
@@ -547,11 +509,6 @@ function locateManifest(cwd: string): string | undefined {
 
   return selected;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Resolution, without a network                                               */
-/* -------------------------------------------------------------------------- */
-
 /** §15.23 — the recorded resolution for this project's spec, and whether it may move. */
 function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
   const frozen = envEntry(ENV.FROZEN_LOCKFILE);
@@ -712,11 +669,6 @@ function hashOfIntegrity(integrity: string): string | null {
   const hex = Buffer.from(integrity.slice(dash + 1), "base64").toString("hex");
   return hex === "" ? null : `${integrity.slice(0, dash).toLowerCase()}.${hex}`;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Environment                                                                 */
-/* -------------------------------------------------------------------------- */
-
 /** Every `COREPACK_*` variable in the real environment, credentials masked. */
 function snapshotEnvironment(): Record<string, string> {
   const snapshot: Record<string, string> = {};
@@ -787,23 +739,13 @@ function describeEnvFile(path: string, realEnvironment: Record<string, string>):
 
   return info;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Registries, store and defaults                                              */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The effective npm registry for one package manager, and the setting that
  * decided it.
  *
  * `npmrc.resolveRegistry` is the single implementation of §15.1's and §15.2's
- * precedence, and this imports it rather than mirroring it. That was worth
- * doing the moment the chain grew past one environment variable: the previous
- * hand-copied version had to be pinned against `getRegistryUrl` by a unit test
- * to keep the two from drifting, and a *four*-tier chain copied twice would
- * drift anyway. `npmrc.ts` reaches for nothing heavier than `node:fs`, so `info`
- * still loads no HTTP or signature stack — which matters, because this is the
- * command you run *because* downloads are failing.
+ * precedence. `npmrc.ts` reaches for nothing heavier than `node:fs`, so `info`
+ * loads no HTTP or signature stack when diagnosing download failures.
  *
  * @param name Omitted, the answer ignores §15.2's per-package-manager tier.
  * @param packageName The npm package, when §15.1's `@scope:registry` applies.
@@ -877,22 +819,10 @@ function describePackageManagers(
     };
   });
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.1 — the `.npmrc` files, and what each contributed                        */
-/* -------------------------------------------------------------------------- */
-
 /**
- * The report people actually run this command for.
- *
- * #540's complaint is "my organisation's registry is configured and this tool
- * ignores it". Once it stops ignoring it, the next question is *which* file won
- * — so this lists every file read in precedence order, the keys each supplied,
- * and the keys refused for coming from a project-level file, which is the single
- * likeliest explanation for a token that "should" have been picked up.
- *
- * Values are never printed. `_authToken`, `_auth` and `_password` are
- * credentials, and this output is pasted into issue trackers.
+ * List every `.npmrc` read in precedence order, including supplied and refused
+ * keys. Never print authentication values because support reports are routinely
+ * shared.
  */
 function describeNpmrc(cwd: string): NpmrcInfo {
   const config = loadNpmrc(cwd);
@@ -956,20 +886,12 @@ function isWritable(path: string): boolean {
     }
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Shims                                                                       */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §10, §15.29 — for every binary name: is a shim installed, and what does that
  * name resolve to on `PATH` right now?
  *
- * The second half is what #686 asks for (*"there's no reliable way to determine
- * if corepack is enabled"*): a shim can be installed perfectly and still lose,
- * because another version manager sits earlier on `PATH`. Reporting only the
- * first half would answer "yes, enabled" to a user whose `yarn` is somebody
- * else's.
+ * Report both the installed shim and the executable selected by `PATH`; another
+ * version manager may shadow a valid shim.
  */
 function describeShims(): InfoReport["shims"] {
   let directory: string | null = null;
@@ -1030,14 +952,8 @@ function samePath(left: string, right: string): boolean {
 }
 
 /*
- * §14.16's ownership test — a file is ours iff it carries the generated-stub
- * marker, or is one of §10.3's wrappers naming our stub — is `isOurShim` in
- * `run/exec.ts`, imported above. It used to be copied here, which made three
- * spellings of one rule and let them drift: the shared one additionally
- * recognises a **dangling** symlink that still names our stub (#751, §15.14),
- * and that is the answer `info` wants. A shim whose stub has moved away is one
- * of ours — it is what `enable` replaces and `disable` removes — and calling it
- * somebody else's would hide the exact breakage the report exists to explain.
+ * Use the shared ownership test, including dangling symlinks that still name a
+ * generated stub. Such a shim is missing its target, not foreign.
  */
 
 /** §10.4 — `which(name)`, returning the file rather than its directory. */
@@ -1065,11 +981,6 @@ function lookupOnPath(name: string): string | null {
 
   return null;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Rendering                                                                   */
-/* -------------------------------------------------------------------------- */
-
 const LABEL_WIDTH = 16;
 
 function line(label: string, value: string): string {
@@ -1312,11 +1223,6 @@ export function formatCacheList(report: InfoReport): string {
 
   return out.join(``);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Commands                                                                    */
-/* -------------------------------------------------------------------------- */
-
 /** `--json`, and nothing else. A typo must not be silently ignored. */
 function wantsJson(args: string[], command: string): boolean {
   let json = false;

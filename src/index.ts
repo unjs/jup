@@ -1,10 +1,3 @@
-/**
- * Library surface.
- *
- * The CLI is the product; this export exists so the resolution engine can be
- * embedded (and so the package has a meaningful `exports` entry).
- */
-
 import type { ResolveOptions } from "./version/resolve.ts";
 import type { Descriptor, InstallSpec, Locator } from "./types.ts";
 

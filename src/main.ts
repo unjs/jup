@@ -38,16 +38,6 @@ import type {
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
 const ARG0_RE = /^([^@]*)(?:@(.*))?$/;
 
-/**
- * §01.2 — match `arg0` against `/^([^@]*)(?:@(.*))?$/`.
- *
- * A known binary name means proxy mode. Otherwise, an `@` in the argument still
- * means proxy mode with an *unknown* package manager — that is how
- * `corepack foo@1.2.3` reaches "Unsupported package manager specification"
- * instead of the CLI's "unknown command". Everything else is management mode.
- *
- * The `[^@]*` is deliberate: `@scope/pkg@1.0.0` never matches as a name.
- */
 export function classifyInvocation(argv: string[]): Invocation {
   const arg0 = argv[0];
 
@@ -62,16 +52,12 @@ export function classifyInvocation(argv: string[]): Invocation {
   const rawVersion = match?.[2];
 
   const known = getPackageManagerFor(binaryName) !== undefined;
-  // `rawVersion !== undefined` means the argument contained an `@`, even when
-  // nothing followed it: `corepack foo@` is a proxy invocation for an unknown
-  // package manager, exactly as corepack's `packageManager == null &&
-  // binaryVersion == null` test decides.
+  // An `@` selects proxy mode even when nothing follows it.
   if (!known && rawVersion === undefined) {
     return { mode: "management", args: argv };
   }
 
-  // Corepack's `binaryVersion || null`: a trailing `@` with nothing after it is
-  // not a version override, so `corepack yarn@` behaves exactly like `yarn`.
+  // A trailing `@` selects proxy mode but supplies no version override.
   const invocation: Invocation = { mode: "proxy", binaryName, args: argv.slice(1) };
   if (rawVersion !== undefined && rawVersion !== "") {
     invocation.binaryVersion = rawVersion;
@@ -113,26 +99,7 @@ export function isTransparentCommand(binaryName: string, args: string[]): boolea
 const GLOBAL_FLAGS = new Set(["-g", "--global", "--location=global"]);
 
 /**
- * §15.31 — does this invocation carry a global flag as a **leading** argument?
- *
- * #690: `npm install -g corepack@latest` inside a yarn-pinned project dies on
- * §03.5's name mismatch, blocking the tool's own documented upgrade path. A
- * global command operates outside the project by definition, so it is treated
- * exactly like a transparent command (§01.4).
- *
- * Where the scan **stops** is the whole argument: a `-g` further along belongs
- * to whatever the package manager is about to run, not to the package manager.
- *
- * * `--` ends it — `npm run build -- -g` passes `-g` to the script.
- * * A *second* operand ends it. The first is the subcommand (`install`, `exec`);
- *   what follows is that subcommand's own argument, and `npm exec foo -g` hands
- *   `-g` to `foo`.
- *
- * The other direction is deliberate: `npm install foo -g`, where npm's own
- * parser would still see the flag, is **not** recognised. That leaves the
- * pre-existing mismatch error standing, which is a refusal to guess rather than
- * a regression — guessing wrong the other way would let an argument the user
- * never wrote bypass the project's pin.
+ * Scan only leading arguments for global flags. Stop at `--` or the second operand; trailing flags deliberately do not bypass the project pin.
  */
 export function isGlobalInvocation(args: string[]): boolean {
   let operands = 0;
@@ -316,18 +283,6 @@ export async function runMain(argv: string[]): Promise<number> {
   }
 }
 
-/**
- * §08.4's error table, isolated so both branches of §12.1 are testable without
- * a process.
- *
- * Returns the exit code rather than exiting, so a caller that still has work to
- * do keeps control.
- *
- * Asynchronous only because of the usage table: the management-mode branch is
- * the *only* thing on the whole warm graph that reads `usage.ts`, and a
- * successful proxy run — the path that runs on every invocation forever — never
- * reaches it. See {@link usageLineFor}.
- */
 export async function presentError(error: unknown, invocation: Invocation): Promise<number> {
   if (error instanceof UsageError) {
     if (invocation.mode === "proxy") {
@@ -344,25 +299,10 @@ export async function presentError(error: unknown, invocation: Invocation): Prom
     return 1;
   }
 
-  // Anything else is a bug — ours or the runtime's — and a stack trace is the
-  // correct output for a bug (corepack 0.31.0 regressed exactly this).
+  // Unexpected failures retain their stack for diagnosis.
   process.stderr.write(`${formatUnexpected(error)}\n`);
   return 1;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Internals                                                                   */
-/* -------------------------------------------------------------------------- */
-
-/**
- * §01.3 step 6 — the marker first, the downloader only if it is missing.
- *
- * `install` is the head of the whole cold-path stack (`http`, `tar`,
- * `integrity`, `registry`, and through them `node:crypto` and `node:zlib`), and
- * a warm run executes none of it. Reading the marker here — one `open` either
- * way, exactly as §16.3 budgets — keeps that stack out of the process entirely
- * unless something actually has to be downloaded.
- */
 async function ensureInstalledLazily(locator: Locator, range: string): Promise<InstallSpec> {
   const installed = readInstalledSpec(locator);
   if (installed !== null) return installed;
@@ -385,20 +325,6 @@ async function ensureInstalledLazily(locator: Locator, range: string): Promise<I
   }
 }
 
-/**
- * §04.1 steps 4 and 5, for the one case the fast path exists to serve: an exact
- * pin. It is a transcription of `resolveDescriptor`'s two middle steps, not a
- * shortcut past them — see the ordering note below.
- *
- * Steps 1–3 cannot apply to an exact version (a URL is not one, and neither is a
- * tag), and step 6 is unreachable once step 5 has answered. So for this
- * descriptor the two files agree by construction, and answering here is what
- * keeps `resolve.ts` — the tag lookup, the registry client's entry points, the
- * range fan-out and `lastKnownGood.json` — out of the warm module graph
- * entirely.
- *
- * Everything this declines takes the full {@link resolveOrExplain} path.
- */
 function resolveExactPin(descriptor: Descriptor): Locator | null {
   // A name outside the table has no §04.1 step 2 definition, and the error for
   // it belongs to the full path. Step 1's URL branch is unreachable from here,
@@ -430,10 +356,8 @@ async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null>
 /**
  * §04.5's fallback reference, behind the same dynamic import.
  *
- * `getFallbackLocator` is a pure table lookup that hands back a thunk, so moving
- * the lookup *into* the thunk changes nothing observable — the laziness that
- * matters (no `lastKnownGood.json` read, no network) is unchanged, and the
- * module itself now loads only when something actually forces the fallback.
+ * Loading the resolver here keeps fallback resolution, including LKG reads and
+ * network access, lazy until the fallback is forced.
  */
 async function fallbackReference(name: string, transparent: boolean): Promise<string> {
   const { getFallbackLocator } = await import("./version/resolve.ts");
@@ -458,14 +382,8 @@ async function usageLineFor(command: string | undefined): Promise<string> {
 /**
  * What step 5 settled on, and whether the **registry** is what settled it.
  *
- * `fromRegistry` is the memo-write condition, stated on the branch that knows
- * the answer. It replaces an inference made at the call site — `locator !==
- * cached?.locator`, object identity on a value returned three frames away — and
- * the explicit form is not a matter of taste: any normalisation on the way back
- * (a digest re-attached, a reference rebuilt for §15.28's host map) makes that
- * test permanently true, which re-stamps the expired memo the registry never
- * confirmed and turns an outage into a 24-hour pin — the very thing the comment
- * above the write says it is preventing.
+ * `fromRegistry` is the memo-write condition. It must be set where the answer
+ * is produced because normalized locator identity cannot establish provenance.
  */
 interface Resolved {
   locator: Locator;
@@ -484,7 +402,7 @@ function isAvailabilityStatus(status: number): boolean {
 }
 
 /**
- * A stand-in URL, used to cut §12.6's template at the slot its URL fills.
+ * A stand-in URL for splitting §12.6's template at its URL slot.
  *
  * NUL occurs in the template exactly once and survives `redactUserinfo` — it is
  * not a parseable URL and matches no `scheme://userinfo@` — so the text before
@@ -571,10 +489,8 @@ async function resolveWithFallback(
 
   if (resolved !== null) return { locator: resolved, fromRegistry: true };
 
-  // `null` is the registry answering with nothing that matches — a truncated
-  // packument, a band that lost its releases — which is the "degraded" half of
-  // §15.23's condition. The memo is range-gated on the way in, so it still
-  // satisfies what the registry no longer offers.
+  // A `null` registry result is degraded service. A range-gated stale memo may
+  // still answer it under §15.23.
   if (cached !== null) {
     const { messages: coldMessages } = await import("./errors-cold.ts");
     advisory(
@@ -598,8 +514,8 @@ async function resolveWithFallback(
  *   the project never asked for. `reconcile` returns the manifest's descriptor
  *   as a `Descriptor` and the fallback as a `LazyLocator`, so the `range in`
  *   test distinguishes them exactly.
- * * No CLI version override. `corepack yarn@1.22.4 …` is a one-invocation
- *   override (§04.6) and must leave the project's recorded resolution alone.
+ * * No CLI version override; one-invocation overrides must not change the
+ *   project's recorded resolution.
  * * The spec is not already exact (or a URL) — {@link usesLockfile}.
  *
  * The directory is the manifest's own, not the cwd: in a monorepo those differ,
@@ -637,8 +553,8 @@ async function materialise(value: Descriptor | LazyLocator): Promise<Descriptor>
  * run.
  */
 async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<void> {
-  // The CLI's `binaryVersion` deliberately does not participate: corepack pins
-  // the project's *default*, then runs whatever the CLI asked for.
+  // A CLI version override does not participate: auto-pin records the project
+  // default, then the override applies only to this invocation.
   const descriptor = await materialise(fallback);
 
   const locator = await resolveOrExplain(descriptor);

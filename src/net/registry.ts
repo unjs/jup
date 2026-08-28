@@ -25,10 +25,9 @@ const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;
  * The npm-protocol base for a request, with **all** trailing slashes stripped —
  * mirrors 404 on a doubled slash.
  *
- * §15.1 and §15.2 turn what used to be one environment variable into a four-tier
- * decision (`COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc`, the
- * built-in default); `npmrc.resolveRegistry` owns it, so this is one call rather
- * than a second copy of the precedence.
+ * `npmrc.resolveRegistry` owns the four-tier precedence:
+ * `COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc`, then the
+ * built-in default.
  *
  * @param options `name` selects §15.2's per-package-manager override;
  * `packageName` selects §15.1's `@scope:registry`.
@@ -37,25 +36,7 @@ export function getRegistryUrl(options?: { name?: string; packageName?: string }
   return resolveRegistry(options).registry;
 }
 
-/**
- * §05.2 rewrite 1 — a band's `npmRegistry` replaces its `registry` once the user
- * has configured an npm-protocol registry that would serve it.
- *
- * The one place the substitution happens, and it covers both halves of "has
- * configured": `COREPACK_NPM_REGISTRY` and `.npmrc` — §15.38 row 150 configures
- * nothing but `@yarnpkg:registry`, and that alone must switch Yarn Berry onto
- * `@yarnpkg/cli-dist`. Every fetcher applies it to its own argument, so the
- * substitution reaches the **resolution** path and not only the download one:
- * repo.yarnpkg.com is not an npm registry and cannot be mirrored, so consulting
- * the fallback only when downloading left `yarn@latest` resolving its tag from
- * the public internet — which fails outright behind a firewall, and leaks
- * traffic the user asked to keep internal everywhere else. Idempotent: given an
- * npm spec this returns it unchanged.
- *
- * `COREPACK_REGISTRY_YARN` deliberately does **not** trigger the switch: §15.2
- * defines it as an origin replacement on Yarn's own distribution URLs, i.e. a
- * mirror of `repo.yarnpkg.com`, which is exactly what #872 could not have.
- */
+/** Use a declared npm alternative when an applicable npm registry is configured. */
 export function resolveRegistrySpec(spec: RegistrySpec): RegistrySpec {
   if (spec.type === "npm") return spec;
 
@@ -82,12 +63,9 @@ function sourceOverrideFor(name: string): string | undefined {
  * §15.2 — move a URL derived from a package manager's **own** table entry onto
  * `COREPACK_REGISTRY_<NAME>`.
  *
- * Unconditional origin replacement, unlike {@link applyRegistryOverride}: the
- * table URL is by construction on that package manager's distribution origin,
- * whatever that origin happens to be, so there is nothing to match against.
- * `repo.yarnpkg.com` is the case the whole item exists for — it is not an npm
- * registry, it is not `registry.npmjs.org`, and before §15.2 nothing could
- * redirect it.
+ * Unconditional origin replacement, unlike {@link applyRegistryOverride}: a
+ * table URL is already known to use that package manager's distribution origin,
+ * so no origin match is required. This also covers non-npm distribution hosts.
  *
  * Idempotent: a URL already sitting under the override is returned untouched,
  * so applying this twice cannot double the override's path prefix.
@@ -119,18 +97,13 @@ export const NPM_FULL_ACCEPT_HEADER = "application/json";
  * §05.2 rewrite 2 / §15.3 — move a URL that lives on the default registry onto
  * `COREPACK_NPM_REGISTRY`.
  *
- * Corepack does `url.replace("https://registry.npmjs.org", override)`, which
- * misses URLs differing only in case or trailing slash and would happily rewrite
- * the *middle* of a URL that merely contains the literal. This compares
- * **origins** (the `URL` parser has already lower-cased the host and normalised
- * the default port) and rebuilds the target on the override, prepending the
- * override's own path prefix — so `http://host/npm-mirror` works.
+ * Compare normalized origins and rebuild only an actual default-registry match,
+ * preserving an override path prefix such as `http://host/npm-mirror`.
  *
  * A no-op when the override is unset: the computed registry is then the default
  * registry, whose origin matches and whose path prefix is empty.
  *
- * Exported because §07.3's download path (T15) applies the same rewrite; it is
- * idempotent, since a rewritten URL no longer sits on the default origin.
+ * Exported for §07.3's download path and idempotent after the origin changes.
  */
 export function applyRegistryOverride(url: string, registryUrl: string = getRegistryUrl()): string {
   try {
@@ -146,10 +119,8 @@ export function applyRegistryOverride(url: string, registryUrl: string = getRegi
  * §15.3's rewrite, in one place: parse both, take the override's scheme, host,
  * port and userinfo, and prepend the override's own path prefix.
  *
- * Never a string operation. Corepack's `url.replace("https://registry.npmjs.org",
- * override)` misses a differing trailing slash or host case — `new URL` has
- * already normalised both by the time these are compared — and would happily
- * rewrite the *middle* of a URL that merely contains the literal.
+ * Never use string replacement: URL parsing normalizes host case and ports and
+ * prevents rewriting a matching substring in an unrelated URL.
  */
 function rebase(url: string, base: string): string {
   let target: URL;
@@ -171,11 +142,6 @@ function rebase(url: string, base: string): string {
   // port and userinfo, and drops its path — which `prefix` puts back.
   return new URL(`${prefix}${target.pathname}${target.search}${target.hash}`, override).href;
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.35e — COREPACK_MINIMUM_RELEASE_AGE                                      */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The gate, in milliseconds, or `undefined` when it is off.
  *
@@ -438,8 +404,7 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
       return version;
     }
 
-    // §15.7 tier 1 — corepack destructures `dist` here and throws a raw
-    // `TypeError` when a private registry omits it. Say what happened instead.
+    // Report omitted `dist` metadata with registry context.
     const dist = requireDist(metadata, spec.package, version, registryUrl);
     const integrity = asString(dist.integrity);
     const shasum = asString(dist.shasum);
@@ -530,11 +495,6 @@ export async function fetchTarballURLAndSignature(
     signatures: readSignatures(dist),
   };
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.7 / §15.8 — registry metadata tiering                                   */
-/* -------------------------------------------------------------------------- */
-
 /** One warning per `<registry>\0<pkg>\0<version>`; §15.7 asks for exactly one. */
 const warnedUnsigned = new Set<string>();
 
@@ -659,11 +619,6 @@ async function fetchRootSignatures(
     return undefined;
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Transport helpers                                                          */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §15.1 + §15.2 — the base URL for one registry spec.
  *
@@ -710,20 +665,14 @@ function npmGetJson(
  * the transport layer (whose message names the URL), and credentials only go out
  * if the document happens to live on the configured registry's origin.
  *
- * §15.2 applies here too, and this is the half corepack has no answer for at
- * all: `https://repo.yarnpkg.com/tags` is the *only* place Yarn Berry's version
- * list comes from, and `COREPACK_REGISTRY_YARN` is what finally moves it.
+ * Apply the source override to URL-registry metadata as well as artifacts, so
+ * resolution and download use the same origin.
  */
 function urlGetJson(url: string, spec: RegistrySpec): Promise<unknown> {
   const name = packageManagerForRegistry(spec);
   const target = applySourceOverride(url, name);
   return httpGetJson(target, { registryOrigin: getRegistryUrl({ name }) });
 }
-
-/* -------------------------------------------------------------------------- */
-/* Shape readers — a registry's JSON is untrusted input, not a typed object     */
-/* -------------------------------------------------------------------------- */
-
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)

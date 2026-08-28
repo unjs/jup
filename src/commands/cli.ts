@@ -3,15 +3,8 @@
  *
  * This is the complete surface. Anything not here is out of scope (§01.7).
  *
- * Two disciplines run through every command in this file:
- *
- * * **Streams (§09.11).** Informational lines and `--json` go to stdout; the
- *   `Usage Error:` block goes to stdout too (§12.1), and it is `main.ts` that
- *   prints it — a `UsageError` therefore propagates out of here rather than
- *   being caught. Warnings and notices go to stderr. The package manager's own
- *   output is never wrapped, prefixed, colourised, or buffered.
- * * **Last-known-good.** Three commands, three different rules; see
- *   {@link setLastKnownGood}.
+ * §09.11 stream routing is preserved: informational output uses stdout,
+ * warnings use stderr, and `UsageError`s propagate to `main.ts`.
  */
 
 import { createReadStream, realpathSync } from "node:fs";
@@ -65,11 +58,6 @@ const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
 import { HELP_TEXT } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
-
-/* -------------------------------------------------------------------------- */
-/* Small shared helpers                                                        */
-/* -------------------------------------------------------------------------- */
-
 /** §09.11 — informational output is stdout, unbuffered, unprefixed. */
 function out(text: string): void {
   process.stdout.write(text);
@@ -94,9 +82,8 @@ async function resolveOrThrow(descriptor: Descriptor, options: ResolveOptions): 
 /**
  * `ensureInstalled`, with §15.19's and §15.35j's diagnostics attached.
  *
- * `range` is what the *user* wrote, so an airgapped failure names something they
- * can paste back into `corepack install -g --cache-only`; the version comes from
- * the locator, because that is the thing the registry says does not exist.
+ * `range` is what the user wrote, so an airgapped failure can name the cache
+ * seeding command; the locator supplies the version for missing-artifact errors.
  */
 async function installOrExplain(
   locator: Locator,
@@ -138,11 +125,6 @@ function setLastKnownGood(name: string, reference: string): void {
 function fileStream(path: string): ReadableStream<Uint8Array> {
   return Readable.toWeb(createReadStream(path)) as unknown as ReadableStream<Uint8Array>;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Argument parsing                                                            */
-/* -------------------------------------------------------------------------- */
-
 interface ArgSpec {
   booleans?: string[];
   strings?: string[];
@@ -229,11 +211,6 @@ function firstValue(parsed: ParsedArgs, ...names: string[]): string | undefined 
 function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
   return names.some((name) => parsed.flags.has(name));
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.1 — pattern resolution                                                  */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §09.1 — shared by `install`, `pack`, `up`, and `use`.
  *
@@ -242,18 +219,15 @@ function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
  * declared devEngines range over the exact pin — which is what lets `up` follow
  * a range across majors.
  *
- * The messages say "to pack" in all four commands. That is a copy-paste artefact
- * in the reference implementation and §14.14 recommends fixing it, but the
- * strings are matched by real-world scripts and CI, so this project keeps them
- * byte-compatible and does **not** apply that divergence.
+ * The byte-compatible messages say "to pack" in all four commands.
  */
 export function resolvePatternsToDescriptors(patterns: string[]): Descriptor[] {
   return resolveDescriptorsFrom(patterns, false);
 }
 
 /**
- * The one behavioural difference the deprecated `prepare` has here: its "no
- * spec" error predates `devEngines` and never mentions it (§09.10).
+ * Deprecated `prepare` retains its byte-exact legacy "no spec" message, which
+ * omits `devEngines`.
  */
 function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor[] {
   const cwd = process.cwd();
@@ -294,9 +268,7 @@ function resolveProjectSpec(
       throw new UsageError(legacy ? messages.noSpecInProjectLegacy() : messages.noSpecInProject());
     }
     case "Found": {
-      // `lookup.range` first: a declared `devEngines.packageManager.version`
-      // outranks the exact `packageManager` pin, which is what makes `corepack
-      // up` follow a declared range across a major boundary (§09.4).
+      // A declared `devEngines.packageManager.version` outranks the exact pin.
       //
       // `requireVersion: false` because these commands legitimately accept
       // a range-valued pin — §09.4's own error message says "a semver version or
@@ -305,11 +277,6 @@ function resolveProjectSpec(
     }
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.2 — install                                                             */
-/* -------------------------------------------------------------------------- */
-
 /** §09.2 — cache the project's package manager. Does **not** touch last-known-good. */
 export async function cmdInstall(args: string[]): Promise<number> {
   const parsed = parseArgs(args, {});
@@ -327,12 +294,8 @@ export async function cmdInstall(args: string[]): Promise<number> {
   // which would cache one version and then run another, offline, in the layer
   // that has no network to fix it with.
   //
-  // Both files are consulted, in §15.23's order, through the same helper the
-  // proxy path uses: an ordinary run no longer writes the committed `jup.lock`,
-  // so "no recorded resolution, a live memo" is now the *common* state, and an
-  // `install` blind to the memo caches the newest match while the very next
-  // `pnpm install` reads the memo and demands the older one. The key is the
-  // pin's, not the `devEngines` range that §09.1 lets outrank it for `up`.
+  // Consult committed and cached resolutions in §15.23 order, keyed by the pin
+  // rather than the `devEngines` range used by `up`.
   const pinned = lookup.getSpec({ requireVersion: false });
   const known = usesLockfile(pinned)
     ? readKnownResolution(dirname(lookup.target), pinned).locator
@@ -341,23 +304,11 @@ export async function cmdInstall(args: string[]): Promise<number> {
   const locator = known ?? (await resolveOrThrow(descriptor, { allowTags: true }));
 
   out(`${messages.addingToCache(locator.name, locator.reference)}\n`);
-  // `cacheOnly` suppresses §04.7's guarded last-known-good bump.
-  //
-  // The spec contradicts itself here: §04.7 bumps after *any* successful install
-  // of a supported version (and corepack does bump on this path), while §09.2
-  // says `install` "does not touch `lastKnownGood.json` — the global default is
-  // unchanged". §09.2 is the specific, command-scoped statement, so it wins over
-  // the general rule: warming a Docker layer must not silently repoint the
-  // machine's default.
+  // Project `install` warms the cache without changing the global default.
   await installOrExplain(locator, descriptor.range, { cacheOnly: true });
 
   return 0;
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.3 — install -g                                                          */
-/* -------------------------------------------------------------------------- */
-
 /** §09.3 — sets last-known-good **unconditionally**, unlike §04.7's guarded bump. */
 export async function cmdInstallGlobal(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["-g", "--global", "--cache-only"] });
@@ -395,11 +346,6 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
 
   return 0;
 }
-
-/* -------------------------------------------------------------------------- */
-/* §07.10 — portable archives                                                  */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §07.10 — validate that the archive came from `pack` before touching anything.
  *
@@ -428,15 +374,8 @@ async function readArchiveEntries(
     const name = segments[0]!;
     const reference = segments[1]!;
 
-    // §07.10's algorithm records `segments[0]` and `segments[1]` verbatim, and
-    // neither it nor corepack validates them — but they are then used as path
-    // components *and* written to `lastKnownGood.json`. `<name>/./.jup`
-    // survives the extractor (`join` folds the `.` away), so `promote` operates
-    // on `<name>` and the recorded default becomes the literal `"."`, which
-    // every later spec-less run classifies as a dist-tag and takes to the
-    // network. `cache clean` spares that file by design, so only a hand edit
-    // undoes it. Treat an implausible segment exactly like a short entry: this
-    // archive did not come from `pack`.
+    // These segments become path components and recorded defaults; reject
+    // values that path joining could reinterpret.
     if (!isPlausibleSegment(name) || !isPlausibleSegment(reference)) {
       hasInvalidEntries = true;
       continue;
@@ -514,11 +453,6 @@ async function installFromArchive(
     await rm(tmp, { recursive: true, force: true });
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.4 — up                                                                  */
-/* -------------------------------------------------------------------------- */
-
 /** §09.4 — the two-step resolve is what confines the update to the current major line. */
 export async function cmdUp(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
@@ -552,8 +486,7 @@ export async function cmdUp(args: string[]): Promise<number> {
   const pin = lookup.range === undefined ? descriptor : declaredPin(lookup);
   if (pin !== undefined && usesLockfile(pin)) {
     if (!isValidRange(pin.range)) {
-      // A dist-tag pin. §09.4 has always refused these, and recording a tag's
-      // current expansion is `use`'s job, not `up`'s.
+      // A dist-tag pin is not refreshable by `up`; `use` records its expansion.
       throw new UsageError(messages.upNotSemver());
     }
     if (isFrozenLockfile()) {
@@ -598,10 +531,7 @@ export async function cmdUp(args: string[]): Promise<number> {
   try {
     highest = await resolveDescriptor(target, { useCache: false });
   } catch (error) {
-    // §15.19 — this second resolve is the one that reaches the registry for an
-    // exactly-pinned project, so leaving it unwrapped left `corepack up` on an
-    // airgapped machine reporting a URL instead of the seeding command. Found
-    // against the built binary; the source-level rows all resolve at step one.
+    // Attach the same offline seeding diagnostic to the second resolution.
     throw explainFetchFailure(error, target) ?? error;
   }
   if (highest === null) throw new UsageError(messages.upNoHighest(name, line));
@@ -624,11 +554,6 @@ function declaredPin(lookup: Extract<SpecResult, { type: "Found" }>): Descriptor
     return undefined;
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.5 — use                                                                 */
-/* -------------------------------------------------------------------------- */
-
 /** §09.5 — writes the pin, then runs the package manager's `use` command. */
 export async function cmdUse(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--here"], strings: ["--pin-style"] });
@@ -645,14 +570,8 @@ export async function cmdUse(args: string[]): Promise<number> {
 
   const descriptor = parseSpec(pattern, CLI_SOURCE, { requireVersion: false });
 
-  // §15.23 — a **semver range** is a statement of intent, and `use` keeps it:
-  // the field goes on saying `^11.0.0` and the version it resolved to is
-  // recorded in `jup.lock` beside it. Three patterns are not that statement and
-  // still pin exactly, as they always have: an exact version, which is its own
-  // record; a dist-tag, which is a question about right now rather than a
-  // standing constraint; and a bare name, whose `*` was synthesised by
-  // `parseSpec` rather than typed — pinning a project to "any pnpm, forever"
-  // because somebody typed `jup use pnpm` would be nobody's intent.
+  // §15.23 — preserve an explicitly typed semver range and record its resolution
+  // in `jup.lock`. Exact versions, dist-tags, and bare names pin exactly.
   const range =
     pattern.slice(1).includes("@") && isValidRange(descriptor.range) && usesLockfile(descriptor);
 
@@ -675,8 +594,7 @@ export async function cmdUse(args: string[]): Promise<number> {
     }
   }
 
-  // `useCache: false`: `corepack use yarn@stable` must ask what stable means
-  // today, not what is lying around in the store.
+  // Resolve tags afresh rather than reusing a cached version.
   const resolved = await resolveOrThrow(descriptor, { allowTags: true, useCache: false });
 
   const options = { here, pinStyle };
@@ -687,9 +605,8 @@ export async function cmdUse(args: string[]): Promise<number> {
  * §15.23 / §09.5 — `use <name>@<range>`: the range goes in the field, the
  * version it resolved to goes in `jup.lock`.
  *
- * This is the only path that creates the recorded resolution from scratch —
- * `up` refreshes one, and a normal run never writes it at all — so it also has
- * to retire whatever the field used to say, exactly as an exact `use` does.
+ * This path creates the recorded resolution and retires the replaced field's
+ * resolution; `up` only refreshes an existing record.
  */
 function pinRangeToProject(
   descriptor: Descriptor,
@@ -708,10 +625,7 @@ function pinRangeToProject(
 
     const dir = dirname(target);
     writeResolution(dir, descriptor, locator, spec.hash, isPerHost(locator));
-    // The memo for this same key is now a note about what the registry said
-    // before this decision was taken, and it answers alone wherever the
-    // committed file is not visible — an uncommitted `use`, a `git stash`, a CI
-    // cache holding `node_modules` but not the lockfile (§15.23).
+    // The committed resolution supersedes any host-local memo for this key.
     removeCachedResolution(dir, resolutionKey(descriptor));
 
     // §15.27, §15.35l — both files changed, so both are named, in the order they
@@ -808,20 +722,14 @@ function pinToProject(
       options,
     );
 
-    // §15.27, §15.35l — name the file. The whole "corepack edited a manifest I
-    // did not expect" class (#607) is a walk the user could not see, and this is
-    // the line that makes it visible; it prints *after* the write, so it can
-    // never claim a change that did not happen.
+    // Name the selected manifest after the write succeeds.
     // §15.12 — `written`, not `reference`: under `--pin-style=sidecar` the field
     // holds a clean version and the digest lives beside it, and a line claiming
     // otherwise would name a string that is nowhere in the file.
     out(`${messages.updatedManifest(target, locator.name, written)}\n`);
 
-    // §15.23 — the field now names one exact version, so any resolution recorded
-    // for the range it replaced answers a question nobody asks any more. Left
-    // behind, it would come back to life the moment someone edited the pin back
-    // to that same range, pinning a version chosen for a project state that no
-    // longer exists.
+    // An exact pin retires the replaced range's resolution so restoring the
+    // range cannot resurrect stale state.
     const stale = staleResolutionKey(previousPackageManager);
     if (stale !== undefined) removeResolution(dirname(target), stale);
 
@@ -879,8 +787,7 @@ function recordedPinToRetire(here: boolean, tool: string): Descriptor | undefine
 }
 
 /**
- * The `jup.lock` key a replaced `packageManager` value used to own, or
- * `undefined` when it owned none (the literal `unknown`, or an exact pin).
+ * Return the replaced `packageManager` value's `jup.lock` key, if it had one.
  */
 function staleResolutionKey(previous: string): string | undefined {
   const at = previous.indexOf("@");
@@ -889,11 +796,6 @@ function staleResolutionKey(previous: string): string | undefined {
   const descriptor = { name: previous.slice(0, at), range: previous.slice(at + 1) };
   return usesLockfile(descriptor) ? resolutionKey(descriptor) : undefined;
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.6 — pack                                                                */
-/* -------------------------------------------------------------------------- */
-
 /** §09.6 — a copy of cache subtrees, not a repackaging. Does update last-known-good. */
 export async function cmdPack(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["--json"], strings: ["-o", "--output"] });
@@ -938,11 +840,6 @@ async function writeArchive(locations: string[], output: string, json: boolean):
   if (json) out(`${JSON.stringify(output)}\n`);
   else out(`${messages.allDone()}\n`);
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.7 — cache                                                               */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §09.7 — `clean` and `clear` are the same command, plus §15.18's `--all` and
  * §15.19's `list`.
@@ -971,26 +868,16 @@ export async function cmdCache(args: string[]): Promise<number> {
   // `rm -rf <home>/v1`, forced; `lastKnownGood.json` lives outside `v1` and
   // therefore survives, so the recorded default is simply re-downloaded.
   //
-  // §15.18 — the survival is deliberate, but corepack's documentation claimed
-  // otherwise and #675 is the resulting confusion. `--all` is the explicit
-  // "yes, the recorded defaults too", and unlike the silent default it reports
-  // what it removed, because a command that deletes things silently gives the
-  // user no way to tell a successful clean from a no-op.
-  //
-  // §15.35l — and *both* forms report. "`cache clean` currently prints nothing;
-  // it MUST print `Removed <n> cached version(s) from <path>` (or `Nothing to
-  // remove`)": a command whose entire job is deletion gives the user no way to
-  // tell a successful clean from a no-op when it is silent, and `DEBUG=corepack`
-  // is a debugging aid rather than command output.
+  // Recorded defaults survive unless `--all` explicitly includes them. Both
+  // forms report whether removal occurred.
   //
   // The count is taken *before* the removal, because afterwards there is nothing
   // left to count.
   const all = hasFlag(parsed, "--all");
   const installed = listInstalled();
 
-  // §15.44 — the backstop for §15.43. An install shimmed by an older build, or
-  // by any route that did not go through §15.43's guard, has an interpreter path
-  // baked into its shims that points *into* this cache; removing it leaves every
+  // §15.44 — the backstop for §15.43. A shim may have an interpreter path baked
+  // into it that points *into* this cache; removing it leaves every
   // shim dying with `bad interpreter` and `enable`, the repair, unreachable
   // behind the broken `node` shim. So the version holding it is spared.
   //
@@ -1010,9 +897,7 @@ export async function cmdCache(args: string[]): Promise<number> {
   const pinned = await interpreterInStore();
 
   if (!all) {
-    // Nothing pinned is the overwhelmingly common case, and it takes the
-    // unchanged single-`rm` path with the unchanged single line of output
-    // (§15.35l).
+    // Without a pinned interpreter, remove the store in one operation (§15.35l).
     if (pinned === undefined) {
       cacheClean();
       out(
@@ -1143,14 +1028,8 @@ function storeVersionOf(file: string): { name: string; version: string } | undef
  * else goes, other versions of the same tool and §07.5's temp folders included:
  * sparing one directory is not a licence to keep anything else.
  *
- * Every removal is attempted, and the ones that failed are **returned** rather
- * than thrown. `rm(…, {force: true})` forgives a missing path but still rejects
- * on `EACCES`/`EPERM` — a tree left root-owned by an earlier `sudo` run, an
- * immutable file, a handle Windows still holds — and one rejection out of
- * `Promise.all` used to abort the whole command mid-clean: the §15.44 line never
- * printed, the count never printed, and the user was left with a raw error and
- * no idea what had been removed or what had deliberately been kept. A clean that
- * cannot finish must still say what it did.
+ * Attempt every removal and return failures rather than aborting the batch, so a
+ * partial clean can report what remained.
  */
 async function cleanSparing(spare: {
   name: string;
@@ -1179,11 +1058,6 @@ async function cleanSparing(spare: {
     .filter((_path, index) => results[index]?.status === "rejected")
     .map((path) => ({ path }));
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.10 — deprecated commands                                                */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §15.35c — a deprecated command names its replacement, on **stderr**, and then
  * does its job.
@@ -1199,7 +1073,7 @@ function deprecated(command: string, replacement: string): void {
 
 /** §09.10 — deprecated, retained for compatibility. */
 export async function cmdHydrate(args: string[]): Promise<number> {
-  // The predecessor of `install -g <file>.tgz` (§09.10), which is what it names.
+  // Its replacement is `install -g <file>.tgz` (§09.10).
   deprecated("hydrate", "install -g");
   const parsed = parseArgs(args, { booleans: ["--activate"] });
   const [file, ...extra] = parsed.positionals;
@@ -1208,8 +1082,7 @@ export async function cmdHydrate(args: string[]): Promise<number> {
     throw new UsageError(`The 'jup hydrate' command requires exactly one archive`);
   }
 
-  // Three differences from `install -g <file>.tgz`: no `.tgz` extension check,
-  // the format error names `'corepack prepare'`, and activation is opt-**in**.
+  // `prepare` accepts any file extension and activates only when requested.
   await installFromArchive(file, {
     activate: hasFlag(parsed, "--activate"),
     format: "prepare",
@@ -1271,11 +1144,6 @@ export async function cmdPrepare(args: string[]): Promise<number> {
 
   return 0;
 }
-
-/* -------------------------------------------------------------------------- */
-/* §09.9 — --version, --help                                                   */
-/* -------------------------------------------------------------------------- */
-
 function cmdVersion(): Promise<number> {
   out(`${getOwnVersion()}\n`);
   return Promise.resolve(0);
@@ -1285,11 +1153,6 @@ function cmdHelp(): Promise<number> {
   out(HELP_TEXT);
   return Promise.resolve(0);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Dispatch                                                                    */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §09 — dispatch a management-mode invocation and return its exit code.
  *

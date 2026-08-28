@@ -30,11 +30,6 @@ export interface TarEntry {
   size: number;
   mode: number;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Constants                                                                    */
-/* -------------------------------------------------------------------------- */
-
 const BLOCK_SIZE = 512;
 
 /** §07.4 rule 7 — generous ceilings for this use case. */
@@ -104,11 +99,6 @@ function getUmask(): number {
 function errnoOf(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Path safety — §07.4 rules 1, 2 and 8                                         */
-/* -------------------------------------------------------------------------- */
-
 /** `C:\…`, `C:foo` (drive-relative) — rule 1. */
 const WINDOWS_DRIVE_RE = /^[a-z]:/i;
 /** `\\server\share`, `//server/share` — rule 1. */
@@ -166,11 +156,6 @@ function stripComponents(path: string, count: number): string | undefined {
   const stripped = segments.slice(count).join("/");
   return stripped === "" ? undefined : stripped;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Byte plumbing                                                                */
-/* -------------------------------------------------------------------------- */
-
 /**
  * `node:zlib`'s `createGunzip` rather than `DecompressionStream("gzip")`: it is
  * the API the plan calls for, it tolerates the trailing padding real registry
@@ -306,11 +291,6 @@ class ByteReader {
     await this.#iterator.return?.();
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Header decoding                                                              */
-/* -------------------------------------------------------------------------- */
-
 /**
  * POSIX ustar writes `"ustar\0"` at 257 followed by a two-byte version; GNU
  * writes `"ustar  \0"` across the same eight bytes. Only the former defines a
@@ -552,11 +532,6 @@ async function walk(
     await reader.dispose();
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* extract                                                                      */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §07.4 rule 6 — one rule, stated once: the header contributes **only** its
  * executable bit, and the mode written is that bit applied to a fixed ceiling.
@@ -684,14 +659,9 @@ export async function extract(
     await writeFile(target, fileMode(entry.mode), body);
   });
 }
-
-/* -------------------------------------------------------------------------- */
-/* listEntries                                                                  */
-/* -------------------------------------------------------------------------- */
-
 /**
- * Entry listing without writing anything — used to validate `pack` archives
- * (§07.10). Paths are returned as the archive spells them: this is a lister,
+ * Entry listing without writes validates `pack` archives (§07.10). Paths are
+ * returned as the archive spells them: this is a lister,
  * and the validation it feeds only reads path segments. The caller still hands
  * the archive to `extract`, which is where the §07.4 rules bite.
  */
@@ -702,11 +672,6 @@ export async function listEntries(stream: ReadableStream<Uint8Array>): Promise<T
   });
   return entries;
 }
-
-/* -------------------------------------------------------------------------- */
-/* create                                                                       */
-/* -------------------------------------------------------------------------- */
-
 function writeOctal(block: Uint8Array, offset: number, length: number, value: number): void {
   const text = value
     .toString(8)

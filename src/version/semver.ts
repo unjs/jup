@@ -18,11 +18,6 @@ export interface SemVer {
   /** The version without build metadata, e.g. `4.1.0` for `4.1.0+sha224.abc`. */
   version: string;
 }
-
-// --------------------------------------------------------------------------
-// Grammar
-// --------------------------------------------------------------------------
-
 /** `<major>`: no leading zeroes. */
 const NUM = String.raw`0|[1-9]\d*`;
 
@@ -32,11 +27,8 @@ const PRE_ID = String.raw`(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)`;
 const BUILD = String.raw`[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*`;
 
 /**
- * The prefix is `v?`, not `[v=]*`: node-semver's strict `valid()` — what
- * corepack's `isValidVersion` calls — takes one bare `v` and nothing else, so
- * `=1.2.3` and `vv1.2.3` are not versions. `=1.2.3` *is* a valid range, and
- * calling it exact would skip the registry query and the `jup.lock` resolution
- * record §04.1/§15.23 require of a range.
+ * The prefix is `v?`, not `[v=]*`: exact versions allow one bare `v`, while
+ * `=1.2.3` is a range that requires registry and `jup.lock` resolution.
  */
 const FULL_RE = new RegExp(
   String.raw`^v?(${NUM})\.(${NUM})\.(${NUM})(?:-(${PRE_ID}(?:\.${PRE_ID})*))?(?:\+(${BUILD}))?$`,
@@ -51,11 +43,6 @@ const PARTIAL_RE = new RegExp(
 );
 
 const OPERATOR_RE = /^(<=|>=|<|>|=)?([^\s<>=]*)$/;
-
-// --------------------------------------------------------------------------
-// Versions
-// --------------------------------------------------------------------------
-
 function toNumber(raw: string): number | null {
   const value = Number.parseInt(raw, 10);
   return Number.isSafeInteger(value) ? value : null;
@@ -221,11 +208,6 @@ export function lt(a: string, b: string): boolean {
 export function major(version: string): number {
   return parse(version)?.major ?? Number.NaN;
 }
-
-// --------------------------------------------------------------------------
-// Ranges
-// --------------------------------------------------------------------------
-
 type Operator = "<" | "<=" | ">" | ">=" | "=";
 
 interface Comparator {
@@ -536,10 +518,8 @@ export function satisfies(version: string, range: string): boolean {
 /**
  * Lenient satisfaction — used everywhere else.
  *
- * Strips the prerelease tag from **both** the version and every comparator, then
- * tests normally. This is *not* semver's `includePrerelease` flag, whose
- * behaviour corepack explicitly rejected. A user pinning `yarn@4.0.0-rc.1` must
- * still land in the `>=2.0.0` band.
+ * Strips prerelease tags from the version and every comparator before testing,
+ * so `yarn@4.0.0-rc.1` still belongs to the `>=2.0.0` band.
  */
 export function satisfiesWithPrereleases(version: string, range: string): boolean {
   const parsedRange = parseRange(range);

@@ -1,19 +1,5 @@
 /**
- * Format-preserving manifest rewriting — §03.7, §16.4, §14.7.
- *
- * `use` / `up` / auto-pin must edit `package.json` while preserving key order,
- * indentation, line endings, and (per §14.7) the BOM. Serialising a parsed DOM
- * loses all of that, so the write path is a **surgical text edit**: locate the
- * value span of the top-level key and replace just the string literal.
- *
- * This needs a JSON *scanner* — one that respects escapes and nesting so a
- * nested `"packageManager"` is never mistaken for the top-level one — but not a
- * *builder*.
- *
- * It is also cold: nothing but `pin.ts` reaches it, so a `yarn --version` never
- * loads it, and with it never loads `node:os` (§16.3). The scanning primitives
- * it shares with the read half come from `json.ts` rather than being duplicated
- * here — `json.ts` is on the warm path and already carries them.
+ * Surgical manifest edits preserve formatting and avoid pulling cold writing machinery into the warm path. Every result is reparsed before emission.
  */
 
 import { EOL } from "node:os";
@@ -144,9 +130,8 @@ export function setTopLevelString(text: string, key: string, value: string): str
   // values it steps over, so it reports success on input that was already
   // malformed (`{"a": ]}`, `{"a": 1]}`) and we would hand `writeFileSync` a
   // manifest that does not parse. Parsing is the only check that proves it does.
-  // `pin.ts` deliberately swallows its own `parseManifest` failure and relies on
-  // this guard to catch a broken manifest before it is written back, and
-  // `setNestedString` has always ended the same way (§16.4).
+  // `pin.ts` relies on this guard to prevent writing a broken manifest, and
+  // `setNestedString` applies the same validation (§16.4).
   try {
     JSON.parse(stripBom(result));
   } catch {

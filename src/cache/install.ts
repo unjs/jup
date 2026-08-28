@@ -116,8 +116,8 @@ export async function ensureInstalled(
   }
 
   const parsed = parse(locator.reference);
-  // Corepack's `isSupportedPackageManagerLocator`: a known name *and* a version
-  // reference. A URL reference is always the "custom URL" shape, even for `yarn`.
+  // A known locator requires a table name and version; URL references use the
+  // custom-URL path even for known names.
   const isKnown = parsed !== null && isSupportedPackageManager(locator.name);
   const version = parsed?.version;
 
@@ -183,31 +183,19 @@ export async function ensureInstalled(
     if (digestOutcome.status === "rejected") throw digestOutcome.reason as Error;
     const streamDigest = digestOutcome.value;
 
-    // §07.4 — a `.js` URL is the one artifact that is not an archive. The
-    // *filtered* tarball that used to join it here is gone with §15.41: it
-    // existed only to pull a lone `yarn.js` out of `@yarnpkg/cli-dist`, and that
-    // package is now installed whole like every other tarball.
+    // A `.js` URL is a single-file artifact; tarballs are installed whole.
     const singleFileName = ext === SCRIPT_EXT ? posix.basename(pathname) : undefined;
 
-    // §06.2 — the artifact whose digest the *reference* names. With the filtered
-    // path retired these are always the received bytes: for a tarball the
-    // archive, for a `.js` the file itself, and the stream is both.
+    // Hash the received artifact bytes.
     const artifactAlgo = streamAlgo;
     const artifactDigest = streamDigest;
 
-    // §06.1 row 1 — an explicit pin is the *only* check. Not "as well as" the
-    // signature: pinning a hash against a bad-signature registry must fail with
-    // a hash mismatch (test 77), and the correct hash must install despite that
-    // signature (test 78).
+    // An explicit reference pin is the only verification check for that artifact.
     if (pin.digest !== undefined) {
       assertDigest(pin.digest, artifactDigest);
     }
 
-    // §06.1 row 2: `dist.integrity` describes the tarball as published, so it is
-    // checked against the stream digest. §14.10's widening — "hash the stream
-    // even on the single-file path" — no longer has a filtered case to cover;
-    // the hole it closed was Yarn Berry behind a corporate mirror, and §15.41
-    // closed that at the source instead.
+    // Otherwise compare the received stream with registry integrity.
     if (expected !== undefined) {
       assertDigest(expected.hex, streamDigest);
     }
@@ -284,7 +272,7 @@ export async function confirmDownload(url: string): Promise<void> {
   process.stderr.write(`${messages.aboutToDownload(url)}\n`);
 
   // §08.6 — stdin is never touched unless we are actually going to ask. An
-  // empty `CI` counts as unset, matching the reference implementation.
+  // empty `CI` counts as unset.
   if (process.stdin.isTTY !== true || isCI()) return;
 
   process.stderr.write(messages.downloadPrompt());
@@ -298,23 +286,8 @@ export async function confirmDownload(url: string): Promise<void> {
 
   process.stderr.write("\n");
 }
-
-/* -------------------------------------------------------------------------- */
-/* §07.3 — choosing the URL                                                    */
-/* -------------------------------------------------------------------------- */
-
 /**
- * Where the artifact comes from, after §15.1's and §15.2's precedence.
- *
- * Two independent decisions live here, and keeping them apart is what makes
- * §15.2 possible at all:
- *
- * * **Which registry spec.** A configured *npm-protocol* registry switches Yarn
- *   Berry onto its `npmRegistry` entry — `@yarnpkg/cli-dist`, a tarball with a
- *   `bin` filter — instead of the single `.js` file `repo.yarnpkg.com` serves.
- * * **Which base URL.** `COREPACK_REGISTRY_<NAME>` replaces the origin of that
- *   package manager's own table URLs without changing the protocol, which is the
- *   only way to mirror Yarn without also redirecting npm and pnpm (#753).
+ * Select the artifact registry and apply its configured origin independently.
  */
 async function chooseSource(
   locator: Locator,
@@ -344,14 +317,8 @@ async function chooseSource(
   // host rather than 404ing on `@oven/bun-{target}`.
   const artifactRegistry = resolveArtifactRegistry(spec, locator);
 
-  // §05.2 rewrite 1, kept in one place (`registry.resolveRegistrySpec`): an
-  // npm-protocol registry configured for the band's `npmRegistry` package
-  // switches Yarn Berry onto `@yarnpkg/cli-dist`, while §15.2's
-  // `COREPACK_REGISTRY_YARN` deliberately does not — it mirrors
-  // `repo.yarnpkg.com` as it stands, which is exactly what #872 asked for.
-  // A band with an `artifactRegistry` has no `npmRegistry` alternative to swap
-  // to: its artifact is already an npm tarball, so a mirror needs no second
-  // shape, only a different origin.
+  // An artifact registry already identifies an npm tarball; otherwise resolve
+  // the configured protocol alternative for the band.
   const registry = artifactRegistry ?? resolveRegistrySpec(spec.registry);
   const packageName = registry.type === "npm" ? registry.package : undefined;
   const registryUrl = getRegistryUrl({ name, packageName });
@@ -380,17 +347,11 @@ async function chooseSource(
     source.signatures = metadata.signatures;
     source.fetched = true;
   } else {
-    // §15.2 — the table URL sits on this package manager's own distribution
-    // origin (`repo.yarnpkg.com`, `registry.yarnpkg.com`), and
-    // `COREPACK_REGISTRY_<NAME>` is the only thing that can move it. Corepack
-    // rewrites exactly one hardcoded prefix and so cannot mirror Yarn at all,
-    // which is #753 and #872.
     source.url = applySourceOverride(source.url, name);
   }
 
-  // §15.3 — origin comparison rather than corepack's substring `replace`, which
-  // misses a differing case or trailing slash and would rewrite the *middle* of
-  // a URL that merely contains the literal. Idempotent, so re-applying it to a
+  // §15.3 — compare origins to handle case and trailing slashes without
+  // rewriting matching text in the middle of a URL. Re-applying it to a
   // `dist.tarball` that `fetchTarballURLAndSignature` already rewrote is a no-op.
   source.url = applyRegistryOverride(source.url, registryUrl);
 
@@ -430,40 +391,10 @@ async function isProgramImage(path: string): Promise<boolean> {
 }
 
 /**
- * §07.4 rule 6, §15.28 — set the executable bit on a native band's entry points.
- *
- * Rule 6 takes the executable bit *from the tar header* and nothing else, which
- * is right for an archive whose modes are attacker-controlled: it is a mask, not
- * a grant. But it assumes the publisher set the bit, and for a native artifact
- * that assumption is a run that ends in `EACCES` with no output.
- *
- * `@nubjs/nub-<host>` publishes `bin/nub` at 0644 — deliberately, because npm
- * normalises an extracted file to 0755 only when the package's `bin` names it,
- * and these per-host packages declare no `bin` at all (that is also why §07.7
- * has nothing to read for them). nub's own `postinstall` chmods it back; jup
- * runs no lifecycle scripts, so nothing did.
- *
- * The grant is the narrowest one that fixes it, and every bound is load-bearing:
- *
- * * **Only a `native` band.** A JavaScript package manager is imported into this
- *   process (§08.2), never executed, so the bit would mean nothing there.
- * * **Only the paths in `bin`.** These are the files jup is about to hand to
- *   `execNative`, they have already been confined to the install (`confine`),
- *   and they are named by the band or by the package's own manifest — not by a
- *   tar header. Nothing else in the archive is touched.
- * * **Only a file that begins like a program.** A shebang, ELF or Mach-O magic.
- *   This is what keeps the grant from *losing* information: a band whose `bin`
- *   path has gone stale and now names a README would, if chmod'd, be handed to
- *   `execvp`, which falls back to `/bin/sh` and exits 127 with the shell's
- *   complaint. Left alone it is the `EACCES` §12's `cannotExecute` reports with
- *   the path in it, which is the answer that says what is wrong.
- * * **Only `+x`, and only where it is missing.** `mode | (0o111 & ~umask)`:
- *   setuid, setgid and sticky are still never honoured, and a publisher who did
- *   ship 0755 gets no write at all.
- *
- * Best-effort by design: a store that is read-only, or a file another process
- * has already promoted, must not fail an install that would otherwise succeed —
- * and if the bit really is missing, `execNative` reports the `EACCES`.
+ * Archive modes are attacker-controlled, so executable-bit grants are bounded
+ * to native bands, confined declared `bin` paths, and recognized program images.
+ * Grant only ordinary execute bits permitted by the umask, never special bits.
+ * Best effort: execution reports any remaining `EACCES`.
  */
 async function makeEntryPointsExecutable(
   tmpDir: string,
@@ -501,11 +432,6 @@ async function makeEntryPointsExecutable(
  * write, and a global one at that.
  */
 const UMASK = process.umask();
-
-/* -------------------------------------------------------------------------- */
-/* §07.7, §15.17 — what goes in the marker's `bin`                             */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §02.4's one `bin` shape: a non-empty `{name: path}` map of strings.
  *
@@ -526,33 +452,8 @@ function isValidBinSpec(value: unknown): value is BinSpec {
 }
 
 /**
- * §07.7, §15.17 — where a completed install's `bin` comes from.
- *
- * The package's own `package.json` is the source of truth, and the embedded
- * table is the fallback. That is the inversion #775 asks for: an entry point is
- * a property of the package, not of the tool that downloads it, and pnpm has
- * moved its own twice (`.js` → `.cjs` → `.mjs`, §02.5) with a v12 alpha moving
- * it again. A hardcoded path is worth nothing once it is wrong, and the version
- * that makes it wrong is by definition one no release of ours anticipated — so
- * a band that disagrees with the package is a stale band, not a correction.
- *
- * The honest objection is that this trusts published metadata. It does not
- * trust it any further than it is already trusted: by the time this runs the
- * artifact has cleared §15.11's verification tier, so the `bin` map comes from
- * the same signed bytes as the code about to be executed from beside it, and
- * §14.13 confines every value it yields before the marker records it.
- *
- * The table still decides two things:
- *
- * * a **single file** has no `package.json` to read at all, so the only thing
- *   left to describe it is its own name — see the branch below; and
- * * a tarball whose package declares no usable `bin` falls back to the band —
- *   but only a **declared** one, so §02.3's fall-forward guess for an uncovered
- *   version never reaches the marker.
- *
- * `exec.resolveBinPath` checks containment again at the point of use — markers
- * outlive this function, including ones written by other releases — but failing
- * here is what keeps an escaping path out of the store in the first place.
+ * Prefer a valid package manifest `bin`; otherwise use the declared band's
+ * `bin`. Manifest paths are confined to the installation root before storage.
  */
 export function resolveBin(
   tmpDir: string,
@@ -568,16 +469,6 @@ export function resolveBin(
   const tableBin = known ? resolveSpecBin(getSpecFor(locator.name, parsed.version)) : undefined;
 
   if (singleFileName !== undefined) {
-    // No manifest to consult, and since §15.41 no *band* produces a single file
-    // either: the only way here is a URL reference naming a `.js` (§04.1 step 1,
-    // behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` for a known name). A URL
-    // reference has no version, so it is never `known` and never banded — which
-    // is why the table is not consulted at all. The artifact is one file and the
-    // locator's own name is what the user asked to run, which is what corepack's
-    // `BinList` expressed as a bare list of names.
-    //
-    // The marker names the *file* instead, so §08.1 needs nothing but the
-    // location — no second pass over the download URL to recover the basename.
     return { [locator.name]: singleFileName };
   }
 
@@ -614,10 +505,7 @@ export function resolveBin(
 /**
  * The install's own `package.json`, or `null` when there is nothing to read.
  *
- * Tolerant by design: §07.7 now reads this on **every** tarball install rather
- * than only on the unbanded path, so a package that ships without a manifest —
- * or with a corrupt one — must degrade to the table rather than turn an install
- * that used to work into an `ENOENT` nobody can act on.
+ * Missing or corrupt manifests degrade to the embedded table.
  */
 function readManifest(tmpDir: string): { name?: unknown; bin?: unknown } | null {
   try {
@@ -668,8 +556,8 @@ function confine(
 /**
  * A note for whoever maintains the embedded table, on the debug channel.
  *
- * `DEBUG=jup` is this tool's spelling of the `DEBUG=corepack` the reference
- * implementation documents, and §15.35l is explicit that it is "a debugging
+ * `DEBUG=jup` and `DEBUG=corepack` enable this compatibility channel. §15.35l
+ * is explicit that it is "a debugging
  * aid, not a substitute for command output" — so this is the one place a
  * message is allowed to be conditional on it. Both names are honoured, for the
  * same reason §14.22 keeps both env-var prefixes.
@@ -686,11 +574,6 @@ function debugNote(message: string): void {
     console.warn(`! ${message}`);
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* §06 — the decision table                                                    */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §06.1 rows 2–5 — the expected digest the *registry* vouches for, or
  * `undefined` when nothing is to be checked.
@@ -698,8 +581,7 @@ function debugNote(message: string): void {
  * Resolved before the download for two reasons: the digest algorithm comes from
  * the SRI string (§14.12) and the stream can only be hashed once (§16.5); and a
  * signature we already know is bad should not cost a tarball's worth of
- * bandwidth. Corepack fetches this metadata *after* the download instead, which
- * is unobservable apart from the wasted transfer.
+ * bandwidth. Metadata therefore precedes the artifact transfer.
  */
 async function resolveExpectedIntegrity(
   source: ArtifactSource,
@@ -752,8 +634,7 @@ async function resolveExpectedIntegrity(
   // Trusted key -> signature -> `integrity` -> the bytes checked by the caller.
   if (source.integrity !== undefined) return parseSri(source.integrity);
 
-  // Soft-fail: unsigned, but the bytes are still checked against the legacy
-  // digest, which is strictly more than corepack does here (it checks nothing).
+  // Soft-fail unsigned artifacts only after checking the available legacy digest.
   return source.shasum === undefined ? undefined : { algo: "sha1", hex: source.shasum };
 }
 
@@ -819,11 +700,6 @@ function assertDigest(expected: string, actual: string): void {
     throw new Error(messages.mismatchHashes(expected, actual));
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* §07.4 / §07.6 — the pieces around the stream                                */
-/* -------------------------------------------------------------------------- */
-
 /** §07.4 — a `.js` artifact is written verbatim under its own basename. */
 /**
  * §07.4 rule 7 applies here too.

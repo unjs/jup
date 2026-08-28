@@ -1,37 +1,5 @@
 /**
- * `jup.lock` — the resolution file for non-exact project specs (§15.23).
- *
- * Corepack's four-year objection to ranges in `packageManager` is that they
- * "prevent using hashes" and "give a false sense of confidence". That is an
- * argument against *unrecorded* ranges, not against ranges: this module is the
- * other half, a file that records which concrete version a range resolved to and
- * the digest of the bytes that version produced. Ranges for humans, a recorded
- * hash for reproducibility and integrity.
- *
- * The same shape serves two files under very different rules (§15.23):
- *
- * * **The resolution file**, `<project>/jup.lock` — committed, authoritative,
- *   written by nothing but the commands typed in order to change it, `jup use
- *   <name>@<range>` and `jup up`. Running a package manager never edits it, so
- *   the version a project runs on is one somebody chose, and `git status` stays
- *   quiet.
- * * **The resolution cache**, `<project>/node_modules/.jup/jup.lock` — host-local,
- *   uncommitted, written by ordinary runs so a range costs one registry request
- *   a day rather than one per invocation. Its entries carry an
- *   {@link Resolution.expires} stamp; the recorded file's never do.
- *
- * Four properties are load-bearing, and each is a rule below:
- *
- * * **An exact pin never touches either file** — not a read, not a `stat`. The
- *   gate is {@link usesLockfile}, and every caller asks it first.
- * * **A recorded resolution costs one `readFileSync` and no network.** §01.3's
- *   fast-path budget extends to ranges.
- * * **The cache is never created out of nothing.** `node_modules` belongs to the
- *   package manager: jup writes inside it when it is already there, and creates
- *   nothing but its own `.jup` directory within it.
- * * **A damaged file is not fatal.** Both are derived state, so every failure
- *   mode degrades to "resolve normally" — §04.4's precedent for
- *   `lastKnownGood.json`.
+ * `jup.lock` records authoritative project resolutions; host-local cache entries expire. Reads stay bounded, offline failures may use stale entries, writes are atomic, and invalid state degrades to a miss.
  */
 
 import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -46,15 +14,7 @@ import { hostTarget, isPerHost } from "../config/table.ts";
 import type { Descriptor, Locator } from "../types.ts";
 
 /**
- * §15.23 — at the project root, next to the manifest that declared the spec.
- * The name is jup's own: corepack has no lockfile of any name.
- *
- * So this is the one layout path §14.24 renamed that must **not** grow a
- * `.corepack.lock` fallback — unlike `.corepack.env`, which keeps one because
- * real repositories have committed it. Corepack rejects ranges outright and has
- * never written a lockfile of any spelling, so a legacy read path would be
- * compatibility with a file that never existed, bought with a second `stat` on
- * the range fast path.
+ * Store authoritative resolutions at the project root without compatibility probes.
  */
 export const LOCKFILE_NAME = "jup.lock";
 
@@ -62,23 +22,7 @@ export const LOCKFILE_NAME = "jup.lock";
 const MODULES_DIRECTORY = "node_modules";
 
 /**
- * §15.23 — where the resolution *cache* lives, relative to the project.
- *
- * `node_modules` rather than the project root: the alternative is a second file
- * beside the first that every project has to gitignore, or a store-side index
- * keyed by a path that goes stale the moment a directory is renamed.
- * `node_modules` is already ignored, already disposable, and already what gets
- * deleted to start over.
- *
- * A dot-prefixed directory *within* it, because npm reads every visible entry in
- * `node_modules` as an installed package: at `node_modules/jup.lock` the memo is
- * `jup.lock@ extraneous` to `npm ls` and is deleted by the next `npm install`,
- * which announces it as `removed 1 package`. It would be destroyed by the very
- * command jup exists to run, its window would never once close on its own, and
- * the user would be told about a package nobody installed. That is why every peer
- * tool keeping state here hides it the same way — `.package-lock.json`,
- * `.modules.yaml`. The file inside keeps its plain name: the directory, not the
- * spelling, says which of §15.23's two files this is.
+ * Keep the host-local cache in an existing `node_modules/.jup`; never create `node_modules` solely for metadata.
  */
 export const CACHE_DIRECTORY = join(MODULES_DIRECTORY, ".jup");
 
@@ -437,11 +381,7 @@ function writeEntry(
 }
 
 /**
- * Drop one key, deleting the file once nothing is left in it.
- *
- * `corepack use` pins exactly, which retires whatever range the field used to
- * hold; leaving that key behind would keep a resolution nothing points at, and
- * the next `use` back to a range would silently reuse a stale one.
+ * Removing a range pin retires its resolution so restoring the range cannot resurrect stale state.
  */
 export function removeResolution(dir: string, key: string): void {
   // The cache is keyed by the same string, so a range the field no longer names
@@ -480,11 +420,6 @@ function dropResolution(dir: string, key: string): void {
 
   save(dir, data);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Internals                                                                   */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The entry `descriptor` would use out of the file in `dir`, if it still stands.
  * "Still satisfies" is the **lenient** test (§04.2); {@link readResolution} says why.
@@ -515,13 +450,9 @@ export function readEntry(dir: string, descriptor: Descriptor): Resolution | nul
  * §15.28 — a **bare** digest recorded for a tool whose artifact is per-host is
  * not this host's fact and is not treated as one. Nothing writes such an entry:
  * {@link writeEntry} takes that branch on `perHost` and records a map keyed by
- * host. What produces one is a table that has *changed its mind* — a band that
- * moved to a per-host artifact in a later release, which is what pnpm 12 did —
- * and there the recorded string describes a tarball this build will never
- * fetch. Reading it back would turn the correct artifact into a hash mismatch on
- * every machine that had run the previous release, and would do it to a file the
- * user committed. So the digest is dropped and the version kept, exactly as
- * §15.28 has the last-known-good repaired on read; the bytes are still verified,
+ * host. Such a digest may describe a portable artifact while the active band is
+ * per-host, so applying it would reject the correct host artifact. Drop the
+ * digest but retain the version; the bytes are still verified,
  * by npm's signature over them (§06.3), and the next `use` or `up` records the
  * host map.
  */
@@ -552,7 +483,9 @@ function serialise(data: LockfileData): string {
   return `${JSON.stringify({ version: LOCKFILE_VERSION, resolutions }, undefined, 2)}\n`;
 }
 
-/** Write-temp-then-rename, so a concurrent reader never sees a half-written file (§14.3). */
+/**
+ * Skip byte-identical writes to preserve mtime and avoid concurrent churn; otherwise replace atomically.
+ */
 function save(dir: string, data: LockfileData): void {
   const target = join(dir, LOCKFILE_NAME);
   const content = serialise(data);

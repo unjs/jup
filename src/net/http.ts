@@ -12,10 +12,8 @@
  * (§15.4) does not even need the dispatcher, because it is installed into the
  * process trust store that `fetch` already consults.
  *
- * On top of that sit §15.5's resilience requirements: a connect timeout and an
- * idle timeout, and bounded retries with jittered backoff for idempotent GETs.
- * Corepack has none of these — no timeout, no retry, no backoff — which is the
- * shape of the undiagnosable CI flake behind #458.
+ * Requests use connect and idle timeouts plus bounded, jittered retries for
+ * transient failures on idempotent GETs.
  */
 
 import { Buffer } from "node:buffer";
@@ -73,10 +71,8 @@ const MAX_RETRY_AFTER = 30_000;
  * Draining keeps a connection reusable, which is why it is done at all — but
  * `arrayBuffer()` reads to the end whatever the end turns out to be, and the
  * peer chooses that. A registry's error document is JSON measured in bytes; a
- * hostile (or merely broken) one answering `500` with a gigabyte behind it used
- * to be an allocation we performed on request. Past the cap the body is
- * abandoned and the connection torn down, which is the correct trade in the one
- * direction it can go wrong.
+ * hostile or broken peer can return an arbitrarily large error body. Past the
+ * cap, the body is abandoned and the connection torn down.
  */
 const MAX_DRAIN_BYTES = 64 * 1024;
 
@@ -234,8 +230,7 @@ export interface HttpOptions {
    */
   attempts?: number;
   /**
-   * The backoff seam. Defaults to a real sleep; a test injects a no-op so the
-   * failure path stays as fast as it was before retrying existed.
+   * The backoff seam. Defaults to a real sleep; tests may inject a no-op.
    */
   sleep?: (milliseconds: number) => Promise<void>;
   /**
@@ -270,9 +265,8 @@ export interface HttpOptions {
 }
 
 /**
- * §14.6 — the single credential rule, used by metadata requests and downloads
- * alike. Corepack has two paths that disagree; this is the unified one, with
- * §15.1's `.npmrc` tier appended below the environment:
+ * §14.6 — the single credential rule for metadata requests and downloads, with
+ * §15.1's `.npmrc` tier below the environment:
  *
  *     userinfo present                        -> Basic from userinfo, stripped from the URL
  *     origin === registryOrigin, and the registry is the user's own choice:
@@ -286,17 +280,9 @@ export interface HttpOptions {
  * rather than what the registry is (see `npmrc.RegistryTrust`): **a registry the
  * repository named gets no environment credential at all**, whatever its origin.
  *
- * The gate stops at the environment tier. An earlier revision put a plaintext
- * floor below it as well — no credential of *any* tier over `http:` unless the
- * user chose that origin — and that is not this spec's rule: §15.38 row 149
- * requires the user's own `.npmrc` credential to be honoured against the
- * registry a project selected, and §15.1's security constraints are prefix
- * scoping and the project-file auth refusal, with no scheme condition among
- * them. The floor also bought nothing the gate above does not already: the
- * environment tier is unreachable once `projectChosen` is true, and the only
- * other credential it withheld was userinfo carried on the request URL itself —
- * which, when the repository chose the origin, is the repository's own
- * credential going to the repository's own registry, not the user's.
+ * The gate applies only to environment credentials. User-scoped `.npmrc`
+ * credentials remain eligible under their host-and-path prefix, including when
+ * the project selected the registry (§15.38 row 149).
  *
  * The `.npmrc` tier is **not** gated on `registryOrigin`, and that is not a
  * relaxation: `//host/path/:_authToken` names its own scope, and
@@ -335,28 +321,14 @@ export function credentialsFor(
     return { url: stripped, authorization };
   }
 
-  // Credentials never leave the configured registry's origin. This is §14.6's
-  // fix: corepack scopes only the Bearer token, and happily sends
-  // COREPACK_NPM_USERNAME/PASSWORD to whatever host a request targets.
+  // Credentials never leave the configured registry origin.
   const registry = originOf(registryOrigin);
   if (registry === undefined || url.origin !== registry) {
     return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
   }
 
-  // §14.6's origin scoping is necessary and — as of §15.37 — no longer
-  // sufficient, because the origin it scopes to became something a repository
-  // can choose. `COREPACK_NPM_TOKEN` is env-file-ineligible and
-  // `COREPACK_NPM_REGISTRY` is not, which blocks half of a pair whose danger is
-  // the pairing: a clone that ships `.jup.env` with `JUP_NPM_REGISTRY=
-  // https://attacker.example`, or an `.npmrc` with `registry=` pointing there,
-  // used to make `https://attacker.example` "the configured registry's origin"
-  // and collect the CI machine's token on the first metadata fetch.
-  //
-  // So the environment tier is withheld outright once the repository is what
-  // named this origin. The request still goes where the project asked — §15.37
-  // is explicit that redirecting a download is a project's business — it simply
-  // goes there as nobody. `.npmrc`'s tier survives below, because it carries its
-  // own scope: a prefix the *user* wrote names the host it is willing to reach.
+  // Repository-selected origins do not receive ambient environment credentials.
+  // `.npmrc` credentials remain eligible because their prefix scopes the host.
   if (projectChosen) {
     return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
   }
@@ -389,9 +361,7 @@ export function credentialsFor(
     return { url, authorization: basic(username, password) };
   }
 
-  // §15.1's tier, below every `COREPACK_*` one. This is the case #540 is
-  // actually about: an organisation whose `.npmrc` already carries the token
-  // for its internal registry, and a tool that ignored it.
+  // `.npmrc` credentials rank below every `COREPACK_*` credential source.
   return { url, authorization: npmrcAuthorizationFor(url)?.authorization };
 }
 
@@ -411,10 +381,6 @@ function userinfoOf(registryUrl: string | undefined): string | undefined {
  * §14.9 — the URL must parse, its scheme must be exactly `https:` (or `http:`
  * when the configured registry is itself `http:`), and its host must equal the
  * configured registry's host unless the user opts in.
- *
- * Corepack accepts anything that `startsWith("http")`, which also matches
- * `httpfoo://`, and imposes no relationship at all between a `dist.tarball`
- * host and the registry that vouched for it.
  *
  * The opt-out is `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1`, and it relaxes only
  * the host check: a plain-HTTP mirror must never be silently upgraded, and an
@@ -587,8 +553,7 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
       throw new Error(messages.badStatus(response.status, href));
     }
 
-    // §15.5's idle half: a connection that stalls mid-body is the shape of the
-    // undiagnosable CI hang #458 describes, and no header timeout catches it.
+    // Header timeouts do not cover a connection that stalls mid-body.
     return withIdleTimeout(response, timeout, href, controller);
   }
 }

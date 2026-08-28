@@ -1,14 +1,5 @@
 /**
- * The command surface's description of itself — §09, §12.1.
- *
- * This lives in its own module because both sides of a management-mode error
- * need it and neither should pull in the other: `cli.ts` owns the commands,
- * `main.ts` owns the `Usage Error:` presentation (§08.4) but loads `cli.ts`
- * lazily so the proxy hot path never pays for the command surface.
- *
- * Keeping one table rather than two also removes a "these MUST stay in step"
- * comment, which is the kind of invariant that drifts the first time a flag
- * changes.
+ * Usage text is isolated so the hot proxy graph does not parse management-command help.
  */
 
 /**

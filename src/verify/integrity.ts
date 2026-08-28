@@ -1,19 +1,5 @@
 /**
- * Integrity and trust — §06, §14.4, §14.11, §14.12.
- *
- * Three independent mechanisms applied in a specific order; §06.1's decision
- * table says which one fires when, and two of its consequences must **not** be
- * accidentally "fixed": a user-supplied hash overrides signature verification,
- * and that is intended.
- *
- * Crypto choice: `node:crypto` throughout rather than `crypto.subtle`.
- * `verifySignature` is synchronous and `subtle.verify` is not; `subtle` also
- * only accepts IEEE-P1363 `r‖s` signatures, while npm publishes DER-encoded
- * `(r, s)` (§06.3), and it exposes no way to read back the curve of an imported
- * key. `node:crypto` handles all three directly. On the hashing side `sha1` and
- * `sha224` — both of which appear in real `packageManager` pins (§06.2) — have
- * no WebCrypto equivalent at all, and `createHash` is the only streaming digest
- * available, so hashing is `node:crypto` too.
+ * Integrity uses synchronous `node:crypto`: npm signatures are DER ECDSA, key curves must be inspected, SHA-1/SHA-224 pins remain supported, and artifact hashes stream.
  */
 
 import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
@@ -43,51 +29,15 @@ const WEAK_HASH_ALGOS = new Set(["sha1", "md5"]);
 const warnedWeakAlgos = new Set<string>();
 
 /**
- * §14.4 — accept an otherwise-valid signature from an expired key, loudly.
- *
- * This was `false` once, on the reading that expiry should be enforceable and
- * that §14.4's leniency is only a SHOULD. The reading was defensible; the blast
- * radius was not. npm rotated its signing key on **2025-01-29**, and
- * `dist.signatures` is written at publish time and never rewritten, so *every*
- * artifact published before that date carries the old keyid — measured, each
- * with a fresh store:
- *
- * | spec | strict | lenient |
- * | --- | --- | --- |
- * | `yarn@1.22.19`, `yarn@1.22.22` | expired-key error | installs |
- * | `npm@9.9.4`, `npm@10.9.2` | expired-key error | installs |
- * | `pnpm@6.6.2`, `pnpm@8.15.0`, `pnpm@10.0.0` | expired-key error | installs |
- * | `pnpm@9.15.9`, `pnpm@10.15.0`, `npm@11.6.0` | installs | installs |
- *
- * That is all of Yarn 1.x — last published in 2024, so it can never be re-signed
- * — plus every npm through 10.9.2 and most of pnpm's history. Corepack installs
- * every one of them. A project pinning `yarn@1.22.22` could not use this tool at
- * all, which costs more than the property being defended: with the registry
- * offering one key per rotation, strictness turns a *key* expiry into a
- * retroactive expiry of everything that key ever signed.
- *
- * What is kept is everything that makes the signature mean something. The ECDSA
- * check below runs first and must pass, so a forged or tampered artifact is
- * still refused — with `expiredKey`, which now fires only when the signature
- * does *not* verify. An expired key is never chosen over a live one (the loop
- * above skips it and keeps walking), and acceptance is never silent.
- *
- * The `sha1`-style option of accepting only signatures made *before* the expiry
- * was investigated and rejected: the publish time is not on this path. §05.1
- * requests the abbreviated packument, whose top-level keys are `name`,
- * `dist-tags`, `versions` and `modified` — no `time`. Only the full packument
- * carries `time[version]`, and fetching it would put a much larger response on
- * every install.
+ * Signatures outlive key expiry, so strict expiry would reject otherwise valid
+ * releases. Acceptance still requires valid ECDSA verification, prefers live
+ * keys, and warns; abbreviated packuments provide no publish time.
  */
 const ACCEPT_EXPIRED_KEY_WITH_WARNING: boolean = true;
 
 /**
- * @param userPinned Whether this algorithm came from the project's own
- * `packageManager` field. §06.2/§14.11 scope the weak-algorithm warning to a
- * *pin*, and that scoping is load-bearing: the embedded table's own defaults are
- * sha1 (§02.5), so warning unconditionally means every default install scolds the
- * user about a hash we chose and they cannot change. A warning nobody can act on
- * is noise, and noise is how real warnings get ignored.
+ * Warn only for user-supplied weak pins; embedded SHA-1 defaults are not actionable.
+ * @param userPinned Whether the project supplied the algorithm.
  */
 export function assertSupportedAlgo(algo: string, userPinned = false): HashAlgo {
   const normalized = algo.toLowerCase();
@@ -135,13 +85,9 @@ export async function hashFile(path: string, algo: string): Promise<string> {
 }
 
 /**
- * §14.12 — parse `<algo>-<base64>` properly; never `slice(7)`.
- *
- * Corepack assumes the SRI algorithm is always `sha512`, so a registry that
- * answers `sha256-…` yields a silently wrong expected digest. Real SRI strings
- * may carry several space-separated entries and `?opt` suffixes; the first
- * entry wins, and an algorithm outside the allowlist is an error rather than a
- * guess.
+ * §14.12 — parse `<algo>-<base64>` without assuming an algorithm. SRI strings
+ * may carry multiple space-separated entries and `?opt` suffixes; the first
+ * entry wins, and algorithms outside the allowlist are rejected.
  */
 export function parseSri(integrity: string): { algo: HashAlgo; hex: string } {
   const entry = integrity.trim().split(/\s+/)[0] ?? "";
@@ -184,9 +130,8 @@ export function shouldSkipIntegrityCheck(): boolean {
  * §06.4, §15.10 — the trust store in force for one registry origin.
  *
  * `COREPACK_INTEGRITY_KEYS` **replaces** the embedded store (it never merges).
- * Both shapes are accepted: corepack's legacy `{"npm": [...]}`, which predates
- * per-origin trust and therefore applies to whichever registry is being used,
- * and the origin-keyed `{"https://registry.npmjs.org": [...]}` of §02.6.
+ * Both compatibility shapes are accepted: `{"npm": [...]}` applies to the
+ * active registry, while §02.6's form is keyed by registry origin.
  * Malformed JSON throws here, at verification time, not at startup (§06.4).
  *
  * Note the env var is ineligible in an env file (§14.5); `env.ts` drops it
@@ -217,17 +162,7 @@ export function getTrustedKeys(registryOrigin?: string): TrustedKey[] {
 }
 
 /**
- * §15.9 — "no trusted key matched the signature's keyid", distinguishably.
- *
- * The one failure a key *refresh* can repair, and the trigger `trust.ts` gates
- * on. Every other outcome of §06.3 is left as it was: a matched-but-unusable
- * signature, an expired key and a failed ECDSA check all describe a key we
- * already hold, so fetching more of them would only add a request to an answer
- * that is not going to change.
- *
- * A subclass rather than a flag, so §12.1's presentation is untouched:
- * `UsageError`'s `name` is inherited, the message is byte-identical, and
- * `main.ts` cannot tell the two apart.
+ * Marks an unmatched-key-ID failure so trust refresh can occur without changing `UsageError` presentation.
  */
 export class UntrustedKeyidError extends UsageError {}
 
@@ -356,9 +291,8 @@ function expiryOf(key: TrustedKey): string | undefined {
  * Its P-256 assertion is scoped to "a native implementation targeting only
  * P-256", which must reject other curves rather than mis-verify them; running on
  * `node:crypto`, this one targets no curve in particular, so pinning P-256 would
- * buy no safety and would reject legitimate keys — a custom registry is free to
- * sign on any curve OpenSSL supports, and corepack's own test registry mints
- * `sect239k1`.
+ * buy no safety and would reject legitimate keys: custom registries may use any
+ * curve OpenSSL supports, including `sect239k1`.
  *
  * The `"ec"` half of the guard stays. It is not a curve restriction but a
  * key-*type* one: an RSA or Ed25519 SPKI parses happily and would then be handed

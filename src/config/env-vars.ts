@@ -35,10 +35,8 @@ export const COREPACK_PREFIX = "COREPACK_";
 /**
  * This tool's own prefix — the spelling every `COREPACK_` variable also answers to.
  *
- * The tool is `jup`; `corepack` is the name of the implementation it replaces, and
- * §11's table is written in its spelling because that is what existing projects,
- * CI configuration and the conformance suite already set. Rather than pick one, a
- * variable is read under **both**: `JUP_X` and `COREPACK_X` name the same setting,
+ * §11 requires both spellings for project, CI, and conformance compatibility:
+ * `JUP_X` and `COREPACK_X` name the same setting,
  * with `JUP_X` winning when both are set, since it is the more specific statement
  * about *this* tool. Everything downstream — the env-file prefix filter (§03.2),
  * the eligibility deny-lists (§14.5), `info`'s environment snapshot — treats the
@@ -161,11 +159,6 @@ export type ToolEnvVar = CorepackEnvVar | JupSpelling<CorepackEnvVar>;
 export function registryVariableFor(name: string): string {
   return `${REGISTRY_PREFIX}${name.toUpperCase().replace(/[^\dA-Z]/g, "_")}`;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Reading and writing a variable that has two spellings                       */
-/* -------------------------------------------------------------------------- */
-
 /** `COREPACK_HOME` -> `JUP_HOME`. Any other name is returned unchanged. */
 export function jupSpelling<N extends string>(name: N): JupSpelling<N> {
   return (

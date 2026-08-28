@@ -1,35 +1,8 @@
 /**
- * `.npmrc`, the constrained subset — §15.1 — and the registry decision it feeds
- * (§15.2, §15.3).
- *
- * §05.4 records that corepack reads no `.npmrc` at any level, which is #540 and
- * the single most-requested missing capability: a locked-down organisation
- * configures one registry, every other tool on the machine honours it, and this
- * one silently reaches the public registry from a machine whose policy forbids
- * exactly that.
- *
- * This is **not** npm-config compatibility. §15.1 lists seven keys; everything
- * else in the file is ignored, `${VAR}` expansion included. What makes reading
- * an attacker-controlled file safe at all is two rules, and they are the part of
- * this module worth reading twice:
- *
- * * **Auth is prefix-scoped by construction.** `//host/path/:_authToken` names
- *   the URLs it applies to, and {@link npmrcAuthorizationFor} attaches it only
- *   to a request whose host *and* path prefix match. That is stricter than
- *   §14.6's origin scoping, which is why `.npmrc` auth can be honoured without
- *   reintroducing the leak §14.6 exists to close.
- * * **A project-level file may set `registry` and `@scope:registry`, and
- *   nothing else.** npm honours project-level auth; this tool must not, because
- *   unlike npm it runs *before* the user has decided to trust the repository —
- *   `git clone && yarn install` executes this code with the clone's `.npmrc`
- *   already on disk. Auth and TLS keys from a project file are refused **and
- *   announced**, following `env.ts`'s `SECURITY_ONLY_FROM_ENVIRONMENT`
- *   precedent: a silently-dropped credential looks exactly like a broken tool.
- *
- * Nothing here is on the warm path. The module is reached only from `http.ts`,
- * `registry.ts`, `install.ts`, `tls.ts` and `info.ts` — all cold — and the whole
- * discovery is memoised per working directory, so a run that makes three
- * requests reads the files once.
+ * Constrained `.npmrc` support, memoized off the warm path. Authentication is
+ * scoped to matching host and path prefixes. Project files may select registries
+ * but may not supply authentication, TLS settings, or environment expansion;
+ * refusals are announced.
  */
 
 import { Buffer } from "node:buffer";
@@ -46,11 +19,6 @@ import {
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { advisory } from "../errors.ts";
 import { loadEnvFileFrom } from "../project/env.ts";
-
-/* -------------------------------------------------------------------------- */
-/* Types                                                                       */
-/* -------------------------------------------------------------------------- */
-
 /** §15.1's three tiers, lowest precedence first. */
 export type NpmrcLevel = "global" | "user" | "project";
 
@@ -72,16 +40,9 @@ export interface NpmrcOrigin {
  * `@scope:registry`, or a `.jup.env` that set one of §15.2's registry
  * variables. §15.37 deliberately keeps those variables project-settable, on the
  * reasoning that redirecting a *download* is a project's own business — but the
- * user's `COREPACK_NPM_TOKEN` is not the project's business, and the two were
- * only ever coupled because §14.6 scopes credentials to "the configured
- * registry's origin" without asking who configured it. A cloned repository
- * could therefore name an origin and collect the token scoped to it, which is
- * precisely the pairing `env.ts`'s deny-list comment describes and only half
- * blocks: the token cannot come from the file, but the registry can, and one
- * hostile half is enough.
- *
- * Splitting the decision from the credential is the fix. The registry still
- * moves wherever the project says; the secrets do not follow it.
+ * user's `COREPACK_NPM_TOKEN` is not the project's business. Separating registry
+ * selection from credential authority lets the registry move without exposing
+ * environment credentials to a repository-selected origin.
  *
  * The classification is a **deny-list**, not an allow-list — see
  * {@link registryTrustFor} for why that is the right way round here.
@@ -139,11 +100,6 @@ export interface NpmrcConfig {
    */
   projectEnvVars: Record<string, string>;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Messages                                                                    */
-/* -------------------------------------------------------------------------- */
-
 /**
  * This module keeps its own strings, as `info.ts`, `shims.ts` and `tls.ts` do.
  * Neither is in §12's normative table: §15.1 prescribes the behaviour and leaves
@@ -180,15 +136,7 @@ export const npmrcMessages = {
   refusedProjectExpansion: (key: string, path: string) =>
     `! Ignoring ${key} from ${path}: a project-level .npmrc may not expand \${...} from the environment`,
 
-  /**
-   * A configured registry that is not an HTTP URL.
-   *
-   * §05.1 speaks HTTP and nothing else, so a `file:`, `data:` or `ftp:`
-   * registry used to travel the whole way to `httpGet` and fail there as a
-   * transport error — which reads as "the network is broken" for what is a
-   * one-character configuration mistake. Refused at the point of decision
-   * instead, and the tier below is used.
-   */
+  /** Reject non-HTTP registry schemes at configuration selection, then use the lower tier. */
   refusedRegistryScheme: (source: string, scheme: string) =>
     `! Ignoring ${source}: a registry must be an http: or https: URL, and this one is ${scheme}`,
 } as const;
@@ -207,11 +155,6 @@ export function resetNpmrcCache(): void {
   cache.clear();
   warned.clear();
 }
-
-/* -------------------------------------------------------------------------- */
-/* Discovery                                                                   */
-/* -------------------------------------------------------------------------- */
-
 /**
  * Keys a **project-level** file may set. Everything else in §15.1's table is a
  * trust decision, and a cloned repository does not get to make it.
@@ -349,11 +292,6 @@ function readIfPresent(path: string): string | undefined {
     return undefined;
   }
 }
-
-/* -------------------------------------------------------------------------- */
-/* Parsing                                                                     */
-/* -------------------------------------------------------------------------- */
-
 /** One `key = value` pair, in file order. Arrays (`ca[]=`) arrive as repeats. */
 export interface NpmrcPair {
   key: string;
@@ -437,11 +375,6 @@ export function expandVariables(value: string): { value: string } | { missing: s
 
   return missing === undefined ? { value: expanded } : { missing };
 }
-
-/* -------------------------------------------------------------------------- */
-/* Loading                                                                     */
-/* -------------------------------------------------------------------------- */
-
 const cache = new Map<string, NpmrcConfig>();
 
 /** The auth key suffixes §15.1 lists, and nothing else. */
@@ -747,11 +680,6 @@ function normalisePrefix(raw: string): string | undefined {
   const path = slash === -1 ? "" : body.slice(slash);
   return `//${host.toLowerCase()}${path}/`;
 }
-
-/* -------------------------------------------------------------------------- */
-/* Auth                                                                        */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §15.1 — the credential for this URL, or `undefined`.
  *
@@ -773,11 +701,6 @@ export function npmrcAuthorizationFor(
     (entry) => target.startsWith(entry.prefix) || `${target}/` === entry.prefix,
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/* The registry decision — §15.1 precedence, §15.2 per-source overrides         */
-/* -------------------------------------------------------------------------- */
-
 /** Where an effective registry setting came from, for `jup info` (§15.30). */
 export interface RegistryDecision {
   /** The base URL, trailing slashes stripped (§05.2). */
@@ -936,9 +859,8 @@ export function resolveRegistry(options?: {
  * Separate from {@link resolveRegistry} because §05.2 rewrite 1 turns on
  * precisely this: `repo.yarnpkg.com` is not an npm registry, so a configured
  * *npm* registry is what switches Yarn Berry to the `@yarnpkg/cli-dist`
- * package. `COREPACK_REGISTRY_YARN` deliberately does not: §15.2 defines it as
- * an origin replacement on Yarn's own distribution URLs — a mirror of
- * repo.yarnpkg.com, which is the thing #872 could not have.
+ * package. `COREPACK_REGISTRY_YARN` deliberately does not: it replaces the
+ * origin of Yarn's own distribution URLs.
  */
 export function npmProtocolRegistry(options?: {
   packageName?: string;
@@ -1052,11 +974,6 @@ export function registryTrustFor(registryUrl: string | undefined, cwd?: string):
 export function hasNpmProtocolRegistry(packageName?: string, cwd?: string): boolean {
   return npmProtocolRegistry({ packageName, cwd }) !== undefined;
 }
-
-/* -------------------------------------------------------------------------- */
-/* TLS — §15.4's middle tier                                                   */
-/* -------------------------------------------------------------------------- */
-
 /**
  * `cafile` / `ca` / `strict-ssl` from the **user and global files only**.
  *

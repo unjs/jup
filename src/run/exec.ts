@@ -16,29 +16,17 @@ import type { BinSpec, InstallSpec } from "../types.ts";
 import { getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
- * §08.7 — the directory containing our own installation root.
- *
- * Corepack resolves its own `package.json` and takes its directory. Two fixed
- * `dirname`s would be cheaper, but they give the wrong answer once bundled: the
- * chunk lands in `dist/_chunks/`, so the root would come out as `dist/`. The walk
- * is cached, so handover still costs no repeat I/O (§16.3).
+ * §08.7 — walk to the installation root because bundled chunks may be nested.
+ * The result is cached.
  */
 let ownRoot: string | undefined;
 function getOwnRoot(): string {
   ownRoot ??= resolveOwnRoot(import.meta.url);
   return ownRoot;
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.32 — the resolved package manager on `PATH`                             */
-/* -------------------------------------------------------------------------- */
-
 /**
- * §15.13 point 1 — the per-user shim directory, the one place a shim can always
- * be written without elevation. `LOCALAPPDATA` only on Windows (point 5, #673).
- * On Windows that is `%LOCALAPPDATA%\jup\bin` (§14.24) — nothing is stranded by
- * the spelling, since the directory is §15.13's own invention and corepack puts
- * its shims beside its own binary instead.
+ * §15.13 points 1 and 5 — the per-user shim directory. Windows uses
+ * `%LOCALAPPDATA%\jup\bin`.
  *
  * It lives here rather than in `shims.ts`, which imports it: §15.32 needs it on
  * every proxy invocation, and the directory this prepends and the one `enable`
@@ -76,12 +64,8 @@ export function perUserShimDirectory(): string | undefined {
  * §15.13 point 8 — the machine-wide directory: `--system`'s target, and the one
  * alternate a `root` process may reach.
  *
- * `/usr/local/bin` because the FHS reserves `/usr/local` for locally installed
- * software, which is what keeps it out of the distribution package manager's
- * hands (#265). `%ProgramData%\jup\bin` is Windows' nearest equivalent — not
- * `%ProgramFiles%`, which is #71's own directory, and not `%APPDATA%\npm`, which
- * point 6 rejects as npm's prefix. `undefined` rather than a guessed drive
- * letter when the variable is unset.
+ * POSIX uses `/usr/local/bin`; Windows uses `%ProgramData%\jup\bin` and returns
+ * `undefined` when that variable is unset.
  */
 export function systemShimDirectory(): string | undefined {
   if (process.platform !== "win32") return "/usr/local/bin";
@@ -193,10 +177,7 @@ function readHeadSync(file: string, length: number): string | undefined {
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
   if (head === undefined) {
-    // The open follows the link, so this also covers #751's stale shim, whose
-    // stub has moved away: §15.14 has `disable` remove it, which needs this
-    // lookup to find the directory. Dangling is ours iff it still names our
-    // stub — `isOurEntry`'s rule. Only reached once the read failed.
+    // A dangling link is ours only if it still names our stub.
     let link: string;
     try {
       link = readlinkSync(file);
@@ -333,40 +314,11 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
 }
 
 /**
- * §08.2 — in-process handover, or §15.28's native handover.
- *
- * The JavaScript path rewrites the process state to look like a direct
- * invocation, then loads the entry module on `nextTick` so our frames leave any
- * stack trace the package manager prints. `process.argv[1]` is how Yarn locates
- * itself; `require.main` is first cleared and then repopulated by `runMain` with
- * the package manager's *own* entry module, which is what both generations of
- * pnpm's self-detection read; `execArgv` is cleared so the package manager does
- * not inherit our runtime flags.
- *
- * **Do not wrap the load in a catch that rewrites the exit code.** §08.4's
- * contract is exact: a synchronous `exitCode = 42` exits 42; setting 42 and then
- * throwing exits **1**; setting 42 only in a `beforeExit` hook exits 42. The
- * first and third fall out of doing nothing; the second is the runtime's own
- * rule — an uncaught exception resets the pending exit code to 1 — and it only
- * applies if the rejection reaches the runtime unhandled. A `.catch()` here, even
- * one that only logs, is the corepack 0.18.1 regression.
- *
- * stdio is untouched and stdin is never speculatively consumed (§08.6): there is
- * only one process, so the package manager inherits the real handles, TTY-ness
- * and all.
- *
- * `execMode` is §15.28's per-band flag. `"native"` means the `bin` target is a
- * real executable, so it is run **directly**: §08.3.1's JavaScript-runtime
- * lookup is skipped entirely, which makes this the *cheaper* of the two paths
- * rather than the more expensive one. The returned promise then settles with the
- * child's exit code; see `native.ts` for how §08.4's and §08.5's observables are
- * preserved across the process boundary, and for §15.43's one further entry in
- * the child's environment — the child may itself be a runtime out of the store.
- *
- * The return value is `0` on the JavaScript path because the package manager
- * sets the real exit code from its own module body, which runs strictly after
- * this returns (§08.4). Awaiting it is safe and changes nothing: `nextTick`
- * drains ahead of the microtask queue either way.
+ * JavaScript handover rewrites process state, schedules `runMain`, and returns 0;
+ * the module sets the process's eventual exit status. Deliberately do not catch
+ * that load: doing so changes the runtime's uncaught-exception exit behavior.
+ * Native handover instead returns the eventual child exit code. Both preserve
+ * inherited stdio.
  */
 export function execPackageManager(
   binName: string,

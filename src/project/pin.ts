@@ -1,17 +1,4 @@
-/**
- * Writing the pin — §03.7, as amended by §15.26 and §15.27.
- *
- * Split out of `manifest.ts` because only `use`, `up` and §03.6's auto-pin ever
- * reach it, while `manifest.ts` itself is on the warm path: every `yarn`, `npm`
- * and `pnpm` invocation on the machine reads a manifest, and none of them
- * rewrites one. Statically importing this from there put the rewriter — and,
- * through `json-write.ts`, the format-preserving JSON editor and `node:os` — in
- * every one of those processes (§16.3).
- *
- * The callers keep it out by loading it the way §16.3 asks: `main.ts` behind an
- * `await import` in its auto-pin branch, `cli.ts` directly, since the whole
- * command surface is already cold.
- */
+/** Pin writing remains outside the warm manifest-reading module graph. */
 
 import {
   lstatSync,
@@ -56,8 +43,7 @@ import type { DevEnginesDeclaration, DevEnginesField, Manifest } from "../types.
  * pin a **semver range**, and then the two halves come apart: the field holds
  * `^11.0.0` while every check that asks "is this pin allowed here?" has to ask it
  * of the version the range actually resolved to. `resolved` carries that version
- * for those checks; when it is absent, `reference` answers both questions, which
- * is the exact-pin case unchanged.
+ * for those checks; when absent, `reference` answers both questions.
  */
 export interface PinInfo {
   name: string;
@@ -100,14 +86,8 @@ function pinText(reference: string): string | undefined {
  * member may have to be *created*, which the package-manager path only ever had
  * to do for §15.12's sidecar.
  *
- * Row two is #874: `corepack use pnpm@latest` on a devEngines-only project
- * writes a top-level `packageManager` that then conflicts with the declaration
- * beside it — a hash-presence difference is enough — so the very next run fails
- * §03.3. The fix is not to create the second field at all.
- *
- * Row three needs no `devEngines` update *because* nothing broke: the value
- * being written already satisfies the declared range, which is exactly what the
- * check above establishes, and rewriting `1.x || 2.x` into `2.4.3` would destroy
+ * Row three needs no `devEngines` update because the value being written already
+ * satisfies the declared range. Rewriting `1.x || 2.x` into `2.4.3` would destroy
  * the statement of intent that §09.4 relies on to carry `up` across a major.
  * §15.26's post-write requirement — "validation MUST run against the state being
  * written" — is met by the check being the same predicate §03.3 applies on read,
@@ -175,11 +155,8 @@ export function writePin(
   // writing a pin that then fails §03.3's name check on every subsequent run —
   // permanently, since nothing but a hand edit can undo it.
   //
-  // §15.26 — the name half runs even when no version is declared. Corepack (and
-  // this implementation before now) only reached the check through the *range*,
-  // so `devEngines: {packageManager: {name: "yarn"}}` imposed nothing at all on
-  // `corepack use pnpm@6`, and the resulting manifest was one §03.3 rejects by
-  // default on every later run.
+  // §15.26 — validate the declared name even when no version is present, so the
+  // written manifest remains acceptable to §03.3.
   //
   // The version half is skipped for exactly one shape — see
   // {@link devEnginesWriteTarget} — because there is nothing left to violate
@@ -352,25 +329,8 @@ function writeManifest(target: string, content: string): void {
 }
 
 /**
- * §15.26 — which field (or fields) this pin belongs in.
- *
- * `devEngines.packageManager.version` is validated as a semver **range** (§03.3),
- * and the distinction between a range and an exact version is the one that
- * decides everything here:
- *
- * * an **exact** version is a *pin* — it says "this release" — so a mutating
- *   command replaces it, and there is nothing left for the version check to
- *   object to (`replacesDeclaredVersion`). This is #874's shape, where a
- *   hash-presence difference between the two fields is enough to make the next
- *   read fail;
- * * a **range** is a *constraint* — it says "anything in here" — so it is
- *   honoured, never overwritten. Collapsing `1.x || 2.x` into `2.4.3` would
- *   destroy the declaration §09.4 relies on to carry `corepack up` across a
- *   major boundary, and would silently narrow what the project accepts.
- *
- * `exclusive` is §15.26's second bullet: with no top-level `packageManager` the
- * pin goes into `devEngines` and **no** `packageManager` is created. Creating
- * one is what breaks #874.
+ * §15.26 — exact declarations may be replaced; range constraints are preserved.
+ * With no top-level `packageManager`, `exclusive` writes only to `devEngines`.
  */
 function devEnginesWriteTarget(
   data: Manifest,
@@ -406,8 +366,7 @@ function devEnginesWriteTarget(
   // does, and goes in as written.
   if (pinText(info.reference) === undefined) return none;
 
-  // A `packageManager` key that is present but not a string is a spec error the
-  // user is about to have overwritten — write it at the top level, as before.
+  // A present non-string `packageManager` is overwritten at the top level.
   const hasPin = typeof data.packageManager === "string";
   const hasBrokenPin =
     Object.hasOwn(data, "packageManager") && !hasPin && data.packageManager != null;
@@ -567,29 +526,9 @@ function createDevEnginesMember(
  * `version` is validated as a semver *range* by §03.3 and a `+sha512.…` suffix
  * has no business in one.
  *
- * `integrity` is written when a usable digest is available, and it is never left
- * behind pointing at a version that has moved: the version and the digest that
- * describes it are settled in the same edit, and when the new version arrives
- * without one — §15.23's range pin keeps its digest in `jup.lock`, and §15.28's
- * per-host tool has none at all — the key is **removed** rather than skipped.
- *
- * That distinction is the whole point of the two branches at the end. "No digest
- * to write" and "the digest that is there is now wrong" are different states:
- * re-pinning the same exact version with no digest to hand must leave a good
- * `integrity` alone, while moving the version — to another release, or to a
- * range no single digest can describe — invalidates it. Skipping both cases
- * alike leaves a digest for a release the project no longer uses, and it is
- * *inert* while the field holds a range, so nothing reports it; the moment
- * anyone (a person, Renovate) narrows the version back to an exact release,
- * §15.12's reader folds that digest into the spec and every install fails a hash
- * check whose cause is several commits away.
- *
- * §15.39 — the member may not exist. For `devEngines.packageManager` that only
- * happened under §15.12's sidecar, which created it explicitly; for a runtime it
- * is the ordinary first `use`, so creation is folded in here and `name` goes in
- * with it. The existing-member path is unchanged and still writes `version` and
- * `integrity` alone, because the name there is already right — the caller
- * checked it, and rewriting it would be a second way to say the same thing.
+ * Write a usable digest with its version. Without one, preserve integrity only
+ * when re-pinning the same exact version; ranges, per-host tools, and changed
+ * versions remove it. Missing members are created with `name`.
  */
 function writeIntoDevEngines(
   content: string,

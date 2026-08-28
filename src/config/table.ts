@@ -32,21 +32,7 @@ import type {
 } from "../types.ts";
 
 /**
- * §15.28, §15.21 — the parts every bun band shares.
- *
- * Bun and Deno are not JavaScript. Each publishes one small launcher package on
- * npm (`bun`, `deno`) whose `postinstall` downloads a binary out of an
- * `optionalDependencies` entry named after the host. jup runs no lifecycle
- * scripts and resolves no dependency graph, so the launcher is not the thing to
- * install — doing so would cache a 15 kB stub that fails on first run. The
- * per-host binary packages are, and they are ordinary signed npm tarballs.
- *
- * That is why `registry` and `artifactRegistry` differ on these two entries and
- * nowhere else: the version line and the dist-tags live on the launcher, the
- * bytes and the npm signature covering them live on `@oven/bun-<target>`.
- *
- * `bun` and `bunx` are one file, distinguished by `argv[0]` — which is how bun's
- * own installer sets them up, and what `run/native.ts` passes through.
+ * Native tools publish versions through a launcher package but executable bytes through per-host artifact packages. Because jup runs no lifecycle scripts or dependency installation, `registry` selects versions and `artifactRegistry` selects the signed artifact. Bun and bunx share one executable and dispatch by `argv[0]`.
  */
 const BUN_BAND = {
   url: "https://registry.npmjs.org/@oven/bun-{target}/-/bun-{target}-{}.tgz",
@@ -72,24 +58,7 @@ const BUN_MUSL_TARGETS = {
 } as const;
 
 /**
- * §15.28, §15.21 — the parts every aube band shares.
- *
- * The same launcher/artifact split as bun and deno, and the plainest instance of
- * it: `@endevco/aube` is a ~12 kB package whose `preinstall` runs
- * `npm install @endevco/aube-<platform>-<arch>[-musl]` and hardlinks the three
- * binaries out of it. jup runs no lifecycle scripts, so it asks for that package
- * directly.
- *
- * aube is the first entry whose published names *are* `hostTarget()` — Node's
- * own `process.platform`/`process.arch` spelling, musl suffix included — so its
- * `targets` map is an identity. It earns its place anyway, and this is the entry
- * that shows why the map is a declaration rather than a formatting rule:
- * **there is no `darwin-x64` build.** Without the map, an Intel Mac would 404 on
- * a package that has never existed; with it, it is told so before any request.
- *
- * `aubr` and `aubx` are `aube run` and `aube dlx`, and are the same executable
- * dispatching on `argv[0]` — the same arrangement as `bun`/`bunx`, three names
- * deep.
+ * aube uses the launcher/artifact split. Its target map intentionally excludes unavailable `darwin-x64`; its three commands dispatch by `argv[0]`.
  */
 const AUBE_BAND = {
   url: "https://registry.npmjs.org/@endevco/aube-{target}/-/aube-{target}-{}.tgz",
@@ -116,25 +85,7 @@ const AUBE_MUSL_TARGETS = {
 } as const;
 
 /**
- * §15.28, §15.21 — the parts every nub band shares.
- *
- * `@nubjs/nub` is the launcher again, and the plainest one yet: a ~30 kB Node
- * script that resolves an `optionalDependencies` entry named after the host and
- * spawns the binary inside it. jup resolves no dependency graph, so it asks for
- * that package directly, exactly as it does for bun, deno and aube.
- *
- * nub is the entry whose published host names are not merely *like*
- * {@link hostTarget}'s — they are computed the same way. Its own `platform.js`
- * builds `${process.platform}-${process.arch}` and appends `-musl` on a musl
- * Linux, which is this file's rule written out in someone else's repository. So
- * the `targets` map below is an identity over the whole vocabulary, with no
- * rename and no hole.
- *
- * `nub` and `nubx` are one file. The per-host packages shipped a byte-identical
- * second copy under the name `nubx` until 0.7.0 and stopped because it doubled
- * every artifact; `bin/nub{exe}` is the one path present in every version, and
- * `argv[0]` is what tells the two apart — `run/native.ts` passes the invoked
- * name through, which is the same arrangement `bun`/`bunx` relies on.
+ * nub uses the launcher/artifact split. Its published targets match host names, and nub/nubx share one executable distinguished by `argv[0]`.
  */
 const NUB_BAND = {
   url: "https://registry.npmjs.org/@nubjs/nub-{target}/-/nub-{target}-{}.tgz",
@@ -165,18 +116,7 @@ const NUB_TARGETS = {
 } as const;
 
 /**
- * §15.39, §02.5 — the parts the `node` band is made of.
- *
- * The launcher/artifact split a fourth time, and the oldest instance of it on
- * npm: the `node` package is ~1.8 kB whose `preinstall` runs `node-bin-setup`,
- * which `npm install`s one per-host package and hardlinks its binary out. jup
- * runs no lifecycle scripts, so it asks for that package directly, exactly as it
- * does for bun, deno, aube and nub.
- *
- * What is new here is not the machinery — none of it — but the `kind`. node is a
- * runtime and nothing else, so §03 reads `devEngines.runtime` for it, `03.5`
- * cannot raise a mismatch against a project's package manager, and `packageManager`
- * may not name it at all. Nothing in §04–§08 knows the difference.
+ * Node uses the launcher/artifact split. As a runtime, its project pin belongs to `devEngines.runtime`; the resolution and execution pipeline is otherwise shared.
  */
 const NODE_BAND = {
   url: "https://registry.npmjs.org/node-{target}/-/node-{target}-{}.tgz",
@@ -212,29 +152,7 @@ const NODE_TARGETS = {
 } as const;
 
 /**
- * §15.28 — pnpm 12's hosts, and the fifth launcher/artifact split in this table.
- *
- * pnpm went native in 12.0.0 and took the shape bun, deno, aube, nub and node
- * already have: the `pnpm` package on npm is now a wrapper whose `preinstall`
- * hardlinks the binary out of an `optionalDependencies` entry named after the
- * host, over four placeholder files its own `bin` points at. jup runs no
- * lifecycle scripts, so what it would cache from that package is the
- * placeholder — the file whose contents are the sentence *"This is a
- * placeholder. pnpm's native binary replaces this file during installation"* —
- * and §07.7 reads a package's own `bin` first, so it would find it and run it.
- *
- * The wrapper does keep a corepack door open, `bin/pnpm.mjs`, which downloads
- * the binary from npm itself on first use. That is the path corepack takes and
- * it is not this one: it puts a download *behind* a cache hit, which §01's
- * budget forbids and §15.19's airgap seeding cannot reach at all — `jup pack`
- * would ship a tarball whose first run needs the network. The per-host packages
- * are ordinary signed npm tarballs (§06.3), so asking for one directly keeps the
- * artifact inside §15.11's tier and inside the store.
- *
- * The names are `@pnpm/exe.<platform>-<arch>[-musl]` — a dot, not a dash, after
- * the scope — and they are {@link hostTarget}'s own spelling, so the map is an
- * identity over the full vocabulary, as nub's is. It is written out for the same
- * reason: it is where a host leaving the set would be said.
+ * pnpm 12 uses signed per-host artifacts because its launcher depends on lifecycle installation. Target names match the host vocabulary.
  */
 const PNPM_EXE_TARGETS = {
   "darwin-arm64": "darwin-arm64",
@@ -309,10 +227,8 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
       // `pnpx` is the one thing the per-host package cannot express by itself.
       // Its binary dispatches on `current_exe()` rather than `argv[0]`, so the
       // name jup invokes it under does not reach the decision — pnpm's own
-      // installer answers that by hardlinking a second file called `pnpx`, and
-      // its POSIX package ships `exec pnpm dlx "$@"` instead. `binArgs` is that
-      // shell script, which is also exactly what `bin/pnpx.mjs` did for corepack
-      // in the band above.
+      // The installer hardlinks `pnpx` to the same executable; `binArgs`
+      // supplies the equivalent `dlx` dispatch.
       [
         ">=12.0.0",
         {
@@ -330,17 +246,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   yarn: {
-    // §15.33 bullet 2 overrides §02.5's literal and §14.21's "deliberately not
-    // changed": an embedded `default` MUST track the current supported major,
-    // and Classic 1.22.22 has been unsupported since 2020 (#812). So `default`
-    // now equals `transparent.default` — the same release at the same digest,
-    // a pin this table already ships rather than a fresh unverified one.
-    // `scripts/refresh-table.mjs` (§16.9) is what stops both rotting; the fields
-    // stay separate because §15.33 bullet 1 floors only the transparent one.
-    // sha1 of the npm tarball, not sha224 of a single file: the band below moved
-    // to `@yarnpkg/cli-dist`, so this is an npm pin and takes npm's shape
-    // (§16.9's `npmDefault`). The digest is of bytes whose npm signature and
-    // `dist.integrity` were both checked before it was written.
+    // §15.33 — the default and transparent floor share the current supported
+    // major but remain separate fields. The SHA-1 digest covers the signed npm
+    // tarball and is refreshed by `scripts/refresh-table.mjs`.
     default: "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85",
     fetchLatestFrom: { type: "npm", package: "yarn" },
     transparent: {
@@ -363,27 +271,8 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
       [
         ">=2.0.0",
         {
-          // §15.41 — the npm registry, unconditionally, like every other band.
-          //
-          // This band used to name `repo.yarnpkg.com`: a single `yarn.js` behind
-          // TLS and nothing else, no signature and no digest. It was the one
-          // source in the table that could not clear §15.11's tier, which made
-          // the most ordinary first command anyone types — `jup install -g yarn`,
-          // no version — refuse on a clean machine, because a bare name resolves
-          // dynamically and had nowhere verified to resolve from. The escape
-          // hatch existed but had to be found: `npmRegistry` swapped the band
-          // onto `@yarnpkg/cli-dist` only once the user had configured an npm
-          // registry, which nobody does to install yarn.
-          //
-          // So the swap is now the band. `@yarnpkg/cli-dist` is Yarn's own
-          // publication of the same artifact, signed by npm, and it moves Berry
-          // onto the signature chain the rest of the table already has — §15.11
-          // clears out of the box, and §06.6's `repo.yarnpkg.com` row is closed
-          // rather than merely documented.
+          // Yarn Berry uses its signed npm tarball and standard registry overrides.
           url: "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz",
-          // A tarball now, not a single file, so `bin` is a BinSpec of paths —
-          // and they are the paths the package itself declares, which §15.17
-          // would read off the manifest anyway.
           bin: { yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" },
           registry: { type: "npm", package: "@yarnpkg/cli-dist" },
           commands: { use: ["yarn", "install"] },
@@ -401,10 +290,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
     },
     shimByDefault: false,
-    // Four bands, and they differ in exactly one field: the host set bun had
-    // published artifacts for at that point in its history. `@oven/bun-*`
-    // appeared in 0.5.0, Windows x64 in 1.1.0, the musl builds in 1.1.39,
-    // Windows arm64 in 1.3.10.
+    // Version bands encode Bun's supported host set at each boundary.
     // Reversed, the newest is tested first (§02.3), so a version gets the
     // narrowest true answer — and a host outside it is named as unsupported
     // *for that version*, rather than 404ing on a URL nobody typed.
@@ -446,11 +332,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
       commands: [["deno", "init"]],
     },
     shimByDefault: false,
-    // One band: `@deno/<target>` appeared with the 1.46.0 relaunch of the npm
-    // package and has kept one layout since — a single executable at the package
-    // root. (The `deno` name also carries a 0.0.0 placeholder from before that;
-    // it has no artifact, and resolves to a 404, which is what an unpublished
-    // version should do.)
+    // Per-target packages contain one executable at the package root.
     ranges: [
       [
         "*",
@@ -489,8 +371,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["aube", "init"], ["aube", "create"], ["aube", "dlx"], ["aubx"]],
     },
-    // One band. aube's host set has moved exactly once — the musl artifacts
-    // start at `1.0.0-beta.12` — and that boundary is *unexpressible*: §02.3
+    // The musl boundary at `1.0.0-beta.12` is unexpressible: §02.3
     // matches bands with `satisfiesWithPrereleases`, which strips the prerelease
     // from both sides, so `>=1.0.0-beta.12` and `>=1.0.0` are the same range and
     // neither excludes `1.0.0-beta.2`. Declaring a second band would therefore
@@ -516,12 +397,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
       commands: [["nub", "init"], ["nub", "dlx"], ["nub", "x"], ["nubx"]],
     },
     shimByDefault: false,
-    // One band. nub has published the same eight hosts since its first release
-    // carrying a binary (0.0.2 — 0.0.1's per-host packages are 273-byte
-    // placeholders with nothing inside, and resolve to a missing entry point,
-    // which is what an artifact-less version should do). The layout has moved
-    // within the package, but never `bin/nub{exe}`, which is the only path this
-    // band names.
+    // Nub supports these eight hosts and exposes `bin/nub{exe}`.
     ranges: [["*", { ...NUB_BAND, targets: NUB_TARGETS }]],
   },
 
@@ -624,15 +500,8 @@ function findBand(definition: ToolDefinition, version: string): ToolSpec | undef
 }
 
 /**
- * §02.3 — the spec governing this version.
- *
- * §15.17: a version outside every declared band falls forward to the **newest**
- * band rather than throwing. That is the band §04.1 already resolves dist-tags
- * against, so its registry and URL template describe wherever the project is
- * heading. What must *not* be inherited is that band's `bin` — #775 is a
- * hardcoded entry point outliving the layout it described — so
- * {@link hasRangeBand} lets `install.resolveBin` tell "the table knows this
- * version" from "the table is guessing".
+ * §15.17 — uncovered versions use the newest band's registry and URL, but not
+ * its `bin`; {@link hasRangeBand} distinguishes declared and fallback bands.
  */
 export function getSpecFor(name: string, version: string): ToolSpec {
   const definition = getDefinition(name);
@@ -656,11 +525,6 @@ export function getTableSpec(locator: Locator): ToolSpec | undefined {
   if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
   return getSpecFor(locator.name, parsed.version);
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.28 — per-platform URL templates                                         */
-/* -------------------------------------------------------------------------- */
-
 /**
  * §15.28 — the normalised platform names `{platform}` resolves against.
  *
@@ -753,11 +617,7 @@ function linuxLibc(arch: string): string {
  * a `targets` lookup, which will miss and report the host it could not place,
  * and a made-up normalisation would only make that message wrong.
  *
- * glibc is unsuffixed, which is not a preference but a compatibility rule: it is
- * the answer on every host that has ever reached this function, so committed
- * `jup.lock` files and every existing `targets` map keep meaning what they
- * meant. A musl host is the only one that sees a new key, and it is the host
- * that was being told the wrong thing before.
+ * glibc targets are unsuffixed; musl targets use the `-musl` suffix.
  */
 export function hostTarget(): string {
   const platform = PLATFORMS[process.platform] ?? process.platform;
@@ -803,10 +663,8 @@ function targetFor(spec: ToolSpec, locator: Locator): string {
 /**
  * §15.28 — substitute `{}`, `{platform}` and `{arch}` into a band's `url`.
  *
- * `{}` is §02.4's version placeholder and is always substituted. The other three
- * are opt-in per band, and the cheap `includes` guard is what keeps the common
- * case — npm, pnpm and yarn — at exactly the one `replace` it used to be, on a
- * path §16.3 counts.
+ * `{}` is always substituted; the host placeholders are opt-in per band. An
+ * `includes` guard avoids unnecessary host resolution on the common path.
  *
  * An unrecognised platform or architecture is an error naming *which* half was
  * unrecognised. It is deliberately not a 404 later on: a URL that still contains
@@ -850,8 +708,8 @@ export function resolveSpecUrl(spec: ToolSpec, locator: Locator, version: string
 /**
  * Is this exact reference one the embedded table ships?
  *
- * Used to scope §06.2's weak-algorithm warning. Every built-in default is
- * currently sha1-pinned (§02.5), so without this check a plain `yarn` in a
+ * Scopes §06.2's weak-algorithm warning. Every built-in default is currently
+ * SHA-1-pinned (§02.5), so without this check a plain `yarn` in a
  * directory with no pin warns the user about an algorithm we chose for them.
  */
 export function isEmbeddedReference(name: string, reference: string): boolean {
@@ -880,11 +738,6 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
   }
   BINARIES_BY_NAME.set(name, [...binNames]);
 }
-
-/* -------------------------------------------------------------------------- */
-/* Which package manager does a registry spec belong to? — §15.2               */
-/* -------------------------------------------------------------------------- */
-
 /**
  * Registry spec -> the package manager that declares it, and (for a url-typed
  * spec) the npm-protocol alternative its band offers.
@@ -927,16 +780,7 @@ export function packageManagerForRegistry(spec: RegistrySpec): string | undefine
   return NAME_BY_REGISTRY.get(spec);
 }
 
-/**
- * §02.5's `npmRegistry` for the band that declares this registry spec.
- *
- * **No entry declares one.** Yarn Berry was the only band that ever did, and
- * §15.41 moved it onto `@yarnpkg/cli-dist` outright rather than only when the
- * user had configured an npm registry — the swap it described is now the band
- * itself. The mechanism stays because §05.3 still defines it and it costs one
- * map lookup: a future band published somewhere that is not an npm registry
- * would need exactly this, and re-deriving it later is the more expensive half.
- */
+/** Return the npm alternative declared by this spec, if any. None currently do. */
 export function npmAlternativeFor(spec: RegistrySpec): NpmRegistrySpec | undefined {
   return NPM_ALTERNATIVE_BY_REGISTRY.get(spec);
 }
@@ -953,11 +797,6 @@ export function getBinariesFor(name: string): string[] {
 export function getPackageManagerFor(binName: string): string | undefined {
   return NAME_BY_BINARY.get(binName);
 }
-
-/* -------------------------------------------------------------------------- */
-/* §15.28 — per-host artifacts                                                 */
-/* -------------------------------------------------------------------------- */
-
 /**
  * Does this band's artifact differ from host to host?
  *
@@ -1058,9 +897,7 @@ export function resolveArtifactRegistry(
 }
 
 /**
- * §10.5 — whether a bare `jup enable` / `disable` covers this package manager.
- *
- * Absent means yes, which is every entry corepack ever had.
+ * §10.5 — whether a bare `jup enable` / `disable` covers this tool. Absent means yes.
  */
 export function shimsByDefault(name: string): boolean {
   return getDefinition(name)?.shimByDefault !== false;

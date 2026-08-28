@@ -1,38 +1,5 @@
 /**
- * Proxy support — §05.1 ("Proxies"), §14.8, §15.6.
- *
- * Corepack ships no proxy code at all: it calls the host `fetch` and relies on
- * the runtime's env-proxy support, which today needs `NODE_USE_ENV_PROXY=1`. So
- * setting `HTTPS_PROXY` — the thing every other tool on the machine honours —
- * does nothing, which is the whole of #447 and #458. §14.8 makes honouring the
- * standard variables **without a second opt-in** a MUST, and this module is
- * that: a `fetch`-shaped dispatcher that establishes the tunnel itself.
- *
- * Two shapes, per the spec:
- *
- *     https:// target   ->  CONNECT host:443 through the proxy, then TLS
- *                           end-to-end inside the tunnel
- *     http://  target   ->  one request to the proxy whose request line is
- *                           absolute-form (`GET http://host/path HTTP/1.1`)
- *
- * Since §15.4, the same dispatcher carries one more job: `fetch` has no way to
- * say "do not verify this certificate", so `COREPACK_STRICT_SSL=0` routes
- * through here too — with no proxy, but with the TLS policy attached.
- *
- * Laziness is a requirement, not a nicety. {@link proxyForUrl} is pure env
- * parsing — no `node:` module beyond what is already loaded — and returns
- * `undefined` in the overwhelmingly common unproxied case, which is why
- * `http.ts` can ask it on every request and still stay on native `fetch`. The
- * socket stack (`node:net`, `node:tls`, `node:http`, `node:https`, and
- * `node:zlib`) is pulled in with `process.getBuiltinModule` at the moment a
- * proxied request is actually sent, so a machine with no proxy configured never
- * loads a byte of it — and neither does a run that never reaches the network.
- *
- * §14.6 survives the tunnel: the credential decision is still made by
- * `credentialsFor` before the request is handed here, and a cross-origin
- * redirect drops `Authorization` exactly as `fetch` would. Proxy credentials
- * live in `Proxy-Authorization` and never in `Authorization`, and no error
- * raised here interpolates anything but `URL.host`, which carries no userinfo.
+ * HTTP proxy transport supporting standard proxy variables, CONNECT for HTTPS, absolute-form forwarding for HTTP, redirect credential stripping, and TLS policy overrides. Socket modules load lazily so unproxied requests remain on native `fetch`.
  */
 
 import { Buffer } from "node:buffer";
@@ -196,18 +163,11 @@ function sniFor(hostname: string): string | undefined {
   if (hostname.startsWith("[")) return undefined;
   return /^[\d.]+$/.test(hostname) ? undefined : hostname;
 }
-
-/* -------------------------------------------------------------------------- */
-/* The dispatcher                                                             */
-/* -------------------------------------------------------------------------- */
-
 /**
  * A `fetch`-shaped transport built on `node:http` / `node:https`.
  *
- * `http.ts` selects it only when a proxy matched (§14.8) or when §15.4's
- * `COREPACK_STRICT_SSL=0` has to be honoured — `fetch` can express neither — so
- * the unconfigured path, which is every request on almost every machine, stays
- * on native `fetch` exactly as before.
+ * `http.ts` selects it only for a matched proxy (§14.8) or
+ * `COREPACK_STRICT_SSL=0` (§15.4); other requests use native `fetch`.
  */
 export const nodeFetch: typeof globalThis.fetch = async (input, init) => {
   const href =
@@ -232,7 +192,7 @@ async function follow(start: URL, init: RequestInit): Promise<Response> {
 
   for (let hop = 0; ; hop++) {
     if (proxy === undefined && !tlsTransportRequired()) {
-      // Not proxied any more, and TLS needs nothing special — `fetch` follows
+      // With no proxy or special TLS requirements, `fetch` follows
       // the remainder, and drops `Authorization` across origins on its own.
       return await globalThis.fetch(target.href, { ...init, headers });
     }
@@ -575,11 +535,6 @@ function abortError(signal: AbortSignal | undefined): Error {
   const reason: unknown = signal?.reason;
   return reason instanceof Error ? reason : new Error("The request was aborted");
 }
-
-/* -------------------------------------------------------------------------- */
-/* node:http response -> web Response                                          */
-/* -------------------------------------------------------------------------- */
-
 /**
  * The seam back to the web API the rest of the tool speaks: `install.ts` tees
  * `response.body` to hash and extract in one pass (§16.5), so the body has to be

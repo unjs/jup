@@ -43,13 +43,9 @@ export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
  * §11.5 — an advisory line **this** implementation adds, which
  * `COREPACK_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
  *
- * The six advisory sites jup inherits from corepack — the download notice and
- * its prompt, the auto-pin notice, the three `devEngines` warnings,
- * `enable`/`disable`'s Yarn Switch skip — call `console.warn`/`stderr` directly
- * and are never routed here, because §13's rows match their text (jup's name in
- * place of corepack's) byte for byte. Routing only what §14/§15 add is what
- * lets "quiet" mean the extra lines rather than a blunt mute that takes the
- * contract text with it (§14.23).
+ * Compatibility advisories call `console.warn` or stderr directly because §13
+ * fixes their text. Routing only additional advisories here lets "quiet" leave
+ * contract output intact (§14.23).
  *
  * `readEnv`, not `envFlag`: `project/env.ts` imports this module, so reaching
  * for its flag reader would close a cycle over the warm path.
@@ -74,8 +70,6 @@ export function advisory(message: string): void {
  * thing that raises it is a cold module, it belongs in the other file.
  */
 export const messages = {
-  /* §12.2 — spec parsing ------------------------------------------------- */
-
   invalidSpecNotString: (source: string) =>
     `Invalid package manager specification in ${source}; expected a string`,
 
@@ -88,19 +82,12 @@ export const messages = {
     `Illegal use of URL for known package manager. Instead, select a specific version, or set JUP_ENABLE_UNSAFE_CUSTOM_URLS=1 in your environment (${raw})`,
 
   invalidPackageJson: (relativePath: string) => `Invalid package.json in ${relativePath}`,
-
-  /* §12.3 — devEngines validation ---------------------------------------- */
-
   /*
    * §15.39 — these four take the member they are about, defaulting to
    * `packageManager`.
    *
-   * The default is what keeps §12.3's four strings byte-identical: every caller
-   * that existed before the `node` entry passes nothing and gets exactly the
-   * text §13 asserts. `devEngines.runtime` substitutes into the same sentence,
-   * which is new text and so free to be worded this way (§12.12) — and a reader
-   * who has seen one of these messages can read the other without learning
-   * anything.
+   * The default preserves §12.3's required `packageManager` text;
+   * `devEngines.runtime` substitutes its member name into the same sentence.
    *
    * The two cross-check messages below take no member: they are about
    * `packageManager` versus its own `devEngines` half, and a runtime has no
@@ -125,9 +112,6 @@ export const messages = {
 
   devEnginesVersionMismatch: (packageManager: unknown, name: unknown, version: unknown) =>
     `"packageManager" field is set to ${json(packageManager)} which does not match the value defined in "devEngines.packageManager" for ${json(name)} of ${json(version)}`,
-
-  /* §12.4 — resolution ---------------------------------------------------- */
-
   failedToResolve: (range: string, name: string) =>
     `Failed to successfully resolve '${range}' to a valid ${name} release`,
 
@@ -141,30 +125,16 @@ export const messages = {
    */
   lockfileUnresolved: (name: string, range: string) =>
     `${name}@${range} is not resolved in jup.lock and lockfile updates are disabled.`,
-
-  /* §12.5 — project enforcement ------------------------------------------ */
-
-  /**
-   * §12.5, with §15.35k's suffix: set when the governing manifest sits at the
-   * home directory or above, where a stray `packageManager` field governs
-   * *every* directory on the machine (#424). Without the clause the user is
-   * named a file they have no memory of creating and left to work out why.
-   */
+  /** §12.5 — identify governing manifests that sit outside any project. */
   projectConfigured: (name: string, manifestPath: string, outsideProject?: boolean) =>
     `This project is configured to use ${name} because ${manifestPath} has a "packageManager" field${
       outsideProject === true
         ? ` (this manifest is outside any project — a stray "packageManager" field there affects every directory)`
         : ""
     }`,
-
-  /* §12.7 — integrity ----------------------------------------------------- */
-
   /** Users read the `got` value and paste it into their `packageManager` field. Keep the format. */
   mismatchHashes: (expected: string, actual: string) =>
     `Mismatch hashes. Expected ${expected}, got ${actual}`,
-
-  /* §12.8 — store & filesystem -------------------------------------------- */
-
   failedToCreateCacheDir: (target: string) =>
     `Failed to create cache directory. Please ensure the user has write access to the target directory (${target}). If the user's home directory does not exist, create it first.`,
 
@@ -174,23 +144,13 @@ export const messages = {
   /** §07.5 — the rename lost to something that is not a completed install. */
   occupiedInstallDir: (target: string) =>
     `Refusing to use ${target}: a directory is already there with no ${"`"}.jup${"`"} marker, so it is not a complete install. Remove it and run again.`,
-
-  /* §12.10 — informational output ----------------------------------------- */
-
   autoPinNotice: (name: string, reference: string) =>
     `! The local project doesn't define a 'packageManager' field. jup will now add one referencing ${name}@${reference}.`,
 
   autoPinDocs: () =>
     `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
 
-  /**
-   * §15.27, §15.35l — every mutating command names the file it touched.
-   *
-   * The single highest-value line in §15: the whole "corepack edited a file I
-   * did not expect" class (#607) is a walk that silently chose an ancestor, and
-   * one printed path retires it. It covers auto-pin (§03.6) too, where it goes
-   * to **stderr** because stdout belongs to the package manager (§09.11).
-   */
+  /** §15.27, §15.35l — every mutating command names the file it touched. */
   updatedManifest: (path: string, name: string, reference: string) =>
     `Updated ${path} to use ${name}@${reference}`,
 
@@ -201,14 +161,8 @@ export const messages = {
    * package manager the file was pointed at to override.
    */
   specFileMissing: (path: string) => `JUP_SPEC_FILE points at ${path}, which does not exist`,
-
-  /* §12.12 — new in this spec --------------------------------------------- */
-
   binEscapes: (binPath: string, name: string, version: string) =>
     `The bin path '${binPath}' declared by ${name}@${version} escapes its installation directory`,
-
-  /* §15.28 — native package managers -------------------------------------- */
-
   /**
    * A `{platform}` placeholder this host cannot fill.
    *
@@ -248,9 +202,6 @@ export const messages = {
    */
   runtimeInPackageManager: (name: string) =>
     `"packageManager" cannot name ${name}: it is a runtime, not a package manager - declare it in "devEngines.runtime" instead`,
-
-  /* §15.40 — version files ------------------------------------------------ */
-
   /**
    * The file exists and does not carry exactly one version.
    *
@@ -272,15 +223,7 @@ export const messages = {
    */
   versionFileUnsupported: (declared: string, source: string) =>
     `Unsupported version ${json(declared)} in ${source}: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"`,
-
-  /* §15.12 — the sidecar integrity ---------------------------------------- */
-
-  /**
-   * `devEngines.packageManager.integrity` that is not an SRI string this
-   * implementation can turn into a build-suffix hash. Routed through `onFail`
-   * like every other `devEngines` complaint (§03.3): a pin nobody can check is
-   * exactly the state §15.11 exists to refuse, so silence is the wrong default.
-   */
+  /** Invalid sidecar integrity follows the `devEngines` `onFail` contract. */
   devEnginesBadIntegrity: (value: unknown) =>
     `Invalid "devEngines.packageManager.integrity" field: ${JSON.stringify(value) ?? String(value)}`,
 
@@ -292,9 +235,6 @@ export const messages = {
    */
   devEnginesIntegrityMismatch: (packageManager: string, integrity: string) =>
     `The "packageManager" field (${packageManager}) and "devEngines.packageManager.integrity" (${integrity}) pin different hashes`,
-
-  /* §14.5 — env-file eligibility ------------------------------------------ */
-
   ignoringEnvVar: (name: string, path: string) =>
     `! Ignoring ${name} from ${path}: this variable can only be set in the environment`,
 } as const;

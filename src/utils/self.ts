@@ -1,17 +1,5 @@
 /**
- * Locating our own installation — §08.7, §10.4.
- *
- * Two questions, both answered by walking **up** from whichever file is asking:
- * where is our package root (for `COREPACK_ROOT`), and where is the entry module
- * a shim stub should import (for `enable`). A third — where is our *own* CLI
- * entry, the file `bin` points at — is answered relative to the second, because
- * §15.46 pins its shebang and the two files live in the same folder.
- *
- * Walking is not over-engineering here. A bundler is free to emit chunks into a
- * subdirectory — obuild puts them in `dist/_chunks/` — so a fixed number of
- * `dirname` calls from `import.meta.url` gives a different answer when built
- * than when run from source. That mismatch is invisible in tests that run from
- * source and wrong in the shipped package, which is the worst combination.
+ * Locate package entries by walking upward because bundled chunks may be nested below the package root.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -21,9 +9,8 @@ import { fileURLToPath } from "node:url";
 /**
  * Candidate names for the module a shim stub should import, best first.
  *
- * `shim.*` comes first because it is the proxy-only entry (§16.3): it exports
- * `runMain` and nothing else, so a shim never loads the library surface. Older
- * installations have no such file, and `index.*` still works there.
+ * `shim.*` comes first because it exposes only the proxy entry (§16.3).
+ * `index.*` remains a compatibility fallback.
  */
 export const ENTRY_CANDIDATES = [
   "shim.mjs",
@@ -70,25 +57,7 @@ declare const __JUP_VERSION__: string | undefined;
 export const UNKNOWN_VERSION = "0.0.0-unknown";
 
 /**
- * The tool's own version (§09.9, §15.30f).
- *
- * **In a build this is a string literal**, and rolldown folds the rest of the
- * function away. That is smaller and faster — no `readFileSync`, no
- * `JSON.parse`, for `--version`, `info` or the `user-agent` — but the reason is
- * that it *cannot be wrong*. The manifest read has to locate the manifest first,
- * and any packaging that moves the entry file away from it makes that walk fail
- * quietly: the fallback used to be the literal `0.0.0`, which is also this
- * package's version, so nothing could tell success from failure and the first
- * release would have started lying with no test able to notice.
- *
- * From source there is no substitution and the manifest is read as before;
- * {@link getOwnRoot}'s walk is what keeps that right from `src/` and from a
- * bundler's chunk directory alike. The last resort is {@link UNKNOWN_VERSION}
- * rather than a believable `0.0.0` — `--version` must answer something, but not
- * something it did not find.
- *
- * It lives here rather than in `cli.ts` because `info` and `http.ts` want it
- * too: three copies of a version lookup is exactly the drift to avoid.
+ * The bundled version literal avoids runtime I/O; source runs fall back to package metadata, and `UNKNOWN_VERSION` avoids inventing a plausible version.
  */
 export function getOwnVersion(): string {
   if (typeof __JUP_VERSION__ === "string") return __JUP_VERSION__;

@@ -1,20 +1,5 @@
 /**
- * §15.40 — the version file a tool's ecosystem already writes.
- *
- * `devEngines.runtime` is the field §15.39 gave a runtime, and almost nobody has
- * written one yet. `.nvmrc` is in a large share of repositories today, says
- * exactly the same thing, and is read by a program most of those repositories
- * already have installed. Reading it is what makes `jup node` do the right thing
- * in a checkout nobody prepared for jup.
- *
- * Which file, and in which dialect, is a **table** fact ({@link VersionFileSpec},
- * §02.3): the name `.nvmrc` appears in `config/table.ts` and nowhere else, so a
- * second one is the data-only change §15.21 requires. Nothing here knows which
- * tool it is reading for.
- *
- * The file is never *written*. §03.7 writes `devEngines.runtime` and only that,
- * so the manifest is always the file that can be edited and the version file is
- * always the one that is merely believed.
+ * Version-file path and dialect are table data. Version files are read-only fallbacks below `devEngines.runtime`.
  */
 
 import { readFileSync } from "node:fs";
@@ -32,15 +17,7 @@ export interface VersionFile {
 }
 
 /**
- * The nvm aliases that mean "the newest release", and the dist-tag they become.
- *
- * `node` is nvm's own spelling of it (`nvm_version` rewrites the bare tool name
- * to `stable` before resolving, `nvm.sh:721-732`); `stable` is the older one it
- * rewrites *to*. Both are a request for the newest published version, which on
- * the npm side is the `latest` dist-tag and is resolved by §04.1 step 3 like any
- * other tag.
- *
- * The LTS aliases are deliberately absent. See {@link rangeFrom}.
+ * nvm’s `node` and `stable` aliases map to `latest`; LTS aliases are intentionally unsupported.
  */
 const NVM_NEWEST = new Set(["node", "stable"]);
 

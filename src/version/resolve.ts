@@ -1,9 +1,3 @@
-/**
- * Version resolution — §04.
- *
- * Descriptor in, Locator out (or `null`, meaning "no release matches").
- */
-
 import { ENV } from "../config/env-vars.ts";
 import { getDefinition, isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
@@ -144,17 +138,8 @@ export async function resolveDescriptor(
   // (repo.yarnpkg.com), so querying only the matching band would lose half the
   // candidates.
   //
-  // §15.24 — `satisfiesWithPrereleases` strips the prerelease tag before
-  // testing, so a published `11.0.0-dev.1005` satisfies `*` and then sorts above
-  // every stable release: `corepack use pnpm` installs a dev build whenever one
-  // is the semver maximum. That lenient rule is right where it *classifies a
-  // version the user already chose* — the band lookup of §02.3, the cache probe
-  // of §14.2 — and wrong here, where nobody chose anything.
-  //
-  // So the leniency stays and the **candidate set** narrows instead: a
-  // prerelease is admitted only when the range names one, or when the user opted
-  // in. That keeps `yarn@4.0.0-rc.1` resolving (step 5 returns it before this
-  // code runs) and `>=4.0.0-rc.1` matching, while `*` no longer does.
+  // Lenient band classification strips prerelease suffixes, but resolution must
+  // not select a prerelease unless the range names one or the user opts in.
   const wantsPrereleases = envFlag(ENV.ENABLE_PRERELEASES) || rangeNamesPrerelease(range);
 
   // §15.35e — `fetchResolvableVersions` is `fetchAvailableVersions` with the
@@ -203,15 +188,8 @@ export async function getDefaultVersion(name: string): Promise<string> {
   const lkg = readLastKnownGood();
   const recorded = lkg[name];
   if (recorded !== undefined) {
-    // §15.28 — a recorded per-host reference must not carry a digest, and this
-    // is the one place a bad one can arrive from *outside* the current build:
-    // this file is derived state that outlives a release, and a version of the
-    // tool that pinned the launcher's digest here left an entry that step 1
-    // returns before any of the guards downstream can run. §04.4 already treats
-    // a damaged `lastKnownGood.json` as something to degrade past rather than
-    // fail on, and this is the same rule with a more specific idea of damaged:
-    // the version is still a perfectly good recorded default, only the digest
-    // is untrue, so the suffix is dropped rather than the entry.
+    // §15.28 — recorded per-host references cannot carry digests. Treat such an
+    // LKG entry as damaged derived state: retain the version and drop the suffix.
     const parsed = parse(recorded);
     if (parsed !== null && parsed.build.length > 0 && isPerHost({ name, reference: recorded })) {
       const healed = parsed.version;
@@ -266,11 +244,8 @@ export function getFallbackLocator(name: string, options: { transparent: boolean
     : undefined;
 
   if (transparentDefault !== undefined) {
-    // §15.33 — corepack's `definition.transparent.default ?? defaultVersion`
-    // makes a compile-time constant unconditionally outrank the user's own
-    // recorded default, so `corepack install -g yarn@4.9.0` still leaves
-    // `yarn dlx` on the table's pin with no way to override it (#202, #812).
-    // The literal is a **floor**, not an override.
+    // The transparent default is a major-line floor, not an unconditional
+    // override of the user's recorded default.
     return {
       name,
       reference: () => Promise.resolve(transparentFallback(name, transparentDefault)),
@@ -281,22 +256,7 @@ export function getFallbackLocator(name: string, options: { transparent: boolean
 }
 
 /**
- * §15.33 — the recorded default, floored at `transparent.default`.
- *
- * **What "at least as new" means here is the major line, not the exact version**,
- * and the two readings genuinely differ: §15.33's own example has a user record
- * `yarn@4.9.0` against a table whose `transparent.default` is `4.14.1`, and row
- * 199 requires `yarn dlx` to run `4.9.0`. A literal version-wise floor answers
- * `4.14.1` there and fails the row. A major-wise floor satisfies both halves and
- * — decisively — is what the driving issue actually asks for: #812 is
- * `yarn create` reaching for Yarn **Classic** 1.22.22, unsupported since 2020,
- * because the recorded default is from an older *major line* than the modern
- * Yarn transparent commands need. Within the current line the user's own choice
- * is respected; below it, the table's floor applies.
- *
- * No network on either branch. A recorded default is read (one `readFileSync`,
- * still zero requests); with none, or with an unparseable one, the literal
- * stands.
+ * The transparent-command floor is major-wise: `4.0.0` meets a `4.2.0` floor, while `3.99.99` does not. This preserves the configured major without forcing minor upgrades.
  */
 function transparentFallback(name: string, transparentDefault: string): string {
   const recorded = readLastKnownGood()[name];

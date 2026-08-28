@@ -1,8 +1,5 @@
 /**
- * Environment and `.jup.env` — §03.2, §11, §14.5.
- *
- * Reading the environment is the *only* configuration input the tool has. There
- * is no config file, no user profile, no registry of registries.
+ * Environment variables and `.jup.env` are the configuration inputs.
  */
 
 import { readFileSync } from "node:fs";
@@ -32,8 +29,7 @@ export const ENV_FILE_PREFIX = COREPACK_PREFIX;
 export const DEFAULT_ENV_FILE_NAME = ".jup.env";
 
 /**
- * §03.2 — corepack's spelling, still read. Unlike `jup.lock` (§15.23) this file
- * exists in repositories today, so §14.24's rename keeps the read side.
+ * §03.2, §14.24 — `.corepack.env` remains a supported compatibility filename.
  */
 export const LEGACY_ENV_FILE_NAME = ".corepack.env";
 
@@ -68,14 +64,7 @@ export const ENV_FILE_INELIGIBLE = new Set<string>([
 ]);
 
 /**
- * §14.5's additions: variables a project file must never supply because doing so
- * is a security decision, not a preference. Corepack honours all of these from
- * an env file, so a cloned repo can disable signature verification, point
- * downloads at an arbitrary host, or pair a token with a hostile registry to
- * exfiltrate it.
- *
- * These are the ones worth telling the user about; the other two entries in
- * {@link ENV_FILE_INELIGIBLE} are refused silently, as corepack refuses them.
+ * This set controls which denied variables emit an advisory; compatibility-denied variables remain silent.
  */
 export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   ENV.INTEGRITY_KEYS,
@@ -108,9 +97,8 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // able to set it could silence the evidence of what its *other* variables
   // were refused for, so muting stays the caller's decision to make.
   ENV.QUIET_ADVISORIES,
-  // §14.5 — the store root, and with it the trusted-key cache. Corepack (and
-  // §11.1 until this entry) treats this as a preference: where the cache lives.
-  // It is not. It is the answer to "which bytes have already been verified":
+  // The store root also selects the trusted-key cache and therefore the bytes
+  // considered already verified:
   // an install directory carrying the `.jup` marker is returned by
   // `resolveInstallTarget` with no digest check at all whenever the project
   // spec is unpinned — the common `"packageManager": "yarn@1.22.22"` case — so
@@ -162,39 +150,11 @@ const CH_SINGLE_QUOTE = 0x27;
 const CH_BACKTICK = 0x60;
 
 /**
- * §03.2, §16.2 — dotenv parse, reproducing `node:util`'s `parseEnv`.
- *
- * Written out by hand rather than delegating, because `node:util` is ~40 kB of
- * JavaScript and 3 native modules loaded on **every** invocation to serve a file
- * that, for almost every project, does not exist: `parseEnvFile` runs only when
- * an env file is actually there. `await import` cannot help — the walk in
- * §03.1 is synchronous — so the ~80 lines §16.2 budgets are what buys it back
- * (measured: −0.85 ms on a warm run, out of ~10 ms of our own).
- *
- * The behaviour is `parseEnv`'s, quirks included, and
- * `test/unit/env.test.ts` holds a differential test that runs both over a corpus
- * of generated files and asserts they agree — importing `node:util` in a *test*
- * costs nothing, and it is what stops the two drifting. The quirks worth naming,
- * since none of them is what a reader would guess:
- *
- * * **Every** `\r` is deleted first, not just the ones in `\r\n` pairs.
- * * A value may be `'`, `"` or `` ` `` quoted, and the quoted run may span lines.
- *   Only a **double**-quoted value expands `\n`; nothing else is an escape, so
- *   `"a\"b"` ends at the middle quote. An **unterminated** quote is not a quote
- *   at all: the value is the rest of the line, including the quote character,
- *   and `#` does not start a comment in it.
- * * In an unquoted value `#` starts a comment anywhere, no space required.
- * * Leading blanks after `=` are skipped *across newlines* — `A= \nB=2` sets `A`
- *   to `B=2` — but only when the first character is a space or tab, which is why
- *   `A=\nB=2` sets `A` to `""` and `B` to `2`.
- * * `export ` is stripped from a key, once, and only with that single space.
- * * An empty key keeps its line's value out of the result (`=1` yields nothing),
- *   except when the value is empty, where `""` is stored under `""` — one
- *   consequence of `parseEnv`'s ordering, reproduced rather than tidied because
- *   the differential test would otherwise have to paper over it.
- * * The document itself is trimmed once up front, which is the *only* thing that
- *   ever trims an unterminated-quote value: `A='x \nB=2` keeps the space,
- *   `A='x \n` does not, because there the space is at the end of the file.
+ * Handwritten parsing keeps `node:util` off the synchronous warm path.
+ * Differential tests enforce `parseEnv` compatibility: quote-specific escapes
+ * and unterminated quotes, `#` handling, cross-line whitespace, `export` and
+ * empty-key ordering, CR removal, and whole-document trimming. Branch comments
+ * below document the corresponding mechanics.
  */
 export function parseEnvFile(content: string): Record<string, string> {
   const vars: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -216,7 +176,6 @@ export function parseEnvFile(content: string): Record<string, string> {
       i = next;
       continue;
     }
-    // A comment line: everything up to the break, and no more.
     if (code === CH_HASH && !(indented && afterComment)) {
       i = endOfLine(text, i) + 1;
       afterComment = true;
@@ -418,9 +377,7 @@ export function loadEnvFileFrom(
 }
 
 /**
- * Filter to `COREPACK_`-prefixed, drop the ineligible set (warning once each),
- * then merge as `{...fileVars, ...process.env}` — the real environment wins —
- * and assign the result to `process.env` for the remainder of the run.
+ * Filter project variables before merging; process environment values win, and denied security variables warn once.
  */
 export function applyEnvFile(vars: Record<string, string>, path: string): void {
   const eligible: Record<string, string> = {};
@@ -432,11 +389,8 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     }
 
     if (!isEnvFileEligible(name)) {
-      // Warn only for the §14.5 / §15.37 adds. Corepack already refuses
-      // COREPACK_ENV_FILE and COREPACK_ENABLE_DOWNLOAD_PROMPT silently, and
-      // conformance row 48 asserts stderr is empty when a project's env file
-      // tries to turn the download prompt on — so announcing those two would
-      // break a row while telling the user nothing they can act on.
+      // Compatibility-denied variables remain silent; security-denied variables
+      // emit an advisory.
       if (SECURITY_ONLY_FROM_ENVIRONMENT.has(corepackSpelling(name))) {
         const seen = `${path}\0${name}`;
         if (!warnedIneligible.has(seen)) {
@@ -502,12 +456,8 @@ export function isCI(): boolean {
 /**
  * §15.23 / §15.37 — whether the project's `jup.lock` may be written.
  *
- * Only `COREPACK_FROZEN_LOCKFILE=1` freezes it, and there is no CI default any
- * more, because there is no longer an *implicit* write for one to guard: running
- * a package manager never edits the recorded file, so the only writers left are
- * `use` and `up` — commands somebody typed in order to change it. A default that
- * every remaining caller had to be exempted from would be a setting that does
- * nothing while reading as though it does something.
+ * Only `COREPACK_FROZEN_LOCKFILE=1` freezes it. Package-manager runs never edit
+ * the recorded file; `use` and `up` are its writers.
  *
  * The cache in `node_modules` is outside this entirely (§15.23). It is not a
  * committed record, freezing it would only cost a request per run, and a job

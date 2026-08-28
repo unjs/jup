@@ -1,29 +1,5 @@
 /**
- * §15.9 — trust-key freshness, decoupled from release cadence.
- *
- * Corepack bakes npm's signing keys into its bundle at release time, so when npm
- * rotated them in February 2025 (#612/#616) every released version broke
- * worldwide and the only remedy was a manual upgrade. This module is the other
- * half of that story: a cached, refreshable key set that is consulted **only**
- * when the embedded one has already failed to explain a signature.
- *
- * Four properties are load-bearing, and each is a rule below:
- *
- * * **A successful verification never touches this file or the network.** The
- *   refresh hangs off one branch of §06.3 — "no trusted key matched the
- *   signature's keyid" — and nothing else reads the cache, so §01.3's fast path
- *   and the ordinary cold install are byte-for-byte what they were.
- * * **Keys are fetched from `registry.npmjs.org` and nowhere else.** Not from
- *   `COREPACK_NPM_REGISTRY`, not from a `.npmrc` registry — see
- *   {@link KEYS_ENDPOINT}. This is §15.10's "never auto-fetched from that
- *   registry itself", and it is what keeps §15.9 from being the circular trust
- *   path the objection on #884 describes.
- * * **The fetched set is merged with the embedded one, never substituted for
- *   it.** An embedded key stays trusted until its own `expires` says otherwise;
- *   a refresh can only *add* keyids.
- * * **A damaged cache is not fatal.** Same precedent as `lastKnownGood.json`
- *   (§04.4, §07.8) and `jup.lock` (§15.23): every failure mode degrades to
- *   "no cached keys", which is where this build started.
+ * Refresh trust only after an unmatched key ID, fetch only from npm’s fixed origin, merge rather than replace keys, and tolerate damaged cache state.
  */
 
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -79,11 +55,7 @@ export interface CachedKeys {
 const EMPTY: CachedKeys = { keys: [], fetchedAt: undefined };
 
 /**
- * §06.3 with §15.9's one repair attached.
- *
- * The happy path is `verifySignature` and a `return` — no cache read, no
- * request, nothing on disk touched. Only {@link UntrustedKeyidError}, the
- * "keyid we have never heard of" branch, continues past the `catch`.
+ * Verify normally without cache or network I/O; only an unmatched key ID may trigger refresh.
  */
 export async function verifySignatureWithRefresh(input: {
   signatures: RegistrySignature[] | undefined;
@@ -120,13 +92,8 @@ export async function verifySignatureWithRefresh(input: {
     }
   }
 
-  // One retry, reporting *its* failure rather than the first one: the diagnostic
-  // then lists everything actually tried. This is also what makes the
-  // npm-rotation case work at all — the embedded table ships only unexpired keys
-  // (§14.4), so a pre-2025-01-29 artifact arrives here as "no trusted key
-  // matched", the refresh supplies the expired key npm still publishes, and
-  // §06.5's leniency accepts the signature it verifies with a warning instead of
-  // failing on a keyid nobody could have recognised.
+  // Retry once with the merged keys so the diagnostic lists everything tried.
+  // A valid signature from an expired refreshed key is accepted with §06.5's warning.
   verifySignature({ ...input, trustedKeys: mergeKeys(base, refreshed) });
 }
 
@@ -146,10 +113,7 @@ function refreshable(): boolean {
  * Whether to spend a request.
  *
  * "The cache already holds a keyid the registry signed with" is the answer that
- * makes the steady state free: after one refresh, a package signed with the
- * rotated key — or with a key that turns out to be *expired*, which is every
- * package manager npm published before 2025-01-29 — is decided from disk
- * forever, with no further requests.
+ * makes subsequent verification use the cached key without another request.
  *
  * Exported for the tests, and not only for convenience: `httpGet` refuses under
  * `COREPACK_ENABLE_NETWORK=0` on its own, so a test that counts sockets cannot
@@ -189,11 +153,6 @@ export function mergeKeys(base: TrustedKey[], extra: TrustedKey[]): TrustedKey[]
   }
   return merged;
 }
-
-/* -------------------------------------------------------------------------- */
-/* The cache file                                                             */
-/* -------------------------------------------------------------------------- */
-
 export function keysCachePath(): string {
   return join(getHomeFolder(), KEYS_CACHE_NAME);
 }
@@ -283,17 +242,7 @@ export function writeKeysCache(keys: TrustedKey[]): void {
 }
 
 /**
- * `GET https://registry.npmjs.org/-/npm/v1/keys`, best effort.
- *
- * One attempt, not §15.5's three: this is a repair on a path that is already
- * failing, and a user waiting for an error deserves it promptly. No credentials
- * are offered — the document is public, and `registryOrigin` is deliberately
- * omitted so that a token scoped to some *other* registry cannot be sent to
- * npm's on the way past (§14.6).
- *
- * A failure — offline, proxied, 404 on a mirror that intercepts the host — is
- * swallowed: the caller then retries with what it already had, and reports the
- * trust error it was always going to report.
+ * Fetch npm keys anonymously, once, and best effort so repair neither leaks credentials nor compounds delays.
  */
 export async function fetchNpmKeys(): Promise<TrustedKey[] | undefined> {
   let body: unknown;

@@ -59,25 +59,7 @@ function randomSuffix(): string {
 }
 
 /**
- * §07.1 — `COREPACK_HOME`, else `XDG_CACHE_HOME`/`LOCALAPPDATA`/platform default,
- * joined with `jup`.
- *
- * No `node/` segment, and `jup` not `corepack` (§14.24): the tool does not ship
- * inside Node and the store holds package managers, not anything Node owns. So a
- * corepack cache under `node/corepack` is never read — `v1`'s abandon-wholesale
- * migration, applied one segment higher up.
- *
- * `XDG_CACHE_HOME` is consulted **before** `LOCALAPPDATA` on every platform,
- * including Windows. That is a quirk of corepack's fallback chain rather than
- * design, kept because nothing recommends changing it.
- *
- * §15.13 point 5 narrows the other half: `LOCALAPPDATA` is consulted **only on
- * Windows** (row 171), because a Linux process started from WSL interop
- * inherits it and would land its cache on `/mnt/c` (#673). The same rule
- * governs §15.13's per-user shim directory.
- *
- * Nullish coalescing, not truthiness: an explicitly empty `COREPACK_HOME` is
- * honoured verbatim, exactly as corepack honours it.
+ * Cache root precedence: `COREPACK_HOME`; otherwise `XDG_CACHE_HOME`; on Windows only, `LOCALAPPDATA`; otherwise the platform home default. Empty `COREPACK_HOME` is honored. Append `jup`.
  */
 export function getHomeFolder(): string {
   const home = readEnv(ENV.HOME);
@@ -198,26 +180,7 @@ export function readInstalledSpec(locator: Locator): InstallSpec | null {
 }
 
 /**
- * The probe {@link readInstalledSpec} is the read-only half of: where this
- * locator's artifact lives, and whether it is already there.
- *
- * ## §15.11 — a pinned hash that is never checked is not a verification tier
- *
- * §07.2 makes the directory name the plain semver version, so
- * `pnpm@9.0.0+sha512.<A>` and `pnpm@9.0.0+sha512.<B>` name one directory and
- * the second reference silently gets whatever the first installed — corepack's
- * behaviour too, and the one place a tier is recorded and then not enforced.
- * Enforcing it is one string comparison against the marker already being read:
- * no network, no store scan, no second file. §04.1 step 4's probe
- * ({@link findInstalledVersion}) makes the same comparison, because it answers
- * first and its answer sheds the build suffix.
- *
- * A marker that does not prove the pin is not an error — the collision has a
- * legitimate shape (§02.5's `sha1` defaults against a `sha512` pin written by
- * `use`) — so that reference's artifact goes to a **pin-qualified** directory,
- * `<version>+<algo>.<hex>`, which is itself valid semver and therefore still a
- * legal `pack`/`cache list`/`info` subtree. §07.2 carries the full reasoning
- * and the cost: one extra marker read, paid only by a colliding reference.
+ * A pinned cache hit requires the marker hash to match. If the plain version directory contains another artifact, use `<version>+<algo>.<digest>` so distinct pins cannot silently share bytes.
  */
 export function resolveInstallTarget(locator: Locator): {
   location: string;
@@ -576,8 +539,7 @@ export function readLastKnownGood(): Record<string, string> {
     return {};
   }
 
-  // Falsy or non-object. Arrays deliberately pass, as they do in corepack
-  // (`typeof [] === "object"`); their numeric keys are harmless.
+  // Arrays deliberately pass; their numeric keys are harmless.
   if (!data || typeof data !== "object") return {};
 
   const lkg: Record<string, string> = {};

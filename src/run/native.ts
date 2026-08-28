@@ -1,26 +1,5 @@
 /**
- * Native handover — §15.28, §08.3, §08.4, §08.5, §08.6.
- *
- * The reference model (§08.2) loads the package manager's entry module into this
- * process, and every observable in §08.4 and §08.5 falls out of there being only
- * one process. A package manager that is not JavaScript cannot be loaded, so it
- * has to be a child — and this module's whole job is to make that child
- * indistinguishable from the in-process case.
- *
- * §08.3.2's `exec()` model would be exact and is what a native re-implementation
- * MUST use. Node has no `execve`, so the fallback is spawn+wait, and §08.5
- * enumerates precisely what that owes:
- *
- * * **stdio inherited, never piped** — package managers detect TTYs to decide on
- *   colour, progress bars and prompts, and are routinely used in pipelines
- *   (§08.6). `stdio: "inherit"` hands over the real file descriptors, so stdin
- *   is passed through untouched and no byte is speculatively consumed.
- * * **No new process group or session.** Detaching would take the child out of
- *   terminal job control and break Ctrl-C, which is the one thing users notice.
- * * **Signals reflected, not swallowed.** See {@link execNative}.
- *
- * This module is reached only from `exec.ts`'s native branch, so `node:child_process`
- * never enters the module graph of a JavaScript cache hit (§01.3, §16.3).
+ * Spawn-and-wait must emulate direct execution. `child_process` remains dynamically isolated from JavaScript cache hits.
  */
 
 import { spawn } from "node:child_process";
@@ -46,28 +25,7 @@ import { messages } from "../errors-cold.ts";
 const FORWARDED_SIGNALS: NodeJS.Signals[] = ["SIGTERM", "SIGHUP", "SIGQUIT", "SIGUSR1", "SIGUSR2"];
 
 /**
- * §15.43 — record, in the child's environment, the runtime hosting this chain.
- *
- * `node` is a table entry (§15.39), so our own `node` shim resolves the
- * project's runtime and spawns it *through here*; everything below that point —
- * a nested `jup enable`, above all — sees a `process.execPath` inside the store.
- * `enable` must never bake that into a shebang (§10.1): the store is what
- * `cache clean` deletes, and a shim whose interpreter has been deleted dies with
- * `bad interpreter` before a line of ours runs, `enable` included. So the last
- * process in the chain that was running *outside* the store leaves its realpath
- * here, and `interpreterPath()` reads it back however deep the chain got.
- *
- * Written only when our own runtime is outside the home; when it is inside, the
- * value the caller inherited is passed through untouched. Overwriting it at
- * every level — the `??=` shape — would replace the one path worth carrying with
- * a store path at the first hop.
- *
- * A **new** object rather than a write into the caller's: {@link execNative}'s
- * `env` defaults to `process.env`, so mutating it would put
- * `COREPACK_HOST_RUNTIME` into our own environment for the rest of the process —
- * §14.5 refuses the same value from an env file, and this is the only other way
- * in. The one caller today hands over a copy, which makes that latent; the
- * signature is what has to make it impossible.
+ * Propagate the original host runtime without mutating the caller’s environment.
  */
 function forwardHostRuntime(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   let own: string;
