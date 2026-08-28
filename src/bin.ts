@@ -8,7 +8,21 @@
  * `??=` so a real environment variable still wins.
  */
 
+import nodeModule from "node:module";
 import { defaultEnv, ENV } from "./config/env-vars.ts";
+
+// §08.2's optional compile cache, asked for before the `import()` below so the
+// core is covered too. Worth ~2 ms of a ~40 ms `jup --version`; a no-op, by its
+// own return value rather than by throwing, where the cache directory is not
+// writable. The shim stubs do the same thing — see `shimSource`.
+//
+// Reached through the default export and called optionally, which is §10.1's
+// `?.()` and not a style choice: a *named* import of an export the runtime does
+// not have is a link-time `SyntaxError`, thrown before any line of this file
+// runs and catchable by nobody. Deno 2.8 is that runtime today — `node:module`
+// there has no `enableCompileCache` — so the named form would trade an optional
+// 2 ms for total failure on a host that merely happens to run us.
+nodeModule.enableCompileCache?.();
 
 defaultEnv(ENV.ENABLE_DOWNLOAD_PROMPT, "0");
 

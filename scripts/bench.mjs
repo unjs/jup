@@ -21,9 +21,9 @@
  *
  * When corepack is on `PATH` its rows are measured too, against a copy of the
  * same seeded store — its marker file is the same JSON under a different name.
- * One caveat on that comparison: corepack's entry calls `enableCompileCache()`,
- * so its runs after the first are served from a V8 code cache that jup does not
- * ask for.
+ * Both entry points call `enableCompileCache()`, so both sides are served from a
+ * V8 code cache after the warm-up runs; `envFor` below is what makes that true
+ * rather than accidental.
  *
  * Usage: `node scripts/bench.mjs [--runs=30] [--json] [--no-compare]`
  */
@@ -32,6 +32,7 @@ import { spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
+  mkdirSync,
   readdirSync,
   readFileSync,
   realpathSync,
@@ -176,11 +177,21 @@ if (corepackDist !== undefined) {
 /* Startup                                                                     */
 /* -------------------------------------------------------------------------- */
 
-/** A deliberate environment: no ambient `COREPACK_*`, no network, no auto-latest. */
+/**
+ * A deliberate environment: no ambient `COREPACK_*`, no network, no auto-latest.
+ *
+ * `TMPDIR` is set rather than inherited because `enableCompileCache()` with no
+ * argument writes under `os.tmpdir()`, and a shared `/tmp/node-compile-cache`
+ * owned by another user makes the call fail silently — the rows would then
+ * measure a no-op and say nothing about it. `NODE_COMPILE_CACHE` would be the
+ * more direct lever and is deliberately *not* used: it enables the cache by
+ * itself, which would hide whether the entry points ask for it.
+ */
 function envFor(home) {
   return {
     PATH: process.env.PATH ?? "",
     HOME: home,
+    TMPDIR: join(home, "tmp"),
     COREPACK_HOME: home,
     COREPACK_ENABLE_NETWORK: "0",
     COREPACK_DEFAULT_TO_LATEST: "0",
@@ -193,7 +204,9 @@ function percentile(sorted, fraction) {
 
 /** Spawn `argv` `runs` times from the pinned project and keep the wall clock of each. */
 function measure(label, argv, home) {
-  const options = { cwd: fixture.cwd, env: envFor(home), encoding: "utf8" };
+  const env = envFor(home);
+  mkdirSync(env.TMPDIR, { recursive: true });
+  const options = { cwd: fixture.cwd, env, encoding: "utf8" };
   const samples = [];
   for (let index = 0; index < runs + 3; index++) {
     const started = performance.now();
@@ -202,7 +215,7 @@ function measure(label, argv, home) {
     if (result.status !== 0) {
       throw new Error(`${label} exited ${result.status}: ${result.stderr || result.stdout}`);
     }
-    // The first three are warm-up: page cache, and corepack's compile cache.
+    // The first three are warm-up: page cache, and both sides' compile caches.
     if (index >= 3) samples.push(elapsed);
   }
   samples.sort((a, b) => a - b);
