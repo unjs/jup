@@ -733,9 +733,9 @@ describe("aube — §15.21's third per-host entry", () => {
 
     pretendHost("win32", "x64");
     expect(resolveSpecBin(getSpecFor("aube", "2.2.0"))).toEqual({
-      aube: "./bin/aube",
-      aubr: "./bin/aubr",
-      aubx: "./bin/aubx",
+      aube: `./bin/aube${EXE}`,
+      aubr: `./bin/aubr${EXE}`,
+      aubx: `./bin/aubx${EXE}`,
     });
   });
 

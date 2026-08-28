@@ -32,9 +32,11 @@ const registry = new MockRegistry();
  * §15.30 reports the shim a `PATH` lookup actually turns up. On Windows that is
  * §10.3's `.cmd` wrapper: `PATHEXT` never contains the empty extension, so the
  * extensionless `<B>` beside it — the one Git Bash runs — is not what `cmd.exe`
- * or PowerShell would find.
+ * or PowerShell would find. Spelled in capitals because `PATHEXT` is: the
+ * lookup returns the candidate it built, not the name on disk, and Windows
+ * paths are case-insensitive so the two are one file.
  */
-const SHIM_ON_PATH = process.platform === "win32" ? ".cmd" : "";
+const SHIM_ON_PATH = process.platform === "win32" ? ".CMD" : "";
 
 interface Report {
   version: number;

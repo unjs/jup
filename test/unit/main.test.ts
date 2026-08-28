@@ -684,7 +684,7 @@ describe("the warm fast path — §01.3 (test 96)", () => {
         `syncBuiltinESMExports();`,
         ``,
         `process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";`,
-        `const { runMain } = await import(${JSON.stringify(new URL("src/main.ts", new URL(`file://${REPO_ROOT}`)).href)});`,
+        `const { runMain } = await import(${JSON.stringify(pathToFileURL(join(REPO_ROOT, "src", "main.ts")).href)});`,
         `const code = await runMain(process.argv.slice(2));`,
         `writeFileSync(${JSON.stringify(report)}, JSON.stringify({`,
         `  code,`,

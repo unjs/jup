@@ -33,8 +33,14 @@ import { SHIM_MARKER } from "../../src/commands/shims.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 
 const IS_WINDOWS = process.platform === "win32";
-/** What a `PATH` lookup finds: `PATHEXT` never contains the empty extension. */
-const PATH_EXTENSION = IS_WINDOWS ? ".cmd" : "";
+/**
+ * The extension a `PATH` lookup produces on Windows. `PATHEXT` never contains
+ * the empty extension, and it is spelled in capitals; `whichFile` returns the
+ * candidate it built, so `yarn.cmd` on disk comes back as `yarn.CMD`. Windows
+ * paths are case-insensitive, so a fixture written under this name is the same
+ * file the tool would find under any other spelling of it.
+ */
+const PATH_EXTENSION = IS_WINDOWS ? ".CMD" : "";
 
 const ENV_KEYS = [
   "COREPACK_HOME",

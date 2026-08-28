@@ -111,13 +111,13 @@ function expectShim(dir: string, binName: string): void {
 }
 
 /**
- * A file that a `PATH` lookup will actually find. Windows resolves a bare name
- * through `PATHEXT`, which never contains the empty extension, so an
- * extensionless `yarn` sitting on `PATH` is not a `yarn` anybody can run — and
- * `whichFile` is right not to return it. `.cmd` is the entry §10.3 installs for
- * that purpose.
+ * The extension a `PATH` lookup produces on Windows. `PATHEXT` never contains
+ * the empty extension, and it is spelled in capitals; `whichFile` returns the
+ * candidate it built, so `yarn.cmd` on disk comes back as `yarn.CMD`. Windows
+ * paths are case-insensitive, so a fixture written under this name is the same
+ * file the tool would find under any other spelling of it.
  */
-const PATH_EXTENSION = process.platform === "win32" ? ".cmd" : "";
+const PATH_EXTENSION = process.platform === "win32" ? ".CMD" : "";
 
 /**
  * §10's shims are `chmod 0o755`, but Windows has no POSIX mode bits: `chmod`
