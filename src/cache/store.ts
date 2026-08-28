@@ -390,12 +390,14 @@ function isDirectory(path: string): boolean {
 }
 
 /**
- * §07.5 — the rename is the commit point. `EEXIST`/`ENOTEMPTY` (and win32
- * `EPERM` onto a directory) mean another process installed the same version
- * first: discard the temp and continue as if we had won. Windows retries 5x with
- * `100 * 2^i` ms backoff.
+ * §07.5 — the rename is the commit point. Returns `true` when this call
+ * published `tmp`, and `false` when `dest` already held a completed install —
+ * another process won the race, and `tmp` is left for the caller to dispose of
+ * once it has decided whether the winner is the artifact it wanted. A `dest`
+ * that is occupied but carries no marker is neither, and throws. Windows retries
+ * 5x with `100 * 2^i` ms backoff.
  */
-export function promote(tmp: string, dest: string): void {
+export function promote(tmp: string, dest: string): boolean {
   ensureDir(dirname(dest), getInstallFolder());
 
   // The rename publishes the staging tree, so `0o700` widens to the ceiling the
@@ -412,7 +414,7 @@ export function promote(tmp: string, dest: string): void {
   for (let i = 0; i < attempts; i++) {
     try {
       renameSync(tmp, dest);
-      return;
+      return true;
     } catch (error) {
       const code = errorCode(error);
 
@@ -429,8 +431,10 @@ export function promote(tmp: string, dest: string): void {
         (isWindows && code === "EPERM" && isDirectory(dest))
       ) {
         if (readMarker(dest) === null) throw new UsageError(messages.occupiedInstallDir(dest));
-        rmSync(tmp, { recursive: true, force: true });
-        return;
+        // `tmp` is left for the caller: whether those bytes are still wanted
+        // depends on what the winner turned out to be, which is a question this
+        // function cannot answer.
+        return false;
       }
 
       // Windows antivirus holds newly-written files open; back off and retry.
@@ -442,6 +446,11 @@ export function promote(tmp: string, dest: string): void {
       throw error;
     }
   }
+
+  // Unreachable: the retry branch is gated on `i < attempts - 1`, so the final
+  // iteration always returns or rethrows. Stated for the return type's sake.
+  /* v8 ignore next */
+  throw new Error(messages.occupiedInstallDir(dest));
 }
 
 /**

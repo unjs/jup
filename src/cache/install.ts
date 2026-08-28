@@ -233,9 +233,25 @@ export async function ensureInstalled(
 
     writeMarker(tmp, { locator: { name: locator.name, reference: locator.reference }, bin, hash });
 
-    // §07.5 — the commit point. Losing the rename race is a success: the winner
-    // installed content-identical bytes.
-    promote(tmp, location);
+    // §07.5 — the commit point.
+    let spec: InstallSpec = { location, bin, hash };
+    if (!promote(tmp, location)) {
+      // Lost the rename race. The winner is a completed install, but not
+      // necessarily *this* reference's artifact: the §15.11 probe that chose
+      // `location` ran before the download, when the plain directory was still
+      // empty, so two references pinning different digests both aimed here.
+      // Re-running the probe now that the marker exists is the same decision on
+      // current facts — it adopts the winner when the marker proves this pin,
+      // and hands back a qualified directory when it does not.
+      const settled = resolveInstallTarget(locator);
+      if (settled.installed === null) {
+        promote(tmp, settled.location);
+        spec = { location: settled.location, bin, hash };
+      } else {
+        await rm(tmp, { recursive: true, force: true });
+        spec = settled.installed;
+      }
+    }
 
     // §04.7 — only ever within the same major, only when an entry already
     // exists, and never when the caller only wanted the cache warmed. The guards
@@ -244,7 +260,7 @@ export async function ensureInstalled(
       bumpLastKnownGood(locator);
     }
 
-    return { location, bin, hash };
+    return spec;
   } catch (error) {
     // §06.2 — nothing is cached on any failure, so a re-run fails identically
     // (test 79) and a bad artifact never reaches the store.

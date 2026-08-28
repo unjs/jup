@@ -548,13 +548,13 @@ describe("promote — §07.5", () => {
     writeFileSync(join(tmp, "yarn.js"), "console.log(1)");
     const dest = join(getInstallFolder(), "yarn", "4.1.0");
 
-    promote(tmp, dest);
+    expect(promote(tmp, dest)).toBe(true);
 
     expect(readFileSync(join(dest, "yarn.js"), "utf8")).toBe("console.log(1)");
     expect(() => statSync(tmp)).toThrow();
   });
 
-  it("treats losing the race as a win: the temp is discarded, the winner kept", () => {
+  it("reports a lost race, keeps the winner, and leaves the temp to the caller", () => {
     const dest = join(getInstallFolder(), "yarn", "4.1.0");
     mkdirSync(dest, { recursive: true });
     writeFileSync(join(dest, "yarn.js"), "winner");
@@ -570,10 +570,13 @@ describe("promote — §07.5", () => {
     const tmp = createTempDir();
     writeFileSync(join(tmp, "yarn.js"), "loser");
 
-    expect(() => promote(tmp, dest)).not.toThrow();
+    expect(promote(tmp, dest)).toBe(false);
 
     expect(readFileSync(join(dest, "yarn.js"), "utf8")).toBe("winner");
-    expect(() => statSync(tmp)).toThrow();
+    // Not discarded here: only the caller knows whether the winner is the
+    // artifact it was installing, and it may still need these bytes for a
+    // qualified directory of their own.
+    expect(readFileSync(join(tmp, "yarn.js"), "utf8")).toBe("loser");
   });
 
   it("refuses a destination that is occupied but carries no marker", () => {
