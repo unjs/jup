@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, relative } from "node:path";
+import { delimiter, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors-cold.ts";
@@ -736,9 +736,11 @@ describe("restoring what enable displaced (§15.15)", () => {
     // shows through when the copy path runs (EXDEV) or when the parked file was
     // touched in between. Drive it directly rather than pretending otherwise.
     const file = join(binDir, "pnpm");
-    const backup = join(root, "parked-pnpm");
+    // Inside `<home>/displaced/`: that is the only place `displace` parks
+    // content, and §15.15's reader rejects a `backup` from anywhere else.
+    const backup = join(corepackHome, "displaced", "parked-pnpm");
+    mkdirSync(dirname(backup), { recursive: true });
     write(backup, "#!/bin/sh\n", 0o600);
-    mkdirSync(corepackHome, { recursive: true });
     writeFileSync(
       join(corepackHome, "shims.json"),
       JSON.stringify({
