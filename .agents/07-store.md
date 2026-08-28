@@ -241,6 +241,14 @@ attacker-controlled input.
 7. **Bound the output**: cap total uncompressed bytes and entry count, and reject a
    gzip stream whose expansion ratio is implausible (zip-bomb defence). 512 MiB and
    200 000 entries are generous ceilings for this use case.
+
+   The cap on the *stream* is not enough on its own. A GNU `L`/`K` block and a
+   PAX `x`/`X` block are metadata: they are read whole into memory before
+   anything can look at them, so an `L` header declaring a 500 MB "long name"
+   costs several times that in resident memory — an OOM kill rather than the
+   refusal this rule promises. An implementation **MUST** therefore reject a
+   metadata body larger than a small fixed bound (64 KiB; `PATH_MAX` is 4 KiB)
+   from the header alone, before reading it.
 8. **Reject a PAX/GNU long-name entry that decodes to a path failing rules 1–2.**
 9. Ignore, do not error on, unknown PAX extended headers.
 

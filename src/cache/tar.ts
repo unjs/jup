@@ -62,6 +62,24 @@ const DEFAULT_MAX_ENTRIES = 200_000;
 const DEFAULT_MAX_RATIO = 100;
 const RATIO_FLOOR = 4 * 1024 * 1024;
 
+/**
+ * §07.4 rule 7, applied to the *metadata* bodies too — a GNU `L`/`K` block or a
+ * PAX `x`/`X` block is read whole into memory before anything can look at it, so
+ * its size has to be bounded before the read, not after.
+ *
+ * Without this the only ceiling is the 512 MiB inflate cap, and an `L` header
+ * declaring a 500 MB "long name" costs several times that in RSS (the collected
+ * parts, the `Buffer.concat` of them, the `utf8` string, the copy `replaceAll`
+ * makes) — an OOM kill instead of the clean refusal rule 7 promises. No real
+ * path is anywhere near 64 KiB; `PATH_MAX` is 4 KiB on Linux.
+ */
+const MAX_METADATA_BYTES = 64 * 1024;
+
+/** Rule 7's refusal, shared by the stream cap and the metadata cap. */
+function expansionRefusal(maxBytes: number): string {
+  return `Refusing to extract: the archive expands past the ${maxBytes} byte limit`;
+}
+
 const TYPE_FILE = new Set(["0", "\0"]);
 const TYPE_LINK = new Set(["1", "2"]);
 
@@ -187,7 +205,7 @@ async function* inflate(
       inflated += chunk.length;
       // Rule 7: checked as the stream flows. Afterwards the disk is already full.
       if (inflated > maxBytes) {
-        throw new Error(`Refusing to extract: the archive expands past the ${maxBytes} byte limit`);
+        throw new Error(expansionRefusal(maxBytes));
       }
       const compressed = gunzip.bytesWritten;
       if (inflated > RATIO_FLOOR && compressed > 0 && inflated > compressed * maxRatio) {
@@ -448,7 +466,9 @@ async function walk(
       // leaves the stream mid-block, and the *next* header fails its checksum.
 
       if (typeflag === "L" || typeflag === "K") {
-        // GNU long name / long link name: the body names the *next* entry.
+        // GNU long name / long link name: the body names the *next* entry, and
+        // is buffered whole — so it is bounded before the `EntryBody` exists.
+        if (size > MAX_METADATA_BYTES) throw new Error(expansionRefusal(MAX_METADATA_BYTES));
         const body = new EntryBody(reader, size);
         const value = Buffer.from(await body.collect())
           .toString("utf8")
@@ -459,6 +479,8 @@ async function walk(
       }
 
       if (typeflag === "x" || typeflag === "X") {
+        // Also collected whole; same bound, for the same reason.
+        if (size > MAX_METADATA_BYTES) throw new Error(expansionRefusal(MAX_METADATA_BYTES));
         const body = new EntryBody(reader, size);
         pax = parsePax(await body.collect());
         await reader.skip(padding(size));
