@@ -1,16 +1,32 @@
+# The suite runs on all three platforms because a good half of this spec is
+# platform-specific and untested elsewhere: §10.3's Windows wrappers, §10.2's
+# POSIX symlinks, §15.13's per-user shim directory (`%LOCALAPPDATA%` /
+# `$XDG_BIN_HOME` / `~/Library`), §07's path and mode handling, and §08.5's
+# signal semantics, which Windows does not have at all.
+#
+# `typecheck` and `lint` stay on Linux alone. Neither reads `process.platform`,
+# so running them three times answers the same question three times.
 name: checks
 on: { push: {}, pull_request: {} }
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Every platform reports. A Windows failure must not hide a macOS one.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
+      # Before `setup-node`, which needs `pnpm` on PATH to resolve its cache.
       - run: npm i -fg corepack && corepack enable
       - uses: actions/setup-node@v6
         with: { node-version: lts/*, cache: "pnpm" }
       - run: pnpm install
-      - run: pnpm typecheck
+      - if: runner.os == 'Linux'
+        run: pnpm typecheck
       - run: pnpm vitest --coverage
-      - run: pnpm run lint
+      - if: runner.os == 'Linux'
+        run: pnpm run lint
       # - uses: codecov/codecov-action@v5
       #   with: { token: "${{ secrets.CODECOV_TOKEN }}" }
