@@ -101,6 +101,33 @@ A marker that fails either check **MUST** be treated exactly as a missing one �
 over. A marker that is not parseable JSON still propagates: that is a broken
 install, not an untrusted one.
 
+#### Pin-qualified directories (§15.11)
+
+The directory name is the plain semver version, so `pnpm@9.0.0+sha512.<A>` and
+`pnpm@9.0.0+sha512.<B>` name one directory and the second reference would silently
+get whatever the first installed. Corepack behaves the same way — the marker's hash
+is *re-attached* to the locator (§07.6 step 3), never compared against it — which is
+the one place §15.11's tier is recorded and then not enforced. Enforcing it costs one
+string comparison against the marker already being read: no network, no store scan,
+no second file.
+
+When the marker does not prove the pin, the entry is not usable for *that* reference,
+and there are three possible answers: run the wrong bytes, refuse, or install the
+pinned artifact somewhere of its own. Refusing is wrong because the collision has a
+legitimate shape — the embedded defaults pin `sha1` (§02.5) while `use` writes the
+registry's `sha512`, so a bare `yarn` followed by a `yarn@1.22.22+sha512.…` project
+is a mismatch nobody misconfigured, and whose only remedy would be wiping the cache.
+So the install target becomes a **pin-qualified** directory,
+`<version>+<algo>.<hex>`, itself valid semver and therefore still a legal
+`<name>/<reference>` subtree for `pack` (§07.10), `cache list` and `info`. The plain
+directory keeps its §07.2 name, so nothing about the common case changes on disk; the
+cost is one extra marker read, paid only by a reference that collides.
+
+The comparison is over the marker's own recorded `hash`, which is a *statement* about
+the bytes, not a re-derivation from them: the digest covers the downloaded artifact,
+which the store does not keep. That is sound for a marker this tool wrote after
+checking the download, and it is exactly why §07.10's note below matters.
+
 ## 7.3 Choosing the URL
 
 ```
@@ -395,3 +422,21 @@ for each (name, reference):
 > It is **not** a security boundary — the archive's contents are extracted with the
 > same extractor and therefore the §07.4 safety rules apply in full. A conforming
 > implementation MUST NOT relax extraction safety for "our own" archives.
+
+> **Note (open).** "Not a security boundary" and §15.11's "**every** artifact MUST
+> clear one of three verification tiers" do not currently meet. The markers in the
+> archive are promoted into the store verbatim, and a marker's `hash` is a
+> self-assertion (§07.2); the store cannot re-derive it, because the digest covers a
+> downloaded artifact the store never keeps. So an archive that asserts the digest a
+> later `packageManager` pin names satisfies that pin on a string comparison, and the
+> pin's tier is cleared by bytes nothing verified. Extraction safety is unaffected —
+> nothing escapes the store — and the user did ask for this archive to be installed,
+> which is why this is a note rather than a rule today.
+>
+> Closing it belongs at the promotion, not in the store: `install -g <file>.tgz`
+> should, for each `<name>/<reference>` it promotes, either re-derive the digest of a
+> single-file artifact and refuse a marker that disagrees, or drop the `hash` from a
+> marker it cannot attribute so the entry is usable only by references that pin
+> nothing. Doing it in `readMarker` instead would break `pack` → `install -g`, the
+> §15.19 workflow this section exists for: a marker written by *another machine's*
+> jup is indistinguishable from one written by an attacker's.

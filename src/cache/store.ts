@@ -50,10 +50,8 @@ function errorCode(error: unknown): string | undefined {
  * Four random bytes, hex encoded, for a temp file name.
  *
  * `node:crypto` is reached through `process.getBuiltinModule` rather than an
- * `import`, because importing it pulls in two dozen native modules (webcrypto,
- * x509, keygen, diffiehellman, …) and neither caller — `createTempDir` and
- * `writeLastKnownGood` — is on the warm path (§01.3, §16.3). The lookup itself
- * loads nothing until it is called.
+ * `import`: importing it pulls in two dozen native modules and neither caller —
+ * `createTempDir`, `writeLastKnownGood` — is on the warm path (§01.3, §16.3).
  */
 function randomSuffix(): string {
   return process.getBuiltinModule("node:crypto").randomBytes(4).toString("hex");
@@ -73,11 +71,9 @@ function randomSuffix(): string {
  * design, kept because nothing recommends changing it.
  *
  * §15.13 point 5 narrows the other half: `LOCALAPPDATA` is consulted **only on
- * Windows** (row 171). Corepack reads it on POSIX too, which is #673 — a Linux
- * process started from WSL interop inherits `LOCALAPPDATA` and lands its cache
- * on `/mnt/c`, with alien permissions and Windows path semantics. This is the
- * one place the spec deliberately breaks store-location compatibility, and the
- * same rule governs §15.13's per-user shim directory.
+ * Windows** (row 171), because a Linux process started from WSL interop
+ * inherits it and would land its cache on `/mnt/c` (#673). The same rule
+ * governs §15.13's per-user shim directory.
  *
  * Nullish coalescing, not truthiness: an explicitly empty `COREPACK_HOME` is
  * honoured verbatim, exactly as corepack honours it.
@@ -182,35 +178,19 @@ export function readInstalledSpec(locator: Locator): InstallSpec | null {
  *
  * §07.2 makes the directory name the plain semver version, so
  * `pnpm@9.0.0+sha512.<A>` and `pnpm@9.0.0+sha512.<B>` name one directory and
- * the second reference silently gets whatever the first installed. Corepack
- * does the same — the marker's hash is *re-attached* to the locator (§07.6
- * step 3), never compared against it — so it is not a regression, but it means
- * a pin is decorative for every project that is not the one that warmed the
- * cache. §15.11 requires every artifact to clear a tier, and this is the one
- * place where the tier was recorded and then not enforced.
+ * the second reference silently gets whatever the first installed — corepack's
+ * behaviour too, and the one place a tier is recorded and then not enforced.
+ * Enforcing it is one string comparison against the marker already being read:
+ * no network, no store scan, no second file. §04.1 step 4's probe
+ * ({@link findInstalledVersion}) makes the same comparison, because it answers
+ * first and its answer sheds the build suffix.
  *
- * The enforcement is one string comparison against the marker already being
- * read: no network, no store scan, and no second file. §04.1 step 4's probe
- * ({@link findInstalledVersion}) has to make the same comparison, because it
- * answers *before* this does and its answer sheds the build suffix; there the
- * `stat` §14.1 budgets becomes a read of that same file, which is the whole
- * cost of §15.11 on the warm path.
- *
- * **When the marker does not prove the pin** the entry is not usable for *this*
- * reference, and there are only three possible answers: run the wrong bytes
- * (what happens today), refuse, or install the pinned artifact somewhere of its
- * own. Refusing is wrong because the collision has a legitimate shape: the
- * embedded defaults pin `sha1` (§02.5) while `corepack use` writes the
- * registry's `sha512`, so a bare `yarn` followed by a `yarn@1.22.22+sha512.…`
- * project is a mismatch nobody misconfigured and whose only remedy would be
- * wiping the cache. So the install target becomes a **pin-qualified**
- * directory, `<version>+<algo>.<hex>`, which is itself valid semver and
- * therefore still a legal `<name>/<reference>` subtree for `pack` (§07.10),
- * `cache list` and `info`.
- *
- * The cost is a second marker read, paid only by a reference that collides, and
- * one extra download the first time it does. The plain directory keeps its
- * §07.2 name, so nothing about the common case changes on disk.
+ * A marker that does not prove the pin is not an error — the collision has a
+ * legitimate shape (§02.5's `sha1` defaults against a `sha512` pin written by
+ * `use`) — so that reference's artifact goes to a **pin-qualified** directory,
+ * `<version>+<algo>.<hex>`, which is itself valid semver and therefore still a
+ * legal `pack`/`cache list`/`info` subtree. §07.2 carries the full reasoning
+ * and the cost: one extra marker read, paid only by a colliding reference.
  */
 export function resolveInstallTarget(locator: Locator): {
   location: string;
@@ -266,10 +246,9 @@ function serializePin(pin: HashPin): string {
  *
  * Constant-time in the digest bytes. Lengths are public — they follow from the
  * algorithm name, which is in the reference the attacker is trying to match —
- * so returning early on a length difference leaks nothing, and `node:crypto`'s
- * `timingSafeEqual` is deliberately not reached for: importing that module here
- * would put twenty-odd native modules on the path that a warm run exists to
- * keep empty (§16.3).
+ * so an early return on a length difference leaks nothing, and `node:crypto`'s
+ * `timingSafeEqual` stays unimported: it would put twenty-odd native modules on
+ * a path the warm run exists to keep empty (§16.3).
  */
 function markerProvesPin(marker: CorepackMarker, pin: HashPin): boolean {
   const expected = serializePin(pin);
@@ -492,14 +471,10 @@ export function findInstalledVersion(name: string, range: string): string | null
     }
 
     // §15.11 — a hash-bearing reference is a cache *hit* only if the stored
-    // marker proves that hash.
-    //
-    // This has to happen here rather than in {@link resolveInstallTarget} alone,
-    // because §04.1 step 4 answers with the bare version and the pin is gone
-    // from the locator by the time anything reads the marker again — which is
-    // exactly how `pnpm@9.0.0+sha512.<A>` and `+sha512.<B>` came to share one
-    // directory with the second silently running the first's bytes. The stat
-    // becomes a read of the same file, and no other syscall is added.
+    // marker proves that hash. It has to happen here as well as in
+    // {@link resolveInstallTarget}, because §04.1 step 4 answers with the bare
+    // version and the pin is gone from the locator by the time anything reads
+    // the marker again. The `stat` becomes a read of the same file.
     const proven = readMarker(join(installFolder, name, version));
     if (proven !== null && markerProvesPin(proven, pin)) return version;
 
@@ -601,10 +576,8 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
  * within the same major and only strictly upward. If there is no existing entry,
  * nothing is written.
  *
- * It lives here, next to the two accessors it is built from, because both of its
- * callers (`resolve`'s §04 pipeline and `install`'s §07.6 promotion) sit *above*
- * `store` in the layering of §16.10 — putting it in either one would force an
- * upward import from the other.
+ * It lives next to the two accessors it is built from: both callers (§04's
+ * pipeline, §07.6's promotion) sit *above* `store` in §16.10's layering.
  */
 export function bumpLastKnownGood(locator: Locator): void {
   if (envDisabled(ENV.DEFAULT_TO_LATEST)) {
@@ -644,10 +617,8 @@ export function bumpLastKnownGood(locator: Locator): void {
  * `.jup` marker. A half-extracted temp folder (`jup-<pid>-<rand>`) and
  * a `.DS_Store` are both directory entries, and neither is a cached version —
  * counting them would make `cache list` (§15.19) report an image as seeded when
- * it is not.
- *
- * §15.19's "did my image get seeded correctly?" and §15.30's "the cached
- * versions present" are the same directory listing, so there is one of it.
+ * it is not. §15.19's "did my image get seeded?" and §15.30's "the cached
+ * versions present" are the same listing, so there is one of it.
  */
 export function listInstalled(): Array<{ name: string; version: string }> {
   const installFolder = getInstallFolder();
