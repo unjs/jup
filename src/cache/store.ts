@@ -6,7 +6,7 @@
  * success**. There is no lockfile and must never be one (§07.5, §16.6).
  */
 
-import {
+const {
   chmodSync,
   mkdirSync,
   readdirSync,
@@ -16,9 +16,9 @@ import {
   rmSync,
   statSync,
   writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, sep } from "node:path";
+} = process.getBuiltinModule("node:fs");
+const { homedir } = process.getBuiltinModule("node:os");
+const { dirname, isAbsolute, join, relative, sep } = process.getBuiltinModule("node:path");
 import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled } from "../project/env.ts";

@@ -5,10 +5,9 @@
  * refusals are announced.
  */
 
-import { Buffer } from "node:buffer";
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve as resolvePath } from "node:path";
+const { readFileSync } = process.getBuiltinModule("node:fs");
+const { homedir } = process.getBuiltinModule("node:os");
+const { dirname, join, resolve: resolvePath } = process.getBuiltinModule("node:path");
 import {
   corepackSpelling,
   ENV,

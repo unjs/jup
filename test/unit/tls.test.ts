@@ -578,7 +578,6 @@ describe("the warm path never reaches TLS (§16.3)", () => {
   const WARM = [
     "main.ts",
     "bin.ts",
-    "shim.ts",
     "index.ts",
     "version/resolve.ts",
     "cache/store.ts",

@@ -5,9 +5,9 @@
  * want?" It touches the filesystem only, never the network.
  */
 
-import { readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+const { readFileSync, statSync } = process.getBuiltinModule("node:fs");
+const { homedir } = process.getBuiltinModule("node:os");
+const { dirname, join, relative, resolve, sep } = process.getBuiltinModule("node:path");
 import { ENV, readEnv } from "../config/env-vars.ts";
 import {
   devEnginesFieldFor,

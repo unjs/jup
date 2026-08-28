@@ -18,21 +18,27 @@
  * would consult it.
  */
 
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 /** Absolute loader paths the fake filesystem contains. */
 const LOADERS = new Set<string>();
 
-vi.mock("node:fs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs")>();
-  return {
+// `table.ts` reaches `node:fs` through `process.getBuiltinModule`, so the
+// builtin is patched rather than the module registry — before the dynamic
+// imports below, which is when the binding is captured.
+{
+  const actual = process.getBuiltinModule("node:fs");
+  const patched = {
     ...actual,
     existsSync: (path: unknown) =>
       typeof path === "string" && path.startsWith("/lib")
         ? LOADERS.has(path)
         : actual.existsSync(path as string),
   };
-});
+  const original = process.getBuiltinModule;
+  process.getBuiltinModule = ((id: string) =>
+    id === "node:fs" ? patched : original.call(process, id)) as typeof process.getBuiltinModule;
+}
 
 const { getTableSpec, hostTarget, resolveSpecUrl } = await import("../../src/config/table.ts");
 const { parse } = await import("../../src/version/semver.ts");

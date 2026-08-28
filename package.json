@@ -19,10 +19,11 @@
   "license": "MIT",
   "repository": "unjs/jup",
   "bin": {
-    "corepack": "./dist/bin.mjs",
-    "jup": "./dist/bin.mjs"
+    "corepack": "./bin/jup.mjs",
+    "jup": "./bin/jup.mjs"
   },
   "files": [
+    "bin",
     "dist"
   ],
   "type": "module",
@@ -33,7 +34,8 @@
   },
   "scripts": {
     "bench": "node scripts/bench.mjs",
-    "build": "obuild && node scripts/generate-shims.mjs",
+    "build": "obuild",
+    "compile": "bun scripts/compile.ts",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",

@@ -1,0 +1,79 @@
+# Manual-only. It builds the package, compiles the standalone binaries with Bun
+# (`scripts/compile.ts`), and hangs both on a GitHub release: `jup.tgz` for
+# anything that installs from a tarball, and one `.tar.xz` per target for the
+# machines that have neither Node.js nor npm — the one distribution shape the
+# published package cannot cover.
+#
+# It runs on Linux alone because Bun cross-compiles every target from one host,
+# so a macOS or Windows runner would build the same eight files more slowly. The
+# packing pass wants cores and memory rather than a particular OS: one `xz -9e`
+# holds ~674 MiB, and the script takes a lane per core, so a 4-core runner peaks
+# near 2.7 GB.
+#
+# The release is a draft by default. A published release is the thing an `sh`
+# installer resolves as `latest`, so the last step is a human pressing publish
+# after checking the assets, not a workflow deciding it on its own.
+name: release
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag. Defaults to v<version> from package.json."
+        type: string
+        required: false
+      draft:
+        description: "Create the release as a draft."
+        type: boolean
+        default: false # true
+permissions: { contents: write }
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # Eight compiles plus the packing pass; the default 360 is far more rope
+    # than a hung `xz` should get.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      # Before `setup-node`, which needs `pnpm` on PATH to resolve its cache.
+      - run: npm i -fg corepack && corepack enable
+      - uses: actions/setup-node@v6
+        with: { node-version: lts/*, cache: "pnpm" }
+      # `compile.ts` is a Bun script and uses `Bun.build`'s cross-compilation,
+      # which the header dates to Bun 1.4.
+      - uses: oven-sh/setup-bun@v2
+        with: { bun-version: latest }
+      - run: pnpm install
+
+      - run: pnpm build
+
+      # `prepack` runs `pnpm build` again, which is what makes the tarball the
+      # authoritative one rather than a copy of whatever `dist/` held; the
+      # compile below then bundles that same `dist/index.mjs`.
+      - run: pnpm pack --out jup.tgz
+
+      # `xz` ships on the runner image, and 5.6 is new enough for the `--arm64`
+      # branch filter the script prefers.
+      - run: pnpm compile
+
+      - id: meta
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          DRAFT: ${{ inputs.draft }}
+        run: |
+          tag="${INPUT_TAG:-v$(node -p 'require("./package.json").version')}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          [ "$DRAFT" = "true" ] && echo "draft=--draft" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - run: ls -l jup.tgz dist-bin/*.tar.xz
+
+      # The uncompressed binaries stay behind: they are ~84 MB each against
+      # ~27 MB packed, and `tar -xJO` reads the archive on every platform,
+      # macOS included, without an `xz` command of its own.
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          DRAFT: ${{ steps.meta.outputs.draft }}
+        run: |
+          gh release create "$TAG" --title "$TAG" --generate-notes $DRAFT \
+            jup.tgz dist-bin/*.tar.xz

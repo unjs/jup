@@ -2,8 +2,8 @@
  * Version-file path and dialect are table data. Version files are read-only fallbacks below `devEngines.runtime`.
  */
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+const { readFileSync } = process.getBuiltinModule("node:fs");
+const { join } = process.getBuiltinModule("node:path");
 import { messages, UsageError } from "../errors.ts";
 import { isValidRange } from "../version/semver.ts";
 import type { VersionFileSpec } from "../types.ts";

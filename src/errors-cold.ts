@@ -2,7 +2,7 @@
  * Cold-only messages and network helpers live here. `messages` merges both halves; warm modules must not import this file.
  */
 
-import { join } from "node:path";
+const { join } = process.getBuiltinModule("node:path");
 import { ENV, jupSpelling } from "./config/env-vars.ts";
 import { messages as warm, UsageError } from "./errors.ts";
 import { CACHE_DIRECTORY, LOCKFILE_NAME } from "./project/lockfile.ts";

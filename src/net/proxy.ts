@@ -2,7 +2,6 @@
  * HTTP proxy transport supporting standard proxy variables, CONNECT for HTTPS, absolute-form forwarding for HTTP, redirect credential stripping, and TLS policy overrides. Socket modules load lazily so unproxied requests remain on native `fetch`.
  */
 
-import { Buffer } from "node:buffer";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { Readable } from "node:stream";

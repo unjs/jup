@@ -2,8 +2,13 @@
  * Integrity uses synchronous `node:crypto`: npm signatures are DER ECDSA, key curves must be inspected, SHA-1/SHA-224 pins remain supported, and artifact hashes stream.
  */
 
-import { createHash, createPublicKey, timingSafeEqual, verify as cryptoVerify } from "node:crypto";
-import { createReadStream } from "node:fs";
+const {
+  createHash,
+  createPublicKey,
+  timingSafeEqual,
+  verify: cryptoVerify,
+} = process.getBuiltinModule("node:crypto");
+const { createReadStream } = process.getBuiltinModule("node:fs");
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "../config/keys.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";

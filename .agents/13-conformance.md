@@ -34,7 +34,7 @@ and rename behavior.
 pnpm test
 pnpm vitest run test/unit/<file>.test.ts
 pnpm vitest run test/conformance/<file>.test.ts
-pnpm build
+pnpm build                         # the bundle and, with it, bin/ (§16)
 pnpm bench
 pnpm test:corepack                 # optional; see test/corepack/README.md
 ```

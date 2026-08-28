@@ -2,7 +2,7 @@
  * Surgical manifest edits preserve formatting and avoid pulling cold writing machinery into the warm path. Every result is reparsed before emission.
  */
 
-import { EOL } from "node:os";
+const { EOL } = process.getBuiltinModule("node:os");
 import {
   BOM,
   CH_BACKSLASH,

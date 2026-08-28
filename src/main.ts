@@ -3,7 +3,7 @@
  * presentation (§08.4, §12.1).
  */
 
-import { dirname } from "node:path";
+const { dirname } = process.getBuiltinModule("node:path");
 import { ENV } from "./config/env-vars.ts";
 import {
   getDefinition,

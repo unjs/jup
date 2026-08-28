@@ -37,15 +37,17 @@ receive the wrapper's invocation name. Every generated stub and wrapper has mode
 > stub's shebang only when the install directory claims the interpreter's own name —
 > either this run enables `node`, or an earlier one already installed a shim of ours
 > at that name. Otherwise the stub keeps `#!/usr/bin/env node`, so the shipped stubs
-> stay relocatable and §10.7's read-only `distFolder` is not rewritten for a user who
+> stay relocatable and §10.7's read-only stub folder is not rewritten for a user who
 > never asked for a `node` shim. A *foreign* `node` in the directory does not count.
 >
 > **The stub's condition governs the tool's own CLI entry on every platform** — the
-> file named by `package.json`'s `bin`. Windows's unconditional rule applies only to
-> generated wrappers. When pinning is required, read the entry and replace only its
-> first line if needed. Write a temporary file in the same directory, preserve the
-> entry's mode, and atomically rename it over the entry. If no built entry exists,
-> do nothing. On `EROFS`, `EACCES`, or `EPERM`, fail before writing any shims and
+> file named by `package.json`'s `bin`, which need not sit in the stub folder.
+> Windows's unconditional rule applies only to generated wrappers. When pinning is
+> required, read the entry and replace only its first line if needed. Write a
+> temporary file in **the entry's own directory**, preserve the entry's mode, and
+> atomically rename it over the entry. If no built entry exists, do nothing — a
+> source checkout is not an installation, and pinning one would leave an absolute
+> shebang in a tracked file. On `EROFS`, `EACCES`, or `EPERM`, fail before writing any shims and
 > name the entry and the remedies: install the tool somewhere writable or stop
 > claiming the runtime name. `disable` MUST NOT restore the old shebang or otherwise
 > modify the entry.
@@ -82,9 +84,9 @@ receive the wrapper's invocation name. Every generated stub and wrapper has mode
 ## 10.2 POSIX shim creation
 
 ```
-generatePosixLink(installDirectory, distFolder, binName):
+generatePosixLink(installDirectory, stubFolder, binName):
     file    := installDirectory/binName
-    target  := RELATIVE path from installDirectory to distFolder/<proxy stub>
+    target  := RELATIVE path from installDirectory to stubFolder/<proxy stub>
     st      := lstat(file)                     # lstat, NOT stat — must not follow
 
     if st exists:
@@ -120,7 +122,7 @@ Required properties:
    unchanged across repeated `enable` runs. The conformance suite asserts this.
 4. **The stub is written at most once per `enable`**, whatever the number of names,
    and not at all when it is already current — so `enable` still succeeds against a
-   read-only `distFolder` that shipped it (§10.7).
+   read-only stub folder that shipped it (§10.7).
 5. **The stub is executable when `enable` returns.** A symlink carries no mode of
    its own, so the bit the kernel checks is the stub's; a shim pointing at a
    non-executable stub is skipped by the `PATH` lookup without a word. `enable`
@@ -171,11 +173,11 @@ Each existing entry MUST be **removed** before its replacement is written, never
 written through. The ownership and `--force` rules decide whether the name may be
 taken, so what reaches the write is one of our own entries — or any entry under
 `--force` — and one of ours can be a symlink left by an earlier POSIX-style
-`enable`, or pointing at a `dist/` that no longer exists. A write that
+`enable`, or pointing at a stub folder that no longer exists. A write that
 follows the link edits the link's target instead of replacing the shim, and
 fails with `ENOENT` when that target is gone.
 
-Let `<rel>` be the path from the shim directory to `dist/<B>.mjs`,
+Let `<rel>` be the path from the shim directory to the per-name stub for `B`,
 backslash-separated for `.cmd` and forward-slash-separated for the other two.
 
 Let `<node>` be the **absolute** path of the runtime `enable` is itself running

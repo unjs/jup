@@ -16,7 +16,7 @@
  * lets `COREPACK_NPM_REGISTRY` mirror all of it.
  */
 
-import { existsSync } from "node:fs";
+const { existsSync } = process.getBuiltinModule("node:fs");
 import { messages, UsageError } from "../errors.ts";
 import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {

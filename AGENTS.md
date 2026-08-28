@@ -15,6 +15,8 @@ language; code and executable tests remain the final check.
   configuration language, or runtime dependencies.
 - A warm exact pinned run uses no network, does not read global defaults, and makes
   only bounded filesystem probes.
+- Never `import` a `node:` builtin. Reach builtins through `process.getBuiltinModule`
+  where they are used ([maintenance](./.agents/16-implementation-notes.md)).
 
 ## Security invariants
 

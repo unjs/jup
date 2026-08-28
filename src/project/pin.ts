@@ -1,15 +1,8 @@
 /** Pin writing remains outside the warm manifest-reading module graph. */
 
-import {
-  lstatSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { basename, dirname, join } from "node:path";
+const { lstatSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } =
+  process.getBuiltinModule("node:fs");
+const { basename, dirname, join } = process.getBuiltinModule("node:path");
 import { messages } from "../errors-cold.ts";
 import {
   detectFormat,

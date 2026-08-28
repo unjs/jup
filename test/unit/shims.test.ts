@@ -23,8 +23,16 @@ import { delimiter, dirname, join, relative } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError } from "../../src/errors-cold.ts";
+import { DEFINITIONS, getBinariesFor } from "../../src/config/table.ts";
+import {
+  BUILT_ENTRY_SPECIFIER,
+  CLI_ENTRY_NAME,
+  findCliEntry,
+  STUB_FOLDER_NAME,
+} from "../../src/utils/self.ts";
 import {
   bakedInterpreter,
+  cliEntrySource,
   chooseInstallDirectory,
   cliEntryNotWritable,
   cmdDisable,
@@ -60,18 +68,21 @@ import {
   whichFile,
 } from "../../src/commands/shims.ts";
 import { isOurShim, shimDirectoryCandidates, systemShimDirectory } from "../../src/run/exec.ts";
+import { writeStubFolder } from "../../build.config.ts";
 
 const execFileAsync = promisify(execFile);
 
 /**
- * `dist` stands in for the folder holding this module — `src/` from source,
- * `dist/` from a build. Pointing the tests at a temporary one keeps the
- * generated stubs (`<dist>/yarn.mjs`, …) out of the repository, and lets the
- * end-to-end test substitute a fake library entry for `main.ts`, which is
- * another task's file.
+ * `dist` stands in for the folder `enable` writes stubs into and finds the entry
+ * module beside — `src/` from a source checkout, `bin/` from a published
+ * install. Pointing the tests at a temporary one keeps the generated stubs
+ * (`<dist>/yarn.mjs`, …) out of the repository, and lets the end-to-end test
+ * substitute a fake library entry for `main.ts`, which is another task's file.
  */
 let root: string;
 let dist: string;
+/** §15.46's file, which ships beside the stubs rather than anywhere else. */
+let cliEntry: string;
 let binDir: string;
 /** §15.13's per-user default, redirected into the fixture. */
 let perUserBin: string;
@@ -155,6 +166,7 @@ beforeEach(() => {
   // resolves the install directory (§10.4) before computing relative targets.
   root = realpathSync(mkdtempSync(join(tmpdir(), "jup-shims-")));
   dist = join(root, "dist");
+  cliEntry = join(dist, "jup.mjs");
   // Not `<root>/bin`: `HOME` is stubbed to `root` below, so that name is
   // §15.13 point 6's `~/bin` alternate and this directory is meant to be an
   // unrelated one the `--install-directory` rows point at.
@@ -788,8 +800,10 @@ describe("enable (§10.2)", () => {
   });
 
   it("errors when the dist folder holds no entry module", async () => {
-    const empty = join(root, "empty-dist");
-    mkdirSync(empty);
+    // Nested twice: the lookup also probes `../dist` for the published layout,
+    // and a folder directly under `root` would find the fixture's own.
+    const empty = join(root, "empty", "bin");
+    mkdirSync(empty, { recursive: true });
 
     await expect(cmdEnable([`--install-directory=${binDir}`, "yarn"], empty)).rejects.toThrow(
       messages.assertStubFolderMissing(),
@@ -1499,7 +1513,7 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
 /* ------------------------------------------------------------------ *
  * §15.46 — jup's own CLI entry does not run through jup's own shim
  *
- * `dist/bin.mjs` — what `package.json`'s `bin` points at — opens
+ * `bin/jup.mjs` — what `package.json`'s `bin` points at — opens
  * `#!/usr/bin/env node` like any published Node program, and that is
  * §14.26 consequence 2 aimed at us: with our `node` shim first on the
  * `PATH` §15.32 asks for, `env node` finds the shim, the shim resolves
@@ -1507,9 +1521,10 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
  * a version string. §15.43 made the path that gets baked in safe; this
  * is the recursion itself.
  *
- * The entry is a bundled build artifact rather than a file we generate,
- * so what these rows pin is *how little* is touched: the first line,
- * only when it is wrong, and never the body.
+ * We ship the file, but what these rows pin is *how little* of it is
+ * touched: the first line, only when it is wrong, and never the body —
+ * the installation being enabled is frequently not the one that wrote
+ * it, and a version skew is not ours to turn into a refusal.
  * ------------------------------------------------------------------ */
 
 describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI entry", () => {
@@ -1522,17 +1537,16 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
    * splice this file in the wrong place.
    */
   const BODY = [
-    'import { runMain } from "./index.mjs";',
+    'import { runMain } from "../dist/index.mjs";',
     "// 200 → 400, ≥ 1 KiB of bundle stands in for the rest",
     "await runMain(process.argv.slice(2));",
     "",
   ].join("\n");
 
-  /** Write `<dist>/bin.mjs` the shape a published install has it: 0o755. */
+  /** Write `<bin>/jup.mjs` the shape a published install has it: 0o755. */
   function writeEntry(shebang = "#!/usr/bin/env node"): string {
-    const file = join(dist, "bin.mjs");
-    write(file, `${shebang}\n${BODY}`, 0o755);
-    return file;
+    write(cliEntry, `${shebang}\n${BODY}`, 0o755);
+    return cliEntry;
   }
 
   function firstLine(file: string): string {
@@ -1616,12 +1630,12 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
   });
 
   it("does nothing when there is no built entry, or none with a shebang", async () => {
-    // A source checkout: the entry is `bin.ts` and is never reached through a
-    // shebang, so there is nothing to pin and `enable` must not need a build.
+    // An installation with no CLI entry beside the stubs: there is nothing to
+    // pin, and `enable` must not fail for want of one.
     expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
-    expect(existsSync(join(dist, "bin.mjs"))).toBe(false);
+    expect(existsSync(cliEntry)).toBe(false);
 
-    // A `bin.mjs` whose first line is not an interpreter is not ours to edit.
+    // An entry whose first line is not an interpreter is not ours to edit.
     const entry = writeEntry("// no shebang here");
     const before = readFileSync(entry);
     expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
@@ -1635,10 +1649,10 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
       // Seed the stub first, so the failure below is about the entry rather than
       // about a stub that was never written.
       expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
-      // The file *and* the directory: the temp-then-rename needs the directory,
+      // The file *and* its directory: the temp-then-rename needs the directory,
       // and a system package install leaves both beyond the user's reach.
       chmodSync(entry, 0o555);
-      chmodSync(dist, 0o555);
+      chmodSync(dirname(entry), 0o555);
 
       try {
         await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
@@ -1653,9 +1667,9 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
         expect(existsSync(join(binDir, "node"))).toBe(false);
         expect(firstLine(entry)).toBe("#!/usr/bin/env node");
         // And no temp file left behind by the refused write.
-        expect(readdirSync(dist).some((name) => name.endsWith(".tmp"))).toBe(false);
+        expect(readdirSync(dirname(entry)).some((name) => name.endsWith(".tmp"))).toBe(false);
       } finally {
-        chmodSync(dist, 0o755);
+        chmodSync(dirname(entry), 0o755);
         chmodSync(entry, 0o755);
       }
     },
@@ -1667,10 +1681,9 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
    * §15.45's (whose `chmod` is about a different property).
    */
   it("255: the message names the entry, the recursion, and the remedies that reach it", () => {
-    const entry = join(dist, "bin.mjs");
-    const message = cliEntryNotWritable(entry);
+    const message = cliEntryNotWritable(cliEntry);
 
-    expect(message).toContain(entry);
+    expect(message).toContain(cliEntry);
     expect(message).toContain("downloads a runtime");
     expect(message).toContain("jup disable node");
     expect(message).not.toContain("chmod +x");
@@ -1810,5 +1823,105 @@ exit $ret
     ]);
     expect(restored).toBe(1);
     expect(readFileSync(cmd, "utf8")).toBe(foreign);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The files that ship in `bin/`
+ *
+ * `bin/jup.mjs` and the stubs beside it are build output, written by
+ * `build.config.ts`'s `end` hook — one directory over from `dist/`,
+ * because `obuild` empties that folder on every run and §10.7 wants
+ * files an installation nobody can write to still has. They are also
+ * the files every `yarn`, `npm` and `pnpm` on the machine runs through,
+ * and the reason `enable` can find the shipped stubs already correct
+ * and write nothing (§10.2 property 4).
+ *
+ * `bin/` is not in the repository, so what is asserted here is the
+ * generator: it runs into the fixture, and what it leaves must be the
+ * table's names and nothing else, each reaching the bundle from the
+ * sibling directory the published layout puts it in.
+ * ------------------------------------------------------------------ */
+
+describe("the shipped static files", () => {
+  let shipped: string;
+
+  /** Every binary name the table shims, which is the per-name stub list (§10.3). */
+  const SHIPPED_NAMES = Object.keys(DEFINITIONS).flatMap((name) => getBinariesFor(name));
+
+  const read = (name: string): string => readFileSync(join(shipped, name), "utf8");
+
+  beforeEach(() => {
+    shipped = join(root, STUB_FOLDER_NAME);
+    writeStubFolder(shipped);
+  });
+
+  it("the CLI entry is what `cliEntrySource()` writes", () => {
+    expect(read(CLI_ENTRY_NAME)).toBe(cliEntrySource());
+  });
+
+  it("the POSIX stub is what `shimSource()` writes for the built entry", () => {
+    expect(read(PROXY_STUB_NAME)).toBe(shimSource(BUILT_ENTRY_SPECIFIER));
+  });
+
+  it.for(SHIPPED_NAMES.map((name) => [name]))(
+    "the win32 stub for %s is what `shimSource()` writes for it",
+    ([binName]) => {
+      expect(read(stubNameFor(binName!))).toBe(shimSource(BUILT_ENTRY_SPECIFIER, binName));
+    },
+  );
+
+  it("holds those and nothing else — a name left the table without its stub going too", () => {
+    expect(readdirSync(shipped).sort()).toEqual(
+      [CLI_ENTRY_NAME, PROXY_STUB_NAME, ...SHIPPED_NAMES.map((name) => stubNameFor(name))].sort(),
+    );
+  });
+
+  /**
+   * The specifier is the one thing a build cannot correct. A file that shipped
+   * naming `index.mjs` beside itself would resolve to `bin/index.mjs`, which
+   * nothing writes, and every shimmed binary on the machine would fail
+   * `ERR_MODULE_NOT_FOUND` — after `enable` had already reported success.
+   */
+  it("reaches the bundle from a sibling directory, not from its own", () => {
+    expect(BUILT_ENTRY_SPECIFIER).toBe("../dist/index.mjs");
+    for (const file of readdirSync(shipped)) {
+      expect(read(file)).toContain(`new URL("../dist/index.mjs"`);
+    }
+  });
+
+  /** §15.45 — a dev checkout runs these straight out of the tree. */
+  it.skipIf(process.platform === "win32")("writes them executable", () => {
+    for (const file of readdirSync(shipped)) {
+      expect(statSync(join(shipped, file)).mode & 0o111).not.toBe(0);
+    }
+  });
+
+  /**
+   * `bin/` is not emptied the way `dist/` is, so a stub whose name has left the
+   * table would otherwise stay behind for `enable` to shim and `npm pack` to
+   * ship. Removal goes by the generated banner, so a file a maintainer put
+   * there by hand survives the build that finds it.
+   */
+  it("clears a stale stub and leaves a foreign file alone", () => {
+    const stale = join(shipped, "gone.mjs");
+    const foreign = join(shipped, "notes.mjs");
+    writeFileSync(stale, shimSource(BUILT_ENTRY_SPECIFIER, "gone"));
+    writeFileSync(foreign, "// mine\n");
+
+    writeStubFolder(shipped);
+
+    expect(existsSync(stale)).toBe(false);
+    expect(readFileSync(foreign, "utf8")).toBe("// mine\n");
+  });
+
+  /**
+   * §15.46's guard, from the other side. `enable` from a checkout resolves its
+   * stub folder to `src/`, and the CLI entry is in `bin/` — so the lookup
+   * cannot reach it, and no maintainer's `enable node` can leave an absolute
+   * shebang naming their own machine in a file `npm publish` would ship.
+   */
+  it("is not reachable as a CLI entry from a source checkout", () => {
+    expect(findCliEntry(new URL("../../src", import.meta.url).pathname)).toBeUndefined();
   });
 });

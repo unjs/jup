@@ -9,13 +9,20 @@
  * sparse files, no other compressors.
  */
 
-import { once } from "node:events";
-import { createReadStream, createWriteStream } from "node:fs";
-import { constants as fsConstants, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+const { once } = process.getBuiltinModule("node:events");
+const { createReadStream, createWriteStream } = process.getBuiltinModule("node:fs");
+const {
+  constants: fsConstants,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  unlink,
+} = process.getBuiltinModule("node:fs/promises");
+const { join, resolve, sep } = process.getBuiltinModule("node:path");
 import type { Writable } from "node:stream";
-import { pipeline } from "node:stream/promises";
-import { createGunzip, createGzip } from "node:zlib";
+const { pipeline } = process.getBuiltinModule("node:stream/promises");
+const { createGunzip, createGzip } = process.getBuiltinModule("node:zlib");
 import { messages } from "../errors-cold.ts";
 
 export interface ExtractOptions {

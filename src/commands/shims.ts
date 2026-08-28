@@ -26,7 +26,7 @@
  *   `PATH` and names whatever beat them.
  */
 
-import {
+const {
   accessSync,
   chmodSync,
   closeSync,
@@ -42,10 +42,10 @@ import {
   statSync,
   symlinkSync,
   writeFileSync,
-  constants as fsConstants,
-} from "node:fs";
+  constants: fsConstants,
+} = process.getBuiltinModule("node:fs");
 import type { Stats } from "node:fs";
-import {
+const {
   chmod,
   lstat,
   open,
@@ -58,17 +58,17 @@ import {
   symlink,
   unlink,
   writeFile,
-} from "node:fs/promises";
-import {
+} = process.getBuiltinModule("node:fs/promises");
+const {
   basename,
   delimiter,
   dirname,
   isAbsolute,
   join,
   relative,
-  resolve as resolvePath,
-} from "node:path";
-import { fileURLToPath } from "node:url";
+  resolve: resolvePath,
+} = process.getBuiltinModule("node:path");
+const { fileURLToPath } = process.getBuiltinModule("node:url");
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
@@ -82,7 +82,14 @@ import {
   systemShimDirectory,
   WIN32_WRAPPER_HEADS,
 } from "../run/exec.ts";
-import { ENTRY_CANDIDATES, findCliEntry, findEntryModule } from "../utils/self.ts";
+import {
+  BUILT_ENTRY_SPECIFIER,
+  findCliEntry,
+  findEntryModule,
+  findEntrySpecifier,
+  findStubFolder,
+  ownModuleUrl,
+} from "../utils/self.ts";
 import { getHomeFolder, isInsideHome } from "../cache/store.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
@@ -122,7 +129,7 @@ const INTERPRETER_NAME = "node";
  * **The runtime running `enable` is not always usable.** §15.39 makes `node` a
  * table entry, so `enable node` puts a shim of ours on that name and §15.32 asks
  * for the shim directory to go *first* on `PATH`; from then on anything that
- * starts `#!/usr/bin/env node` — our own `bin.mjs` included — resolves through
+ * starts `#!/usr/bin/env node` — our own `bin/jup.mjs` included — resolves through
  * that shim, which downloads the project's runtime and spawns it. `enable` run
  * from inside that chain has a `process.execPath` under `<home>`, and baking it
  * in would tie every shim on the machine to a file `jup cache clean` exists to
@@ -240,7 +247,7 @@ export async function bakedInterpreter(options?: {
   // record one directory over.
   return (
     (await posixShimInterpreter(options?.installDirectory)) ??
-    (await readShebangOf(join(options?.distFolder ?? resolveDistFolder(), PROXY_STUB_NAME)))
+    (await readShebangOf(join(options?.distFolder ?? resolveStubFolder(), PROXY_STUB_NAME)))
   );
 }
 
@@ -598,14 +605,20 @@ export function targetBinaries(
   return [...binaries];
 }
 /**
- * The folder holding the library entry: `src/` from source, `dist/` from a build.
+ * The folder holding the stubs: `bin/` in a published install, the entry's own
+ * directory (`src/`) from a source checkout.
  *
- * Found by walking up rather than by taking this module's own directory — a
- * bundler may emit chunks into a subdirectory (obuild uses `dist/_chunks/`), in
- * which case this file's neighbour is not the entry.
+ * The entry is found by walking up rather than by taking this module's own
+ * directory — a bundler may emit chunks into a subdirectory (obuild uses
+ * `dist/_chunks/`), in which case this file's neighbour is not the entry.
  */
-function resolveDistFolder(): string {
-  return findEntryModule(import.meta.url)?.directory ?? dirname(fileURLToPath(import.meta.url));
+function resolveStubFolder(): string {
+  // Not `import.meta.url` directly: inside a compiled binary that names the
+  // build machine's checkout, whose `bin/` exists and whose stubs would be
+  // linked onto this user's `PATH` (see {@link ownModuleUrl}).
+  const self = ownModuleUrl(import.meta.url);
+  const module = findEntryModule(self);
+  return module === undefined ? dirname(fileURLToPath(self)) : findStubFolder(module);
 }
 
 function isExecutableFile(file: string): boolean {
@@ -917,12 +930,12 @@ function realpathOr(directory: string): string {
  * §10.1 — the stub bakes in the binary name, because Node loses it: it
  * `realpath`s the executed module, so a shim cannot ask how it was called.
  *
- * `COREPACK_ENABLE_DOWNLOAD_PROMPT` defaults to `1` here and to `0` in `bin.ts`
+ * `COREPACK_ENABLE_DOWNLOAD_PROMPT` defaults to `1` here and to `0` in the CLI entry
  * (§05.5): the user asked for `yarn`, not for a download. `??=` in both, so a
  * real environment variable still wins.
  *
  * **The entry is resolved against the stub's own realpath, not by a relative
- * specifier.** `./shim.mjs` would be the obvious spelling and it is wrong: the
+ * specifier.** `./index.mjs` would be the obvious spelling and it is wrong: the
  * shim on `PATH` is a *symlink* to this file (§10.2), so a relative specifier is
  * resolved against whichever path the runtime considers the main module's. That
  * happens to be the realpath under stock Node, which is why the relative form
@@ -939,7 +952,7 @@ function realpathOr(directory: string): string {
  * `import()` of the entry stays *after* the download-prompt assignment, which
  * the entry does read.
  *
- * The exit code is assigned only when it is non-zero, exactly as `bin.ts` does
+ * The exit code is assigned only when it is non-zero, exactly as the CLI entry does
  * it and for the same reason (§08.4): the in-process handover answers `0` before
  * the package manager's module body has run, and writing that would replace
  * `undefined` with `0` — after which a package manager whose `beforeExit` hook
@@ -951,7 +964,7 @@ function realpathOr(directory: string): string {
  * §14.15 — **`binName` is omitted on POSIX**, and the stub reads the name it was
  * invoked under from `basename(process.argv[1])` instead. Node does not
  * `realpath` `argv[1]` (it does `realpath` the *module*, which is what
- * {@link ENTRY_CANDIDATES} and the `realpathSync` below are for), so a symlink
+ * {@link findEntrySpecifier} and the `realpathSync` below are for), so a symlink
  * named `yarn` still says `yarn` there — under a direct `PATH` execution, under
  * `node <shim>`, and under `--preserve-symlinks-main`. One stub therefore serves
  * every binary name, avoiding stale per-name files.
@@ -972,9 +985,10 @@ function realpathOr(directory: string): string {
  * `enableCompileCache()` is §08.2's optional performance detail, with no
  * observable contract either way. It is asked for before the `import()` so the
  * entry module is covered too, and it is measured rather than assumed: on the
- * warm proxy path it is worth roughly 0.6 ms of a ~33 ms run, because that path
- * only ever compiles the ~52 kB warm chunk. `bin.ts` gains more (~2 ms) for the
- * same reason in reverse. A runtime whose cache directory is not writable gets a
+ * warm proxy path it is worth roughly 0.6 ms of a ~33 ms run: `codeSplitting:
+ * false` puts the cold code in the same file, but behind rolldown's lazy init
+ * thunks, so the run compiles the bundle once and evaluates only §16.3's warm
+ * set. The CLI entry gains more (~2 ms), since it evaluates further into it. A runtime whose cache directory is not writable gets a
  * documented no-op — the call reports failure through its return value rather
  * than throwing, and nothing here reads it.
  *
@@ -985,28 +999,80 @@ function realpathOr(directory: string): string {
  * worst failure this module can produce. Deno 2.8's `node:module` has no
  * `enableCompileCache`, so that runtime is not hypothetical.
  *
- * @param entryName The entry module's *bare file name* — one of
- * {@link ENTRY_CANDIDATES}. Not a specifier: the stub builds its own.
+ * @param entry The entry module's specifier relative to the stub, from
+ * {@link findEntrySpecifier} — `index.ts` beside it in a source checkout,
+ * `../dist/index.mjs` in a published one. Resolved against the stub's own
+ * realpath, never against the process's working directory.
  * @param binName Windows only. Omitted, the stub dispatches on its own
  * invocation name.
  * @param interpreter Absolute path to put in the shebang. Omitted,
  * `/usr/bin/env node`.
  */
-export function shimSource(entryName: string, binName?: string, interpreter?: string): string {
+export function shimSource(entry: string, binName?: string, interpreter?: string): string {
   const name = binName === undefined ? "basename(process.argv[1])" : JSON.stringify(binName);
   return [
     interpreter === undefined ? "#!/usr/bin/env node" : `#!${interpreter}`,
     `// ${SHIM_MARKER} — generated by \`${TOOL_NAME} enable\`; edits are overwritten.`,
-    `import { realpathSync } from "node:fs";`,
-    `import nodeModule from "node:module";`,
-    ...(binName === undefined ? [`import { basename } from "node:path";`] : []),
-    `import { pathToFileURL } from "node:url";`,
+    // `process.getBuiltinModule` rather than four static imports: the stub is
+    // parsed on every warm run, and skipping the ESM import machinery for
+    // builtins the runtime has already loaded is worth ~2 ms of it (§16.3).
+    `const { realpathSync } = process.getBuiltinModule("node:fs");`,
+    `const nodeModule = process.getBuiltinModule("node:module");`,
+    ...(binName === undefined
+      ? [`const { basename } = process.getBuiltinModule("node:path");`]
+      : []),
+    `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
     `nodeModule.enableCompileCache?.();`,
     `if (process.env.${jupSpelling(ENV.ENABLE_DOWNLOAD_PROMPT)} === undefined)`,
     `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "1";`,
-    `const entry = new URL(${JSON.stringify(entryName)}, pathToFileURL(realpathSync(import.meta.filename)));`,
+    `const entry = new URL(${JSON.stringify(entry)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
     `const code = await runMain([${name}, ...process.argv.slice(2)]);`,
+    `if (code !== 0) process.exitCode = code;`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * The body of `bin/jup.mjs` — the file `package.json`'s `bin` points `jup` and
+ * `corepack` at, shipped as a static file rather than as a second bundle.
+ *
+ * It was an entry of its own until it was not worth one: `codeSplitting: false`
+ * makes every entry a full copy of the module graph, so `dist/bin.mjs` was 168 kB
+ * of which all but ~300 bytes was `dist/index.mjs` again (§16.3). What is
+ * actually specific to this entry is the nine lines below, and none of them need
+ * a bundler.
+ *
+ * Everything here is {@link shimSource}'s, for {@link shimSource}'s reasons —
+ * `process.getBuiltinModule` over static imports, the optional compile cache
+ * through the namespace, the entry resolved against this file's own realpath so
+ * an `npm` bin symlink and `--preserve-symlinks-main` cannot send it into
+ * `node_modules/dist/`, and the exit code assigned only when non-zero (§08.4).
+ *
+ * Two things differ, both §05.5's:
+ *
+ * - the download prompt defaults to `0`, not `1`. The user typed our name, so
+ *   they did ask to download something.
+ * - `argv` is passed through unchanged. A shim prepends the name it was invoked
+ *   under (§14.15); here that name *is* us, and `runMain` reads §09's commands
+ *   from position 0.
+ *
+ * @param interpreter Absolute path for the shebang — §15.46's pin. Omitted,
+ * `/usr/bin/env node`, which is how it ships.
+ */
+export function cliEntrySource(interpreter?: string): string {
+  return [
+    interpreter === undefined ? "#!/usr/bin/env node" : `#!${interpreter}`,
+    `// ${TOOL_NAME}'s own CLI entry — generated by \`pnpm build\`; edits are overwritten.`,
+    `const nodeModule = process.getBuiltinModule("node:module");`,
+    `const { realpathSync } = process.getBuiltinModule("node:fs");`,
+    `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
+    `nodeModule.enableCompileCache?.();`,
+    `if (process.env.${jupSpelling(ENV.ENABLE_DOWNLOAD_PROMPT)} === undefined)`,
+    `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "0";`,
+    `const entry = new URL(${JSON.stringify(BUILT_ENTRY_SPECIFIER)}, pathToFileURL(realpathSync(import.meta.filename)));`,
+    `const { runMain } = await import(entry.href);`,
+    `const code = await runMain(process.argv.slice(2));`,
     `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");
@@ -1116,11 +1182,12 @@ async function ensureStub(
 ): Promise<string> {
   // The stub resolves its entry module against its own realpath, so the pair
   // stays relocatable (§10.2 property 2) whichever path the runtime hands the
-  // stub — see `shimSource`. Which name exists depends on
-  // whether we are running from source or from a build; `ENTRY_CANDIDATES` is the
-  // single definition of that order, and `scripts/generate-shims.mjs` shares it so
-  // that the shipped stubs and the ones `enable` writes are byte-identical.
-  const entry = ENTRY_CANDIDATES.find((candidate) => existsSync(join(distFolder, candidate)));
+  // stub — see `shimSource`. Which specifier it gets depends on whether we are
+  // running from source (`index.ts`, beside the stub) or from a build
+  // (`../dist/index.mjs`, one directory over); `findEntrySpecifier` is the single
+  // definition of that order, and `build.config.ts` shares it so that
+  // the shipped stubs and the ones `enable` writes are byte-identical.
+  const entry = findEntrySpecifier(distFolder);
   if (entry === undefined) throw new UsageError(messages.assertStubFolderMissing());
 
   const file = join(distFolder, binName === undefined ? PROXY_STUB_NAME : stubNameFor(binName));
@@ -1150,7 +1217,7 @@ async function ensureStub(
  * §15.46 — pin the interpreter into ${TOOL_NAME}'s **own** CLI entry, the same
  * way and for the same reason §10.1 pins it into the stub.
  *
- * `dist/bin.mjs` opens `#!/usr/bin/env ${INTERPRETER_NAME}`, and
+ * `bin/jup.mjs` opens `#!/usr/bin/env ${INTERPRETER_NAME}`, and
  * that line is §14.26 consequence 2 waiting to happen to *us*. Once a
  * ${INTERPRETER_NAME} shim of ours is on the `PATH` §15.32 asks the user to
  * prepend the shim directory to, `env` finds the shim, the shim resolves the
@@ -1160,24 +1227,26 @@ async function ensureStub(
  * removes the lookup, so the entry runs under the same host runtime `enable`
  * chose for the shims.
  *
- * **Only the first line, and only when it is wrong.** This is a bundled build
- * artifact rather than a file we generate, so there is no source to compare it
- * against and no version of it we are entitled to rewrite — the shebang is the
- * whole of our business with it, and everything from the first newline on is
- * copied through byte for byte. Testing before writing is what keeps §10.7's
- * read-only `distFolder` and §10.2's idempotency intact for the second and every
- * later `enable`.
+ * **Only the first line, and only when it is wrong.** The shebang is the whole
+ * of §15.46's business with this file; everything from the first newline on is
+ * copied through byte for byte. We ship `bin/jup.mjs` verbatim and could compare
+ * it against `cliEntrySource()` — but the installation being enabled is
+ * frequently not the one that wrote it (an `npx jup enable`, a global since
+ * upgraded), and a body comparison would turn a version skew into a refusal over
+ * a line nobody asked us to police. Testing before writing is also what keeps
+ * §10.7's read-only installation and §10.2's idempotency intact for the second
+ * and every later `enable`.
  *
  * Temp-then-rename, unlike {@link ensureStub}: a `writeFile` truncates first, and
- * an interrupt between the two halves leaves an empty `bin.mjs`, which is the one
+ * an interrupt between the two halves leaves an empty `jup.mjs`, which is the one
  * file that cannot be repaired by running this tool. The mode rides across, or a
  * `bin` target npm made `0o755` would come back as whatever the umask says and
  * stop being executable — §15.45's failure, one file over.
  */
 async function pinCliEntry(distFolder: string, interpreter: string): Promise<void> {
   const file = findCliEntry(distFolder);
-  // A source checkout builds nothing to pin, and its `bin.ts` is never reached
-  // through a shebang — it is run as `node src/bin.ts`. Nothing to do is a
+  // An installation with no built CLI entry beside its stubs — a source
+  // checkout, a compiled binary — has nothing to pin. Nothing to do is a
   // success here, not a gap: `enable` must not fail for want of a build.
   if (file === undefined) return;
 
@@ -1185,7 +1254,7 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
 
   // The cheap half of the comparison first: 1 KiB covers a shebang naming any
   // path a filesystem will hold, and the warm `enable node` — by far the common
-  // one — then never reads the rest of a 300 KB bundle.
+  // one — then never reads the rest of the file.
   const head = await readHead(file, 1024);
   if (head === undefined || !head.startsWith("#!")) return;
   const firstLine = head.split("\n", 1)[0] ?? "";
@@ -1207,10 +1276,16 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
 
   const mode = (await stat(file).catch(() => undefined))?.mode ?? 0o755;
   const suffix = process.getBuiltinModule("node:crypto").randomBytes(6).toString("hex");
-  const tmp = join(distFolder, `.${basename(file)}.${suffix}.tmp`);
+  // The entry's own directory. It is the stub folder in both layouts we ship,
+  // but a `rename` is only atomic within one directory — which is the whole
+  // reason this write goes through a temp file — and it is this directory's
+  // permissions that decide the write, so it is the one to name rather than the
+  // one that happens to equal it.
+  const cliFolder = dirname(file);
+  const tmp = join(cliFolder, `.${basename(file)}.${suffix}.tmp`);
 
   await guardWrites(
-    distFolder,
+    cliFolder,
     async () => {
       try {
         // `wx` under an unguessable name, so a link planted beside the entry is
@@ -1890,7 +1965,7 @@ async function claimsInterpreter(installDirectory: string, binaries: string[]): 
  */
 export async function cmdEnable(
   args: string[],
-  distFolder: string = resolveDistFolder(),
+  distFolder: string = resolveStubFolder(),
 ): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);
   // Validate before touching the filesystem, so a bad name reports itself even

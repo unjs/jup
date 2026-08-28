@@ -6,7 +6,7 @@
  * failures.
  */
 
-import { readFileSync } from "node:fs";
+const { readFileSync } = process.getBuiltinModule("node:fs");
 import { ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { advisory, messages } from "../errors-cold.ts";
 import { type NpmrcOrigin, npmrcTlsSettings } from "./npmrc.ts";

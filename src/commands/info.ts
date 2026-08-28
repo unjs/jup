@@ -2,14 +2,14 @@
  * `jup info` produces a versioned support report without network requests and tolerates malformed project specifications.
  */
 
-import {
+const {
   accessSync,
-  constants as fsConstants,
+  constants: fsConstants,
   readFileSync,
   realpathSync,
   statSync,
-} from "node:fs";
-import { delimiter, dirname, join, resolve as resolvePath } from "node:path";
+} = process.getBuiltinModule("node:fs");
+const { delimiter, dirname, join, resolve: resolvePath } = process.getBuiltinModule("node:path");
 import {
   corepackSpelling,
   ENV,

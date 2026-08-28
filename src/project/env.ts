@@ -2,8 +2,8 @@
  * Environment variables and `.jup.env` are the configuration inputs.
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+const { readFileSync } = process.getBuiltinModule("node:fs");
+const { resolve } = process.getBuiltinModule("node:path");
 import {
   COREPACK_PREFIX,
   corepackSpelling,

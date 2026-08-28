@@ -2,9 +2,9 @@
  * Spawn-and-wait must emulate direct execution. `child_process` remains dynamically isolated from JavaScript cache hits.
  */
 
-import { spawn } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { constants } from "node:os";
+const { spawn } = process.getBuiltinModule("node:child_process");
+const { realpathSync } = process.getBuiltinModule("node:fs");
+const { constants } = process.getBuiltinModule("node:os");
 import { isInsideHome } from "../cache/store.ts";
 import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";

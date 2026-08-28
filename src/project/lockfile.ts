@@ -2,8 +2,9 @@
  * `jup.lock` records authoritative project resolutions; host-local cache entries expire. Reads stay bounded, offline failures may use stale entries, writes are atomic, and invalid state degrades to a miss.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+const { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } =
+  process.getBuiltinModule("node:fs");
+const { join } = process.getBuiltinModule("node:path");
 import {
   isValidRange,
   isValidVersion,

@@ -16,7 +16,6 @@
  * transient failures on idempotent GETs.
  */
 
-import { Buffer } from "node:buffer";
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import {

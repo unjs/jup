@@ -25,8 +25,11 @@ const shimState = vi.hoisted(() => ({ interpreter: undefined as string | undefin
  */
 const rmState = vi.hoisted(() => ({ refuse: new Set<string>() }));
 
-vi.mock("node:fs/promises", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("node:fs/promises")>();
+// `cli.ts` reaches `node:fs/promises` through `process.getBuiltinModule`, which
+// the module registry cannot intercept — patch the builtin itself, hoisted above
+// the imports so the binding it captures is the patched one.
+vi.hoisted(() => {
+  const actual = process.getBuiltinModule("node:fs/promises");
   const rm: typeof actual.rm = (path, options) =>
     rmState.refuse.has(String(path))
       ? Promise.reject(
@@ -35,7 +38,12 @@ vi.mock("node:fs/promises", async (importOriginal) => {
           }),
         )
       : actual.rm(path, options);
-  return { ...actual, rm, default: { ...actual, rm } };
+  const patched = { ...actual, rm };
+  const original = process.getBuiltinModule;
+  process.getBuiltinModule = ((id: string) =>
+    id === "node:fs/promises"
+      ? patched
+      : original.call(process, id)) as typeof process.getBuiltinModule;
 });
 
 vi.mock("../../src/commands/shims.ts", async (importOriginal) => ({

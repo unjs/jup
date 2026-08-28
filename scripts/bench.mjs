@@ -2,12 +2,12 @@
  * What jup ships, and what it costs to start — the two numbers §16.1 puts a
  * budget on ("Small", and the warm proxy invocation).
  *
- * Two sections, both measured against the **built** `dist/`, because that is
- * what a user installs and what Node actually parses:
+ * Two sections, both measured against what ships — the built `dist/` and the
+ * static `bin/` beside it — because that is what a user installs and what Node
+ * actually parses:
  *
- * - *size*: the bytes loaded on a cached proxy run (the stub, `shim.mjs` and the
- *   `warm` chunk `build.config.ts` groups for exactly this reason), and the
- *   bytes the package ships in total, raw and gzipped.
+ * - *size*: the bytes loaded on a cached proxy run (the stub and the bundle it
+ *   imports), and the bytes the package ships in total, raw and gzipped.
  * - *startup*: wall clock for a whole process, spawned repeatedly. Two floors
  *   are measured alongside so the numbers can be read: bare `node -e ""` is what
  *   the runtime costs before any of our code runs, and the seeded package
@@ -50,6 +50,7 @@ import {
 
 const REPO = join(import.meta.dirname, "..");
 const DIST = join(REPO, "dist");
+const BIN = join(REPO, "bin");
 
 /** The pin every scenario shares: a real table entry, seeded rather than downloaded. */
 const TOOL = "npm";
@@ -65,7 +66,7 @@ if (!Number.isInteger(runs) || runs < 1) {
   process.exit(1);
 }
 
-if (!existsSync(join(DIST, "bin.mjs")) || !existsSync(join(DIST, "shim-proxy.mjs"))) {
+if (!existsSync(join(DIST, "index.mjs"))) {
   console.error("No build in dist/ — run `pnpm build` first.");
   process.exit(1);
 }
@@ -84,7 +85,7 @@ const STATIC_IMPORT = /(?:^|\n)\s*(?:import|export)\b[^;\n]*?from\s*"(\.[^"]+)"/
  */
 function eagerClosure(entries) {
   const seen = new Set();
-  const queue = entries.map((entry) => join(DIST, entry));
+  const queue = [...entries];
   while (queue.length > 0) {
     const file = queue.pop();
     if (seen.has(file)) continue;
@@ -115,14 +116,19 @@ function weigh(files) {
 
 const kB = (bytes) => `${(bytes / 1000).toFixed(1)} kB`;
 
-// The stub dispatches into `shim.mjs`, which is the whole of a proxy run. The
-// edge from the stub is a dynamic `import()`, so it is named here rather than
-// discovered; everything below `shim.mjs` is static and gets walked.
-const WARM_ENTRIES = ["shim-proxy.mjs", "shim.mjs"];
+// The stub dispatches into `dist/index.mjs`, which is the whole of a proxy run.
+// The edge from the stub is a dynamic `import()`, so it is named here rather
+// than discovered; everything below the bundle is static and gets walked.
+//
+// One bundle now serves both entries, so this row no longer measures a chunk
+// sized for the warm path: it is the whole file, of which a warm run *evaluates*
+// only §16.3's set. What it still measures honestly is the bytes Node reads and
+// compiles on every `yarn`, `npm` and `pnpm` invocation on the machine.
+const WARM_ENTRIES = [join(BIN, "shim-proxy.mjs"), join(DIST, "index.mjs")];
 
 const sizes = [
   { label: "jup, loaded on a warm proxy run", ...weigh(eagerClosure(WARM_ENTRIES)) },
-  { label: "jup, dist/ in full", ...weigh(walk(DIST)) },
+  { label: "jup, shipped in full", ...weigh([...walk(DIST), ...walk(BIN)]) },
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -234,10 +240,10 @@ const timings = [
     [directBin, "--version"],
     fixture.home,
   ),
-  measure("jup --version", [join(DIST, "bin.mjs"), "--version"], fixture.home),
+  measure("jup --version", [join(BIN, "jup.mjs"), "--version"], fixture.home),
   measure(
     `jup ${TOOL} --version (warm proxy)`,
-    [join(DIST, `${TOOL}.mjs`), "--version"],
+    [join(BIN, `${TOOL}.mjs`), "--version"],
     fixture.home,
   ),
 ];

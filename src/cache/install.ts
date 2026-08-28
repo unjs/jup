@@ -6,9 +6,9 @@
  * disk is full.
  */
 
-import { readFileSync } from "node:fs";
-import { chmod, open, rm, stat } from "node:fs/promises";
-import { join, posix, resolve, sep } from "node:path";
+const { readFileSync } = process.getBuiltinModule("node:fs");
+const { chmod, open, rm, stat } = process.getBuiltinModule("node:fs/promises");
+const { join, posix, resolve, sep } = process.getBuiltinModule("node:path");
 import { ENV, SYSTEM_ENV } from "../config/env-vars.ts";
 import {
   getSpecFor,

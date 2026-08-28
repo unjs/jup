@@ -1,41 +1,67 @@
-import { readFileSync } from "node:fs";
-import { type BuildConfig, defineBuildConfig } from "obuild/config";
+import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { defineBuildConfig } from "obuild/config";
+import { DEFINITIONS, getBinariesFor } from "./src/config/table.ts";
+import { cliEntrySource, PROXY_STUB_NAME, shimSource, stubNameFor } from "./src/commands/shims.ts";
+import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME, STUB_FOLDER_NAME } from "./src/utils/self.ts";
 
 /** Our own version, taken from the manifest **once, here**, and baked in below. */
 const OWN_VERSION = (
-  JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as { version: string }
+  JSON.parse(readFileSync(new URL("package.json", import.meta.url), "utf8")) as {
+    version: string;
+  }
 ).version;
 
 /**
- * Rolldown's `PreRenderedChunk`, reached through obuild's hook signature so that
- * `rolldown` itself need not become a direct devDependency just for one type.
+ * **One bundled entry.** There were three — `index.ts`, `bin.ts` and `shim.ts` —
+ * and with `codeSplitting: false` each of them was a complete copy of the same
+ * module graph: 168 kB apiece, differing in their last few hundred bytes, for a
+ * 527 kB `dist/`. `shim.ts` bought nothing at all (the warm set statically
+ * reachable from it was *identical* to `index.ts`'s), and `bin.ts` bought nine
+ * lines that need no bundler.
+ *
+ * Both now ship as static files in `bin/` that import this bundle by a relative
+ * specifier — `jup.mjs` and the stubs beside it, written by
+ * {@link writeStubFolder} from the `end` hook below. Nothing they contain
+ * depends on the bundle, but hanging them off the same command is what keeps a
+ * fresh clone one `pnpm build` away from a complete package, `bin/` out of the
+ * repository, and the table's binary names from drifting away from the stubs
+ * that serve them.
  */
-type ChunkInfo = Parameters<
-  Extract<
-    Parameters<
-      NonNullable<NonNullable<BuildConfig["hooks"]>["rolldownOutput"]>
-    >[0]["chunkFileNames"],
-    (...args: never) => unknown
-  >
->[0];
+export default defineBuildConfig({
+  entries: [
+    {
+      type: "bundle",
+      input: "./src/index.ts",
+      minify: true,
+      rolldown: { transform: { define: { __JUP_VERSION__: JSON.stringify(OWN_VERSION) } } },
+    },
+  ],
+  hooks: {
+    rolldownOutput(cfg) {
+      cfg.codeSplitting = false;
+    },
+    end(ctx) {
+      const written = writeStubFolder(join(ctx.pkgDir, STUB_FOLDER_NAME));
+      console.log(`Wrote ${STUB_FOLDER_NAME}/: ${written.join(", ")}`);
+    },
+  },
+});
+
 
 /**
- * The modules a warm proxy invocation loads, relative to `src/` — §01.3, §16.3.
+ * The modules a warm proxy invocation **evaluates**, relative to `src/` — §01.3,
+ * §16.3. This is the code that runs on every `yarn`, `npm` and `pnpm` invocation
+ * on the machine, forever.
  *
- * This is the code that runs on every `yarn`, `npm` and `pnpm` invocation on the
- * machine, forever, so it is shipped as **one** chunk rather than the seven
- * rolldown emits on its own.
+ * The build is a single file (`codeSplitting: false`), so this is not a
+ * statement about which chunk a module lands in: rolldown wraps every module in
+ * a lazy init thunk and rewrites `import()` to
+ * `Promise.resolve().then(() => (init_x(), x_exports))`, so a cold module sitting
+ * in the same file as the warm path is still not executed until something asks
+ * for it. What the list names is the set that *is* executed.
  *
- * The fragmentation is a side effect of the lazy cold path rather than anything
- * about these modules: every `import()` boundary is a new entry, and a module
- * gets its own chunk for each distinct set of entries that reaches it. So
- * `store.ts` (reached by the proxy, `install` and `enable`) and `manifest.ts`
- * (reached by the proxy, `cli` and `info`) land in different files despite
- * always being loaded together. Each additional module file costs roughly
- * 0.2 ms of resolve-and-link at startup — measured, and worth ~1 ms of a ~13 ms
- * warm run in total. Nothing about *what* is loaded changes.
- *
- * The list must equal the set of modules statically reachable from `shim.ts`,
+ * The list must equal the set of modules statically reachable from `index.ts`,
  * and `test/unit/main.test.ts` asserts exactly that: a new static import on the
  * warm path fails the suite until it is added here, and a cold module added by
  * mistake fails it too.
@@ -56,91 +82,67 @@ export const WARM_MODULES = [
   "version/semver.ts",
 ];
 
-/** `config/table.ts` → `config[\\/]table\.ts`, so the pattern matches on either separator. */
-const pattern = (module: string) =>
-  module.replaceAll(".", String.raw`\.`).replaceAll("/", String.raw`[\\/]`);
-
-const WARM_CHUNK = new RegExp(String.raw`[\\/]src[\\/](?:${WARM_MODULES.map(pattern).join("|")})$`);
-
-/** The one chunk this build asks for by name; everything else is named after its modules. */
-const WARM_GROUP = "warm";
+/** The line every file this writes carries, and the licence to delete a stale one. */
+const GENERATED_MARKER = "edits are overwritten.";
 
 /**
- * `/abs/jup/src/net/registry.ts` → `net/registry`.
+ * Write the static files that ship in `bin/`: our own CLI entry `jup.mjs`, and
+ * the shim stubs beside it. Returns the names it wrote.
  *
- * `undefined` for anything outside `src/` and for the `.d.ts` modules of the
- * declaration build, which names its own output.
+ * They are build output like `dist/` is, but they cannot live *in* `dist/`: the
+ * bundler empties that folder on every run, and §10.7 wants files that a global
+ * npm install, a container image or an OS package can leave exactly where they
+ * are. So they sit one directory over and reach the bundle by a relative
+ * specifier. Shipping them also means `enable` finds them already correct and
+ * writes nothing but the symlinks, which is what §10.2 property 4's idempotency
+ * rests on when the install directory is read-only.
+ *
+ * The bodies come from `shimSource` and `cliEntrySource`, so there is exactly
+ * one definition of what each file is; this only decides where they land, and
+ * takes the folder rather than finding it so a test can point it somewhere
+ * harmless.
+ *
+ * Stale removal is by marker, not by wildcard: a name that leaves the table must
+ * not leave its stub behind — `bin/` is not emptied the way `dist/` is — but a
+ * file a maintainer put there by hand is not ours to delete.
+ *
+ * The `0o755` is a convenience, not the guarantee: `npm pack` re-applies the
+ * execute bit to `bin` targets alone, so these stubs reach a published install
+ * `0o644` however this left them. What guarantees an executable stub is `enable`
+ * itself, which chmods one that arrives without the bit (§15.45). The chmod
+ * stays because a dev checkout and a tarball unpacked by other means both run
+ * the files straight out of the tree.
  */
-const SOURCE_MODULE = /[\\/]src[\\/](.+)(?<!\.d)\.[cm]?ts$/;
+export function writeStubFolder(folder: string): string[] {
+  // The POSIX stub, once: §14.15 has it read its own name from `argv[1]`, so one
+  // file serves every binary. The per-name stubs are §10.3's, and Windows is the
+  // only thing that reads them. No interpreter is passed, so the shipped files
+  // keep `#!/usr/bin/env node` and stay relocatable; `enable` bakes in an
+  // absolute path only where §10.1 says it must.
+  const sources = new Map<string, string>([
+    [CLI_ENTRY_NAME, cliEntrySource()],
+    [PROXY_STUB_NAME, shimSource(BUILT_ENTRY_SPECIFIER)],
+    ...Object.keys(DEFINITIONS)
+      .flatMap((name) => getBinariesFor(name))
+      .map(
+        (binName) => [stubNameFor(binName), shimSource(BUILT_ENTRY_SPECIFIER, binName)] as const,
+      ),
+  ]);
 
-function sourceName(id: string | undefined): string | undefined {
-  if (id === undefined) return undefined;
-  return SOURCE_MODULE.exec(id)?.[1]?.replaceAll("\\", "/");
+  mkdirSync(folder, { recursive: true });
+
+  for (const entry of readdirSync(folder, { withFileTypes: true })) {
+    if (!entry.isFile() || sources.has(entry.name)) continue;
+    const file = join(folder, entry.name);
+    if (readFileSync(file, "utf8").includes(GENERATED_MARKER)) rmSync(file);
+  }
+
+  for (const [name, source] of sources) {
+    const file = join(folder, name);
+    writeFileSync(file, source);
+    chmodSync(file, 0o755);
+  }
+
+  return [...sources.keys()];
 }
 
-/**
- * Name a chunk after the module it exists for, mirroring `src/` inside `_chunks/`.
- *
- * Rolldown's own names are the module *basenames*, which collide as soon as two
- * chunks share one — and here they always do, because a dynamically imported
- * module that is also statically imported somewhere else is emitted twice: a
- * re-export facade for the `import()` site, plus the chunk actually holding the
- * code. That produced `install.mjs`/`install2.mjs`, `pin.mjs`/`pin2.mjs` and
- * five more pairs where the digit, not the name, carried the meaning.
- *
- * So:
- *
- * - the `warm` group keeps the name it was asked for;
- * - a chunk fronting an `import()` is named for the module that `import()` names
- *   — `cache/install.ts` → `_chunks/cache/install.mjs`;
- * - a chunk that fronts no single module is a shared chunk, named for its root
- *   module (last in dependency order) plus `.shared` — so the pair above becomes
- *   `cache/install.mjs` and `cache/install.shared.mjs`, and `net/tls.shared.mjs`
- *   holds `net/tls.ts` together with the `keys.ts`/`npmrc.ts` it drags in.
- *
- * Declaration chunks and anything outside `src/` fall through to `[name]`; the
- * `.d.ts` pipeline renames its own output afterwards and must not be second
- * guessed. Nothing here forces a module into a chunk — this only labels the
- * chunks rolldown decided on, so the split stays whatever the import graph says.
- *
- * The subdirectories are safe: `getOwnRoot` and `findEntryModule` walk *up* to
- * find the package root precisely because a bundler is free to nest chunks, and
- * `test/unit/self.test.ts` pins that.
- */
-function chunkName(chunk: ChunkInfo): string {
-  if (chunk.name === WARM_GROUP) return WARM_GROUP;
-
-  const entry = sourceName(chunk.facadeModuleId);
-  if (entry !== undefined) return entry;
-
-  const shared = sourceName(chunk.moduleIds.at(-1));
-  return shared === undefined ? "[name]" : `${shared}.shared`;
-}
-
-export default defineBuildConfig({
-  entries: [
-    {
-      type: "bundle",
-      input: ["./src/index.ts", "./src/bin.ts", "./src/shim.ts"],
-      minify: true,
-      // `utils/self.ts` reads this instead of locating and parsing our own
-      // manifest at runtime. A build cannot then be wrong about its own version
-      // the way a filesystem walk can (see `getOwnVersion`), and `--version`,
-      // `info` and the `user-agent` all stop touching the disk for it.
-      rolldown: { transform: { define: { __JUP_VERSION__: JSON.stringify(OWN_VERSION) } } },
-    },
-  ],
-  hooks: {
-    rolldownOutput(cfg) {
-      cfg.codeSplitting = {
-        // Keep obuild's own groups (it splits `node_modules` into `libs/*`) so a
-        // dependency, should one ever appear, still lands where obuild expects.
-        groups: [
-          { name: WARM_GROUP, test: WARM_CHUNK },
-          ...(typeof cfg.codeSplitting === "object" ? (cfg.codeSplitting.groups ?? []) : []),
-        ],
-      };
-      cfg.chunkFileNames = (chunk) => `_${chunkName(chunk)}.mjs`;
-    },
-  },
-});

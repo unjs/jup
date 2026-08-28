@@ -2,11 +2,12 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   findEntryModule,
   getOwnRoot,
   getOwnVersion,
+  isStandaloneBinary,
   UNKNOWN_VERSION,
 } from "../../src/utils/self.ts";
 
@@ -70,6 +71,73 @@ describe("locating ourselves", () => {
     it("returns undefined when there is no entry module anywhere above", () => {
       const orphan = mkdtempSync(join(tmpdir(), "orphan-"));
       expect(findEntryModule(pathToFileURL(join(orphan, "x.mjs")).href)).toBeUndefined();
+    });
+  });
+
+  /**
+   * `scripts/compile.ts` builds the standalone binary as CommonJS, which
+   * `--bytecode` requires, and Bun resolves `import.meta.url` in a CommonJS
+   * output *at build time*: inside the binary every module reports the path its
+   * source held on the machine that compiled it. So these tests pass a module
+   * URL that looks like an ordinary checkout — because that is exactly what the
+   * binary sees — and assert that `Bun.main` is believed over it. Answering from
+   * the module URL there hands the package manager a `COREPACK_ROOT` on the
+   * build machine's disk and lets `enable`, which has no `bin/` to link to, find
+   * the build checkout's stubs and link a user's `PATH` to those.
+   */
+  describe("running as a compiled binary", () => {
+    /** Neither `Bun` nor `process.versions.bun` exists under the Node test run. */
+    function asBun(main: string | undefined, body: () => void): void {
+      const versions = process.versions as { bun?: string };
+      versions.bun = "1.4.0";
+      (globalThis as { Bun?: unknown }).Bun = main === undefined ? undefined : { main };
+      try {
+        body();
+      } finally {
+        delete versions.bun;
+        delete (globalThis as { Bun?: unknown }).Bun;
+      }
+    }
+
+    afterEach(() => {
+      delete (process.versions as { bun?: string }).bun;
+      delete (globalThis as { Bun?: unknown }).Bun;
+    });
+
+    const buildPath = pathToFileURL(join("/build", "jup", "dist", "index.mjs")).href;
+
+    it("detects the binary from `Bun.main`, not from the baked module URL", () => {
+      asBun("/$bunfs/root/jup", () => expect(isStandaloneBinary(buildPath)).toBe(true));
+    });
+
+    it("detects it on Windows, where `Bun.main` is a path and not a URL", () => {
+      // `B:\~BUN\root\jup.exe` — backslashes, so the `/~BUN/` spelling a
+      // `file://` URL carries would never match.
+      asBun(String.raw`B:\~BUN\root\jup.exe`, () =>
+        expect(isStandaloneBinary(buildPath)).toBe(true),
+      );
+    });
+
+    it("is not fooled by the `bun` CLI, which sets `process.versions.bun` too", () => {
+      const root = scaffold();
+      const entry = pathToFileURL(join(root, "dist", "index.mjs")).href;
+      asBun(join(root, "bin", "jup.mjs"), () => {
+        expect(isStandaloneBinary(entry)).toBe(false);
+        expect(getOwnRoot(entry)).toBe(root);
+      });
+    });
+
+    it("is false under Node, whatever the URL says", () => {
+      expect(isStandaloneBinary("file:///$bunfs/root/jup")).toBe(false);
+    });
+
+    it("roots itself in the binary rather than in the build machine's checkout", () => {
+      const root = scaffold();
+      const baked = pathToFileURL(join(root, "dist", "index.mjs")).href;
+
+      // The scaffolded manifest is right there above `baked`, and it is still
+      // not the answer: this run is a binary, and its root is the virtual one.
+      asBun("/$bunfs/root/jup", () => expect(getOwnRoot(baked)).toBe("/$bunfs/root"));
     });
   });
 

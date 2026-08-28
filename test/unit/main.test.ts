@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -1029,13 +1030,15 @@ function harnessFloor(): number {
 
 describe("the warm fast path — the module graph (§16.3)", () => {
   // Both entries a warm proxy run can arrive through: our own binary, and the
-  // module the generated shims import (§10.1). The shims are the hot one — they
-  // are what occupies `yarn`, `npm` and `pnpm` on `PATH` once `enable` has run —
-  // so a lazy `main.ts` is worth nothing unless the shim entry is lazy too.
+  // module the generated shims import (§10.1). They are the same file now —
+  // `index.ts` is what the stubs and `bin/jup.mjs` both `import()`, and the
+  // separate `shim.ts` it replaced reached an identical module set — but the
+  // shims are the hot one, since they are what occupies `yarn`, `npm` and `pnpm`
+  // on `PATH` once `enable` has run. A lazy `main.ts` is worth nothing unless
+  // the entry above it is lazy too.
   it.for([
     ["bin", "main.ts"],
-    ["shim", "shim.ts"],
-    ["library", "index.ts"],
+    ["shim and library", "index.ts"],
   ])("loads no cold-path module through the %s entry", ([, entry]) => {
     const graph = moduleGraph(entry!);
 
@@ -1051,7 +1054,7 @@ describe("the warm fast path — the module graph (§16.3)", () => {
   it("stays inside the native-module budget", () => {
     const floor = harnessFloor();
 
-    for (const entry of ["main.ts", "shim.ts", "index.ts"]) {
+    for (const entry of ["main.ts", "index.ts"]) {
       const graph = moduleGraph(entry);
       expect(graph.natives - floor).toBeLessThanOrEqual(NATIVE_MODULE_BUDGET);
     }
@@ -1070,11 +1073,13 @@ describe("the warm fast path — the module graph (§16.3)", () => {
  * `resolve.ts` really is warm-reachable in the *source* graph, since an
  * unpinned project needs it — because the chunking was what was wrong.
  *
- * What decides the chunking is static-import reachability from the
- * entry, so that is what these tests pin: the warm set is exactly
- * `WARM_MODULES`, and `WARM_MODULES` is what `build.config.ts` ships as
- * a single `warm.mjs`. Either half drifting fails the suite, and no
- * build is needed to find out.
+ * The build no longer emits chunks — `codeSplitting: false` inlines
+ * every entry's whole graph into one file, with each module behind a
+ * lazy init thunk — so the set below is what a warm run *evaluates*
+ * rather than what it parses. Static-import reachability from the entry
+ * is still what decides it, so that is what these tests pin: the warm
+ * set is exactly `WARM_MODULES`. Either half drifting fails the suite,
+ * and no build is needed to find out.
  * ------------------------------------------------------------------ */
 
 const SRC = join(REPO_ROOT, "src");
@@ -1107,17 +1112,43 @@ function staticGraph(entry: string): string[] {
 
 describe("the warm fast path — the emitted chunk (§16.3)", () => {
   it("reaches exactly the modules the build ships as one warm chunk", () => {
-    // `shim.ts` is the entry itself, so it is a file of its own either way.
-    expect(staticGraph("shim.ts")).toEqual(["shim.ts", ...WARM_MODULES].sort());
+    // `index.ts` is the entry itself, so it is a file of its own either way.
+    expect(staticGraph("index.ts")).toEqual(["index.ts", ...WARM_MODULES].sort());
   });
 
   it("keeps every cold-path module out of that chunk", () => {
     // Belt and braces on top of the runtime graph: a cold module reached
-    // statically would be merged into `warm.mjs` and parsed on every run even if
-    // nothing ever called into it.
+    // statically is evaluated on every run even if nothing ever calls into it.
     for (const cold of COLD_PATH_MODULES) {
       expect(WARM_MODULES).not.toContain(cold);
     }
+  });
+
+  /**
+   * The invariant the single-file build rests on (§16.3).
+   *
+   * `build.config.ts` inlines each entry's whole graph into one file, so a
+   * static `import` of a `node:` builtin anywhere in `src/` — cold module or not
+   * — is hoisted to the top of that file and loaded on every invocation. The
+   * cold set alone (`node:crypto`, `node:zlib`, `node:child_process`,
+   * `node:stream/promises`, `node:fs/promises`) measured ~10 ms of startup that
+   * way. Reached through `process.getBuiltinModule` at the point of use, they
+   * cost nothing until something calls them.
+   *
+   * Type-only imports are erased before the bundler sees them and are fine.
+   */
+  it("reaches every `node:` builtin through `process.getBuiltinModule`", () => {
+    const offenders = readdirSync(SRC, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".ts"))
+      .flatMap((entry) => {
+        const file = join(entry.parentPath, entry.name);
+        const source = readFileSync(file, "utf8");
+        return [...source.matchAll(/^import\s+(?!type\b)[^;]*?from\s*"(node:[^"]+)"/gm)].map(
+          (match) => `${relativePath(SRC, file)} imports ${match[1]}`,
+        );
+      });
+
+    expect(offenders).toEqual([]);
   });
 
   it("names only modules that exist", () => {
@@ -1514,9 +1545,26 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * What is owed is unchanged and now owed a fifth time, against the same
    * resident: `config/table.ts`, still 45,837, still read past one entry at a
    * time by every `yarn --version`.
+   *
+   * A note on the `_warm.mjs` figures above: that file no longer exists. The
+   * build inlines its one entry into one file and leaves every module behind a
+   * lazy init thunk, so the same set is now evaluated out of `dist/index.mjs`
+   * and the bytes sharing the file with it cost nothing measurable — parsing
+   * 164 kB and parsing 52 kB came out equal, and what the split was really
+   * buying was an import list free of `node:crypto` and `node:zlib`, which
+   * `process.getBuiltinModule` now buys instead. The entries are kept as
+   * measured; the ceiling below now bounds the source that is *evaluated* on
+   * every warm run, which is the thing that was ever worth bounding.
+   *
+   * The entry row became `index.ts` when `shim.ts` was deleted and its role
+   * passed to the library entry (§16.3): +1,151 bytes on a sum that has since
+   * fallen well under this ceiling anyway. Nothing was added to the warm path —
+   * the two files reach an identical module set, which is why one of them could
+   * go — so this is the same code measured under a different entry, and the
+   * ceiling stays where it was.
    */
-  it("stays inside the warm chunk's byte ceiling", () => {
-    const sizes = ["shim.ts", ...WARM_MODULES]
+  it("stays inside the warm set's byte ceiling", () => {
+    const sizes = ["index.ts", ...WARM_MODULES]
       .map((module) => [module, statSync(join(SRC, module)).size] as const)
       .sort(([, a], [, b]) => b - a);
     const total = sizes.reduce((sum, [, bytes]) => sum + bytes, 0);

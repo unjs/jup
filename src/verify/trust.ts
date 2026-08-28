@@ -2,8 +2,9 @@
  * Refresh trust only after an unmatched key ID, fetch only from npm’s fixed origin, merge rather than replace keys, and tolerate damaged cache state.
  */
 
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+const { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } =
+  process.getBuiltinModule("node:fs");
+const { join } = process.getBuiltinModule("node:path");
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { envDisabled } from "../project/env.ts";

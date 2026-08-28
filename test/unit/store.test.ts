@@ -2,10 +2,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  opendirSync,
   readdirSync,
   readFileSync,
-  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -37,14 +35,20 @@ import {
 import { resolveBin } from "../../src/cache/install.ts";
 
 /**
- * `node:fs`'s ESM namespace is frozen, so `vi.spyOn` cannot touch it. The mock
- * delegates every function to the real implementation and exists purely so the
- * §14.1 fast-path test can *count* directory reads, and so the last-known-good
- * tests can inject an `EROFS` without needing a read-only filesystem.
+ * The source reaches `node:fs` through `process.getBuiltinModule`, which the
+ * module registry cannot intercept — so the builtin is patched here instead,
+ * inside `vi.hoisted` so that it is in place before the modules under test are
+ * evaluated and capture their bindings.
+ *
+ * Every function delegates to the real implementation. The spies exist purely
+ * so the §14.1 fast-path test can *count* directory reads, and so the
+ * last-known-good tests can inject an `EROFS` without needing a read-only
+ * filesystem. The file's own imports stay on the real `node:fs`, so a fixture
+ * written by the test never lands in those counts.
  */
-vi.mock("node:fs", async () => {
-  const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
-  return {
+const fs = vi.hoisted(() => {
+  const actual = process.getBuiltinModule("node:fs");
+  const patched = {
     ...actual,
     readdirSync: vi.fn(actual.readdirSync),
     readFileSync: vi.fn(actual.readFileSync),
@@ -53,10 +57,13 @@ vi.mock("node:fs", async () => {
     renameSync: vi.fn(actual.renameSync),
     mkdirSync: vi.fn(actual.mkdirSync),
   };
+  const original = process.getBuiltinModule;
+  process.getBuiltinModule = ((id: string) =>
+    id === "node:fs" ? patched : original.call(process, id)) as typeof process.getBuiltinModule;
+  return patched;
 });
 
-const fsActual = await vi.importActual<typeof import("node:fs")>("node:fs");
-const mkdirSyncActual = fsActual.mkdirSync;
+const mkdirSyncActual = process.getBuiltinModule("node:fs").mkdirSync;
 
 let home: string;
 
@@ -304,7 +311,7 @@ describe("resolveInstallTarget — §15.11's cache-hit check", () => {
     // §01.3 budgets one `.jup` read for a warm, exactly-pinned run, and
     // §15.11's check must not turn that into two. The second read exists only
     // for a reference the cached marker cannot vouch for.
-    const readFileSyncMock = vi.mocked(readFileSync);
+    const readFileSyncMock = fs.readFileSync;
     readFileSyncMock.mockClear();
     expect(readInstalledSpec({ name: "pnpm", reference: "9.0.0+sha512.aaaa" })).not.toBeNull();
     expect(markerReads(readFileSyncMock)).toBe(1);
@@ -362,14 +369,14 @@ describe("referenceWithHash — §07.6 step 3", () => {
 
 describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
   beforeEach(() => {
-    vi.mocked(readdirSync).mockClear();
-    vi.mocked(opendirSync).mockClear();
+    fs.readdirSync.mockClear();
+    fs.opendirSync.mockClear();
   });
 
   /** The budget guard: an exact pin must never read a directory (§01.3, §16.3). */
   function expectNoDirectoryRead(): void {
-    expect(readdirSync).not.toHaveBeenCalled();
-    expect(opendirSync).not.toHaveBeenCalled();
+    expect(fs.readdirSync).not.toHaveBeenCalled();
+    expect(fs.opendirSync).not.toHaveBeenCalled();
   }
 
   it("stats the marker directly, without opening the store directory", () => {
@@ -453,9 +460,9 @@ describe("findInstalledVersion — the range probe (§04.3, §14.2)", () => {
 
   it("scans the directory for a genuine range", () => {
     seedInstall("yarn", "1.0.0");
-    vi.mocked(readdirSync).mockClear();
+    fs.readdirSync.mockClear();
     expect(findInstalledVersion("yarn", "^1.0.0")).toBe("1.0.0");
-    expect(readdirSync).toHaveBeenCalled();
+    expect(fs.readdirSync).toHaveBeenCalled();
   });
 
   it("skips dot-entries such as macOS's .DS_Store", () => {
@@ -505,7 +512,7 @@ describe("createTempDir — §07.4", () => {
 
   it("reports EACCES on the install folder with §12.8's verbatim message", () => {
     const denied = Object.assign(new Error("permission denied"), { code: "EACCES" });
-    vi.mocked(mkdirSync).mockImplementationOnce(() => {
+    fs.mkdirSync.mockImplementationOnce(() => {
       throw denied;
     });
 
@@ -516,11 +523,9 @@ describe("createTempDir — §07.4", () => {
   it("reports EACCES on the temp directory itself the same way", () => {
     const denied = Object.assign(new Error("permission denied"), { code: "EACCES" });
     // First call is `mkdir -p <install>`; the second creates the temp.
-    vi.mocked(mkdirSync)
-      .mockImplementationOnce(mkdirSyncActual)
-      .mockImplementationOnce(() => {
-        throw denied;
-      });
+    fs.mkdirSync.mockImplementationOnce(mkdirSyncActual).mockImplementationOnce(() => {
+      throw denied;
+    });
 
     try {
       createTempDir();
@@ -535,7 +540,7 @@ describe("createTempDir — §07.4", () => {
 
   it("propagates a filesystem failure that is not EACCES", () => {
     const broken = Object.assign(new Error("no space"), { code: "ENOSPC" });
-    vi.mocked(mkdirSync).mockImplementationOnce(() => {
+    fs.mkdirSync.mockImplementationOnce(() => {
       throw broken;
     });
     expect(() => createTempDir()).toThrow(broken);
@@ -607,7 +612,7 @@ describe("promote — §07.5", () => {
   it("propagates an unrelated rename failure", () => {
     const tmp = createTempDir();
     const failure = Object.assign(new Error("nope"), { code: "EXDEV" });
-    vi.mocked(renameSync).mockImplementationOnce(() => {
+    fs.renameSync.mockImplementationOnce(() => {
       throw failure;
     });
     expect(() => promote(tmp, join(getInstallFolder(), "yarn", "4.1.0"))).toThrow(failure);
@@ -664,16 +669,15 @@ describe("writeLastKnownGood — §14.3, atomic", () => {
   it("writes a temp file in the same directory and renames over the target", () => {
     writeLastKnownGood({ yarn: "1.22.22" });
 
-    const written = vi
-      .mocked(writeFileSync)
-      .mock.calls.map((call) => String(call[0]))
+    const written = fs.writeFileSync.mock.calls
+      .map((call) => String(call[0]))
       .filter((path) => path.startsWith(lkgPath()));
     expect(written).toHaveLength(1);
     // The write never touched the target itself...
     expect(written[0]).not.toBe(lkgPath());
     expect(dirname(written[0]!)).toBe(home);
     // ...the rename did.
-    expect(renameSync).toHaveBeenCalledWith(written[0], lkgPath());
+    expect(fs.renameSync).toHaveBeenCalledWith(written[0], lkgPath());
 
     expect(readFileSync(lkgPath(), "utf8")).toBe(
       `${JSON.stringify({ yarn: "1.22.22" }, null, 2)}\n`,
@@ -697,7 +701,7 @@ describe("writeLastKnownGood — §14.3, atomic", () => {
 
   it("swallows EROFS silently and leaves no temp behind", () => {
     const readOnly = Object.assign(new Error("read-only file system"), { code: "EROFS" });
-    vi.mocked(writeFileSync).mockImplementationOnce(() => {
+    fs.writeFileSync.mockImplementationOnce(() => {
       throw readOnly;
     });
 
@@ -707,7 +711,7 @@ describe("writeLastKnownGood — §14.3, atomic", () => {
 
   it("swallows a failing rename too, cleaning up the temp", () => {
     const readOnly = Object.assign(new Error("read-only file system"), { code: "EROFS" });
-    vi.mocked(renameSync).mockImplementationOnce(() => {
+    fs.renameSync.mockImplementationOnce(() => {
       throw readOnly;
     });
 
@@ -717,7 +721,7 @@ describe("writeLastKnownGood — §14.3, atomic", () => {
 
   it("propagates a failure that is not a filesystem error", () => {
     const bug = new TypeError("bug");
-    vi.mocked(writeFileSync).mockImplementationOnce(() => {
+    fs.writeFileSync.mockImplementationOnce(() => {
       throw bug;
     });
     expect(() => writeLastKnownGood({ yarn: "1.22.22" })).toThrow(bug);

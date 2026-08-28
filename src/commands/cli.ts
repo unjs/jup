@@ -7,10 +7,17 @@
  * warnings use stderr, and `UsageError`s propagate to `main.ts`.
  */
 
-import { createReadStream, realpathSync } from "node:fs";
-import { readdir, rm } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve as resolvePath, sep } from "node:path";
-import { Readable } from "node:stream";
+const { createReadStream, realpathSync } = process.getBuiltinModule("node:fs");
+const { readdir, rm } = process.getBuiltinModule("node:fs/promises");
+const {
+  basename,
+  dirname,
+  join,
+  relative,
+  resolve: resolvePath,
+  sep,
+} = process.getBuiltinModule("node:path");
+const { Readable } = process.getBuiltinModule("node:stream");
 import { ENV, writeEnv } from "../config/env-vars.ts";
 import {
   getTableSpec,

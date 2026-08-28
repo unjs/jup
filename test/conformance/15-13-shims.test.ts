@@ -875,8 +875,8 @@ describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
  * §15.45 — row 254
  *
  * §10.2's shim is a symlink, so the execute bit the kernel checks
- * before running the name is the **stub's**. `scripts/generate-shims.mjs`
- * chmods the stubs `0o755` at build time and `npm pack` undoes it: it
+ * before running the name is the **stub's**. The build chmods the
+ * stubs `0o755` and `npm pack` undoes it: it
  * re-applies the bit to the package's `bin` targets and to nothing
  * else, so a published install has `dist/bin.mjs` executable and every
  * stub at `0o644`. `enable` compared the stub's *content*, found it
@@ -952,7 +952,7 @@ describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable
 /* ------------------------------------------------------------------ *
  * §15.46 — row 255
  *
- * `dist/bin.mjs` — what `package.json`'s `bin` points `jup` and
+ * `bin/jup.mjs` — what `package.json`'s `bin` points `jup` and
  * `corepack` at — opens `#!/usr/bin/env node`, and §14.26 consequence 2
  * is about that spelling rather than about who wrote it. Once
  * `enable node` has put our shim on the `PATH` §15.32 asks the user to
@@ -960,9 +960,9 @@ describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable
  * `.nvmrc` (§15.40), and `jup --version` downloads a runtime to print
  * its own version string.
  *
- * The row plants a `bin.mjs` beside the copy's entry — a source
- * checkout has none, which §15.46 makes a no-op rather than a failure —
- * and then runs it through a real `execve`, because `node <entry>` is
+ * The row plants a `jup.mjs` beside the copy's entry — an installation
+ * without one makes §15.46 a no-op rather than a failure — and then
+ * runs it through a real `execve`, because `node <entry>` is
  * precisely the spelling that never reads a shebang. `JUP_ENABLE_NETWORK=0`
  * turns the recursion into a loud failure instead of a 171 MB download,
  * so the row proves the same property either way round without a
@@ -975,8 +975,8 @@ describe.skipIf(IS_WINDOWS)(
     /** Its own copy: this row rewrites a file inside the installation. */
     const BUILT = copyTool();
 
-    /** `<copy>/src/bin.mjs` — the built entry §15.46 pins, standing in for `dist/`. */
-    const ENTRY = join(dirname(BUILT), "bin.mjs");
+    /** `<copy>/src/jup.mjs` — the CLI entry §15.46 pins, beside the copy's stubs. */
+    const ENTRY = join(dirname(BUILT), "jup.mjs");
 
     /** What §15.43 tier 0 chooses for a suite running outside any `<home>`. */
     const HOST = realpathSync(process.execPath);
