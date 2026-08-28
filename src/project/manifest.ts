@@ -134,7 +134,7 @@ const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
  * truthiness: a declared-but-invalid value stops the walk and is then reported
  * by `parseSpec`, which is where an invalid value belongs.
  */
-function stopsWalk(data: Manifest | undefined, field: DevEnginesField): boolean {
+export function stopsWalk(data: Manifest | undefined, field: DevEnginesField): boolean {
   if (data === undefined) return false;
   // §15.39 — the top-level field speaks for package managers only, so a nested
   // manifest pinning `pnpm` says nothing about the runtime and must not stop a

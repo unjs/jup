@@ -57,7 +57,7 @@ import {
   resolutionKey,
   usesLockfile,
 } from "../project/lockfile.ts";
-import { discoverProjectSpec, NODE_MODULES_RE, parseSpec } from "../project/manifest.ts";
+import { discoverProjectSpec, NODE_MODULES_RE, parseSpec, stopsWalk } from "../project/manifest.ts";
 import {
   loadNpmrc,
   type NpmrcLevel,
@@ -507,7 +507,7 @@ function locateManifest(cwd: string): string | undefined {
     selected = target;
 
     // An unparseable manifest is where the real walk stopped, so it is the file
-    // to name — and a truthy `packageManager` is §03.1's own stop condition.
+    // to name.
     let data: unknown;
     try {
       data = parseManifest(content);
@@ -515,7 +515,13 @@ function locateManifest(cwd: string): string | undefined {
       return target;
     }
     if (typeof data !== "object" || data === null) return target;
-    if ((data as Manifest).packageManager) return target;
+    // Otherwise stop exactly where §03.1's walk stops. Sharing `stopsWalk` is
+    // the point: a local re-statement of it drifted, testing `packageManager`
+    // for truthiness and ignoring `devEngines` entirely — and since this runs
+    // only after discovery *threw*, the commonest reason to be here is an
+    // invalid `devEngines` block, the one case the copy sailed straight past to
+    // name an ancestor manifest that had nothing to do with the failure.
+    if (stopsWalk(data as Manifest, "packageManager")) return target;
   }
 
   return selected;
