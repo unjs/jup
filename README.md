@@ -9,6 +9,9 @@
 
 **jup (pronounced “yup”) makes sure every developer, CI job, and container runs the tool version selected by the project.**
 
+> [!WARNING]
+> jup is experimental. Its behavior may change between releases.
+
 jup is a fast, small tool version manager and a safer, more capable alternative to [Corepack](https://github.com/nodejs/corepack). It supports npm, pnpm, Yarn, aube, Bun, Deno, nub, and Node.js.
 
 Pin a tool once, then keep using its normal command:
