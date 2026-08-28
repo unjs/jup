@@ -106,6 +106,19 @@ describe("locating ourselves", () => {
 
     const buildPath = pathToFileURL(join("/build", "jup", "dist", "index.mjs")).href;
 
+    /**
+     * Bun spells its virtual root per platform — `/$bunfs/root` on POSIX,
+     * `B:\~BUN\root` on Windows — and a row that asserts the *root* has to use
+     * the local spelling. The POSIX one put through `path.win32` resolves
+     * against whatever drive the run happens to be on (`D:\$bunfs\root` in
+     * CI), which is an artifact of the test's input rather than anything a
+     * binary can see. Rows that only ask {@link isStandaloneBinary} are exempt:
+     * it folds separators and matches both spellings everywhere.
+     */
+    const IS_WIN32 = process.platform === "win32";
+    const binaryRoot = IS_WIN32 ? String.raw`B:\~BUN\root` : "/$bunfs/root";
+    const binaryMain = IS_WIN32 ? String.raw`B:\~BUN\root\jup.exe` : "/$bunfs/root/jup";
+
     it("detects the binary from `Bun.main`, not from the baked module URL", () => {
       asBun("/$bunfs/root/jup", () => expect(isStandaloneBinary(buildPath)).toBe(true));
     });
@@ -137,7 +150,7 @@ describe("locating ourselves", () => {
 
       // The scaffolded manifest is right there above `baked`, and it is still
       // not the answer: this run is a binary, and its root is the virtual one.
-      asBun("/$bunfs/root/jup", () => expect(getOwnRoot(baked)).toBe("/$bunfs/root"));
+      asBun(binaryMain, () => expect(getOwnRoot(baked)).toBe(binaryRoot));
     });
   });
 
