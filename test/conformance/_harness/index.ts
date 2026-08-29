@@ -11,6 +11,7 @@ export {
   publishBerry,
   pmScript,
   seedPackageManager,
+  tempRoot,
   versionOf,
 } from "./fixtures.ts";
 export type { Fixture } from "./fixtures.ts";

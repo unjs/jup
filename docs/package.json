@@ -2,9 +2,8 @@
   "name": "jup-docs",
   "private": true,
   "scripts": {
-    "assets": "node scripts/release-assets.mjs",
     "dev": "undocs dev",
-    "build": "node scripts/release-assets.mjs && undocs build"
+    "build": "undocs build"
   },
   "devDependencies": {
     "undocs": "npm:undocs-nightly@0.10.1-20260821-012344-bd4881e"

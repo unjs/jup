@@ -2,33 +2,51 @@
 #
 #   irm https://jup.unjs.io/install.ps1 | iex
 #
-# It downloads the standalone binary for this machine from the release mirror
-# under https://jup.unjs.io/r/, checks it against the digest GitHub recorded for
-# that asset, and puts it in the directory `jup enable` uses for shims,
-# %LOCALAPPDATA%\jup\bin, so one directory on PATH ends up holding jup and the
-# tool commands it links rather than two.
+# jup is a JavaScript program, so this script does not install jup. It makes
+# sure a runtime exists and then hands over to `jup self-install`, which is the
+# command that knows where the copy belongs (<home>\self\<version>) and which
+# names go on PATH. Everything below is bootstrap.
 #
-# The binary carries its own runtime, so nothing here needs Node.js or npm.
+# The runtime is whatever the machine already has. Only when there is neither a
+# recent enough Node.js nor a bun does this download one: bun, from the same
+# signed npm artifact jup's own table names (`@oven/bun-<target>`), into
+# <home>\bun beside the store rather than anywhere on the user's PATH.
 #
-# Unlike the POSIX script, this one puts the directory on the user PATH itself.
-# That directory belongs to jup and exists only because of this install, so
-# there is no shell profile a user already maintains for it to print a line
-# into. Pass -NoPathUpdate to skip that and print the command instead.
+# PATH is left alone. `self-install` chooses the shim directory and prints the
+# exact line to add when it is not already there, and two things telling the
+# user about PATH is one too many.
 #
 # Parameters / environment:
-#   -Dir <path> or JUP_INSTALL_DIR        where to put the binary
-#   JUP_INSTALL_BASE_URL                  mirror (default: https://jup.unjs.io)
+#   -Version <spec>         jup version or npm dist-tag (default: latest)
+#   -Dir <path>             where the jup and corepack commands go
+#   JUP_HOME                jup's store root (default: %LOCALAPPDATA%\jup)
+#   JUP_SHIM_DIRECTORY      where `self-install` puts jup and corepack
+#   JUP_INSTALL_REGISTRY    npm registry to bootstrap from
 
 [CmdletBinding()]
 param(
+  [string] $Version = 'latest',
   [string] $Dir,
-  [switch] $NoPathUpdate
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]] $Rest = @()
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$baseUrl = if ($env:JUP_INSTALL_BASE_URL) { $env:JUP_INSTALL_BASE_URL } else { 'https://jup.unjs.io' }
+# jup's `engines.node`. A machine whose only Node is older is treated as having
+# none: jup would install, and then fail on the first command with an error
+# about syntax rather than about the version.
+$nodeMinMajor = 22
+$nodeMinMinor = 18
+
+# `JUP_NPM_REGISTRY` is jup's own setting (section 11.2) and is honoured here for
+# the machine that has to reach a mirror for everything, bootstrap included.
+$registry =
+  if ($env:JUP_INSTALL_REGISTRY) { $env:JUP_INSTALL_REGISTRY }
+  elseif ($env:JUP_NPM_REGISTRY) { $env:JUP_NPM_REGISTRY }
+  elseif ($env:COREPACK_NPM_REGISTRY) { $env:COREPACK_NPM_REGISTRY }
+  else { 'https://registry.npmjs.org' }
 
 function Fail([string] $message) {
   # `throw` rather than `exit`, so an `irm | iex` run reports the failure and
@@ -36,121 +54,181 @@ function Fail([string] $message) {
   throw "jup install: $message"
 }
 
-# Two targets are published for Windows. RuntimeInformation reports the OS
-# architecture rather than the process's, so this is still right under a 32-bit
-# or emulated PowerShell on an arm64 machine, which PROCESSOR_ARCHITECTURE is
-# not.
-$osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-$arch = switch ($osArch) {
-  'X64' { 'x64' }
-  'Arm64' { 'arm64' }
-  default { Fail "unsupported architecture: $osArch (jup ships x64 and arm64 binaries)" }
+function Note([string] $message) {
+  # stderr, so only jup's own output reaches the pipeline.
+  [Console]::Error.WriteLine("jup install: $message")
 }
 
-$target = "windows-$arch"
-$asset = "jup-$target.tar.xz"
-
-if (-not $Dir) {
-  $Dir = if ($env:JUP_INSTALL_DIR) { $env:JUP_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'jup\bin' }
+# One field of a parsed registry document, or `$null` when it is absent.
+# `Set-StrictMode -Version Latest` turns a missing property into an exception, so
+# every read of a document this script did not write goes through here.
+function Get-Field($object, [string] $name) {
+  if ($null -eq $object) { return $null }
+  $property = $object.PSObject.Properties[$name]
+  if ($null -eq $property) { return $null }
+  return $property.Value
 }
 
-# tar.exe has shipped with Windows since 10 1803 and is libarchive, so it reads
-# .tar.xz without an xz command. There is no PowerShell fallback: Expand-Archive
-# is zip-only and .NET has no LZMA decoder.
-$tar = Get-Command tar.exe -ErrorAction SilentlyContinue
-if (-not $tar) {
-  Fail 'tar.exe was not found. It ships with Windows 10 1803 and later; on an older system, install jup with "npm install -g jup" instead.'
+# Section 7.1's chain, the Windows branch. install.sh is the other half.
+function Get-StoreHome {
+  if ($env:JUP_HOME) { return $env:JUP_HOME }
+  if ($env:COREPACK_HOME) { return $env:COREPACK_HOME }
+  $root =
+    if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME }
+    elseif ($env:LOCALAPPDATA) { $env:LOCALAPPDATA }
+    elseif ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'AppData\Local' }
+    else { Fail 'neither JUP_HOME nor LOCALAPPDATA is set' }
+  return Join-Path $root 'jup'
 }
 
-$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("jup-install-" + [System.Guid]::NewGuid().ToString('n'))
-New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+# The `{target}` half of `@oven/bun-{target}`, spelled the way bun spells it.
+# RuntimeInformation reports the OS architecture rather than the process's, so
+# this is still right under a 32-bit or emulated PowerShell on an arm64 machine,
+# which PROCESSOR_ARCHITECTURE is not.
+function Get-BunTarget {
+  $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+  if ($osArch -eq 'X64') { return 'windows-x64' }
+  if ($osArch -eq 'Arm64') { return 'windows-aarch64' }
+  Fail "unsupported architecture: $osArch (bun ships x64 and arm64 builds)"
+}
 
-try {
-  $archive = Join-Path $tmp $asset
+# Is this Node new enough to run jup? Any failure to start is simply "no".
+function Test-NodeSupported([string] $path) {
+  try { $reported = (& $path --version 2>$null) | Select-Object -First 1 } catch { return $false }
+  if ($reported -is [string] -and $reported -match '^v(\d+)\.(\d+)\.') {
+    $major = [int] $Matches[1]
+    $minor = [int] $Matches[2]
+    return $major -gt $nodeMinMajor -or ($major -eq $nodeMinMajor -and $minor -ge $nodeMinMinor)
+  }
+  return $false
+}
 
-  Write-Host "jup install: downloading $asset"
+# `sha512-<base64>`, the shape npm records in `dist.integrity`.
+function Get-Integrity([string] $path) {
+  $sha = [System.Security.Cryptography.SHA512]::Create()
+  $stream = [System.IO.File]::OpenRead($path)
+  try {
+    return 'sha512-' + [Convert]::ToBase64String($sha.ComputeHash($stream))
+  } finally {
+    $stream.Dispose()
+    $sha.Dispose()
+  }
+}
+
+# Advisory, not a gate: the registry serves both the metadata and the tarball, so
+# a host that could alter one could alter the other. It catches a truncated or
+# stale-cached download, which is what actually goes wrong here.
+function Assert-Integrity([string] $path, $expected, [string] $what) {
+  if (-not $expected) { return }
+  $actual = Get-Integrity $path
+  if ($actual -ne $expected) {
+    Fail "checksum mismatch for $what (expected $expected, got $actual)"
+  }
+}
+
+# One npm package tarball, unpacked into $into with its `package/` level stripped.
+function Expand-Package([string] $package, [string] $spec, [string] $into, [string] $stage) {
+  $meta = Invoke-RestMethod -Uri "$registry/$package/$spec" -UseBasicParsing
+  $dist = Get-Field $meta 'dist'
+  $tarball = Get-Field $dist 'tarball'
+  if (-not $tarball) { Fail "$registry/$package/$spec named no tarball" }
+
+  $archive = Join-Path $stage ([System.IO.Path]::GetRandomFileName() + '.tgz')
   # The default progress bar makes Invoke-WebRequest an order of magnitude
-  # slower on a file this size, and this one is ~30 MB.
+  # slower on files this size, and bun's is ~40 MB.
   $progress = $ProgressPreference
   $ProgressPreference = 'SilentlyContinue'
   try {
-    Invoke-WebRequest -Uri "$baseUrl/r/$asset" -OutFile $archive -UseBasicParsing
-    $index = Invoke-RestMethod -Uri "$baseUrl/r/index.json" -UseBasicParsing
+    Invoke-WebRequest -Uri $tarball -OutFile $archive -UseBasicParsing
   } finally {
     $ProgressPreference = $progress
   }
 
-  # Advisory, not a gate: the mirror serves both the archive and the index, so a
-  # host that could alter one could alter the other. It catches a truncated or
-  # stale-cached download, which is what actually goes wrong here.
-  $expected = ($index.assets | Where-Object { $_.name -eq $asset }).digest
-  if ($expected) {
-    $actual = 'sha256:' + (Get-FileHash -Path $archive -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($actual -ne $expected) {
-      Fail "checksum mismatch for $asset (expected $expected, got $actual)"
-    }
-  }
+  Assert-Integrity $archive (Get-Field $dist 'integrity') $package
 
-  & $tar.Path -xf $archive -C $tmp
-  if ($LASTEXITCODE -ne 0) { Fail "cannot unpack $asset" }
+  New-Item -ItemType Directory -Path $into -Force | Out-Null
+  & tar.exe -xzf $archive -C $into --strip-components=1
+  if ($LASTEXITCODE -ne 0) { Fail "cannot unpack $package" }
+}
 
-  $extracted = Join-Path $tmp "jup-$target.exe"
-  if (-not (Test-Path -LiteralPath $extracted)) { Fail "$asset did not contain jup-$target.exe" }
+# Download bun into <home>\bun. A sibling of `v1` and of `self`, for `self`'s
+# reason (section 7.11): `jup cache clean` frees cache entries, and a runtime the
+# installation depends on is not one.
+#
+# `$storeRoot` rather than `$home`: PowerShell variable names are case
+# insensitive, so a parameter called `$home` is the automatic `$HOME`.
+function Install-Bun([string] $storeRoot, [string] $stage) {
+  $target = Get-BunTarget
+  Note "no Node.js $nodeMinMajor.$nodeMinMinor+ and no bun found; downloading bun for $target"
 
-  New-Item -ItemType Directory -Path $Dir -Force | Out-Null
-  $dest = Join-Path $Dir 'jup.exe'
+  $staged = Join-Path $stage 'bun'
+  Expand-Package "@oven/bun-$target" 'latest' $staged $stage
 
-  # Windows refuses to overwrite a running executable but does allow renaming
-  # one out of the way, which is how a `jup` that is upgrading itself can still
-  # be replaced. The displaced file is deleted straight afterwards when nothing
-  # holds it, and otherwise on the next install.
-  $stale = "$dest.old"
-  if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force -ErrorAction SilentlyContinue }
-  if (Test-Path -LiteralPath $dest) { Rename-Item -LiteralPath $dest -NewName (Split-Path $stale -Leaf) -Force }
-  Move-Item -LiteralPath $extracted -Destination $dest -Force
-  if (Test-Path -LiteralPath $stale) { Remove-Item -LiteralPath $stale -Force -ErrorAction SilentlyContinue }
+  $exe = Join-Path $staged 'bin\bun.exe'
+  if (-not (Test-Path -LiteralPath $exe)) { Fail "@oven/bun-$target did not contain bin\bun.exe" }
 
-  $version = (& $dest --version 2>$null)
-  Write-Host "jup install: installed jup $version to $dest"
+  # Only reached when no usable bun was found at this path, so whatever is there
+  # is a failed or half-finished earlier attempt.
+  $dest = Join-Path $storeRoot 'bun'
+  New-Item -ItemType Directory -Path $storeRoot -Force | Out-Null
+  if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+  Move-Item -LiteralPath $staged -Destination $dest
 
-  # HKCU only. A machine-wide PATH needs elevation, and this install is
-  # per-user by construction.
-  #
-  # The registry is read and written directly rather than through
-  # [Environment]::SetEnvironmentVariable, which stores the value as REG_SZ and
-  # so silently freezes any `%VAR%` an existing user PATH was relying on. The
-  # read asks for the unexpanded value for the same reason: expanding it and
-  # writing it back would do the damage without the type change.
-  $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
-  try {
-    if (-not $envKey) { Fail 'cannot open HKCU\Environment to read PATH' }
-    $userPath = [string] $envKey.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
-    $onPath = @($userPath -split ';' | Where-Object { $_.Trim() } |
-      Where-Object { $_.TrimEnd('\') -ieq $Dir.TrimEnd('\') }).Count -gt 0
-    if (-not $onPath) {
-      if ($NoPathUpdate) {
-        Write-Host ''
-        Write-Host "  $Dir is not on PATH. Add it, then open a new terminal:"
-        Write-Host ''
-        Write-Host "    setx PATH `"$Dir;%PATH%`""
-        Write-Host ''
-      } else {
-        $updated = if ($userPath) { "$Dir;$userPath" } else { $Dir }
-        $envKey.SetValue('Path', $updated, 'ExpandString')
-        # That value is for processes started from now on; this one keeps the
-        # session that ran the installer working without a restart.
-        $env:Path = "$Dir;$env:Path"
-        Write-Host "jup install: added $Dir to your user PATH (open a new terminal for other apps to see it)."
-      }
-    }
-  } finally {
-    if ($envKey) { $envKey.Dispose() }
-  }
+  return (Join-Path $dest 'bin\bun.exe')
+}
 
-  # Not `jup enable`: shims point at a stub that imports the entry module, and
-  # a single-file binary has no such file on disk (see docs/.agents section 10.2).
-  # Linking the tool commands still needs the npm package.
-  Write-Host "Next: run 'jup use pnpm@12' in a project, or 'jup --help'."
+# The runtime to run jup under: the user's own first, then one an earlier run of
+# this script left behind. Node before bun because jup's Windows wrappers name
+# `node` in their bodies, so a machine with both wants that one.
+function Find-Runtime([string] $storeRoot) {
+  $node = Get-Command node.exe -ErrorAction SilentlyContinue
+  if ($node -and (Test-NodeSupported $node.Path)) { return $node.Path }
+
+  $bun = Get-Command bun.exe -ErrorAction SilentlyContinue
+  if ($bun) { return $bun.Path }
+
+  $sidecar = Join-Path $storeRoot 'bun\bin\bun.exe'
+  if (Test-Path -LiteralPath $sidecar) { return $sidecar }
+
+  return $null
+}
+
+# tar.exe has shipped with Windows since 10 1803 and is libarchive, so it reads
+# a gzipped tarball without a separate gzip. There is no PowerShell fallback:
+# Expand-Archive is zip-only.
+if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) {
+  Fail 'tar.exe was not found. It ships with Windows 10 1803 and later; on an older system, install jup with "npm install -g jup" instead.'
+}
+
+$storeHome = Get-StoreHome
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ('jup-install-' + [System.Guid]::NewGuid().ToString('n'))
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+try {
+  $runtime = Find-Runtime $storeHome
+  if (-not $runtime) { $runtime = Install-Bun $storeHome $tmp }
+
+  $unpacked = Join-Path $tmp 'jup'
+  Expand-Package 'jup' $Version $unpacked $tmp
+
+  $entry = Join-Path $unpacked 'bin\jup.mjs'
+  if (-not (Test-Path -LiteralPath $entry)) { Fail 'the jup package did not contain bin\jup.mjs' }
+
+  # Section 15.43 — the runtime hosting a chain that is about to run out of the
+  # store, named here so `self-install` uses the one this script chose rather
+  # than re-deriving it from a PATH that may have no `node` on it at all.
+  $env:JUP_HOST_RUNTIME = $runtime
+
+  $arguments = @('self-install')
+  if ($Dir) { $arguments += @('--install-directory', $Dir) }
+  if ($Rest) { $arguments += $Rest }
+
+  Note "installing jup with $runtime"
+
+  # The handover. From here everything the user sees is jup's own output: where
+  # the copy went, which names were linked, and the PATH line to add.
+  & $runtime $entry @arguments
+  if ($LASTEXITCODE -ne 0) { Fail "self-install exited with $LASTEXITCODE" }
 } finally {
   Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }

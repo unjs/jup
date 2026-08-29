@@ -411,3 +411,61 @@ for each (name, reference):
 > artifact bytes are available. Otherwise remove an unattributable marker `hash`, so
 > the promoted entry is usable only by an unpinned reference. Do not weaken
 > `readMarker`: a marker produced on another machine is not inherently trusted.
+
+## 7.11 The self-install root (`<home>/self`)
+
+`self-install` (§09.12) copies the tool itself into
+
+```
+<home>/
+├── lastKnownGood.json
+├── self/
+│   └── 0.4.2/
+│       ├── .jup                     # marker; `hash` is over the copied payload
+│       ├── package.json             # so §08.7's COREPACK_ROOT stops here
+│       ├── dist/                    # the bundle …
+│       └── bin/                     # … and the CLI entry with the shared stub
+└── v1/                              # everything else
+```
+
+The directory name is the tool's own version, and the layout below it is what was
+copied: a published package's `dist/` + `bin/` + manifest.
+
+`self/` is a **sibling of `v1`, not a child**, and that placement is normative. The
+copy it holds is what the shims on the user's `PATH` execute, so a `cache clean`
+(§07.9) that reached it would not free a cache entry but uninstall the tool. Neither
+`cache clean` nor `cache clean --all` may remove it.
+
+`self-upgrade` (§09.13) writes the same layout from a downloaded package rather than
+a copied one, into a directory named after the version the registry resolved.
+
+The marker is §07.2's. After a `self-install`, two of its fields differ from a
+downloaded entry's, and both differences follow from nothing having been downloaded:
+
+* `hash` is a `sha256` digest over the payload — each file's store-relative path, its
+  execute bit, and its bytes, in sorted order. It is not a verification: nothing
+  signed these files, and they came from a running process rather than a registry.
+  It answers one question, "are the files in the store already the ones I would
+  copy?", which is what makes a repeated `self-install` free and a rebuilt one at the
+  same version actually replace what is there.
+* `bin` names the entry point each of the tool's own names runs. Nothing resolves the
+  tool through §04, so the store never executes it; the field is there because a
+  marker that describes its own directory is what lets §07.5's promotion read it back.
+
+After a downloaded install (§09.13) `hash` is instead the artifact's own digest, which
+is what §07.2 records everywhere else; `bin` is unchanged.
+
+**`self/` holds one copy.** Once the shims name a version, every other version
+directory under `self/` is unreferenced — nothing resolves the tool through §04, so
+there is no second consumer — and both commands SHOULD delete them once the shims
+have been installed and verified. Two MUST NOT be touched: an entry whose name is not
+a version, which is not the tool's to interpret, and the copy the running process was
+started from, whose removal would pull files out from under a run still in progress
+and cannot succeed at all on Windows. Removal is best effort and never fails the
+command; whatever survives is retried on the next run.
+
+Replacing an occupied `<home>/self/<version>` renames it aside and deletes it after
+the promotion, rather than removing it first: the window in which the directory does
+not exist is then one rename long. A failed promotion puts the old directory back. On
+Windows the rename can fail outright — a directory holding a file a running process
+has open cannot be moved — and that is reported, naming the remedy, rather than retried.

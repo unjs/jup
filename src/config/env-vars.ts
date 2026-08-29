@@ -122,12 +122,6 @@ export const SYSTEM_ENV = {
   /** §10 — shell detection for `enable`'s hints. */
   SHELL: "SHELL",
   PSMODULEPATH: "PSModulePath",
-  /**
-   * Makes a Bun single-file executable behave as the `bun` CLI rather than
-   * running its own embedded entry. Written only into the child environment of
-   * §08.2's handover when we *are* such a binary; see `run/exec.ts`.
-   */
-  BUN_BE_BUN: "BUN_BE_BUN",
 } as const;
 
 /**

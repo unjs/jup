@@ -1202,6 +1202,22 @@ export async function runManagementCommand(args: string[]): Promise<number> {
         ? cmdInstallGlobal(rest)
         : cmdInstall(rest);
     }
+    case "self-install": {
+      // Lazily, like `enable`/`disable`, and for the same reason: §09.12 pulls
+      // in the whole of §10's shim machinery plus a tree copy, and no other
+      // command in this switch pays for either.
+      return import("./self-install.ts").then(({ cmdSelfInstall }) => cmdSelfInstall(rest));
+    }
+    // §09.13 — `upgrade` is the same command under a shorter name. It is
+    // deliberately *not* `up`, which updates the project's `packageManager`
+    // field (§09.4) and is corepack's own spelling for it; the two are adjacent
+    // enough that the help text distinguishes them outright.
+    case "self-upgrade":
+    case "upgrade": {
+      return import("./self-upgrade.ts").then(({ cmdSelfUpgrade }) =>
+        cmdSelfUpgrade(rest, command),
+      );
+    }
     case "pack": {
       return cmdPack(rest);
     }

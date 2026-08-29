@@ -12,6 +12,8 @@ This is the complete surface. Anything not here is out of scope (§01.7).
 <tool> install
 <tool> install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 <tool> pack [--json] [-o|--output <path>] [...name[@<version>]]
+<tool> self-install [--install-directory <path>|--system] [--force]
+<tool> self-upgrade | upgrade [--install-directory <path>|--system] [--force]
 <tool> up
 <tool> use <name[@<version>]>
 <tool> --version
@@ -260,3 +262,88 @@ tolerates a bare flag, defaulting to `jup.tgz`.
 A conforming implementation MUST NOT wrap, prefix, colourise, or buffer the package
 manager's own output. `<tool> yarn --version` prints exactly `1.22.4\n` and nothing
 else.
+
+## 9.12 `self-install`
+
+```
+<tool> self-install [--install-directory <path>|--system] [--force]
+```
+
+Installs **the tool itself**: it copies the running installation into the store and
+puts its own two names (§10.8) on `PATH`.
+
+```
+payload := the running installation — <root>/dist, <root>/bin, <root>/package.json
+  a source checkout (no dist/ and no bin/) → UsageError naming what it looked for
+version := the tool's own version
+hash    := digest over the payload's (relative path, mode bit, bytes)
+
+stdout: `Installing <tool>@<version>...\n`
+unless readMarker(<home>/self/<version>).hash === hash:
+    stage the payload in a temp directory, write its .jup marker, promote it
+    an occupied <home>/self/<version> is renamed aside first and deleted after
+stdout: `<tool> <version> -> <home>/self/<version>\n`
+
+install the shims (§10.8) into §10.4's directory
+stdout: `<names> -> <install directory>\n`      omitted when nothing was installed
+verify the result is on PATH (§15.29)
+```
+
+It resolves nothing, opens no socket, and never reads the project: the bytes it
+installs are the ones already running, which is the only way a command that installs
+the tool can be run by the tool it installs. It does not touch
+`lastKnownGood.json` — the tool is not a table entry.
+
+Both halves are idempotent. An unchanged payload writes nothing to the store, and a
+shim that is already correct is left alone (§10.2 property 4). The digest is what
+makes the first of those true, and it is also what makes a *changed* payload at the
+same version replace what is there — the case §07.5's promotion alone would treat as
+a lost race.
+
+The flags are §10.4's and §14.16's, with the meanings they have for `enable`.
+`--force` is what takes a name another tool owns, which is what replacing a
+Node-bundled `corepack` needs.
+
+## 9.13 `self-upgrade` (also spelled `upgrade`)
+
+```
+<tool> self-upgrade [--install-directory <path>|--system] [--force]
+```
+
+§09.12 with the payload fetched from the registry instead of copied from the
+running process. It is the only command that installs **the tool** from the network,
+and the only one whose artifact is not a table entry.
+
+```
+version+digest := §04.5's `latest` lookup for the tool's own package
+    signature-verified, release-age gated, and refused outright when it clears
+    no verification tier (§15.11)
+a version that is not semver → UsageError naming what the registry answered
+
+stdout: `Installing <tool>@<version>...\n`
+unless <home>/self/<version> holds a readable marker:
+    metadata → tarball URL (§07.3), download prompt (§05.5),
+    one pass: hash the stream while extracting it (§16.5, §07.4 strip 1)
+    digest mismatch → discard the temp directory, install nothing (§06.2)
+    the archive must contain dist/, bin/<cli entry> and bin/<shared stub>,
+      otherwise UsageError — a registry publishing something else under our name
+    grant the execute bit to those two files (§15.45)
+    write the .jup marker, promote (§07.5), replacing as §09.12 replaces
+
+<same as §09.12 from here>: announce, shim (§10.8), verify on PATH (§15.29)
+```
+
+Two differences from §09.12 are normative.
+
+1. **The marker's `hash` is the artifact's digest**, as it is for every other
+   download (§07.2) — not §09.12's digest over the copied payload. Nothing compares
+   contents here: a complete marker for that version is what says the work is done,
+   and it is what makes a second run cost one metadata request and no transfer.
+2. **Nothing downloaded is rewritten.** The shims are linked at the *published*
+   stub (§10.8's `verbatim` target); regenerating it from the running version's
+   source would put an old stub in front of a new bundle. The one permitted edit is
+   §15.46's shebang, and only under the condition that already governs it.
+
+`upgrade` is an accepted spelling of the same command. It is deliberately not `up`,
+which writes the project's `packageManager` field (§09.4); §12.1's usage line names
+whichever word was typed.

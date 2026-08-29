@@ -375,3 +375,44 @@ write could not work:
 
 When nothing needs writing, the install succeeds; here the write is load-bearing, and an `enable` that exited 0 would leave the
 user with shims that are silently inert.
+
+## 10.8 Self-install shims
+
+`self-install` (§09.12) claims the tool's **own** names — `jup` and `corepack`, the
+two keys of the package's `bin` — pointing them at the copy it just put in
+`<home>/self/<version>` (§07.11). Everything about *how* a name is claimed is §10.2
+and §10.3 unchanged: ownership, `--force`, §15.15's displacement, the idempotent
+no-write, the install-directory chain of §10.4, and §15.29's verification. Only the
+target differs, and it differs two ways:
+
+| Platform | Target |
+|---|---|
+| POSIX | the shared stub in the copy's `bin/`, exactly as `enable` links it |
+| Windows | §10.3's trio, naming the CLI entry under the interpreter |
+
+Three requirements follow.
+
+1. **The shared POSIX stub MUST recognise the tool's own names.** It already reads the
+   name it was invoked under (§10.1); finding one of its own, it behaves as the CLI
+   entry does — the download prompt defaults to `0` rather than `1` (§05.5), and the
+   argv is passed through unchanged rather than gaining a leading binary name.
+   Without the second, `jup use pnpm@12` reaches the entry point as
+   `["jup", "use", …]` and is rejected as an unknown command.
+2. **Windows wrappers MUST NOT be generated against a per-name stub here.** §10.3's
+   stub for `jup` would be `jup.mjs`, which is the CLI entry's own name; the wrappers
+   name that entry directly instead. Because they then name no stub, §14.16's
+   ownership test cannot recognise them the usual way, so these wrappers carry the
+   shim marker in a comment.
+3. **A copy the running version did not produce MUST be linked as it arrived.**
+   `self-install` copies the running installation, so the shared stub it links is one
+   this version would have written anyway and §10.1's regeneration is free to run.
+   `self-upgrade` (§09.13) installs a *different* version, whose stub belongs to it:
+   regenerating that file from the running version's source puts an old stub in front
+   of a new bundle, which is the one skew an upgrade exists to remove. The downloaded
+   stub is therefore linked verbatim, and the only byte that may change is the
+   shebang below — the same first-line-only rewrite §15.46 makes to the CLI entry, for
+   the same reason and under the same condition.
+
+Baking in the interpreter is §10.1's rule, unchanged and for its reason: the copy in
+the store opens `#!/usr/bin/env node` like any other installation, and with the tool's
+own `node` shim ahead of the runtime on `PATH` that lookup finds the shim.

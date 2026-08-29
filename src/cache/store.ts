@@ -43,6 +43,18 @@ export const LAST_KNOWN_GOOD_NAME = "lastKnownGood.json";
 /** §07.2 — the layout-version segment; bumping it abandons old caches wholesale. */
 export const LAYOUT_VERSION = "v1";
 
+/**
+ * §07.11 — where `self-install` keeps jup's own files.
+ *
+ * Beside `v1` rather than inside it, for the reason {@link LAST_KNOWN_GOOD_NAME}
+ * is: `cache clean` empties the cache, and the copy of jup that the shims on the
+ * user's `PATH` point at is not a cache entry. Under `v1` a `jup cache clean`
+ * would delete the very executable that ran it and leave every shim dying with
+ * `bad interpreter` — §15.43's failure, one directory over, and this time with
+ * no `enable` left to repair it.
+ */
+export const SELF_FOLDER_NAME = "self";
+
 function errorCode(error: unknown): string | undefined {
   return (error as NodeJS.ErrnoException | undefined)?.code;
 }
@@ -79,6 +91,11 @@ export function getInstallFolder(): string {
   return join(getHomeFolder(), LAYOUT_VERSION);
 }
 
+/** `<home>/self` — §07.11's root, one directory per installed version of jup. */
+export function getSelfFolder(): string {
+  return join(getHomeFolder(), SELF_FOLDER_NAME);
+}
+
 /**
  * §15.43 — does `file` live under the directory this tool owns?
  *
@@ -93,14 +110,25 @@ export function getInstallFolder(): string {
  * answer wrongly since nothing is inside a directory that is not there.
  */
 export function isInsideHome(file: string): boolean {
-  let home = getHomeFolder();
+  return isBelow(getHomeFolder(), file);
+}
+
+/**
+ * Is `file` below `root`? The shared half of the two tests above.
+ *
+ * `root` is resolved here and falls back to its literal spelling when it does
+ * not exist yet, which cannot answer wrongly since nothing is inside a directory
+ * that is not there.
+ */
+function isBelow(root: string, file: string): boolean {
+  let resolved = root;
   try {
-    home = realpathSync(home);
+    resolved = realpathSync(root);
   } catch {
     // Not created yet, or not readable: the literal spelling is the best there is.
   }
   // `..hidden` is a legal name, so the escape test compares whole segments.
-  const rel = relative(home, file);
+  const rel = relative(resolved, file);
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
@@ -663,6 +691,11 @@ function readdirSafe(dir: string): string[] {
  * §15.18: the survival is deliberate — a recorded default is a preference, not a
  * cache entry — but the documentation said otherwise, so `all` is the explicit
  * way to ask for both. Nothing else may remove that file implicitly.
+ *
+ * §07.11's `self/` survives both, and `all` does not reach it either: it holds
+ * the copy of jup the shims on `PATH` execute, so deleting it would not free a
+ * cache entry but uninstall the tool. Removing a self-install is a deliberate
+ * act and not a cache operation.
  */
 export function cacheClean(options?: { all?: boolean }): void {
   rmSync(getInstallFolder(), { recursive: true, force: true });

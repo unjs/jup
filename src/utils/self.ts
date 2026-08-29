@@ -4,7 +4,7 @@
 
 const { existsSync, readFileSync } = process.getBuiltinModule("node:fs");
 const { dirname, join } = process.getBuiltinModule("node:path");
-const { fileURLToPath, pathToFileURL } = process.getBuiltinModule("node:url");
+const { fileURLToPath } = process.getBuiltinModule("node:url");
 
 /**
  * Candidate names for the module a shim stub should import, best first.
@@ -19,6 +19,13 @@ const { fileURLToPath, pathToFileURL } = process.getBuiltinModule("node:url");
 export const ENTRY_CANDIDATES = ["index.mjs", "index.js", "index.ts"];
 
 /**
+ * The bundler's own folder in a published install. It is emptied on every build,
+ * which is why {@link STUB_FOLDER_NAME} is not inside it — and why §09.12 has to
+ * name both to copy an installation into the store.
+ */
+export const DIST_FOLDER_NAME = "dist";
+
+/**
  * Directories the entry module can sit in, relative to the folder holding the
  * stubs, best first. Forward slashes: these become `new URL` specifiers.
  *
@@ -31,7 +38,7 @@ export const ENTRY_CANDIDATES = ["index.mjs", "index.js", "index.ts"];
  * Beside first, so a source checkout that also happens to hold a build keeps
  * importing its own sources rather than a bundle that may be stale.
  */
-const ENTRY_FOLDERS = ["", "../dist/"];
+const ENTRY_FOLDERS = ["", `../${DIST_FOLDER_NAME}/`];
 
 /**
  * The one directory this package ships that is not the bundler's: `bin/`, a
@@ -87,73 +94,8 @@ function walkUp(from: string, matches: (dir: string) => boolean): string | undef
  * that it is running under a version manager. Yarn's `yarn init` reads it.
  */
 export function getOwnRoot(moduleUrl: string): string {
-  const from = dirname(fileURLToPath(ownModuleUrl(moduleUrl)));
+  const from = dirname(fileURLToPath(moduleUrl));
   return walkUp(from, (dir) => existsSync(join(dir, "package.json"))) ?? from;
-}
-
-/** `Bun.main` — the entry Bun started with — or `undefined` off Bun. */
-function entryPath(): string | undefined {
-  return (globalThis as { Bun?: { main?: string } }).Bun?.main;
-}
-
-/**
- * The URL to answer "where are we?" from, given a caller's `import.meta.url`.
- *
- * It is that URL everywhere except inside a compiled binary, where
- * {@link isStandaloneBinary} explains why it instead names the directory the
- * source sat in on the machine that ran `bun build`. Two things go wrong if that
- * path is believed: `COREPACK_ROOT` is handed to the package manager as a real
- * directory on someone else's disk, and `enable` — which is meant to refuse,
- * having no `bin/` inside the executable to link to — finds the build
- * checkout's stubs and links a user's `PATH` to *those*. The binary's own root
- * fails both honestly.
- *
- * Only there, though. `Bun.main` names whoever *started* Bun, which under the
- * `bun` CLI is someone else's entry — a script importing this bundle would be
- * told its own root — so every other run stays on the URL it was given.
- */
-export function ownModuleUrl(moduleUrl: string): string {
-  const main = isStandaloneBinary(moduleUrl) ? entryPath() : undefined;
-  return main === undefined ? moduleUrl : pathToFileURL(main).href;
-}
-
-/**
- * Are we running as a Bun single-file executable (`bun build --compile`)?
- *
- * Such a binary serves its own modules from a virtual filesystem — `/$bunfs/` on
- * POSIX, `B:\~BUN\` on Windows — and that path is the signal, being the only one
- * that separates a compiled binary from the same code under the `bun` CLI
- * (`process.versions.bun` is set for both). The `bun` test comes first so the
- * string work is skipped on every Node run, which is all of them in a published
- * install.
- *
- * It reads that path from `Bun.main` rather than from the module URL it is
- * handed, and the difference is not cosmetic. `scripts/compile.ts` builds with
- * `--format=cjs`, which `--bytecode` requires, and Bun resolves `import.meta.url`
- * in a CommonJS output *at build time*: every module in the binary reports the
- * absolute path its source sat at on the machine that compiled it. `Bun.main`
- * stays `/$bunfs/root/<name>` in both output formats. The argument is kept so
- * the Node paths — every published install — answer from their own URL as
- * before, and so the tests can ask about a layout they scaffolded.
- *
- * Both needles are load-bearing, and `Bun.main` is why the second is matched
- * loosely: it is a *path*, not a URL, so Windows spells the same root
- * `B:\~BUN\root\jup.exe` — backslashes where a `file://` URL had slashes. The
- * separators are folded before the test so one pair of needles covers a module
- * URL and a native path alike.
- *
- * It exists for one reason, and it is a runtime defect rather than a preference:
- * a standalone Bun executable resolves a bare specifier off disk without reading
- * the target's `package.json`, honouring neither `main` nor `exports` and only
- * finding `<pkg>/index.js`. npm's first require is `graceful-fs`, whose `main`
- * is `graceful-fs.js`, so §08.2's in-process handover cannot load npm at all
- * there. See `run/exec.ts` for what this gates, and `scripts/compile.ts` for
- * the measurements.
- */
-export function isStandaloneBinary(moduleUrl: string): boolean {
-  if (process.versions.bun === undefined) return false;
-  const main = (entryPath() ?? moduleUrl).replaceAll("\\", "/");
-  return main.includes("/$bunfs/") || main.includes("/~BUN/");
 }
 
 /**
@@ -230,6 +172,26 @@ export function findStubFolder(module: { directory: string; entry: string }): st
  * it from the folder its one caller already has.
  */
 export const CLI_ENTRY_NAME = "jup.mjs";
+
+/**
+ * **The names we answer to ourselves** — `package.json`'s two `bin` keys, and
+ * therefore the two names §09.12's `self-install` puts on `PATH`.
+ *
+ * They are the exception §10.1 carves out of the shared POSIX stub: every other
+ * name that reaches it is a package manager to be run, and these two are the
+ * management CLI. The stub reads the list to decide which of the two it was
+ * invoked as — see `shimSource` — so it lives here, beside {@link CLI_ENTRY_NAME},
+ * as the one statement of what "our own name" means.
+ *
+ * `corepack` is on it for the reason it is a `bin` key at all: a drop-in
+ * replacement has to answer to the name the machine already types.
+ */
+export const OWN_BIN_NAMES = ["jup", "corepack"] as const;
+
+/** Is `binName` one of {@link OWN_BIN_NAMES} rather than a package manager? */
+export function isOwnBinName(binName: string): boolean {
+  return (OWN_BIN_NAMES as readonly string[]).includes(binName);
+}
 
 /**
  * Our own CLI entry for the installation whose stubs are in `stubFolder`, or

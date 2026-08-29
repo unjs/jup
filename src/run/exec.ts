@@ -14,7 +14,7 @@ import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
 import type { BinSpec, InstallSpec } from "../types.ts";
-import { getOwnRoot as resolveOwnRoot, isStandaloneBinary } from "../utils/self.ts";
+import { getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
  * §08.7 — walk to the installation root because bundled chunks may be nested.
@@ -26,12 +26,6 @@ function getOwnRoot(): string {
   return ownRoot;
 }
 
-/** As {@link isStandaloneBinary}, for this module's own URL. Cached alongside. */
-let standalone: boolean | undefined;
-function inStandaloneBinary(): boolean {
-  standalone ??= isStandaloneBinary(import.meta.url);
-  return standalone;
-}
 /**
  * §15.13 points 1 and 5 — the per-user shim directory. Windows uses
  * `%LOCALAPPDATA%\jup\bin`.
@@ -375,39 +369,6 @@ export function execPackageManager(
   // none of which resolves a binary from `PATH`. Nothing of ours ever observes
   // the modified value.
   const shimDirectory = shimDirectoryFor(binName);
-
-  // A Bun single-file executable cannot perform the handover below: its resolver
-  // reads no `package.json` for a bare specifier off disk, so npm dies on its
-  // first require (see {@link isStandaloneBinary}). Re-enter ourselves as the
-  // `bun` CLI instead — `BUN_BE_BUN` makes this same binary run `binPath` with
-  // the full resolver — and let §08.4/§08.5's exit and signal handling come from
-  // the native path, which is exactly what it already does for a native child.
-  //
-  // Spawning rather than loading is what §08.2's rewrite below emulates, so the
-  // package manager sees the state it wants *more* directly here: `bun` installs
-  // its own entry as `require.main`, and nothing of ours precedes it.
-  //
-  // `BUN_BE_BUN` is inherited by whatever the package manager itself spawns. A
-  // grandchild that is another Bun executable would read it too — a real leak,
-  // and unfixable through an environment block. It stays acceptable only because
-  // this branch is the compiled binary, where `enable` cannot write shims
-  // (§10.1) and so nothing of ours is on `PATH` to be misread.
-  if (inStandaloneBinary()) {
-    const env = { ...process.env };
-    if (shimDirectory !== undefined) {
-      const path = pathWith(shimDirectory, process.env[SYSTEM_ENV.PATH]);
-      if (path !== undefined) setPath(env, path);
-    }
-    env[SYSTEM_ENV.BUN_BE_BUN] = "1";
-
-    // No `argv0`: the child is an interpreter running `binPath`, which is what
-    // §08.2 spells as `[execPath, binPath, ...]` for the in-process path. The
-    // native branch's `binName` would be wrong here — it names the package
-    // manager, not the runtime being started.
-    return import("./native.ts").then((native) =>
-      native.execNative(process.execPath, [binPath, ...argv], env),
-    );
-  }
 
   if (shimDirectory !== undefined) {
     const path = pathWith(shimDirectory, process.env[SYSTEM_ENV.PATH]);

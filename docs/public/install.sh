@@ -3,212 +3,289 @@
 #
 #   curl -fsSL https://jup.unjs.io/install.sh | sh
 #
-# It downloads the standalone binary for this machine from the release mirror
-# under https://jup.unjs.io/r/, checks it against the digest GitHub recorded for
-# that asset, and puts it in the same directory `jup enable` would put shims in:
-# $XDG_BIN_HOME or ~/.local/bin. That is deliberate — one directory on PATH ends
-# up holding `jup` and the tool commands it links, rather than two.
+# jup is a JavaScript program, so this script does not install jup. It makes
+# sure a runtime exists and then hands over to `jup self-install`, which is the
+# command that knows where the copy belongs (<home>/self/<version>) and which
+# names go on PATH. Everything below is bootstrap.
 #
-# The binary carries its own runtime, so nothing here needs Node.js or npm. That
-# is the whole reason this script exists next to `npm install -g jup`.
+# The runtime is whatever the machine already has. Only when there is neither a
+# recent enough Node.js nor a bun does this download one: bun, from the same
+# signed npm artifact jup's own table names (`@oven/bun-<target>`), into
+# <home>/bun beside the store rather than anywhere on the user's PATH.
 #
 # Environment:
-#   JUP_INSTALL_DIR       where to put the binary (default: as above)
-#   JUP_INSTALL_BASE_URL  mirror to download from (default: https://jup.unjs.io)
+#   JUP_HOME                jup's store root (default: $XDG_CACHE_HOME/jup)
+#   JUP_SHIM_DIRECTORY      where `self-install` puts jup and corepack
+#   JUP_INSTALL_REGISTRY    npm registry to bootstrap from
 #
-# Options: --dir <path> (same as JUP_INSTALL_DIR), --help.
+# Options: --version <spec> picks the jup release; --dir <path> is
+# `self-install --install-directory`. Anything else is passed through to
+# `self-install` unread, so its own parser reports it.
+#
+# Progress goes to stderr and only jup's own output reaches stdout, so a
+# `--json`-style consumer downstream sees nothing of the bootstrap.
 #
 # Everything is inside main(), called on the last line, so a download that is
 # cut short cannot run half a script.
 
 set -eu
 
-BASE_URL="${JUP_INSTALL_BASE_URL:-https://jup.unjs.io}"
+# jup's `engines.node`. A machine whose only Node is older is treated as having
+# none: jup would install, and then fail on the first command with an error
+# about syntax rather than about the version.
+NODE_MIN_MAJOR=22
+NODE_MIN_MINOR=18
+
+# `JUP_NPM_REGISTRY` is jup's own setting (§11.2) and is honoured here for the
+# machine that has to reach a mirror for everything, bootstrap included.
+REGISTRY="${JUP_INSTALL_REGISTRY:-${JUP_NPM_REGISTRY:-${COREPACK_NPM_REGISTRY:-https://registry.npmjs.org}}}"
+
+# Set by find_runtime or install_bun. A variable rather than a return value:
+# `err` inside a command substitution would only leave the subshell, and this
+# is the one result worth not routing through one.
+RUNTIME=
 
 err() {
   echo "jup install: $*" >&2
   exit 1
 }
 
+note() {
+  echo "jup install: $*" >&2
+}
+
 usage() {
   cat <<'EOF'
-Usage: install.sh [--dir <path>]
+Usage: install.sh [--version <spec>] [--dir <path>] [self-install options]
 
-  --dir <path>  Install jup here instead of $XDG_BIN_HOME or ~/.local/bin.
-  --help        Show this message.
+  --version <spec>  jup version or npm dist-tag to install (default: latest).
+  --dir <path>      Install the jup and corepack commands here.
+  --help            Show this message.
+
+Any other option is passed through to `jup self-install`.
 EOF
 }
 
-# `uname` names for the eight targets `pnpm compile` builds.
-detect_target() {
-  os=$(uname -s)
-  arch=$(uname -m)
-
-  case "$arch" in
-  x86_64 | amd64) arch=x64 ;;
-  aarch64 | arm64) arch=arm64 ;;
-  *) err "unsupported architecture: $arch (jup ships x64 and arm64 binaries)" ;;
-  esac
-
-  case "$os" in
-  Darwin) echo "darwin-$arch" ;;
-  Linux)
-    # glibc and musl need different binaries, and a musl system running the
-    # glibc build fails at exec with a message about a missing loader rather
-    # than anything that names the cause. `ldd --version` writes its banner to
-    # stderr on musl and exits non-zero, so both streams are read and the exit
-    # status ignored; the loader check is the fallback for systems with no ldd.
-    if (ldd --version 2>&1 || true) | grep -qi musl ||
-      [ -n "$(find /lib /lib64 -maxdepth 1 -name 'ld-musl-*' -print -quit 2>/dev/null)" ]; then
-      echo "linux-$arch-musl"
-    else
-      echo "linux-$arch"
-    fi
-    ;;
-  *)
-    err "unsupported system: $os (this script covers macOS and Linux; on Windows use install.ps1)"
-    ;;
-  esac
+have() {
+  command -v "$1" >/dev/null 2>&1
 }
 
-# §10.4's default, minus the parts only `enable` can answer: the alternates it
-# considers are about which directory already holds shims, and none do yet.
-default_dir() {
-  if [ "$(uname -s)" != Darwin ] && [ -n "${XDG_BIN_HOME:-}" ]; then
-    case "$XDG_BIN_HOME" in
-    /*)
-      echo "$XDG_BIN_HOME"
-      return
-      ;;
-    esac
-  fi
-  [ -n "${HOME:-}" ] || err "HOME is not set; pass --dir <path>"
-  echo "$HOME/.local/bin"
-}
-
-download() {
-  # -f so a 404 is a failure rather than an HTML page written to disk.
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$1" -o "$2"
-  elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$2" "$1"
-  else
-    err "neither curl nor wget is available"
-  fi
-}
-
+# curl and wget cover every machine this script runs on; a system with neither
+# has no way to have fetched this script either, though it may have been copied.
 fetch() {
-  if command -v curl >/dev/null 2>&1; then
+  if have curl; then
     curl -fsSL "$1"
-  elif command -v wget >/dev/null 2>&1; then
+  elif have wget; then
     wget -qO- "$1"
   else
     err "neither curl nor wget is available"
   fi
 }
 
-sha256_of() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | cut -d' ' -f1
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | cut -d' ' -f1
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 "$1" | sed 's/.*= *//'
+download() {
+  # -f so a 404 is a failure rather than an HTML page written to disk.
+  if have curl; then
+    curl -fsSL "$1" -o "$2"
+  elif have wget; then
+    wget -qO "$2" "$1"
+  else
+    err "neither curl nor wget is available"
   fi
 }
 
-# The digest GitHub recorded for the asset, read out of the mirror's index.json
-# without a JSON parser: quotes, spaces, and commas are stripped, then the first
-# `digest` line after the matching `name` line is the answer.
-published_digest() {
-  # Errors are dropped rather than reported: a mirror with no index is a
-  # verification this run skips, not a failure to show the user.
-  fetch "$BASE_URL/r/index.json" 2>/dev/null | tr -d ' ",' | awk -F: -v n="$1" '
-    $1 == "name" && $2 == n { found = 1 }
-    found && $1 == "digest" { print $3; exit }
-  '
+# The one string this script reads out of a registry document, without a JSON
+# parser: npm serves these on a single line, and `dist.tarball` and
+# `dist.integrity` each appear once in a version document.
+json_string() {
+  sed -n 's/.*"'"$1"'":"\([^"]*\)".*/\1/p'
+}
+
+# Advisory, not a gate: the registry serves both the metadata and the tarball,
+# so a host that could alter one could alter the other. It catches a truncated
+# or stale-cached download, which is what actually goes wrong here. Skipped
+# rather than failed when there is no openssl to compute `sha512-<base64>`.
+check_integrity() {
+  have openssl || return 0
+  [ -n "$2" ] || return 0
+  actual="sha512-$(openssl dgst -sha512 -binary "$1" | openssl base64 -A)"
+  [ "$2" = "$actual" ] || err "checksum mismatch for $3 (expected $2, got $actual)"
+}
+
+# §07.1's chain, minus the Windows branch. `install.ps1` is the other half.
+store_home() {
+  if [ -n "${JUP_HOME:-}" ]; then
+    echo "$JUP_HOME"
+  elif [ -n "${COREPACK_HOME:-}" ]; then
+    echo "$COREPACK_HOME"
+  elif [ -n "${XDG_CACHE_HOME:-}" ]; then
+    echo "$XDG_CACHE_HOME/jup"
+  elif [ -n "${HOME:-}" ]; then
+    echo "$HOME/.cache/jup"
+  fi
+}
+
+# The `{target}` half of `@oven/bun-{target}`, spelled the way bun spells it.
+# Linux is the one platform where <platform>-<arch> does not name an ABI, and
+# the musl test is §15.28's: musl wins only when it is the *only* loader
+# present, so a glibc distribution with musl merely installed stays glibc.
+bun_target() {
+  case "$(uname -m)" in
+  x86_64 | amd64) arch=x64 ;;
+  aarch64 | arm64) arch=aarch64 ;;
+  *) return 1 ;;
+  esac
+
+  case "$(uname -s)" in
+  Darwin) echo "darwin-$arch" ;;
+  Linux)
+    case "$arch" in
+    aarch64) musl=/lib/ld-musl-aarch64.so.1 glibc=/lib/ld-linux-aarch64.so.1 ;;
+    *) musl=/lib/ld-musl-x86_64.so.1 glibc=/lib64/ld-linux-x86-64.so.2 ;;
+    esac
+    if [ -e "$musl" ] && [ ! -e "$glibc" ]; then
+      echo "linux-$arch-musl"
+    else
+      echo "linux-$arch"
+    fi
+    ;;
+  *) return 1 ;;
+  esac
+}
+
+# Is this Node new enough to run jup? Called in an `if`, so `set -e` is off
+# inside it and a runtime that fails to start is simply not a candidate.
+node_supported() {
+  # `node_` prefixes throughout: sh has no local scope, and an unprefixed
+  # `version` here is main's `--version` a few frames up.
+  node_version=$("$1" --version 2>/dev/null) || return 1
+  node_version=${node_version#v}
+  node_major=${node_version%%.*}
+  node_rest=${node_version#*.}
+  node_minor=${node_rest%%.*}
+  case "$node_major$node_minor" in "" | *[!0-9]*) return 1 ;; esac
+  if [ "$node_major" -gt "$NODE_MIN_MAJOR" ]; then return 0; fi
+  if [ "$node_major" -eq "$NODE_MIN_MAJOR" ] && [ "$node_minor" -ge "$NODE_MIN_MINOR" ]; then
+    return 0
+  fi
+  return 1
+}
+
+# The runtime to run jup under: the user's own first, then one an earlier run of
+# this script left behind. Node before bun because jup's POSIX shims name `node`
+# in their shebang, so a machine with both wants the one they will find.
+find_runtime() {
+  for candidate in node bun; do
+    path=$(command -v "$candidate" 2>/dev/null) || continue
+    if [ "$candidate" = bun ] || node_supported "$path"; then
+      RUNTIME=$path
+      return 0
+    fi
+  done
+  if [ -x "$1/bun/bin/bun" ]; then
+    RUNTIME="$1/bun/bin/bun"
+    return 0
+  fi
+  return 1
+}
+
+# Download bun into <home>/bun. A sibling of `v1` and of `self`, for `self`'s
+# reason (§07.11): `jup cache clean` frees cache entries, and a runtime the
+# installation depends on is not one.
+install_bun() {
+  home=$1
+  tmp=$2
+
+  target=$(bun_target) ||
+    err "no supported bun build for $(uname -s) $(uname -m); install Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR or newer and re-run"
+  package="@oven/bun-$target"
+
+  note "no Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR+ and no bun found; downloading bun for $target"
+
+  meta=$(fetch "$REGISTRY/$package/latest") || err "cannot reach $REGISTRY/$package"
+  tarball=$(echo "$meta" | json_string tarball)
+  [ -n "$tarball" ] || err "$REGISTRY/$package/latest named no tarball"
+
+  download "$tarball" "$tmp/bun.tgz" || err "download failed: $tarball"
+  check_integrity "$tmp/bun.tgz" "$(echo "$meta" | json_string integrity)" "$package"
+
+  mkdir -p "$tmp/bun"
+  tar -xzf "$tmp/bun.tgz" -C "$tmp/bun" --strip-components=1 || err "cannot unpack $package"
+  [ -f "$tmp/bun/bin/bun" ] || err "$package did not contain bin/bun"
+  chmod 755 "$tmp/bun/bin/bun"
+
+  # Only reached when no usable bun was found at this path, so whatever is there
+  # is a failed or half-finished earlier attempt.
+  mkdir -p "$home" || err "cannot create $home"
+  rm -rf "$home/bun"
+  mv "$tmp/bun" "$home/bun" || err "cannot write to $home"
+  RUNTIME="$home/bun/bin/bun"
 }
 
 main() {
-  dir=""
-  while [ $# -gt 0 ]; do
-    case "$1" in
-    --dir)
-      [ $# -ge 2 ] || err "--dir needs a path"
-      dir="$2"
-      shift 2
-      ;;
-    --dir=*)
-      dir="${1#--dir=}"
+  version=latest
+
+  # Options this script answers are consumed; the rest are rotated to the end of
+  # "$@" and handed to `self-install`, which has its own parser and its own
+  # messages for them.
+  remaining=$#
+  while [ "$remaining" -gt 0 ]; do
+    arg=$1
+    shift
+    remaining=$((remaining - 1))
+    case "$arg" in
+    --version)
+      [ "$remaining" -gt 0 ] || err "--version needs a value"
+      version=$1
       shift
+      remaining=$((remaining - 1))
       ;;
+    --version=*) version=${arg#--version=} ;;
+    --dir)
+      [ "$remaining" -gt 0 ] || err "--dir needs a path"
+      set -- "$@" --install-directory "$1"
+      shift
+      remaining=$((remaining - 1))
+      ;;
+    --dir=*) set -- "$@" --install-directory "${arg#--dir=}" ;;
     -h | --help)
       usage
       return 0
       ;;
-    *) err "unknown option: $1" ;;
+    *) set -- "$@" "$arg" ;;
     esac
   done
 
-  [ -n "$dir" ] || dir="${JUP_INSTALL_DIR:-$(default_dir)}"
+  have tar || err "tar is required"
 
-  target=$(detect_target)
-  asset="jup-$target.tar.xz"
-
-  command -v tar >/dev/null 2>&1 || err "tar is required"
+  home=$(store_home)
+  [ -n "$home" ] || err "neither HOME nor JUP_HOME is set"
 
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/jup-install.XXXXXX") || err "cannot create a temporary directory"
   trap 'rm -rf "$tmp"' EXIT INT TERM
 
-  echo "jup install: downloading $asset"
-  download "$BASE_URL/r/$asset" "$tmp/$asset" ||
-    err "download failed: $BASE_URL/r/$asset"
+  find_runtime "$home" || install_bun "$home" "$tmp"
 
-  # Advisory, not a gate: the mirror serves both the archive and the index, so a
-  # host that could alter one could alter the other. It catches a truncated or
-  # stale-cached download, which is what actually goes wrong here.
-  expected=$(published_digest "$asset" || true)
-  actual=$(sha256_of "$tmp/$asset" || true)
-  if [ -n "$expected" ] && [ -n "$actual" ]; then
-    [ "$expected" = "$actual" ] ||
-      err "checksum mismatch for $asset (expected $expected, got $actual)"
-  fi
+  meta=$(fetch "$REGISTRY/jup/$version") || err "cannot reach $REGISTRY/jup/$version"
+  tarball=$(echo "$meta" | json_string tarball)
+  [ -n "$tarball" ] || err "$REGISTRY/jup/$version named no tarball; is '$version' a published version?"
 
-  # -J where it exists, `xz` piped in where tar has no LZMA support of its own.
-  if ! tar -xJf "$tmp/$asset" -C "$tmp" 2>/dev/null; then
-    command -v xz >/dev/null 2>&1 || err "tar cannot read .tar.xz and xz is not installed"
-    xz -dc "$tmp/$asset" | tar -xf - -C "$tmp" || err "cannot unpack $asset"
-  fi
-  [ -f "$tmp/jup-$target" ] || err "$asset did not contain jup-$target"
+  note "installing jup with $RUNTIME"
+  download "$tarball" "$tmp/jup.tgz" || err "download failed: $tarball"
+  check_integrity "$tmp/jup.tgz" "$(echo "$meta" | json_string integrity)" jup
 
-  mkdir -p "$dir" || err "cannot create $dir"
-  [ -w "$dir" ] || err "$dir is not writable"
+  mkdir -p "$tmp/jup"
+  tar -xzf "$tmp/jup.tgz" -C "$tmp/jup" --strip-components=1 || err "cannot unpack jup"
+  [ -f "$tmp/jup/bin/jup.mjs" ] || err "the jup package did not contain bin/jup.mjs"
 
-  # Written beside the destination and renamed over it, so an interrupted
-  # install cannot leave a half-written `jup`, and a running one is replaced
-  # rather than truncated under itself.
-  chmod 755 "$tmp/jup-$target"
-  mv -f "$tmp/jup-$target" "$dir/.jup.new" || err "cannot write to $dir"
-  mv -f "$dir/.jup.new" "$dir/jup" || err "cannot install $dir/jup"
+  # §15.43 — the runtime hosting a chain that is about to run out of the store,
+  # named here so `self-install` uses the one this script chose rather than
+  # re-deriving it from a PATH that may have no `node` on it at all.
+  JUP_HOST_RUNTIME="$RUNTIME"
+  export JUP_HOST_RUNTIME
 
-  version=$("$dir/jup" --version 2>/dev/null || echo "?")
-  echo "jup install: installed jup $version to $dir/jup"
-
-  case ":${PATH:-}:" in
-  *":$dir:"*) ;;
-  *)
-    echo
-    echo "  $dir is not on PATH. Add it:"
-    echo
-    echo "    export PATH=\"$dir:\$PATH\""
-    echo
-    ;;
-  esac
-
-  # Not `jup enable`: shims point at a stub that imports the entry module, and
-  # a single-file binary has no such file on disk (§10.2). Linking the tool
-  # commands still needs the npm package.
-  echo "Next: run 'jup use pnpm@12' in a project, or 'jup --help'."
+  # The handover. From here everything the user sees is jup's own output: where
+  # the copy went, which names were linked, and the PATH line to add.
+  "$RUNTIME" "$tmp/jup/bin/jup.mjs" self-install "$@"
 }
 
 main "$@"

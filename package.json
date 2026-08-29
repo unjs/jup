@@ -35,7 +35,6 @@
   "scripts": {
     "bench": "node scripts/bench.mjs",
     "build": "obuild",
-    "compile": "bun scripts/compile.ts",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",

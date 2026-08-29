@@ -159,29 +159,15 @@ export async function ensureInstalled(
 
   const tmp = createTempDir();
   try {
-    const response = await httpGet(source.url, { registryOrigin: source.registryUrl });
-    const body = response.body;
-    if (body === null) {
-      throw new Error(messages.requestFailed(source.url));
-    }
-
-    // §16.5 — the one pass. One branch feeds the digest, the other gunzip+tar
-    // (or the file writer); both are consumed concurrently so `tee` never has
-    // to buffer more than the slower consumer is behind by.
-    const [digestBranch, contentBranch] = body.tee();
     const streamAlgo = expected?.algo ?? algo;
-    const digesting = hashStream(digestBranch, streamAlgo);
-    const writing =
-      ext === TARBALL_EXT
-        ? extract(contentBranch, tmp, { strip: 1 })
-        : writeStreamToFile(contentBranch, join(tmp, posix.basename(pathname)));
-
-    // `allSettled`, not `all`: a rejected extraction must not leave the digest
-    // promise unhandled, and the body still has to drain either way.
-    const [digestOutcome, writeOutcome] = await Promise.allSettled([digesting, writing]);
-    if (writeOutcome.status === "rejected") throw writeOutcome.reason as Error;
-    if (digestOutcome.status === "rejected") throw digestOutcome.reason as Error;
-    const streamDigest = digestOutcome.value;
+    const streamDigest = await streamArtifact(source.url, {
+      algo: streamAlgo,
+      registryUrl: source.registryUrl,
+      write: (stream) =>
+        ext === TARBALL_EXT
+          ? extract(stream, tmp, { strip: 1 })
+          : writeStreamToFile(stream, join(tmp, posix.basename(pathname))),
+    });
 
     // A `.js` URL is a single-file artifact; tarballs are installed whole.
     const singleFileName = ext === SCRIPT_EXT ? posix.basename(pathname) : undefined;
@@ -286,6 +272,45 @@ export async function confirmDownload(url: string): Promise<void> {
 
   process.stderr.write("\n");
 }
+
+/**
+ * §16.5 — fetch `url` and hash it while it is being written, in one pass, and
+ * return the digest of what actually arrived.
+ *
+ * One branch of the tee feeds the digest and the other feeds `write` — gunzip
+ * plus tar, or the single-file writer — and both are consumed concurrently, so
+ * the tee never has to buffer more than the slower consumer is behind by. That
+ * is also the only reason `allSettled` is right here: a rejected extraction must
+ * not leave the digest promise unhandled, and the body has to drain either way.
+ *
+ * Exported because §09.13 downloads an artifact the table knows nothing about
+ * and must do it under exactly these rules; nothing about this depends on the
+ * caller being a table entry.
+ */
+export async function streamArtifact(
+  url: string,
+  options: {
+    algo: string;
+    registryUrl: string;
+    write: (stream: ReadableStream<Uint8Array>) => Promise<unknown>;
+  },
+): Promise<string> {
+  const response = await httpGet(url, { registryOrigin: options.registryUrl });
+  const body = response.body;
+  if (body === null) {
+    throw new Error(messages.requestFailed(url));
+  }
+
+  const [digestBranch, contentBranch] = body.tee();
+  const digesting = hashStream(digestBranch, options.algo);
+  const writing = options.write(contentBranch);
+
+  const [digestOutcome, writeOutcome] = await Promise.allSettled([digesting, writing]);
+  if (writeOutcome.status === "rejected") throw writeOutcome.reason as Error;
+  if (digestOutcome.status === "rejected") throw digestOutcome.reason as Error;
+  return digestOutcome.value;
+}
+
 /**
  * Select the artifact registry and apply its configured origin independently.
  */
@@ -695,7 +720,7 @@ function assertVerificationTier(
 }
 
 /** §06.2 + §14.11 — constant-time, and the message format is load-bearing (§12.7). */
-function assertDigest(expected: string, actual: string): void {
+export function assertDigest(expected: string, actual: string): void {
   if (!compareDigest(expected, actual)) {
     throw new Error(messages.mismatchHashes(expected, actual));
   }
