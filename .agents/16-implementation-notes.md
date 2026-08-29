@@ -31,8 +31,7 @@ static files that import the bundle by a relative specifier:
 | --- | --- | --- |
 | `dist/index.mjs` | the bundle; also the package's `exports` | `pnpm build` |
 | `bin/jup.mjs` | `package.json`'s `bin` target, for `jup` and `corepack` | `pnpm build` |
-| `bin/shim-proxy.mjs` | §10.2's one POSIX stub for every name | `pnpm build` |
-| `bin/<B>.mjs` | §10.3's per-name stubs, which only Windows reads | `pnpm build` |
+| `bin/<B>.mjs` | §10.2's per-name stubs, one per table binary, read on every platform | `pnpm build` |
 | `src/bin.ts` | the CLI entry a source checkout runs (`node src/bin.ts`) | — |
 
 `bin/` is a sibling of `dist/`, not a child, because the bundler empties `dist/` on

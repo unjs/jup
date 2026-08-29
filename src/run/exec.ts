@@ -14,7 +14,7 @@ import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
 import type { BinSpec, InstallSpec } from "../types.ts";
-import { getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
+import { CLI_ENTRY_NAME, getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
  * §08.7 — walk to the installation root because bundled chunks may be nested.
@@ -125,14 +125,7 @@ export function shimDirectoryCandidates(): string[] {
 export const SHIM_MARKER = "@jup-shim";
 
 /**
- * §10.2 — the shared stub every POSIX shim links to. It carries no binary name,
- * so it cannot collide with one: every table name is a bare command, and this is
- * the only file in `dist/` with a hyphen.
- */
-export const PROXY_STUB_NAME = "shim-proxy.mjs";
-
-/**
- * §10.3 — the per-name stub a Windows wrapper invokes. `.mjs` so the runtime
+ * §10.2 — the stub a shim points at, one per binary name. `.mjs` so the runtime
  * knows the format from the name and never walks up for a `package.json`
  * `"type"` (§14.27). Here for the reason `SHIM_MARKER` is: §14.16's ownership
  * test reads it on every invocation.
@@ -171,10 +164,14 @@ function readHeadSync(file: string, length: number): string | undefined {
  * Is the entry at `file` a shim **we** wrote, rather than any file that happens
  * to wear the name?
  *
- * A POSIX shim is a symlink to the shared stub (§10.2), so the open follows it
+ * A POSIX shim is a symlink to a stub of ours (§10.2), so the open follows it
  * and reads the stub's banner: a link is ours exactly when what it points at is.
  * §10.3's Windows wrappers cannot carry the marker (their bodies are byte-exact)
  * and are recognised by shebang plus the {@link stubNameFor} stub they invoke.
+ *
+ * Two names satisfy the dangling case, one per shape a link of ours can have:
+ * the per-name stub §10.2 writes, and {@link CLI_ENTRY_NAME} for the two names
+ * §10.8 points at the CLI entry itself.
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
@@ -187,7 +184,7 @@ export function isOurShim(file: string, binName: string): boolean {
       return false;
     }
     const target = basename(link);
-    return target === PROXY_STUB_NAME || target === stubNameFor(binName);
+    return target === stubNameFor(binName) || target === CLI_ENTRY_NAME;
   }
   if (head.includes(SHIM_MARKER)) return true;
   // All three shapes, and not gated on the platform — `isOurEntry` reads them
@@ -231,6 +228,11 @@ export function isOurShim(file: string, binName: string): boolean {
  * a run *through* a shim already holds the answer and opens nothing. Both halves
  * of that test are load-bearing — a promotion decided on a name alone is what the
  * banner check exists to prevent.
+ *
+ * The branch is an optimisation and never an answer of its own: a runtime that
+ * *does* `realpath` `argv[1]` — bun does — simply fails the name comparison and
+ * pays for the loop below, which reads the same directories and returns the same
+ * directory. Nothing about correctness rests on which runtime is reading this.
  */
 function shimDirectoryFor(binName: string): string | undefined {
   const configured = readEnv(ENV.SHIM_DIRECTORY);

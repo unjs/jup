@@ -7,7 +7,15 @@
  * enough" (§07.2). Both are asserted here against real processes.
  */
 
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -313,15 +321,32 @@ describe("§13.8 store, cache and offline", () => {
  * ------------------------------------------------------------------ */
 
 describe.skipIf(process.platform === "win32")("§15.44 cache clean spares the interpreter", () => {
+  /** The one stub these rows pin. Any name in the table would do. */
+  const PINNED_STUB = "yarn.mjs";
+
   /**
-   * A copy of the tool per row: these rewrite the shared stub, and the
-   * repository's own `src/shim-proxy.mjs` is a file every other suite reads.
+   * A copy of the tool per row: these rewrite a stub, and the repository's own
+   * stub folder is a set of files every other suite reads.
+   *
+   * The whole folder is normalised to `#!/usr/bin/env node` before `interpreter`
+   * is pinned into one file, which is what makes the row say what it means. §10.2
+   * gives every name its own stub, so the copied folder holds a dozen of them,
+   * and their first lines are whatever the working tree happened to have — a
+   * developer's own `enable node` leaves absolute paths in a source checkout's
+   * stubs. Reproducing "an install shimmed by an older build" means the pin is
+   * on exactly one file and every other stub is relocatable.
    */
   function toolWithShebang(interpreter: string): string {
     const bin = copyTool();
-    const stub = join(dirname(bin), "shim-proxy.mjs");
-    const source = readFileSync(stub, "utf8");
-    writeFileSync(stub, `#!${interpreter}\n${source.slice(source.indexOf("\n") + 1)}`);
+    const folder = dirname(bin);
+    for (const name of readdirSync(folder)) {
+      if (!name.endsWith(".mjs")) continue;
+      const file = join(folder, name);
+      const source = readFileSync(file, "utf8");
+      if (!source.startsWith("#!")) continue;
+      const shebang = name === PINNED_STUB ? `#!${interpreter}` : "#!/usr/bin/env node";
+      writeFileSync(file, `${shebang}\n${source.slice(source.indexOf("\n") + 1)}`);
+    }
     return bin;
   }
 

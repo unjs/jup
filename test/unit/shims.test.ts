@@ -44,7 +44,6 @@ import {
   interpreterPath,
   pathExportLine,
   perUserShimDirectory,
-  PROXY_STUB_NAME,
   readDisplacedRecord,
   rehashNotice,
   removePosixLink,
@@ -97,19 +96,19 @@ const ENTRY_SOURCE = `export async function runMain(argv) {
 }
 `;
 
-/** The relative symlink target `enable` must install for a binary name. */
 /**
- * §14.15 — every POSIX shim points at the same stub, whatever name it wears, so
- * this takes no binary name any more. The Windows wrappers still name their own
- * (`expectedWin32Stub`).
+ * §10.2 — the relative symlink target `enable` must install for a binary name,
+ * and the same path §10.3's Windows wrappers cite.
+ *
+ * One helper for both platforms, because there is one stub per name on both.
  */
-function expectedTarget(from = binDir): string {
-  return relative(from, join(dist, PROXY_STUB_NAME));
+function expectedTarget(binName: string, from = binDir): string {
+  return relative(from, join(dist, stubNameFor(binName)));
 }
 
-/** §10.3 — Windows keeps one stub per name; this is the path its wrappers cite. */
-function expectedWin32Stub(binName: string, from = binDir): string {
-  return relative(from, join(dist, stubNameFor(binName)));
+/** The stub `enable <binName>` writes and links — §10.2's target, absolute. */
+function stubPath(binName: string): string {
+  return join(dist, stubNameFor(binName));
 }
 
 function write(file: string, content: string, mode = 0o644): void {
@@ -118,11 +117,10 @@ function write(file: string, content: string, mode = 0o644): void {
 }
 
 /**
- * `enable` leaves a different shape behind on each platform: §10.2's one
- * relative symlink to the shared stub, or §10.3's three regular files citing a
- * per-name one. Rows that only care *that* the name was taken assert through
- * this rather than reaching for `readlink`, which is `EINVAL` on a Windows
- * wrapper.
+ * `enable` leaves a different shape behind on each platform: §10.2's relative
+ * symlink to the name's own stub, or §10.3's three regular files citing it.
+ * Rows that only care *that* the name was taken assert through this rather than
+ * reaching for `readlink`, which is `EINVAL` on a Windows wrapper.
  */
 function expectShim(dir: string, binName: string): void {
   if (process.platform === "win32") {
@@ -130,12 +128,12 @@ function expectShim(dir: string, binName: string): void {
       expect(existsSync(join(dir, `${binName}${extension}`))).toBe(true);
     }
     expect(readFileSync(join(dir, `${binName}.cmd`), "utf8")).toContain(
-      expectedWin32Stub(binName, dir).replaceAll("/", "\\"),
+      expectedTarget(binName, dir).replaceAll("/", "\\"),
     );
     return;
   }
   expect(lstatSync(join(dir, binName)).isSymbolicLink()).toBe(true);
-  expect(readlinkSync(join(dir, binName))).toBe(expectedTarget(dir));
+  expect(readlinkSync(join(dir, binName))).toBe(expectedTarget(binName, dir));
 }
 
 /**
@@ -592,15 +590,14 @@ describe("enable (§10.2)", () => {
   });
 
   // §10.3 is explicit that Windows has no idempotency short-circuit: all three
-  // wrappers are rewritten on every run, and there is no shared `shim-proxy.mjs`
-  // for the row to age either. The claim is POSIX's alone.
+  // wrappers are rewritten on every run. The claim is POSIX's alone.
   it.skipIf(process.platform === "win32")(
     "122: is idempotent — an already-correct symlink is not rewritten",
     async () => {
       await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist);
 
       const file = join(binDir, "yarn");
-      const stub = join(dist, PROXY_STUB_NAME);
+      const stub = stubPath("yarn");
       const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
       lutimesSync(file, past, past);
       lutimesSync(stub, past, past);
@@ -627,7 +624,7 @@ describe("enable (§10.2)", () => {
     async () => {
       expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
-      const stub = join(dist, PROXY_STUB_NAME);
+      const stub = stubPath("yarn");
       // The published shape. The mtime goes back far enough that a rewrite —
       // rather than the chmod §10.2 property 5 asks for — would show below.
       chmodSync(stub, 0o644);
@@ -640,7 +637,7 @@ describe("enable (§10.2)", () => {
       expect(statSync(stub).mtime.getTime()).toBe(past.getTime());
       // And the shim still points at it, so what was repaired is the file the
       // kernel checks when the name is executed.
-      expect(readlinkSync(join(binDir, "yarn"))).toBe(expectedTarget());
+      expect(readlinkSync(join(binDir, "yarn"))).toBe(expectedTarget("yarn"));
       expect(warn).not.toHaveBeenCalled();
     },
   );
@@ -650,7 +647,7 @@ describe("enable (§10.2)", () => {
     async () => {
       expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
-      const stub = join(dist, PROXY_STUB_NAME);
+      const stub = stubPath("yarn");
       chmodSync(stub, 0o755);
       // `ctime` is what a chmod moves, and the only thing it moves when the mode
       // it writes is the mode already there. §10.2 property 4 and §10.7 both
@@ -675,7 +672,7 @@ describe("enable (§10.2)", () => {
     async () => {
       expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
-      const stub = join(dist, PROXY_STUB_NAME);
+      const stub = stubPath("yarn");
       for (const mode of [0o744, 0o750, 0o700]) {
         chmodSync(stub, mode);
         const before = statSync(stub).ctimeMs;
@@ -697,7 +694,7 @@ describe("enable (§10.2)", () => {
 
     await generatePosixLink(binDir, dist, "yarn");
 
-    expect(readlinkSync(file)).toBe(expectedTarget());
+    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -711,7 +708,7 @@ describe("enable (§10.2)", () => {
 
     await expect(generatePosixLink(binDir, dist, "yarn")).resolves.toBe(file);
 
-    expect(readlinkSync(file)).toBe(expectedTarget());
+    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
   });
 
   it("173: replaces a shim whose target no longer exists (§15.14, #751)", async () => {
@@ -765,7 +762,7 @@ describe("enable (§10.2)", () => {
     await generatePosixLink(binDir, dist, "yarn");
 
     expect(warn).not.toHaveBeenCalled();
-    expect(readlinkSync(file)).toBe(expectedTarget());
+    expect(readlinkSync(file)).toBe(expectedTarget("yarn"));
   });
 
   // §10.2 scopes the Yarn Switch guard to POSIX, and `generateWin32Link` says so
@@ -791,7 +788,7 @@ describe("enable (§10.2)", () => {
       );
       expect(readlinkSync(file)).toBe(join(switchBin, "yarn"));
       // `yarnpkg` is a different entry and is installed normally.
-      expect(readlinkSync(join(binDir, "yarnpkg"))).toBe(expectedTarget());
+      expect(readlinkSync(join(binDir, "yarnpkg"))).toBe(expectedTarget("yarnpkg"));
     },
   );
 
@@ -833,7 +830,7 @@ describe("enable (§10.2)", () => {
       prompt: "1",
     });
     // The stub is executable in its own right, for the `#!/usr/bin/env node` path.
-    expectMode(join(dist, PROXY_STUB_NAME), 0o755);
+    expectMode(stubPath("yarn"), 0o755);
   });
 
   /**
@@ -1337,7 +1334,7 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
 
     expect(await cmdEnable([`--install-directory=${binDir}`, "node"], dist)).toBe(0);
 
-    const stub = readFileSync(join(dist, PROXY_STUB_NAME), "utf8");
+    const stub = readFileSync(stubPath("node"), "utf8");
     expect(stub.split("\n")[0]).toBe(`#!${host}`);
     // The property, stated the way the bug is: nothing `cache clean` removes.
     expect(stub).not.toContain(store);
@@ -1382,7 +1379,7 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
     // The other copy's stub, and a shim of the shape §10.2 leaves pointing at it.
     const otherDist = join(root, "other-dist");
     mkdirSync(otherDist);
-    const otherStub = join(otherDist, PROXY_STUB_NAME);
+    const otherStub = join(otherDist, stubNameFor("yarn"));
     write(otherStub, `#!${store}\n// ${SHIM_MARKER}\n`, 0o755);
     symlinkSync(relative(otherBin, otherStub), join(otherBin, "yarn"));
 
@@ -1452,7 +1449,7 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
     // Not a partial install: the name is untaken and the shipped stub — which a
     // `#!/usr/bin/env node` fallback would have left in place — was never written.
     expect(existsSync(join(binDir, "node"))).toBe(false);
-    expect(existsSync(join(dist, PROXY_STUB_NAME))).toBe(false);
+    expect(existsSync(stubPath("node"))).toBe(false);
   });
 
   /**
@@ -1465,9 +1462,7 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
     vi.stubEnv("PATH", [dirname(ourNodeShim("shims")), dirname(store)].join(delimiter));
 
     expect(await cmdEnable([`--install-directory=${binDir}`, "pnpm"], dist)).toBe(0);
-    expect(readFileSync(join(dist, PROXY_STUB_NAME), "utf8").split("\n")[0]).toBe(
-      "#!/usr/bin/env node",
-    );
+    expect(readFileSync(stubPath("pnpm"), "utf8").split("\n")[0]).toBe("#!/usr/bin/env node");
   });
 
   /**
@@ -1486,12 +1481,12 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
       // a write to a file already in it, and what a system package install
       // actually leaves behind is root-owned files the user cannot open for
       // writing. Both are what §10.7 means by "read-only".
-      chmodSync(join(dist, PROXY_STUB_NAME), 0o555);
+      chmodSync(stubPath("pnpm"), 0o555);
       chmodSync(dist, 0o555);
 
       try {
         await expect(cmdEnable([`--install-directory=${binDir}`, "node"], dist)).rejects.toThrow(
-          stubNotWritable(join(dist, PROXY_STUB_NAME)),
+          stubNotWritable(stubPath("pnpm")),
         );
         // §10.7 — and the case that must keep working: a warm `enable` of
         // anything else compares before it writes, so it never touches `dist`.
@@ -1499,7 +1494,7 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
         expect(warn).not.toHaveBeenCalled();
       } finally {
         chmodSync(dist, 0o755);
-        chmodSync(join(dist, PROXY_STUB_NAME), 0o755);
+        chmodSync(stubPath("pnpm"), 0o755);
       }
     },
   );
@@ -1515,9 +1510,9 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
    * one that would help there.
    */
   it("254: the not-executable message names the stub and a remedy that reaches it", () => {
-    const message = stubNotExecutable(join(dist, PROXY_STUB_NAME));
+    const message = stubNotExecutable(stubPath("pnpm"));
 
-    expect(message).toContain(join(dist, PROXY_STUB_NAME));
+    expect(message).toContain(stubPath("pnpm"));
     expect(message).toContain("chmod +x");
     // Not §15.43's: neither of those moves this file, and "without node" is
     // wrong advice here — the bit is needed whichever names are enabled.
@@ -1621,7 +1616,7 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
     expectMode(entry, 0o755);
     // The stub the shims link to is the same property one file over, and it
     // goes through a `chmod` of its own.
-    expectMode(join(dist, PROXY_STUB_NAME), 0o755);
+    expectMode(stubPath("node"), 0o755);
   });
 
   it("leaves it byte-identical when no `node` shim is claimed (§10.7)", async () => {
@@ -1806,7 +1801,7 @@ exit $ret
   it("131: writes <B>, <B>.cmd and <B>.ps1, byte for byte", async () => {
     await generateWin32Link(binDir, dist, "yarn");
 
-    const rel = expectedWin32Stub("yarn");
+    const rel = expectedTarget("yarn");
     const file = join(binDir, "yarn");
 
     expect(readFileSync(file, "utf8")).toBe(expectedSh(rel.replaceAll("\\", "/")));
@@ -1890,20 +1885,16 @@ describe("the shipped static files", () => {
     expect(read(CLI_ENTRY_NAME)).toBe(cliEntrySource());
   });
 
-  it("the POSIX stub is what `shimSource()` writes for the built entry", () => {
-    expect(read(PROXY_STUB_NAME)).toBe(shimSource(BUILT_ENTRY_SPECIFIER));
-  });
-
   it.for(SHIPPED_NAMES.map((name) => [name]))(
-    "the win32 stub for %s is what `shimSource()` writes for it",
+    "the stub for %s is what `shimSource()` writes for it",
     ([binName]) => {
-      expect(read(stubNameFor(binName!))).toBe(shimSource(BUILT_ENTRY_SPECIFIER, binName));
+      expect(read(stubNameFor(binName!))).toBe(shimSource(BUILT_ENTRY_SPECIFIER, binName!));
     },
   );
 
   it("holds those and nothing else — a name left the table without its stub going too", () => {
     expect(readdirSync(shipped).sort()).toEqual(
-      [CLI_ENTRY_NAME, PROXY_STUB_NAME, ...SHIPPED_NAMES.map((name) => stubNameFor(name))].sort(),
+      [CLI_ENTRY_NAME, ...SHIPPED_NAMES.map((name) => stubNameFor(name))].sort(),
     );
   });
 

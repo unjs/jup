@@ -29,7 +29,7 @@ import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   cliEntrySource,
-  PROXY_STUB_NAME,
+  stubNameFor,
   selfWin32Wrappers,
   SHIM_MARKER,
   shimSource,
@@ -66,9 +66,11 @@ function builtTool(version: string = VERSION): { root: string; entry: string } {
   mkdirSync(join(root, "bin"), { recursive: true });
   const entry = join(root, "bin", CLI_ENTRY_NAME);
   writeFileSync(entry, cliEntrySource());
-  writeFileSync(join(root, "bin", PROXY_STUB_NAME), shimSource(BUILT_ENTRY_SPECIFIER));
+  // One §10.2 stub beside it, so the copied payload has the shape a published
+  // install has: `enable` links these, `self-install` links the entry above.
+  writeFileSync(join(root, "bin", stubNameFor("pnpm")), shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"));
   chmodSync(entry, 0o755);
-  chmodSync(join(root, "bin", PROXY_STUB_NAME), 0o755);
+  chmodSync(join(root, "bin", stubNameFor("pnpm")), 0o755);
 
   writeFileSync(
     join(root, "package.json"),
@@ -142,7 +144,7 @@ describe("§09.12 self-install", () => {
     // the manifest §08.7 reads back as `COREPACK_ROOT`.
     expect(statSync(join(selfDir, "dist", "index.mjs")).isFile()).toBe(true);
     expect(statSync(join(selfDir, "bin", CLI_ENTRY_NAME)).isFile()).toBe(true);
-    expect(statSync(join(selfDir, "bin", PROXY_STUB_NAME)).isFile()).toBe(true);
+    expect(statSync(join(selfDir, "bin", stubNameFor("pnpm"))).isFile()).toBe(true);
     expect(JSON.parse(readFileSync(join(selfDir, "package.json"), "utf8")).version).toBe(VERSION);
 
     // §07.2's marker, which is what makes the directory readable as an install.
@@ -164,8 +166,8 @@ describe("§09.12 self-install", () => {
     expect(statSync(join(fixture.home, "self", VERSION)).isDirectory()).toBe(true);
   });
 
-  // §10.1 — the shared stub reads its own name, finds one of ours, and passes
-  // the argv through instead of prepending a binary name. Without that, this is
+  // §10.8 — both names link the CLI entry, which passes the argv through
+  // instead of prepending a binary name. Without that, this is
   // `Unknown command "jup"`.
   it.skipIf(IS_WINDOWS)("installs a jup that runs, under both of its names", async () => {
     const { shimDir, options } = selfFixture();

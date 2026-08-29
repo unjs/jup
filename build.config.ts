@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync 
 import { join } from "node:path";
 import { defineBuildConfig } from "obuild/config";
 import { DEFINITIONS, getBinariesFor } from "./src/config/table.ts";
-import { cliEntrySource, PROXY_STUB_NAME, shimSource, stubNameFor } from "./src/commands/shims.ts";
+import { cliEntrySource, shimSource, stubNameFor } from "./src/commands/shims.ts";
 import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME, STUB_FOLDER_NAME } from "./src/utils/self.ts";
 
 /** Our own version, taken from the manifest **once, here**, and baked in below. */
@@ -114,14 +114,12 @@ const GENERATED_MARKER = "edits are overwritten.";
  * the files straight out of the tree.
  */
 export function writeStubFolder(folder: string): string[] {
-  // The POSIX stub, once: §14.15 has it read its own name from `argv[1]`, so one
-  // file serves every binary. The per-name stubs are §10.3's, and Windows is the
-  // only thing that reads them. No interpreter is passed, so the shipped files
-  // keep `#!/usr/bin/env node` and stay relocatable; `enable` bakes in an
+  // §10.2's stubs, one per binary name on every platform, plus the CLI entry
+  // §10.8 points our own two names at. No interpreter is passed, so the shipped
+  // files keep `#!/usr/bin/env node` and stay relocatable; `enable` bakes in an
   // absolute path only where §10.1 says it must.
   const sources = new Map<string, string>([
     [CLI_ENTRY_NAME, cliEntrySource()],
-    [PROXY_STUB_NAME, shimSource(BUILT_ENTRY_SPECIFIER)],
     ...Object.keys(DEFINITIONS)
       .flatMap((name) => getBinariesFor(name))
       .map(

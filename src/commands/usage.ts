@@ -41,9 +41,15 @@ export const GENERIC_USAGE_LINE = "$ jup <command>";
  *
  * Every branch reassembles the line from its own captures, so with colour off
  * (`NO_COLOR`, a pipe, an agent) the result is `HELP_TEXT` byte for byte.
+ *
+ * `text` is a seam for the suite, and production passes nothing. The heading
+ * rule below turns on a *shape* the help text is not obliged to keep having —
+ * there is no wrapped line ending in a colon in it today — so a row that could
+ * only feed it {@link HELP_TEXT} would assert the rule by proxy at best, and
+ * silently stop asserting it the next time the prose is rewrapped.
  */
-export function formatHelp(colors: Palette): string {
-  const lines = HELP_TEXT.split("\n");
+export function formatHelp(colors: Palette, text: string = HELP_TEXT): string {
+  const lines = text.split("\n");
 
   return lines
     .map((line, index) =>
@@ -108,8 +114,11 @@ function paintHelpLine(line: string, previous: string, colors: Palette): string 
   if (synopsis === null) {
     // A heading is a flush-left line ending in a colon that *opens* a block. The
     // blank line in front is what carries it: the prose wraps, and a wrapped
-    // line ends in a colon often enough ("… that never needs elevation
-    // (§15.13):") that the colon alone would bold a sentence fragment.
+    // line can end in a colon — "… installed to a per-user directory:" — often
+    // enough that the colon alone would bold a sentence fragment. No paragraph
+    // in the current text wraps that way, which is a fact about this wording
+    // rather than a property of it; the suite feeds `formatHelp` a paragraph
+    // that does.
     const heading = line.endsWith(":") && !line.startsWith(" ") && previous === "";
     return heading ? colors.bold(line) : line;
   }

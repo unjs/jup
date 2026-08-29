@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { cliEntrySource, PROXY_STUB_NAME, shimSource } from "../../src/commands/shims.ts";
+import { cliEntrySource, shimSource, stubNameFor } from "../../src/commands/shims.ts";
 import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME } from "../../src/utils/self.ts";
 import {
   cleanupFixtures,
@@ -89,8 +89,8 @@ function publishedTool(version: string, entry: string): Uint8Array {
     // to grant the bit itself.
     { path: `package/bin/${CLI_ENTRY_NAME}`, content: cliEntrySource(), mode: 0o644 },
     {
-      path: `package/bin/${PROXY_STUB_NAME}`,
-      content: shimSource(BUILT_ENTRY_SPECIFIER),
+      path: `package/bin/${stubNameFor("pnpm")}`,
+      content: shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"),
       mode: 0o644,
     },
   ]);
@@ -185,7 +185,7 @@ describe("§09.13 self-upgrade", () => {
     // needs to travel with them.
     expect(existsSync(join(selfDir, "dist", "index.mjs"))).toBe(true);
     expect(existsSync(join(selfDir, "bin", CLI_ENTRY_NAME))).toBe(true);
-    expect(existsSync(join(selfDir, "bin", PROXY_STUB_NAME))).toBe(true);
+    expect(existsSync(join(selfDir, "bin", stubNameFor("pnpm")))).toBe(true);
     expect(JSON.parse(readFileSync(join(selfDir, "package.json"), "utf8")).version).toBe(VERSION);
 
     // §07.2's marker, with §07.11's meaning: `hash` is the artifact's digest.
@@ -210,9 +210,10 @@ describe("§09.13 self-upgrade", () => {
 
       await run(["self-upgrade"], options);
 
-      for (const name of [CLI_ENTRY_NAME, PROXY_STUB_NAME]) {
-        expect(statSync(join(selfDir, "bin", name)).mode & 0o111).not.toBe(0);
-      }
+      // §10.8 points both of our names at the CLI entry, so it is the one file
+      // the command has to make executable; the per-name stubs beside it are a
+      // later `enable`'s business (§15.45).
+      expect(statSync(join(selfDir, "bin", CLI_ENTRY_NAME)).mode & 0o111).not.toBe(0);
 
       // Both names, through the shims the command just wrote, answering out of
       // the copy in the store.
@@ -226,16 +227,20 @@ describe("§09.13 self-upgrade", () => {
     },
   );
 
-  it("§10.8 — links the downloaded stub rather than rewriting it", async () => {
+  it("§10.8 — links the downloaded CLI entry rather than rewriting it", async () => {
     const { selfDir, options } = upgradeFixture();
 
     await run(["self-upgrade"], options);
 
-    // Byte for byte what the tarball carried. An upgrade that regenerated this
-    // file from the *running* version's source would put an old stub in front of
-    // a new bundle.
-    expect(readFileSync(join(selfDir, "bin", PROXY_STUB_NAME), "utf8")).toBe(
-      shimSource(BUILT_ENTRY_SPECIFIER),
+    // Byte for byte what the tarball carried. This is the file §10.8 points both
+    // of our names at, and an upgrade that regenerated it from the *running*
+    // version's source would put an old entry in front of a new bundle.
+    expect(readFileSync(join(selfDir, "bin", CLI_ENTRY_NAME), "utf8")).toBe(cliEntrySource());
+
+    // The per-name stubs travel untouched too: nothing links them until a later
+    // `enable`, which is where §10.2 writes or repairs one.
+    expect(readFileSync(join(selfDir, "bin", stubNameFor("pnpm")), "utf8")).toBe(
+      shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"),
     );
   });
 

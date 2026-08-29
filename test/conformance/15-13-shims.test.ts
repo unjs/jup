@@ -712,24 +712,35 @@ describe("§14.25 — the stub resolves its own entry", () => {
   });
 });
 
-describe("§14.15 — one stub, dispatching on the name it was invoked under", () => {
-  it.skipIf(IS_WINDOWS)("244: two shims share a target and still reach their own", async () => {
+/* ------------------------------------------------------------------ *
+ * §10.2 — row 244: the name a shim runs is written into the file
+ *
+ * The alternative is a single stub reading `basename(process.argv[1])`,
+ * which rests on node's promise that it does not `realpath` that value.
+ * Bun makes no such promise — it replaces `argv[1]` with the script's
+ * realpath — and a stub that trusted it would take its own filename for
+ * a package manager name under every such runtime.
+ *
+ * The name is a literal in each stub, and both rows below are about
+ * that: the first that dispatch is per-name, the second that it does
+ * not consult `argv[1]` to get there.
+ * ------------------------------------------------------------------ */
+
+describe("§10.2 — the name a stub runs is baked into it", () => {
+  it.skipIf(IS_WINDOWS)("244: each name links its own stub and reaches its own tool", async () => {
     const { fixture, shimDir, options } = shimFixture();
     fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
     seedPackageManager(fixture.home, "yarn", "1.22.4");
 
     expect((await run(["enable", "yarn", "pnpm"], options)).exitCode).toBe(0);
 
-    // One target for both names. This is the property: nothing in the dist
-    // folder is named after a binary, so there is no per-name file to go stale
-    // when the tool is upgraded or removed (§15.14, #751).
-    const yarnLink = readlinkSync(join(shimDir, "yarn"));
-    expect(readlinkSync(join(shimDir, "pnpm"))).toBe(yarnLink);
-    expect(basename(yarnLink)).not.toBe("yarn.mjs");
-    expect(basename(yarnLink)).not.toBe("pnpm.mjs");
+    // One stub per name, and no two names sharing one. The staleness §15.14
+    // worried about is handled by `enable` rewriting the link, not by there
+    // being a single file to point at.
+    expect(basename(readlinkSync(join(shimDir, "yarn")))).toBe("yarn.mjs");
+    expect(basename(readlinkSync(join(shimDir, "pnpm")))).toBe("pnpm.mjs");
 
-    // And the shared stub still tells them apart, because the name comes from
-    // `argv[1]` rather than from the file. The yarn shim runs the pinned yarn…
+    // The yarn shim runs the pinned yarn…
     const asYarn = await run(["--version"], { ...options, bin: join(shimDir, "yarn") });
     expect(asYarn.exitCode).toBe(0);
     expect(asYarn.stdout).toBe("1.22.4\n");
@@ -739,6 +750,25 @@ describe("§14.15 — one stub, dispatching on the name it was invoked under", (
     const asPnpm = await run(["--version"], { ...options, bin: join(shimDir, "pnpm") });
     expect(asPnpm.exitCode).toBe(1);
     expect(asPnpm.stderr).toContain("This project is configured to use yarn");
+  });
+
+  it.skipIf(IS_WINDOWS)("244: and dispatches the same however `argv[1]` is spelled", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
+    seedPackageManager(fixture.home, "yarn", "1.22.4");
+
+    expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);
+
+    // The shim, run by its *resolved* path rather than by the name on `PATH`.
+    // That is the argv a runtime which realpaths `argv[1]` produces — bun does —
+    // and it is reachable from node by naming the stub outright. A stub that
+    // read its name from `argv[1]` would answer `yarn.mjs` here; one carrying
+    // its own name cannot tell the two invocations apart.
+    const stub = resolve(shimDir, readlinkSync(join(shimDir, "yarn")));
+    const direct = await run(["--version"], { ...options, bin: stub });
+
+    expect(direct.exitCode).toBe(0);
+    expect(direct.stdout).toBe("1.22.4\n");
   });
 });
 
@@ -775,9 +805,9 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
   "§15.43 — the interpreter a shim names",
   () => {
     /**
-     * Two tool copies of their own. These rows rewrite the shared stub's
-     * shebang and make one of them read-only, and `TOOL` above is a directory
-     * every other row in this file reads.
+     * Two tool copies of their own. These rows rewrite stub shebangs and make
+     * one copy read-only, and `TOOL` above is a directory every other row in
+     * this file reads.
      */
     const PINNED = copyTool();
     const READ_ONLY = copyTool();
@@ -909,22 +939,30 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
         expect(refused.stdout).not.toContain("/usr/bin/env");
         expect(existsSync(join(shimDir, "node"))).toBe(false);
 
-        // The adjacent message: the package directory is read-only, so the stub
-        // cannot be rewritten to carry the pin. Seed it first, or the failure
+        // The adjacent message: the package directory is read-only, so the stubs
+        // cannot be rewritten to carry the pin. Seed one first, or the failure
         // would be "no stub yet" rather than "the stub needs rewriting".
         expect((await run(["enable", "pnpm"], { ...options, bin: READ_ONLY })).exitCode).toBe(0);
         const stub = stubFor(shimDir, "pnpm");
-        // The file *and* the directory: a read-only directory alone still permits
-        // a write to a file already inside it, and a system package install
-        // leaves behind files the user cannot open for writing.
+        const stubFolder = dirname(stub);
+        // The files *and* the directory: a read-only directory alone still
+        // permits a write to a file already inside it, and a system package
+        // install leaves behind files the user cannot open for writing.
         await chmod(stub, 0o555);
-        await chmod(dirname(stub), 0o555);
+        await chmod(stubFolder, 0o555);
 
         try {
           const unwritable = await run(["enable", "node"], { ...options, bin: READ_ONLY });
 
           expect(unwritable.exitCode).toBe(1);
-          expect(unwritable.stdout).toContain(stub);
+          // §10.1 pins every stub in the folder, not only the ones this run
+          // writes, so which one the refusal names is whichever the sweep
+          // reaches first. What the row is about is that it names a *stub* —
+          // a file in jup's own folder — rather than the shim directory.
+          const named = /Unable to update (\S+?):/.exec(unwritable.stdout)?.[1];
+          expect(named).toBeDefined();
+          expect(dirname(named!)).toBe(stubFolder);
+          expect(named!.endsWith(".mjs")).toBe(true);
           // The two remedies that move the *shims* are not offered, because
           // neither of them moves this file.
           expect(unwritable.stdout).not.toContain("--install-directory <a writable");
@@ -967,7 +1005,7 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
 const execFileAsync = promisify(execFile);
 
 describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable", () => {
-  /** Its own copy: this row rewrites the mode of the shared stub inside it. */
+  /** Its own copy: this row rewrites the mode of a stub inside it. */
   const PUBLISHED = copyTool();
 
   /** The stub `<shimDir>/<binName>` points at — §10.2's relative symlink. */

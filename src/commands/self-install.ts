@@ -41,7 +41,6 @@ import {
   chooseInstallDirectory,
   installSelfShims,
   prepareInstallDirectory,
-  type SelfInstall,
   type ShimOptions,
   shimDirectoryPreferred,
   systemAndInstallDirectory,
@@ -452,12 +451,7 @@ function isRunningFrom(directory: string): boolean {
  * disagreeing about where a user's shims live, or about which of them is allowed
  * to displace a foreign entry, would be two answers to one question.
  */
-export async function linkSelf(
-  version: string,
-  dest: string,
-  install: Omit<SelfInstall, "directory">,
-  options: ShimOptions,
-): Promise<void> {
+export async function linkSelf(version: string, dest: string, options: ShimOptions): Promise<void> {
   out(`${installedTo(version, dest)}\n`);
 
   // §15.13 — choose, announce, probe, then fall back; nothing is written before
@@ -473,11 +467,7 @@ export async function linkSelf(
       : choice.directory,
   );
 
-  const installed = await installSelfShims(
-    installDirectory,
-    { directory: dest, ...install },
-    options,
-  );
+  const installed = await installSelfShims(installDirectory, dest, options);
 
   if (installed.length > 0) {
     out(
@@ -536,7 +526,7 @@ export async function cmdSelfInstall(args: string[]): Promise<number> {
     publish(tmp, dest);
   }
 
-  await linkSelf(payload.version, dest, {}, options);
+  await linkSelf(payload.version, dest, options);
 
   return 0;
 }

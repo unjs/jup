@@ -20,11 +20,11 @@
  *   directory so nothing is ever cached (§06.2). §15.11's rule holds here too:
  *   an artifact that clears no verification tier is refused, and upgrading
  *   ourselves is the last place to make an exception.
- * * **Nothing downloaded is rewritten.** The new version's stub is *its* stub;
- *   regenerating it from the running version's source (which is what `enable`
- *   does, correctly, for an installation it belongs to) would put an old stub in
- *   front of a new bundle. §10.8's `verbatim` mode links the file as it arrived,
- *   and the only byte that may change is §15.46's shebang.
+ * * **Nothing downloaded is rewritten.** The new version's CLI entry is *its*
+ *   entry; regenerating it from the running version's source (which is what
+ *   `enable` does, correctly, for an installation it belongs to) would put an
+ *   old entry in front of a new bundle. §10.8 links the file as it arrived, and
+ *   the only byte that may change is §15.46's shebang.
  */
 
 const { chmodSync, existsSync, rmSync } = process.getBuiltinModule("node:fs");
@@ -62,7 +62,6 @@ import {
   sweepSuperseded,
   TOOL_NAME,
 } from "./self-install.ts";
-import { PROXY_STUB_NAME } from "./shims.ts";
 import type { NpmRegistrySpec } from "../types.ts";
 
 /**
@@ -104,7 +103,7 @@ const UPGRADE_TAG = "latest";
  * exist, with the store copy already in place.
  */
 export const notAnInstallation = (version: string, url: string) =>
-  `Unable to upgrade to ${TOOL_NAME}@${version}: the package downloaded from ${url} has no \`${STUB_FOLDER_NAME}/\` folder holding ${CLI_ENTRY_NAME} and ${PROXY_STUB_NAME} beside a \`${DIST_FOLDER_NAME}/\` bundle, so there is nothing to point \`${OWN_BIN_NAMES.join("` and `")}\` at. Either that release predates the layout this version installs, or the registry it came from is publishing something else under that name.`;
+  `Unable to upgrade to ${TOOL_NAME}@${version}: the package downloaded from ${url} has no \`${STUB_FOLDER_NAME}/\` folder holding ${CLI_ENTRY_NAME} beside a \`${DIST_FOLDER_NAME}/\` bundle, so there is nothing to point \`${OWN_BIN_NAMES.join("` and `")}\` at. Either that release predates the layout this version installs, or the registry it came from is publishing something else under that name.`;
 
 /**
  * The registry named a version that cannot be a directory name.
@@ -196,8 +195,8 @@ async function download(release: Release, dest: string): Promise<void> {
 
     writeMarker(tmp, {
       locator: { name: TOOL_NAME, reference: version },
-      // §09.12's shape. Both of our names run the CLI entry: on POSIX through
-      // the shared stub beside it, on Windows through §10.3's wrappers.
+      // §09.12's shape. Both of our names run the CLI entry: on POSIX by a
+      // symlink straight at it, on Windows through §10.3's wrappers.
       bin: Object.fromEntries(
         OWN_BIN_NAMES.map((binName) => [binName, `./${STUB_FOLDER_NAME}/${CLI_ENTRY_NAME}`]),
       ),
@@ -214,38 +213,43 @@ async function download(release: Release, dest: string): Promise<void> {
 }
 
 /**
- * The three files §10.8 is going to point a name at, before anything is
- * promoted.
+ * The files §10.8 is going to point a name at, before anything is promoted.
  *
  * A shape check and not a trust check — the digest above is the trust check.
  * What it buys is that a registry serving an unrelated package under our name
  * fails here, with the store untouched, rather than after the promotion with two
  * dead entries on the user's `PATH`.
+ *
+ * The bundle and the CLI entry, and nothing else — §10.8 points both of our
+ * names at {@link CLI_ENTRY_NAME} on every platform, and those are the two files
+ * a name is about to be pointed at. §10.2's per-name stubs are not checked: this
+ * command installs no shim for a table binary, and a later `enable` reports its
+ * own missing stub far better than a shape check here could.
  */
 function assertInstallation(directory: string, version: string, url: string): void {
   const stubFolder = join(directory, STUB_FOLDER_NAME);
   const complete =
-    findEntrySpecifier(stubFolder) !== undefined &&
-    existsSync(join(stubFolder, CLI_ENTRY_NAME)) &&
-    existsSync(join(stubFolder, PROXY_STUB_NAME));
+    findEntrySpecifier(stubFolder) !== undefined && existsSync(join(stubFolder, CLI_ENTRY_NAME));
 
   if (!complete) throw new UsageError(notAnInstallation(version, url));
 }
 
 /**
- * §15.45 — the two files a shim runs, made executable.
+ * §15.45 — the file this command's own shims run, made executable.
  *
  * §07.4 rule 6 lets an archive contribute only its execute bit, and npm has been
- * observed to publish `bin` targets without one. A symlink to a stub the kernel
+ * observed to publish `bin` targets without one. A symlink to a file the kernel
  * will not execute is passed over in silence by a `PATH` lookup, so the bit is
- * set here rather than discovered later. Bounded to these two names on purpose:
- * everything else in the archive stays exactly as §07.4 wrote it.
+ * set here rather than discovered later.
+ *
+ * One name, because §10.8 points both of ours at it. The per-name stubs in the
+ * same folder arrive `0o644` too and are not touched here: nothing links them
+ * until a `jup enable`, and that is where §15.45 already chmods the stub it is
+ * about to link. Everything else in the archive stays exactly as §07.4 wrote it.
  */
 function makeStubsExecutable(directory: string): void {
   if (process.platform === "win32") return;
-  for (const name of [CLI_ENTRY_NAME, PROXY_STUB_NAME]) {
-    chmodSync(join(directory, STUB_FOLDER_NAME, name), 0o755);
-  }
+  chmodSync(join(directory, STUB_FOLDER_NAME, CLI_ENTRY_NAME), 0o755);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -284,9 +288,9 @@ export async function cmdSelfUpgrade(args: string[], command: string): Promise<n
     await download(release, dest);
   }
 
-  // §10.8's `verbatim` — the copy belongs to the version that published it, not
-  // to the version installing it.
-  await linkSelf(release.version, dest, { verbatim: true }, options);
+  // §10.8 links the copy as it arrived: it belongs to the version that
+  // published it, not to the version installing it.
+  await linkSelf(release.version, dest, options);
 
   return 0;
 }

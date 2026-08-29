@@ -49,6 +49,7 @@ const {
   chmod,
   lstat,
   open,
+  readdir,
   readFile,
   readlink,
   realpath,
@@ -78,7 +79,6 @@ import {
   perUserShimDirectory as perUserDefault,
   shimDirectoryCandidates,
   SHIM_MARKER,
-  PROXY_STUB_NAME,
   stubNameFor,
   systemShimDirectory,
   WIN32_WRAPPER_HEADS,
@@ -106,7 +106,7 @@ const TOOL_NAME = "jup";
  * invocation and this module imports that one, not the other way round;
  * re-exported here because this is where the concept belongs.
  */
-export { SHIM_MARKER, PROXY_STUB_NAME, stubNameFor, WIN32_WRAPPER_HEADS } from "../run/exec.ts";
+export { SHIM_MARKER, stubNameFor, WIN32_WRAPPER_HEADS } from "../run/exec.ts";
 
 /**
  * §10.1 — the interpreter the generic shebang names.
@@ -118,6 +118,19 @@ export { SHIM_MARKER, PROXY_STUB_NAME, stubNameFor, WIN32_WRAPPER_HEADS } from "
  * {@link interpreterPath}.
  */
 const INTERPRETER_NAME = "node";
+
+/**
+ * §10.1's **relocatable** spelling — what a shebang says when no absolute path
+ * has been baked into it, and what the shipped stubs keep.
+ *
+ * A constant because it is written by {@link shimSource} and
+ * {@link cliEntrySource}, and *read back* by {@link ownStubInterpreter} to tell
+ * a stub that names a runtime from one that only names a lookup. Spelling it out
+ * at each of those sites invited the mistake it exists to prevent: this string
+ * begins with `/`, so `isAbsolute` calls it a path, and the reader that asked
+ * that question took every unpinned stub for a pinned one.
+ */
+const RELOCATABLE_INTERPRETER = `/usr/bin/env ${INTERPRETER_NAME}`;
 
 /**
  * §10.1 — the absolute path of the runtime to bake into a shebang or a Windows
@@ -314,7 +327,7 @@ export async function bakedInterpreter(options?: {
   // record one directory over.
   return (
     (await posixShimInterpreter(options?.installDirectory)) ??
-    (await readShebangOf(join(options?.distFolder ?? resolveStubFolder(), PROXY_STUB_NAME)))
+    (await ownStubInterpreter(options?.distFolder ?? resolveStubFolder()))
   );
 }
 
@@ -349,12 +362,37 @@ async function posixShimInterpreter(installDirectory?: string): Promise<string |
   return undefined;
 }
 
-/** The interpreter named by `file`'s shebang, or `undefined` if it has none. */
-async function readShebangOf(file: string): Promise<string | undefined> {
-  // 1 KiB covers a shebang naming any path a filesystem will hold; the first
-  // line is all that is read out of it.
-  const head = await readHead(file, 1024);
-  return head === undefined ? undefined : shebangOf(head);
+/**
+ * §15.44's fallback — the shebang of a stub in *our own* folder, for the install
+ * that has no shim directory to read.
+ *
+ * §10.2 gives every name its own stub, so the folder is asked rather than one
+ * file: `enable` pins the whole of it in one pass ({@link pinStubFolder}), which
+ * means any stub carrying an absolute shebang answers for the set.
+ */
+async function ownStubInterpreter(distFolder: string): Promise<string | undefined> {
+  const entries = await readdir(distFolder).catch(() => undefined);
+  if (entries === undefined) return undefined;
+
+  // A *pinned* stub wins over a relocatable one, and the folder is read to the
+  // end rather than stopped at the first answer to make that so: a partial
+  // `enable` — one interrupted, or run against a folder some of whose stubs
+  // could not be written — leaves a mix, and the pin is the one thing §15.44
+  // exists to find.
+  //
+  // Sorted, so two runs against one folder cannot disagree about which of
+  // several pinned stubs answered; `readdir` order is the filesystem's.
+  let relocatable: string | undefined;
+  for (const name of entries.sort()) {
+    if (name === CLI_ENTRY_NAME || !name.endsWith(".mjs")) continue;
+    const head = await readHead(join(distFolder, name), 1024);
+    if (head === undefined || !head.includes(SHIM_MARKER)) continue;
+    const interpreter = shebangOf(head);
+    if (interpreter === undefined) continue;
+    if (interpreter !== RELOCATABLE_INTERPRETER) return interpreter;
+    relocatable ??= interpreter;
+  }
+  return relocatable;
 }
 
 /**
@@ -476,7 +514,7 @@ export const noSystemShimDirectory = () =>
  * `guardWrites` covers the shim directory and the package directory alike, and
  * the message above names neither: it says "shims", and its two remedies
  * (`--install-directory`, `JUP_SHIM_DIRECTORY`) both move where the shims land,
- * which is not what failed. What failed is the shared stub inside jup's own
+ * which is not what failed. What failed is a stub inside jup's own
  * installation, which §10.1 rewrites to pin the interpreter — so the shim
  * directory is irrelevant and saying so is most of the value here. `enable`
  * without ${INTERPRETER_NAME} never reaches this: `ensureStub` compares before it
@@ -1025,34 +1063,37 @@ function realpathOr(directory: string): string {
  * the stub every `yarn`, `npm` and `pnpm` on the machine runs through, so the
  * reasoning lives here rather than in the handful of lines it emits.
  *
- * §14.15 — **`binName` is omitted on POSIX**, and the stub reads the name it was
- * invoked under from `basename(process.argv[1])` instead. Node does not
- * `realpath` `argv[1]` (it does `realpath` the *module*, which is what
- * {@link findEntrySpecifier} and the `realpathSync` below are for), so a symlink
- * named `yarn` still says `yarn` there — under a direct `PATH` execution, under
- * `node <shim>`, and under `--preserve-symlinks-main`. One stub therefore serves
- * every binary name, avoiding stale per-name files.
+ * §14.15 — **the name is a literal in the emitted stub**, one stub per name, and
+ * the stub never asks what it was invoked as.
  *
- * Windows still passes a name, because §10.3's `.cmd` / `.ps1` wrappers invoke
- * `node <stub>` and the invocation name is gone by then. That is the *only*
- * reason the parameter still exists.
+ * The tempting alternative is one file for every name reading
+ * `basename(process.argv[1])`: a shim is a symlink named `yarn`, and node leaves
+ * `argv[1]` as the path it was handed rather than resolving it (it *does*
+ * `realpath` the module, which is what {@link findEntrySpecifier} and the
+ * `realpathSync` below are for). That works, on node. **Bun replaces `argv[1]`
+ * with the script's realpath**, so every such shim would read its own name as
+ * the stub's filename and run *that* as a package manager — and nothing in the
+ * stub could recover the truth, because the kernel passes the invoked path but
+ * bun has overwritten the only place it appears before JavaScript runs. A name
+ * written into the file is a name no runtime gets a vote on. §10.3's Windows
+ * wrappers need the same thing for a plainer reason: their `.cmd` / `.ps1`
+ * bodies invoke `node <stub>`, with the invocation name already gone.
  *
- * §10.1 — **{@link OWN_BIN_NAMES} are the exception**, and the shared stub is
- * where they are read: §09.12's `self-install` links `jup` and `corepack` at
- * this same file, and those two are the management CLI rather than a package
- * manager to run. So the stub asks which it is and answers both of §05.5's
- * questions from that: the download prompt defaults to `0` — the user typed
- * *our* name, so they did ask to download something — and the argv goes through
- * unchanged instead of gaining a leading binary name, which for `jup use pnpm@12`
- * would otherwise arrive at `runMain` as `["jup", "use", …]` and be rejected as
- * an unknown command. It is the same pair of decisions {@link cliEntrySource}
- * makes, in the one file that cannot know its name until it runs.
+ * §10.1 — **{@link OWN_BIN_NAMES} are the exception**, and they are handled by
+ * not being stubs at all: §09.12's `self-install` links `jup` and `corepack`
+ * straight at {@link cliEntrySource}'s file on every platform (§10.8). Those two
+ * are the management CLI rather than a package manager to run, so both of
+ * §05.5's answers differ — the download prompt defaults to `0`, the user having
+ * typed *our* name, and the argv goes through unchanged instead of gaining a
+ * leading binary name, which for `jup use pnpm@12` would otherwise arrive at
+ * `runMain` as `["jup", "use", …]` and be rejected as an unknown command. The
+ * CLI entry makes exactly those two decisions and needs no name to do it.
  *
- * The per-name branch never sees one of those names, by construction: `enable`
- * takes its names from the table, and `self-install` writes Windows wrappers
- * that name `${CLI_ENTRY_NAME}` directly rather than a stub of their own (§10.8)
- * — which is also what keeps a `jup` stub from being written *over* our CLI
- * entry, the two having the same name.
+ * This function never sees one of those names, by construction: `enable` takes
+ * its names from the table, and `self-install` points both of ours at
+ * `${CLI_ENTRY_NAME}` directly rather than at a stub of their own (§10.8) — which
+ * is also what keeps a `jup` stub from being written *over* our CLI entry, the
+ * two having the same name.
  *
  * `interpreter` is the other half of that: `#!/usr/bin/env node` re-searches
  * `PATH` at every invocation, and §15.32 asks the user to put the shim directory
@@ -1084,45 +1125,27 @@ function realpathOr(directory: string): string {
  * {@link findEntrySpecifier} — `index.ts` beside it in a source checkout,
  * `../dist/index.mjs` in a published one. Resolved against the stub's own
  * realpath, never against the process's working directory.
- * @param binName Windows only. Omitted, the stub dispatches on its own
- * invocation name.
+ * @param binName The name this stub runs, baked in as a literal.
  * @param interpreter Absolute path to put in the shebang. Omitted,
  * `/usr/bin/env node`.
  */
-export function shimSource(entry: string, binName?: string, interpreter?: string): string {
-  // The shared POSIX stub, which reads its name at runtime, or §10.3's per-name
-  // Windows stub, where the name is a literal and every branch below folds away.
-  const shared = binName === undefined;
-  const name = shared ? "name" : JSON.stringify(binName);
+export function shimSource(entry: string, binName: string, interpreter?: string): string {
+  const name = JSON.stringify(binName);
   return [
-    interpreter === undefined ? "#!/usr/bin/env node" : `#!${interpreter}`,
+    `#!${interpreter ?? RELOCATABLE_INTERPRETER}`,
     `// ${SHIM_MARKER} — generated by \`${TOOL_NAME} enable\`; edits are overwritten.`,
     // `process.getBuiltinModule` rather than four static imports: the stub is
     // parsed on every warm run, and skipping the ESM import machinery for
     // builtins the runtime has already loaded is worth ~2 ms of it (§16.3).
     `const { realpathSync } = process.getBuiltinModule("node:fs");`,
     `const nodeModule = process.getBuiltinModule("node:module");`,
-    ...(shared ? [`const { basename } = process.getBuiltinModule("node:path");`] : []),
     `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
     `nodeModule.enableCompileCache?.();`,
-    // §10.1 — one `||` chain over a two-name list, not an array and an
-    // `includes`: this runs before every `yarn`, and the comparison is the whole
-    // of what the extra names cost.
-    ...(shared
-      ? [
-          `const name = basename(process.argv[1]);`,
-          `const own = ${OWN_BIN_NAMES.map((own) => `name === ${JSON.stringify(own)}`).join(" || ")};`,
-        ]
-      : []),
     `if (process.env.${jupSpelling(ENV.ENABLE_DOWNLOAD_PROMPT)} === undefined)`,
-    `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= ${shared ? `own ? "0" : "1"` : `"1"`};`,
+    `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "1";`,
     `const entry = new URL(${JSON.stringify(entry)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
-    `const code = await runMain(${
-      shared
-        ? `own ? process.argv.slice(2) : [name, ...process.argv.slice(2)]`
-        : `[${name}, ...process.argv.slice(2)]`
-    });`,
+    `const code = await runMain([${name}, ...process.argv.slice(2)]);`,
     `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");
@@ -1157,8 +1180,15 @@ export function shimSource(entry: string, binName?: string, interpreter?: string
  */
 export function cliEntrySource(interpreter?: string): string {
   return [
-    interpreter === undefined ? "#!/usr/bin/env node" : `#!${interpreter}`,
-    `// ${TOOL_NAME}'s own CLI entry — generated by \`pnpm build\`; edits are overwritten.`,
+    `#!${interpreter ?? RELOCATABLE_INTERPRETER}`,
+    // {@link SHIM_MARKER}, because §10.8 now points `jup` and `corepack` at this
+    // file on POSIX as well as on Windows, and §14.16's ownership test is "does
+    // the target carry the marker". Without it `disable` would leave the two
+    // names it installed sitting on the user's `PATH`, and a re-`self-install`
+    // would take its own shims for somebody else's binaries and decline to
+    // replace them. The Windows wrappers say what they are outright for exactly
+    // this reason; this is the same admission one file over.
+    `// ${SHIM_MARKER} — ${TOOL_NAME}'s own CLI entry, generated by \`pnpm build\`; edits are overwritten.`,
     `const nodeModule = process.getBuiltinModule("node:module");`,
     `const { realpathSync } = process.getBuiltinModule("node:fs");`,
     `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
@@ -1266,13 +1296,13 @@ async function ensureExecutable(file: string, distFolder: string): Promise<void>
  * read-only. {@link ensureExecutable} is the one exception, and only for a stub
  * that arrived without the execute bit (§15.45).
  *
- * `binName` is Windows's: §10.3 needs one stub per name because its wrappers
- * cannot carry the invocation name. POSIX omits it and gets
- * {@link PROXY_STUB_NAME}, written once however many names are enabled.
+ * `binName` names the stub: `<binName>.mjs`, one per name on every platform. The
+ * per-name files are shipped, so a published install finds every one of them
+ * already correct and writes nothing (§10.7).
  */
 async function ensureStub(
   distFolder: string,
-  binName?: string,
+  binName: string,
   interpreter?: string,
 ): Promise<string> {
   // The stub resolves its entry module against its own realpath, so the pair
@@ -1285,7 +1315,7 @@ async function ensureStub(
   const entry = findEntrySpecifier(distFolder);
   if (entry === undefined) throw new UsageError(messages.assertStubFolderMissing());
 
-  const file = join(distFolder, binName === undefined ? PROXY_STUB_NAME : stubNameFor(binName));
+  const file = join(distFolder, stubNameFor(binName));
   const source = shimSource(entry, binName, interpreter);
 
   // One byte more than the stub is long, so a longer file cannot compare equal.
@@ -1348,14 +1378,53 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
 }
 
 /**
+ * §10.1 — carry the pin to every stub the shim folder already holds, not just
+ * the ones this run is writing.
+ *
+ * §10.2 gives every name its own stub, so the pin is not transitive: writing it
+ * into the files this run happens to name would leave every stub an earlier run
+ * wrote still saying `#!/usr/bin/env node`. That gap is §14.26's exec loop with a
+ * delay on it — `enable pnpm` writes `pnpm.mjs` relocatable, a later
+ * `enable node` claims that name in the shim directory, and from then on
+ * `pnpm install` resolves `node` through *our* shim, downloads the project's
+ * runtime and runs the package manager under it. Nothing reports that; it is
+ * simply slow and wrong.
+ *
+ * So the condition is answered once per run and applied to the whole folder. The
+ * files are read before they are written ({@link pinShebang} compares first), so
+ * a warm run still writes nothing and §10.7's read-only installation is
+ * unaffected.
+ *
+ * {@link CLI_ENTRY_NAME} is deliberately not here: {@link pinCliEntry} owns that
+ * file, and only so that a read-only installation reports §15.46's message about
+ * the entry rather than §10.1's about a stub.
+ */
+async function pinStubFolder(distFolder: string, interpreter: string): Promise<void> {
+  // A folder we cannot list has no stubs to pin, and `enable` has no business
+  // failing over that: whatever it is about to write, it writes with the
+  // interpreter already baked in.
+  const entries = await readdir(distFolder).catch(() => undefined);
+  if (entries === undefined) return;
+
+  // Sorted, because a read-only installation makes the *first* stub this reaches
+  // the one named in the refusal, and `readdir` order is the filesystem's.
+  for (const name of entries.sort()) {
+    if (name === CLI_ENTRY_NAME || !name.endsWith(".mjs")) continue;
+    const file = join(distFolder, name);
+    // The marker, not the name: `bin/` is ours but the test that decides whether
+    // a file may be rewritten is the same one §14.16 uses everywhere else.
+    const head = await readHead(file, 1024);
+    if (head === undefined || !head.includes(SHIM_MARKER)) continue;
+    await pinShebang(file, interpreter, stubNotWritable);
+  }
+}
+
+/**
  * The rewrite itself, on one named file — see {@link pinCliEntry} for why it is
  * only ever the first line.
  *
- * Separate from its caller because §09.13 needs the same operation on a file
- * `enable` never touches: an upgrade links its names at the **downloaded**
- * shared stub rather than at one written from the running version's source
- * (§10.8), so that stub's `#!/usr/bin/env node` is pinned here instead of being
- * regenerated by {@link ensureStub}.
+ * Separate from its caller because {@link pinStubFolder} needs the same
+ * operation on files `enable` is not otherwise writing this run.
  */
 async function pinShebang(
   file: string,
@@ -1435,10 +1504,11 @@ async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
  * Both `enable` and `disable` check ownership before replacing or removing an
  * entry. The three owned shapes are:
  *
- * * a POSIX symlink whose target carries {@link SHIM_MARKER};
- * * a **dangling** symlink that still names a stub of ours — the shared
- *   {@link PROXY_STUB_NAME}, or a per-name `<binName>.mjs` from a Windows
- *   install, which `enable` replaces and `disable` removes;
+ * * a POSIX symlink whose target carries {@link SHIM_MARKER} — every stub, and
+ *   the CLI entry §10.8 points our own two names at;
+ * * a **dangling** symlink that still names a file of ours — the per-name
+ *   `<binName>.mjs` §10.2 links, or {@link CLI_ENTRY_NAME} for those same two
+ *   names — which `enable` replaces and `disable` removes;
  * * a regular file carrying the marker, or one of §10.3's three Windows
  *   wrappers, which cannot carry it (see {@link WIN32_WRAPPER_HEADS}).
  */
@@ -1455,7 +1525,7 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
     // still names our stub.
     if (head !== undefined) return head.includes(SHIM_MARKER);
     const target = basename(link);
-    return target === PROXY_STUB_NAME || target === stubNameFor(binName);
+    return target === stubNameFor(binName) || target === CLI_ENTRY_NAME;
   }
 
   if (!entry.isFile()) return false;
@@ -1704,7 +1774,7 @@ export async function generatePosixLink(
 ): Promise<string | undefined> {
   return linkPosixEntry(
     installDirectory,
-    await ensureStub(distFolder, undefined, interpreter),
+    await ensureStub(distFolder, binName, interpreter),
     binName,
     options,
   );
@@ -2109,13 +2179,15 @@ export function verifyOnPath(installDirectory: string, installed: [string, strin
  * §10.1 — does this install directory put our own shim on the name the shebang
  * would look up?
  *
- * True when the run is claiming it, and true when an earlier run already did:
- * the stub is shared by every name, so a `yarn` shim installed *after*
- * `enable node` would otherwise still go through `env node` and land back on the
- * `node` shim, which then re-enters us with the proxy stub as its argument.
+ * True when the run is claiming it, and true when an earlier run already did: a
+ * `yarn` shim installed *after* `enable node` would otherwise go through
+ * `env node`, land back on the `node` shim, and re-enter us with its own path as
+ * the argument. The order the two runs happen in is not the user's to get right,
+ * which is why this asks about the directory rather than about `binaries`.
+ *
  * A foreign `node` sitting in the directory is not our problem and does not
- * count — treating it as one would rewrite the stub for people who never asked
- * for a `node` shim at all.
+ * count — treating it as one would rewrite stubs for people who never asked for
+ * a `node` shim at all.
  */
 async function claimsInterpreter(installDirectory: string, binaries: string[]): Promise<boolean> {
   if (binaries.includes(INTERPRETER_NAME)) return true;
@@ -2191,7 +2263,13 @@ export async function cmdEnable(
   //
   // Before any shim is written, so a refusal here leaves the shim directory
   // exactly as it found it — the ordering §15.45 gives the execute-bit check.
-  if (pin && interpreter !== undefined) await pinCliEntry(distFolder, interpreter);
+  if (pin && interpreter !== undefined) {
+    await pinCliEntry(distFolder, interpreter);
+    // …and every stub already in the folder, which the run's own names get for
+    // free from `ensureStub` below. §10.2's per-name stubs made that two calls
+    // instead of one — see {@link pinStubFolder}.
+    await pinStubFolder(distFolder, interpreter);
+  }
 
   // §10.5 — all binaries are processed concurrently.
   const installed = await Promise.all(
@@ -2253,25 +2331,6 @@ export async function cmdDisable(args: string[]): Promise<number> {
 /* §09.12 — the shims a self-install writes                                    */
 /* -------------------------------------------------------------------------- */
 
-/** The promoted copy §09.12 put in the store, as the shim writer needs to see it. */
-export interface SelfInstall {
-  /** `<home>/self/<version>`, holding the copy's `dist/` and `bin/`. */
-  directory: string;
-  /**
-   * Whether the copy came from somewhere other than the running process, and so
-   * must be linked exactly as it arrived (§09.13).
-   *
-   * `self-install` copies the running installation, so the stub it links is one
-   * the running version would have written anyway and {@link ensureStub} is free
-   * to (re)write it. `self-upgrade` downloads a *different* version, whose stub
-   * belongs to it; regenerating that file from this version's source would put
-   * an old stub in front of a new bundle, which is the one skew an upgrade
-   * exists to remove. So the downloaded stub is linked as it is, and the only
-   * byte that may change is §15.46's shebang.
-   */
-  verbatim?: boolean;
-}
-
 /**
  * §09.12 — put `jup` and `corepack` on `PATH`, pointing into the store copy.
  *
@@ -2280,27 +2339,30 @@ export interface SelfInstall {
  * claimed — ownership, §15.15's displacement, idempotency, the platform split —
  * is the machinery above, called with a different target.
  *
- * Two of those targets exist, one per platform:
+ * Both platforms now point at one file, the copy's `bin/${CLI_ENTRY_NAME}`:
  *
- * * **POSIX** — the shared stub in the copy's `bin/`, exactly as `enable` links
- *   it. The stub reads its own name and, finding one of ours, behaves as the CLI
- *   entry does (§10.1); one file therefore serves `jup`, `corepack` and every
- *   package manager alike. A `verbatim` copy links the stub that arrived with it
- *   rather than one written here.
- * * **Windows** — §10.3's trio, whose bodies name our CLI entry directly rather
- *   than a per-name stub. A stub for `jup` would be `jup.mjs`, which is the CLI
- *   entry's own name.
+ * * **POSIX** — a symlink straight at it, the shape {@link linkPosixEntry}
+ *   gives every other name. Not a stub of its own, for two reasons that arrive
+ *   at the same file: a stub for `jup` would be named `jup.mjs` and written
+ *   *over* the CLI entry, and the entry already makes both of §05.5's decisions
+ *   these two names need (§10.1).
+ * * **Windows** — §10.3's trio, whose bodies name that same file directly.
+ *
+ * A downloaded copy (§09.13) needs no special case. Nothing here writes the file
+ * it links, so an upgrade's `bin/${CLI_ENTRY_NAME}` is used exactly as it
+ * arrived and the only byte that may change is §15.46's shebang.
  *
  * Returns the `[name, path]` pairs actually installed, for {@link verifyOnPath}.
  */
 export async function installSelfShims(
   installDirectory: string,
-  install: SelfInstall,
+  directory: string,
   options: ShimOptions = {},
 ): Promise<[string, string][]> {
-  const binFolder = join(install.directory, STUB_FOLDER_NAME);
+  const binFolder = join(directory, STUB_FOLDER_NAME);
   const isWindows = process.platform === "win32";
-  const rel = relative(installDirectory, join(binFolder, CLI_ENTRY_NAME));
+  const entry = join(binFolder, CLI_ENTRY_NAME);
+  const rel = relative(installDirectory, entry);
 
   // §10.1, unchanged: Windows wrappers always name the runtime, POSIX only when
   // this directory claims `node`. `claimsInterpreter` is asked with no names,
@@ -2316,7 +2378,12 @@ export async function installSelfShims(
   // command downloads a runtime to print its own version. Before any shim is
   // written, so a refusal leaves the directory as it found it. Windows reads no
   // shebang, so it pins only under the POSIX condition (§10.1).
+  //
+  // This is the file the two names below link to, so the pin and the execute bit
+  // are both about the same file §15.45 is about — no stub stands between them
+  // any more.
   if (runtime !== undefined && !isWindows) await pinCliEntry(binFolder, runtime);
+  if (!isWindows) await ensureExecutable(entry, binFolder);
 
   // §10.3's trio, built once and shared by both names — they differ only in the
   // file each is written to. It is defined exactly when this is Windows, because
@@ -2324,25 +2391,12 @@ export async function installSelfShims(
   // `isWindows` below is what carries that fact into the wrappers' signature.
   const wrappers = isWindows && runtime !== undefined ? selfWin32Wrappers(rel, runtime) : undefined;
 
-  // A downloaded copy's own stub, adopted rather than written (see
-  // {@link SelfInstall.verbatim}). Both halves of `ensureStub` still have to
-  // happen — §15.45's execute bit, and §15.46's shebang under the same condition
-  // as the CLI entry above — but on the file as it arrived.
-  const adopted =
-    install.verbatim === true && !isWindows ? join(binFolder, PROXY_STUB_NAME) : undefined;
-  if (adopted !== undefined) {
-    if (runtime !== undefined) await pinShebang(adopted, runtime, stubNotWritable);
-    await ensureExecutable(adopted, binFolder);
-  }
-
   const installed = await Promise.all(
     OWN_BIN_NAMES.map(async (binName): Promise<[string, string] | undefined> => {
       const shim =
         wrappers !== undefined
           ? await writeWin32Entries(installDirectory, binName, wrappers, options)
-          : adopted === undefined
-            ? await generatePosixLink(installDirectory, binFolder, binName, options, runtime)
-            : await linkPosixEntry(installDirectory, adopted, binName, options);
+          : await linkPosixEntry(installDirectory, entry, binName, options);
       return shim === undefined ? undefined : [binName, shim];
     }),
   );

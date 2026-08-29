@@ -10,14 +10,15 @@ A shim for binary `B` must invoke the tool as if the user had typed
 `<tool> B <args…>`, and must set the download-prompt default to `1` (§05.5) because
 the user asked for `B`, not for a download.
 
-On POSIX, every name points to one executable proxy stub. The stub resolves the
-jup entry point from the stub's own realpath and dispatches from the name used to
-invoke it. It sets the download-prompt default to `1` for a known binary name and to
-`0` for jup's own name. The explicit `<tool> <binary>` form remains available.
+On POSIX, every name points to its own executable stub, `<B>.mjs`. The stub
+resolves the jup entry point from its own realpath and runs the name written into
+it, with the download-prompt default at `1`. The tool's own two names are not stubs
+at all: §10.8 points them straight at the CLI entry, which defaults that same
+setting to `0`. The explicit `<tool> <binary>` form remains available.
 
-Windows wrappers preserve the binary name explicitly because their runtime does not
-receive the wrapper's invocation name. Every generated stub and wrapper has mode
-`0755`.
+Windows wrappers name the binary explicitly for the same reason the POSIX stubs do,
+and always did: their runtime does not receive the wrapper's invocation name. Every
+generated stub and wrapper has mode `0755`.
 
 ### Baking in the interpreter
 
@@ -106,7 +107,7 @@ receive the wrapper's invocation name. Every generated stub and wrapper has mode
 ```
 generatePosixLink(installDirectory, stubFolder, binName):
     file    := installDirectory/binName
-    target  := RELATIVE path from installDirectory to stubFolder/<proxy stub>
+    target  := RELATIVE path from installDirectory to stubFolder/<binName>.mjs
     st      := lstat(file)                     # lstat, NOT stat — must not follow
 
     if st exists:
@@ -126,10 +127,20 @@ generatePosixLink(installDirectory, stubFolder, binName):
     symlink(target, file)
 ```
 
-`<proxy stub>` is **one file for every binary name**: it carries no name of
-its own and reads the one it was invoked under from `argv[1]`. An implementation MUST
-NOT make the target depend on `binName` — that is what leaves a per-name file behind
-to go stale when the tool is upgraded or removed.
+The target is the **per-name stub**, `<binName>.mjs`, and the name it runs is a
+literal inside that file. An implementation MUST NOT have the stub derive its own
+name from `argv[1]`.
+
+That is not a stylistic preference. One stub reading `basename(argv[1])` would serve
+every name and is correct under node, which leaves `argv[1]` as the path the user
+invoked; **bun replaces it with the script's realpath**, and such a stub would there
+read its own filename as the name it was asked to run. The kernel passes the invoked
+path, but by the time the stub runs there is no portable way back to it. A name
+written into the file is a name no runtime gets a vote on. A stale link is corrected
+by `enable` rewriting it (§15.14), not by there being a single file to point at.
+
+The two names in §10.8 are not stubs: they point at the CLI entry, which needs no
+name to decide what to do.
 
 Required properties:
 
@@ -140,9 +151,10 @@ Required properties:
    computed from a symlinked directory would be wrong.
 3. **Idempotent.** An already-correct symlink is not rewritten; its mtime is
    unchanged across repeated `enable` runs. The conformance suite asserts this.
-4. **The stub is written at most once per `enable`**, whatever the number of names,
-   and not at all when it is already current — so `enable` still succeeds against a
-   read-only stub folder that shipped it (§10.7).
+4. **A stub is written only when it is not already current**, so `enable` still
+   succeeds against a read-only stub folder that shipped every one of them (§10.7).
+   The published package carries a stub per table name, so the ordinary install
+   writes none.
 5. **The stub is executable when `enable` returns.** A symlink carries no mode of
    its own, so the bit the kernel checks is the stub's; a shim pointing at a
    non-executable stub is skipped by the `PATH` lookup without a word. `enable`
@@ -151,7 +163,10 @@ Required properties:
    still holds for the ordinary warm run. §10.7 defines the failure when `chmod` is refused.
 
 Before replacing an entry, `enable` MUST establish that it is a jup-owned shim. A
-POSIX entry is owned only when it points to jup's proxy stub. A Windows entry is
+POSIX entry is owned only when it points at a file of jup's: a stub carrying the
+shim marker, or — for the two names of §10.8 — the CLI entry, which carries it too.
+A dangling link is owned when it still names `<binName>.mjs` or the CLI entry. A
+Windows entry is
 owned only when its complete generated contents or native executable identity match
 jup's shim format. A dangling jup link remains owned; a name or file extension alone
 is never proof of ownership.
@@ -403,35 +418,33 @@ two keys of the package's `bin` — pointing them at the copy it just put in
 `<home>/self/<version>` (§07.11). Everything about *how* a name is claimed is §10.2
 and §10.3 unchanged: ownership, `--force`, §15.15's displacement, the idempotent
 no-write, the install-directory chain of §10.4, and §15.29's verification. Only the
-target differs, and it differs two ways:
+target differs, and both platforms name the same file:
 
 | Platform | Target |
 |---|---|
-| POSIX | the shared stub in the copy's `bin/`, exactly as `enable` links it |
-| Windows | §10.3's trio, naming the CLI entry under the interpreter |
+| POSIX | a relative symlink to the CLI entry in the copy's `bin/` |
+| Windows | §10.3's trio, naming that same CLI entry under the interpreter |
 
 Three requirements follow.
 
-1. **The shared POSIX stub MUST recognise the tool's own names.** It already reads the
-   name it was invoked under (§10.1); finding one of its own, it behaves as the CLI
-   entry does — the download prompt defaults to `0` rather than `1` (§05.5), and the
-   argv is passed through unchanged rather than gaining a leading binary name.
-   Without the second, `jup use pnpm@12` reaches the entry point as
+1. **Neither name may be given a stub of its own.** §10.2's stub for `jup` would be
+   `jup.mjs`, which is the CLI entry's own name, and writing it would destroy the
+   entry. Pointing at the entry is also what these two names want: it makes both of
+   §05.5's decisions they need — the download prompt defaults to `0` rather than `1`,
+   and the argv is passed through unchanged rather than gaining a leading binary
+   name. Without the second, `jup use pnpm@12` reaches the entry point as
    `["jup", "use", …]` and is rejected as an unknown command.
-2. **Windows wrappers MUST NOT be generated against a per-name stub here.** §10.3's
-   stub for `jup` would be `jup.mjs`, which is the CLI entry's own name; the wrappers
-   name that entry directly instead. Because they then name no stub, §14.16's
-   ownership test cannot recognise them the usual way, so these wrappers carry the
-   shim marker in a comment.
+2. **The CLI entry MUST carry the shim marker.** It is the target of a POSIX link
+   and of the Windows wrappers, so §14.16's ownership test resolves to it; without
+   the marker `disable` would leave both names on the user's `PATH`. §10.3's
+   wrappers, whose bodies are byte-exact and name no stub, carry it for the same
+   reason.
 3. **A copy the running version did not produce MUST be linked as it arrived.**
-   `self-install` copies the running installation, so the shared stub it links is one
-   this version would have written anyway and §10.1's regeneration is free to run.
-   `self-upgrade` (§09.13) installs a *different* version, whose stub belongs to it:
-   regenerating that file from the running version's source puts an old stub in front
-   of a new bundle, which is the one skew an upgrade exists to remove. The downloaded
-   stub is therefore linked verbatim, and the only byte that may change is the
-   shebang below — the same first-line-only rewrite §15.46 makes to the CLI entry, for
-   the same reason and under the same condition.
+   Nothing here writes the file it links: `self-upgrade` (§09.13) installs a
+   *different* version, whose CLI entry belongs to it, and regenerating that file
+   from the running version's source would put an old entry in front of a new
+   bundle. The only byte that may change is the shebang below — the first-line-only
+   rewrite of §15.46, under its condition.
 
 Baking in the interpreter is §10.1's rule, unchanged and for its reason: the copy in
 the store opens `#!/usr/bin/env node` like any other installation, and with the tool's

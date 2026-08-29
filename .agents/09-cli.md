@@ -353,9 +353,10 @@ unless <home>/self/<version> holds a readable marker:
     metadata → tarball URL (§07.3), download prompt (§05.5),
     one pass: hash the stream while extracting it (§16.5, §07.4 strip 1)
     digest mismatch → discard the temp directory, install nothing (§06.2)
-    the archive must contain dist/, bin/<cli entry> and bin/<shared stub>,
-      otherwise UsageError — a registry publishing something else under our name
-    grant the execute bit to those two files (§15.45)
+    the archive must contain dist/ and bin/<cli entry>, the file §10.8 points
+      both names at, otherwise UsageError — a registry publishing something
+      else under our name
+    grant the execute bit to that file (§15.45)
     write the .jup marker, promote (§07.5), replacing as §09.12 replaces
 
 <same as §09.12 from here>: announce, shim (§10.8), verify on PATH (§15.29)
@@ -368,9 +369,9 @@ Two differences from §09.12 are normative.
    contents here: a complete marker for that version is what says the work is done,
    and it is what makes a second run cost one metadata request and no transfer.
 2. **Nothing downloaded is rewritten.** The shims are linked at the *published*
-   stub (§10.8's `verbatim` target); regenerating it from the running version's
-   source would put an old stub in front of a new bundle. The one permitted edit is
-   §15.46's shebang, and only under the condition that already governs it.
+   CLI entry (§10.8); regenerating it from the running version's source would put an
+   old entry in front of a new bundle. The one permitted edit is §15.46's shebang,
+   and only under the condition that already governs it.
 
 `upgrade` is an accepted spelling of the same command. It is deliberately not `up`,
 which writes the project's `packageManager` field (§09.4); §12.1's usage line names

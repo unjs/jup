@@ -90,7 +90,6 @@ red row is a regression, which is the whole point of keeping the port.
 | 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe env-file discovery. |
 | 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
 | 1 | **§15, #138** — `enable`'s default target set includes npm. |
-| 1 | **§14.15** — a POSIX shim points at one name-agnostic stub, so the corrected link reads `…/shim-proxy.js` rather than `…/yarn.js`. The row's subject, correcting a wrong symlink, is covered by jup's row 123. |
 | 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |
 
 ## Compat mode

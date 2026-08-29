@@ -373,7 +373,14 @@ cached package manager successfully and print nothing to stderr.
 
 Both names remove cached versions but preserve `lastKnownGood.json`. If an installed
 legacy shim names an interpreter inside `<home>/v1`, preserve that version directory
-unless `--all` is passed; warn before removing it with `--all`. Report
+unless `--all` is passed; warn before removing it with `--all`.
+
+The interpreter is read from the shims themselves — the shebang of the stub each
+installed shim links to — and, failing that, from the stub folder of the running
+copy. §10.2 gives every name its own stub, so that folder holds many: a stub naming
+an absolute path answers for the set, and the relocatable spelling is used only when
+no stub carries anything else, so a partially pinned folder still answers with the
+pin. Report
 `Removed <n> cached version(s) from <path>` or `Nothing to remove`. A failed removal
 warns with the exact message in §12.12.
 
@@ -424,7 +431,7 @@ for each (name, reference):
 │       ├── .jup                     # marker; `hash` is over the copied payload
 │       ├── package.json             # so §08.7's COREPACK_ROOT stops here
 │       ├── dist/                    # the bundle …
-│       └── bin/                     # … and the CLI entry with the shared stub
+│       └── bin/                     # … and the CLI entry with the shim stubs
 └── v1/                              # everything else
 ```
 

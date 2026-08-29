@@ -235,6 +235,17 @@ describe("the help text — §09.11", () => {
       { FORCE_COLOR: "1" },
     );
 
+  /** {@link helpWithColour}, over text of the row's own rather than `HELP_TEXT`. */
+  const paintedWithColour = (text: string): Promise<string> =>
+    runChild(
+      [
+        `const log = await import(${LOG});`,
+        `const usage = await import(${USAGE});`,
+        `log.out(usage.formatHelp(log.outColors, ${JSON.stringify(text)}));`,
+      ].join("\n"),
+      { FORCE_COLOR: "1" },
+    );
+
   it("is HELP_TEXT byte for byte with colour off", async () => {
     const { formatHelp } = await import("../../src/commands/usage.ts");
 
@@ -280,18 +291,46 @@ describe("the help text — §09.11", () => {
   it("leaves a hyphen inside a word alone", async () => {
     const printed = await helpWithColour();
 
-    expect(printed).toContain("package-manager shim");
-    expect(printed).toContain("per-user directory");
+    // The words, not the phrases they sit in: what is under test is the
+    // lookbehind in `FLAG`, and an assertion spanning two words also asserts
+    // where the paragraph happens to wrap.
+    expect(printed).toContain("package-manager");
+    expect(printed).toContain("per-user");
     expect(printed).not.toContain(`${YELLOW}-manager`);
     expect(printed).not.toContain(`${YELLOW}-user`);
   });
 
-  it("bolds a heading but not a wrapped line that ends in a colon", async () => {
+  it("bolds a heading in the help text", async () => {
     const printed = await helpWithColour();
 
     expect(printed).toContain(`${BOLD}Deprecated, retained for compatibility:`);
-    expect(printed).toContain("installed to a per-user directory that never needs elevation");
-    expect(printed).not.toContain(`${BOLD}installed to a per-user directory`);
+  });
+
+  /**
+   * The other half of the heading rule, and the reason it is not asserted
+   * against `HELP_TEXT`: a heading is a flush-left line ending in a colon *with
+   * a blank line in front*, and it is the blank line that does the work. No
+   * paragraph in the current wording wraps onto a colon, so the real text cannot
+   * tell a correct implementation from one that dropped the `previous === ""`
+   * condition — it would have to be rewrapped back into the shape the rule
+   * exists for. Feeding `formatHelp` that shape directly is what keeps the
+   * condition under test through the next rewrite.
+   */
+  it("does not bold a wrapped line that ends in a colon", async () => {
+    const wrapped = [
+      "Shims go where enable puts them, which is a per-user",
+      "directory that never needs elevation:",
+      "",
+      "A heading:",
+    ].join("\n");
+
+    const painted = await paintedWithColour(wrapped);
+
+    expect(painted).toContain(`${BOLD}A heading:`);
+    expect(painted).toContain("directory that never needs elevation:");
+    expect(painted).not.toContain(`${BOLD}directory that never needs elevation:`);
+    // §09.11 rule 1 — colour may only wrap what the text already says.
+    expect(painted.replaceAll(ANSI, "")).toBe(wrapped);
   });
 
   it("colours the command word and leaves the prose alone", async () => {
@@ -299,6 +338,6 @@ describe("the help text — §09.11", () => {
 
     expect(printed).toContain(`${CYAN}cache`);
     // The paragraphs below the list name commands too; they must stay plain.
-    expect(printed).toContain("self-upgrade updates jup.");
+    expect(printed).toContain("self-upgrade changes jup.");
   });
 });
