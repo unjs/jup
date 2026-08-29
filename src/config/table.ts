@@ -272,9 +272,12 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
         ">=2.0.0",
         {
           // Yarn Berry uses its signed npm tarball and standard registry overrides.
+          // `publishedFrom` is the one place the band is wider than the package:
+          // 2.0.0 through 2.4.0 only ever existed on `repo.yarnpkg.com`, so a
+          // 404 below 2.4.1 gets §04.1's sentence instead of "does not exist".
           url: "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz",
           bin: { yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" },
-          registry: { type: "npm", package: "@yarnpkg/cli-dist" },
+          registry: { type: "npm", package: "@yarnpkg/cli-dist", publishedFrom: "2.4.1" },
           commands: { use: ["yarn", "install"] },
         },
       ],

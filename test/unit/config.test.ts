@@ -158,7 +158,11 @@ describe("registry table — shape (§02.5)", () => {
 
   it("resolves dist-tags against the last range entry's registry (§02.3)", () => {
     const [, lastYarn] = DEFINITIONS.yarn!.ranges.at(-1)!;
-    expect(lastYarn.registry).toEqual({ type: "npm", package: "@yarnpkg/cli-dist" });
+    expect(lastYarn.registry).toEqual({
+      type: "npm",
+      package: "@yarnpkg/cli-dist",
+      publishedFrom: "2.4.1",
+    });
     expect(DEFINITIONS.yarn!.fetchLatestFrom).toEqual({ type: "npm", package: "yarn" });
   });
 
@@ -228,7 +232,13 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
     // A tarball like every other band: paths, not the list of bare names the
     // single-file form used to declare.
     expect(spec.bin).toEqual({ yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" });
-    expect(spec.registry).toEqual({ type: "npm", package: "@yarnpkg/cli-dist" });
+    // §04.1 — the band claims `>=2.0.0` but the package starts at 2.4.1, and
+    // `publishedFrom` is what a 404 below that reads to name the release to pin.
+    expect(spec.registry).toEqual({
+      type: "npm",
+      package: "@yarnpkg/cli-dist",
+      publishedFrom: "2.4.1",
+    });
     // The conditional swap is gone: it *is* the band now, not a rewrite that
     // waited for the user to configure an npm registry.
     expect(spec.npmRegistry).toBeUndefined();

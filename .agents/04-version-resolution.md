@@ -47,6 +47,19 @@ band because one requested range may cross package channels. `useCache: false` i
 used by `use` and `up`. If artifact download returns 404 for an exact version, report
 `<name>@<version> does not exist in <registry>. Run 'jup info' to see the resolved spec and where it came from.`
 
+A band MAY declare `registry.publishedFrom` — the earliest version its npm package
+carries — when the band covers a wider range than the package was published over. On
+the 404 above, and only there, a version below it reports instead:
+
+`<name>@<version> does not exist in <registry>. jup installs <name> from <package>, whose earliest published version is <publishedFrom>; releases before it were only ever distributed elsewhere. Pin <publishedFrom> or newer.`
+
+The first sentence is the same one, verbatim. `publishedFrom` MUST NOT gate a
+request, filter a candidate, or take part in resolution: it selects a sentence after
+a 404 has already happened, so a stale value can only make a message less specific.
+Today Yarn Berry is its one user — `@yarnpkg/cli-dist` begins at 2.4.1, while the
+band claims `>=2.0.0`, and everything between exists only on a host §15.41 stopped
+reading.
+
 ## 4.2 The semver subset
 
 A conforming zero-dependency implementation must provide exactly these operations.

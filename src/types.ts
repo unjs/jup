@@ -98,6 +98,22 @@ export interface CorepackMarker {
 export interface NpmRegistrySpec {
   type: "npm";
   package: string;
+  /**
+   * The earliest version this npm package carries, when the band claims a wider
+   * range than the package was ever published over.
+   *
+   * §15.41 moved every band onto the npm registry, and one of them landed on a
+   * package whose history is shorter than the range it serves: Yarn Berry is
+   * `@yarnpkg/cli-dist`, whose 2.x line begins at 2.4.1, while the band claims
+   * `>=2.0.0`. Everything between exists — on `repo.yarnpkg.com`, which jup no
+   * longer reads — so a plain 404 tells the user their version does not exist,
+   * which is false and unactionable.
+   *
+   * It is **only** ever read to explain a 404 that already happened (§04.1).
+   * Nothing gates a request on it: a stale value can make a message less
+   * specific, never make a reachable version unreachable.
+   */
+  publishedFrom?: string;
 }
 
 /**

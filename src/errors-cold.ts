@@ -4,8 +4,10 @@
 
 const { join } = process.getBuiltinModule("node:path");
 import { ENV, jupSpelling } from "./config/env-vars.ts";
+import { getSpecFor } from "./config/table.ts";
 import { messages as warm, UsageError } from "./errors.ts";
 import { CACHE_DIRECTORY, LOCKFILE_NAME } from "./project/lockfile.ts";
+import { lt } from "./version/semver.ts";
 
 export * from "./errors.ts";
 
@@ -166,6 +168,25 @@ export const messages = {
   /** Reframe an exact-version artifact 404 in terms of the requested version. */
   versionDoesNotExist: (name: string, version: string, registry: string) =>
     `${name}@${version} does not exist in ${url_(registry)}. Run 'jup info' to see the resolved spec and where it came from.`,
+
+  /**
+   * §04.1 — the same 404, for a version a band covers but its npm package was
+   * never published over ({@link NpmRegistrySpec.publishedFrom}).
+   *
+   * The first sentence is `versionDoesNotExist`'s, verbatim: it is still true,
+   * it is what a user greps for, and keeping it means the two messages differ
+   * only where they have something different to say. What follows is the part
+   * the bare form got wrong — the version *does* exist, somewhere jup does not
+   * read — and the pin that would work instead.
+   */
+  versionBelowPublished: (
+    name: string,
+    version: string,
+    registry: string,
+    packageName: string,
+    from: string,
+  ) =>
+    `${name}@${version} does not exist in ${url_(registry)}. jup installs ${name} from ${packageName}, whose earliest published version is ${from}; releases before it were only ever distributed elsewhere. Pin ${from} or newer.`,
 
   /** An offline miss must name the requested tool and the cache-seeding command. */
   notInCacheOffline: (name: string, range: string) =>
@@ -485,5 +506,48 @@ export function explainFetchFailure(
     // A URL too malformed to parse is still better in the message than nothing.
   }
 
+  const below = publishedFromFor(what.name, what.version);
+  if (below !== null) {
+    return new UsageError(
+      messages.versionBelowPublished(
+        what.name,
+        what.version,
+        registry,
+        below.package,
+        below.publishedFrom,
+      ),
+    );
+  }
+
   return new UsageError(messages.versionDoesNotExist(what.name, what.version, registry));
+}
+
+/**
+ * §04.1 — the band's npm package and its first published version, when the
+ * requested version predates it. `null` otherwise, which is every tool but Yarn
+ * Berry today.
+ *
+ * Table data only, and read only after a 404 has already happened: this decides
+ * which sentence to print, never whether to make the request. A version outside
+ * the table, or one the band declares no `publishedFrom` for, falls through to
+ * the bare form rather than guessing.
+ */
+function publishedFromFor(
+  name: string,
+  version: string,
+): { package: string; publishedFrom: string } | null {
+  let registry;
+  try {
+    registry = getSpecFor(name, version).registry;
+  } catch {
+    // An unsupported name has no band; `getSpecFor` throws and the caller's
+    // original 404 is the better message anyway.
+    return null;
+  }
+
+  if (registry.type !== "npm") return null;
+  const { publishedFrom } = registry;
+  if (publishedFrom === undefined || !lt(version, publishedFrom)) return null;
+
+  return { package: registry.package, publishedFrom };
 }

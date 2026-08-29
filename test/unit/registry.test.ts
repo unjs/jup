@@ -1140,7 +1140,11 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
     // nothing conditional left: the spec is npm-typed before anything is
     // configured, and `resolveRegistrySpec` returns it by identity either way.
     const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
-    expect(table).toEqual({ type: "npm", package: "@yarnpkg/cli-dist" });
+    expect(table).toEqual({
+      type: "npm",
+      package: "@yarnpkg/cli-dist",
+      publishedFrom: "2.4.1",
+    });
     expect(resolveRegistrySpec(table)).toBe(table);
 
     process.env.COREPACK_NPM_REGISTRY = "https://mirror.example.org";

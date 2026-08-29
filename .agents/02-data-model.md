@@ -56,6 +56,10 @@ Supported forms for discovering tool versions:
 // npm-style: talk the npm registry protocol (§05.2)
 { "type": "npm", "package": "pnpm" }
 
+// `publishedFrom` is optional: the earliest version the package carries, for a
+// band that covers a wider range than the package was published over (§04.1)
+{ "type": "npm", "package": "@yarnpkg/cli-dist", "publishedFrom": "2.4.1" }
+
 // url-style: fetch JSON and read the configured tags and versions fields.
 // Supported for a tool published somewhere other than an npm registry.
 { "type": "url",
@@ -71,6 +75,11 @@ For `type: "url"`:
   not `latest`, for URL registries.
 
 An npm registry spec has no `bin`; §07.4 always extracts the whole archive.
+
+`publishedFrom` is read in exactly one place — choosing which sentence an
+exact-version 404 prints (§04.1) — and MUST NOT gate a request, filter a candidate,
+or otherwise take part in resolution. A value that has gone stale therefore costs a
+less specific message and nothing else.
 
 ## 2.3 Tool definition
 
@@ -374,8 +383,14 @@ Ranges, in declaration order:
 **`>=2.0.0`** (Yarn Berry — an ordinary `@yarnpkg/cli-dist` npm tarball)
 * `url` = `https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz`
 * `bin` = `{"yarn": "./bin/yarn.js", "yarnpkg": "./bin/yarn.js"}`
-* `registry` = `{type: npm, package: "@yarnpkg/cli-dist"}`
+* `registry` = `{type: npm, package: "@yarnpkg/cli-dist", publishedFrom: "2.4.1"}`
 * `commands.use` = `["yarn", "install"]`
+
+> The band claims `>=2.0.0`, but `@yarnpkg/cli-dist`'s 2.x line begins at **2.4.1**:
+> 2.0.0 through 2.4.0 were only ever published on `repo.yarnpkg.com`, which §15.41
+> stopped reading. `publishedFrom` is what turns the resulting 404 from "does not
+> exist" — false, and unactionable — into the release the user can pin instead. It is
+> the only band that declares one.
 
 
 > **Note.** `default` for yarn is Yarn **1**, but `transparent.default` is Yarn **4**.

@@ -210,6 +210,62 @@ describe("§15.35j nonexistent versions", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
   });
+
+  /**
+   * §04.1's `publishedFrom` — the narrower half of the same row.
+   *
+   * "Does not exist" is the wrong sentence when the version plainly does exist
+   * and jup simply stopped reading the host that carries it. §15.41 put every
+   * band on npm, and Yarn Berry landed on `@yarnpkg/cli-dist`, whose 2.x line
+   * starts at 2.4.1 — so `yarn@2.2.2`, which `repo.yarnpkg.com` still serves,
+   * 404s. The band declares `publishedFrom` and the 404 says which release to
+   * pin instead.
+   */
+  it("204: a version below the band's `publishedFrom` names the release to pin", async () => {
+    const fixture = createFixture({ packageManager: "yarn@2.2.2" });
+
+    const result = await run(["yarn", "--version"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(
+      `yarn@2.2.2 does not exist in https://registry.npmjs.org. ` +
+        `jup installs yarn from @yarnpkg/cli-dist, whose earliest published version ` +
+        `is 2.4.1; releases before it were only ever distributed elsewhere. ` +
+        `Pin 2.4.1 or newer.\n`,
+    );
+    // The first sentence is `versionDoesNotExist`'s, unchanged — the two messages
+    // differ only where they have something different to say.
+    expect(result.stderr).toContain("does not exist in");
+    expect(result.stderr).not.toContain("Server answered with HTTP 404");
+  });
+
+  it("204: a missing version *above* it keeps the bare sentence", async () => {
+    // The branch is gated on the version, not on the tool: Berry above 2.4.1 is
+    // published, so a 404 there means what it says.
+    const fixture = createFixture({ packageManager: "yarn@3.9999.0" });
+
+    const result = await run(["yarn", "--version"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(
+      `yarn@3.9999.0 does not exist in https://registry.npmjs.org. ` +
+        `Run 'jup info' to see the resolved spec and where it came from.\n`,
+    );
+  });
+
+  it("204: `publishedFrom` gates no request — a published Berry release still installs", async () => {
+    // The invariant that keeps a stale `publishedFrom` cheap: it selects a
+    // sentence *after* a 404, and never decides whether to ask.
+    const tarball = packageManagerTarball("yarn", "2.4.1", { packageName: "@yarnpkg/cli-dist" });
+    registry.publish("@yarnpkg/cli-dist", "2.4.1", tarball, { distTags: { latest: "2.4.1" } });
+
+    const fixture = createFixture({ packageManager: "yarn@2.4.1" });
+
+    const result = await run(["yarn", "--version"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("2.4.1\n");
+  });
 });
 
 /* -------------------------------------------------------------------------- */
