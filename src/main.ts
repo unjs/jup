@@ -424,7 +424,7 @@ const URL_SLOT = "\u0000";
  * project stays on yesterday's version with no diagnostic ever printed.
  *
  * What must therefore never reach the fallback: `COREPACK_ENABLE_NETWORK=0` and
- * `COREPACK_MINIMUM_RELEASE_AGE`, which are security controls — `net/registry.ts`
+ * `JUP_MINIMUM_RELEASE_AGE`, which are security controls — `net/registry.ts`
  * states the rule for both, that a control reporting success without having been
  * applied is worse than one that stops; **401 and 403**, where a rotated
  * credential is a permanent failure and the fallback would pin the project on it

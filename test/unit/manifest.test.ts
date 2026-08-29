@@ -738,9 +738,9 @@ describe("devEngines — §03.3", () => {
 
   // §11.3 — the mute is scoped by *origin*. All three warnings in this
   // block are ones corepack prints too, and §13 rows 27–29 match their text byte
-  // for byte, so `COREPACK_QUIET_ADVISORIES` must not reach any of them.
+  // for byte, so `JUP_QUIET_ADVISORIES` must not reach any of them.
   it("keeps printing corepack's own devEngines warnings when advisories are quiet", () => {
-    process.env.COREPACK_QUIET_ADVISORIES = "1";
+    process.env.JUP_QUIET_ADVISORIES = "1";
 
     read({ devEngines: { packageManager: [{ name: "yarn" }] } });
     expect(warn).toHaveBeenCalledWith(messages.devEnginesArray());
@@ -1311,13 +1311,13 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
   it("`here` still loads an ancestor's env file", () => {
     // §03.2's walk is about configuration, not about which manifest to edit, so
     // confining the write must not also cut off the registry settings.
-    write(".jup.env", "COREPACK_ENABLE_PRERELEASES=1\n");
+    write(".jup.env", "JUP_ENABLE_PRERELEASES=1\n");
     dir("nested");
 
     const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
 
     expect(result.envFilePath).toBe(join(root, ".jup.env"));
-    expect(process.env.COREPACK_ENABLE_PRERELEASES).toBe("1");
+    expect(process.env.JUP_ENABLE_PRERELEASES).toBe("1");
   });
 });
 

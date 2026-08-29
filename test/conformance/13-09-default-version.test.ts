@@ -177,7 +177,7 @@ describe("§13.9 default version and last-known-good", () => {
   it("103: install -g yarn (bare) resolves the true latest, not the 1.x line", async () => {
     const fixture = createFixture({});
 
-    // §02.5 — no opt-out. This row needed `COREPACK_ALLOW_UNVERIFIED=1` for as
+    // §02.5 — no opt-out. This row needed `JUP_ALLOW_UNVERIFIED=1` for as
     // long as a bare name resolved through Berry's `/tags` document on
     // `repo.yarnpkg.com`, which published neither signatures nor digests: the
     // most ordinary first command anyone types was also the one that could not

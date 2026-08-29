@@ -122,13 +122,13 @@ describe("§04.1 prereleases in implicit resolution", () => {
     }
   });
 
-  it("185: COREPACK_ENABLE_PRERELEASES=1 opts back in", async () => {
+  it("185: JUP_ENABLE_PRERELEASES=1 opts back in", async () => {
     const fixture = createFixture({ name: "project" });
 
     const result = await run(["use", "pnpm"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_ENABLE_PRERELEASES: "1" }),
+      env: env({ JUP_ENABLE_PRERELEASES: "1" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -141,7 +141,7 @@ describe("§04.1 prereleases in implicit resolution", () => {
     // that is where §03.2's walk loads the file (`corepack use` takes its spec
     // from the command line and never walks — see the note in the report).
     const fixture = createFixture({ name: "project", packageManager: "pnpm@>=11" });
-    fixture.write(".jup.env", "COREPACK_ENABLE_PRERELEASES=1\n");
+    fixture.write(".jup.env", "JUP_ENABLE_PRERELEASES=1\n");
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 

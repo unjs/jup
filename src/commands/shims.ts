@@ -856,7 +856,7 @@ function namedDirectory(options: ShimOptions): string | undefined {
 /**
  * §10.5 — where `enable` installs, and what it displaced to get there.
  *
- * `--system`, `--install-directory` and `COREPACK_SHIM_DIRECTORY` are answered
+ * `--system`, `--install-directory` and `JUP_SHIM_DIRECTORY` are answered
  * first and never second-guessed. After that the order is: the default when it
  * is already on `PATH` (nothing to improve on), then continuity, then the first
  * eligible alternate that is on `PATH`, then the default with §10.5's
@@ -899,7 +899,7 @@ export function chooseInstallDirectory(options: ShimOptions): {
 
 /**
  * §10.5 — `--system` or `--install-directory`, else
- * `COREPACK_SHIM_DIRECTORY`, else the candidate holding our shims, else the
+ * `JUP_SHIM_DIRECTORY`, else the candidate holding our shims, else the
  * per-user default.
  *
  * `--system` matters most here, on the removal side: `/usr/local/bin` is a

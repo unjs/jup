@@ -19,7 +19,6 @@ import {
   getFallbackLocator,
   resolveDescriptor,
 } from "../../src/version/resolve.ts";
-import type { UrlRegistrySpec } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *
  * A real local server per test, as in registry.test.ts: the wire is the
@@ -99,14 +98,17 @@ const ENV_KEYS = [
   "COREPACK_INTEGRITY_KEYS",
   // §04.1's opt-in. Leaking it between rows would let one test silently decide
   // what the next one resolves to — precisely the hazard §04.1 is about.
-  "COREPACK_ENABLE_PRERELEASES",
+  "JUP_ENABLE_PRERELEASES",
   "XDG_CACHE_HOME",
   "LOCALAPPDATA",
 ] as const;
 
-/** Yarn Berry's tag document lives on a fixed host; point it at the mock. */
-const BERRY_REGISTRY = DEFINITIONS.yarn!.ranges.at(-1)![1].registry as UrlRegistrySpec;
-const BERRY_REGISTRY_URL = BERRY_REGISTRY.url;
+/**
+ * §02.2 — Berry resolves through `@yarnpkg/cli-dist` on the npm registry like
+ * every other band, so the `berry` server below is never reached. It stays as
+ * the negative control: the rows asserting `berry.requests` is empty are what
+ * would catch a band being moved back onto a vendor host.
+ */
 
 let saved: Record<string, string | undefined>;
 let home: string;
@@ -138,8 +140,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  BERRY_REGISTRY.url = BERRY_REGISTRY_URL;
-
   for (const key of ENV_KEYS) {
     const value = saved[key];
     if (value === undefined) {
@@ -157,10 +157,9 @@ afterEach(async () => {
 /**
  * The Berry band as an npm package.
  *
- * §05.2 rewrite 1: with COREPACK_NPM_REGISTRY set, a band's `npmRegistry`
- * replaces its `registry` for tag and version lookups too, not just for the
- * download — so Berry is asked for as `@yarnpkg/cli-dist` on the mirror rather
- * than as repo.yarnpkg.com's tag document. The mirror therefore has to serve it.
+ * §05.2 rewrite 1: with `JUP_NPM_REGISTRY` set, the override applies to tag and
+ * version lookups too, not just to the download — so Berry is asked for as
+ * `@yarnpkg/cli-dist` on the mirror. The mirror therefore has to serve it.
  */
 const CLI_DIST_PACKUMENT = {
   // Mirrors BERRY_TAGS.tags exactly, so swapping the source does not also swap
@@ -179,7 +178,6 @@ async function startYarnServers(): Promise<{ npm: TestServer; berry: TestServer 
   const berry = await startServer({ "/tags": BERRY_TAGS });
 
   process.env.COREPACK_NPM_REGISTRY = npm.origin;
-  BERRY_REGISTRY.url = `${berry.origin}/tags`;
 
   return { npm, berry };
 }
@@ -545,9 +543,7 @@ describe("resolveDescriptor step 6 — range query", () => {
       "/yarn": delayed(YARN_PACKUMENT),
       "/@yarnpkg/cli-dist": delayed(CLI_DIST_PACKUMENT),
     });
-    const berry = await startServer({ "/tags": delayed(BERRY_TAGS) });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
-    BERRY_REGISTRY.url = `${berry.origin}/tags`;
 
     await resolveDescriptor({ name: "yarn", range: ">=1" });
 
@@ -562,9 +558,7 @@ describe("resolveDescriptor step 6 — range query", () => {
       "/yarn": { versions: { "4.9.0": {}, "1.22.9": {} }, "dist-tags": {} },
       "/@yarnpkg/cli-dist": CLI_DIST_PACKUMENT,
     });
-    const berry = await startServer({ "/tags": BERRY_TAGS });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
-    BERRY_REGISTRY.url = `${berry.origin}/tags`;
 
     await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
       name: "yarn",
@@ -598,11 +592,7 @@ describe("resolveDescriptor step 6 — range query", () => {
           "dist-tags": {},
         },
       });
-      const berry = await startServer({
-        "/tags": { aliases: {}, tags: ["4.10.0-rc.1", "4.9.0"] },
-      });
       process.env.COREPACK_NPM_REGISTRY = npm.origin;
-      BERRY_REGISTRY.url = `${berry.origin}/tags`;
     }
 
     it("takes the highest STABLE release for a plain range", async () => {
@@ -614,9 +604,9 @@ describe("resolveDescriptor step 6 — range query", () => {
       });
     });
 
-    it("takes the prerelease with COREPACK_ENABLE_PRERELEASES=1", async () => {
+    it("takes the prerelease with JUP_ENABLE_PRERELEASES=1", async () => {
       await serveYarn();
-      process.env.COREPACK_ENABLE_PRERELEASES = "1";
+      process.env.JUP_ENABLE_PRERELEASES = "1";
 
       await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
         name: "yarn",
@@ -640,9 +630,7 @@ describe("resolveDescriptor step 6 — range query", () => {
         "/yarn": { versions: {}, "dist-tags": {} },
         "/@yarnpkg/cli-dist": { versions: { "5.0.0-rc.1": {} }, "dist-tags": {} },
       });
-      const berry = await startServer({ "/tags": { aliases: {}, tags: ["5.0.0-rc.1"] } });
       process.env.COREPACK_NPM_REGISTRY = npm.origin;
-      BERRY_REGISTRY.url = `${berry.origin}/tags`;
 
       // §04.1 says "discard", with no fallback: `Failed to successfully resolve`
       // names a real problem, where installing a dev build silently does not.
@@ -785,7 +773,6 @@ describe("getFallbackLocator (§02.1)", () => {
     const npm = await startServer({});
     const berry = await startServer({ "/tags": BERRY_TAGS });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
-    BERRY_REGISTRY.url = `${berry.origin}/tags`;
     seedLastKnownGood({ yarn: "1.0.0" });
 
     // §01.3's step 2: the fallback is built *before* the project is inspected.

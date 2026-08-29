@@ -42,7 +42,7 @@ export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
 
 /**
  * §11.3 — an advisory line **this** implementation adds, which
- * `COREPACK_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
+ * `JUP_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
  *
  * Compatibility advisories call `warn()` or stderr directly because §13 fixes
  * their text. Routing only additional advisories here lets "quiet" leave
@@ -156,7 +156,7 @@ export const messages = {
     `Updated ${path} to use ${name}@${reference}`,
 
   /**
-   * §03.1 — `COREPACK_SPEC_FILE` names a file that is not there. Falling back
+   * §03.1 — `JUP_SPEC_FILE` names a file that is not there. Falling back
    * to the manifest is the worst outcome available: the variable exists for
    * trees whose manifest says the *wrong* thing, so ignoring a typo runs the
    * package manager the file was pointed at to override.

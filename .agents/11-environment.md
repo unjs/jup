@@ -5,9 +5,13 @@ lives in one file, `src/config/env-vars.ts`, so that eligibility sets, `info`'s
 masking list, and the read sites are all built from the same constants — which is
 what stops a new variable being readable but unclassified.
 
-Every setting has **two spellings**: the canonical `JUP_<NAME>` and the
-compatibility `COREPACK_<NAME>`. They are one setting. `JUP_` wins by presence.
-Ambient variables such as `PATH` and `CI` have no prefixed alias.
+Every setting is spelled `JUP_<NAME>`. The settings **corepack itself defined**
+also answer to `COREPACK_<NAME>`: they are one setting, and `JUP_` wins by
+presence. That compatibility set is closed — it is listed in §11.7, and
+`COMPATIBILITY_ENV` in `src/config/env-vars.ts` is the implementation of it.
+Everything jup invented is `JUP_`-only, because a CI written against corepack
+cannot be setting a name corepack never had. Ambient variables such as `PATH`
+and `CI` have no prefixed alias.
 
 The **Env file** column says whether `.jup.env` may supply the variable (§03.2).
 A real environment variable always beats the file.
@@ -82,16 +86,26 @@ finds it too.
 
 ## 11.6 Precedence
 
-Each prefixed pair is one setting, and a name is canonicalised before its
-env-file eligibility is checked, so the compatibility spelling cannot bypass the
-deny list.
-
 ```
 1. real environment, JUP_<NAME>                       (highest)
-2. real environment, COREPACK_<NAME>
-3. .jup.env, either spelling, if eligible
+2. real environment, COREPACK_<NAME>, compatibility set only
+3. .jup.env, any spelling the setting answers to, if eligible
 4. the built-in default                               (lowest)
 ```
+
+Step 2 exists only for §11.7's set. For every other variable the `COREPACK_`
+spelling names nothing and is read by nobody.
+
+The env-file deny-list carries **both** spellings of every entry it names,
+including the `COREPACK_` spelling of a `JUP_`-only variable, so a name is
+checked exactly as the file spelled it and renaming a key is not a way past the
+list. Both spellings are refused even where jup would ignore the second: the
+deny-list governs what a cloned repository may *inject* into the environment,
+which every child process inherits, not merely what jup itself reads back.
+
+Conversely, a real `COREPACK_<NAME>` MUST NOT shadow an env file's
+`JUP_<NAME>` outside the compatibility set — the file's value would give way to
+a variable that has no effect.
 
 **Presence decides, not truthiness**: `JUP_NPM_PASSWORD=` shadows a set
 `COREPACK_NPM_PASSWORD`, because the empty string is meaningful for several of
@@ -99,10 +113,23 @@ these. A diagnostic that names the variable which supplied a value names **the
 spelling the user actually set** — this is the one place `COREPACK_` may appear
 in output. A message that merely *suggests* a variable names the `JUP_` spelling.
 
-Resolve each pair once at startup so downstream code cannot observe different
+Resolve each setting once at startup so downstream code cannot observe different
 values for one setting.
 
-## 11.7 The configuration boundary
+## 11.7 The compatibility spelling
+
+These, and only these, also answer to `COREPACK_<NAME>`. They are the settings
+corepack defined, so a CI or a project written against corepack keeps working
+when jup replaces it (§01) — which is the whole of what the set is for. Adding to
+it would be inventing a compatibility burden rather than honouring one.
+
+| | |
+|---|---|
+| Behaviour (§11.1) | `ENABLE_PROJECT_SPEC`, `ENABLE_STRICT`, `ENABLE_AUTO_PIN`, `DEFAULT_TO_LATEST`, `ENABLE_NETWORK`, `ENABLE_UNSAFE_CUSTOM_URLS`, `ENABLE_DOWNLOAD_PROMPT`, `ENV_FILE`, `HOME` |
+| Registry and auth (§11.2) | `NPM_REGISTRY`, `NPM_TOKEN`, `NPM_USERNAME`, `NPM_PASSWORD`, `INTEGRITY_KEYS` |
+| Written, not read (§11.4) | `ROOT`, `MIGRATE_FROM` |
+
+## 11.8 The configuration boundary
 
 These variables, the constrained `.npmrc` (§05.3), the project manifest, version
 files, and `jup.lock` are the complete configuration surface. There is no config

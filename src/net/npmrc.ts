@@ -8,13 +8,7 @@
 const { readFileSync } = process.getBuiltinModule("node:fs");
 const { homedir } = process.getBuiltinModule("node:os");
 const { dirname, join, resolve: resolvePath } = process.getBuiltinModule("node:path");
-import {
-  corepackSpelling,
-  ENV,
-  jupSpelling,
-  registryVariableFor,
-  SYSTEM_ENV,
-} from "../config/env-vars.ts";
+import { ENV, envSpellings, registryVariableFor, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { advisory } from "../errors.ts";
 import { loadEnvFileFrom } from "../project/env.ts";
@@ -725,14 +719,15 @@ export interface RegistryDecision {
 export { registryVariableFor };
 
 /**
- * A configured, non-empty value under either spelling, with the name that set it.
+ * A configured, non-empty value under any spelling the setting answers to, with
+ * the name that set it.
  *
  * An empty value means "not configured" for a registry URL — unlike a token,
- * where §11.2 makes the empty string meaningful — so both spellings are skipped
+ * where §11.2 makes the empty string meaningful — so every spelling is skipped
  * when empty rather than the empty one shadowing the other.
  */
 function envSetting(name: string): { name: string; value: string } | undefined {
-  for (const spelling of [jupSpelling(name), name]) {
+  for (const spelling of envSpellings(name)) {
     const value = process.env[spelling];
     if (value !== undefined && value !== "") return { name: spelling, value };
   }
@@ -785,15 +780,11 @@ function envRegistrySetting(
  * still authorise by deleting the file — a conservative answer to a case that
  * does not arise.
  *
- * Both spellings are checked because §11 gives every variable two, and the file
- * may use either.
+ * Every spelling is checked because §11 gives a compatibility setting two, and
+ * the file may use either.
  */
 function suppliedByProjectEnvFile(config: NpmrcConfig, name: string, value: string): boolean {
-  const corepack = corepackSpelling(name);
-  for (const spelling of [corepack, jupSpelling(corepack)]) {
-    if (config.projectEnvVars[spelling] === value) return true;
-  }
-  return false;
+  return envSpellings(name).some((spelling) => config.projectEnvVars[spelling] === value);
 }
 
 /** The `@scope` of an npm package name, with the `@`, or `undefined`. */
@@ -807,7 +798,7 @@ function scopeOf(packageName: string | undefined): string | undefined {
  * §05.3 + §05.2's precedence, in one place:
  *
  * ```
- * 1. COREPACK_REGISTRY_<NAME>                       per package manager
+ * 1. JUP_REGISTRY_<NAME>                       per package manager
  * 2. COREPACK_NPM_REGISTRY
  * 3. .npmrc  @scope:registry, then registry         project > user > global
  * 4. the built-in default
@@ -855,11 +846,12 @@ export function resolveRegistry(options?: {
 /**
  * Tiers 2 and 3 alone — an **npm-protocol** registry the user configured.
  *
- * Separate from {@link resolveRegistry} because §05.2 rewrite 1 turns on
- * precisely this: `repo.yarnpkg.com` is not an npm registry, so a configured
- * *npm* registry is what switches Yarn Berry to the `@yarnpkg/cli-dist`
- * package. `COREPACK_REGISTRY_YARN` deliberately does not: it replaces the
- * origin of Yarn's own distribution URLs.
+ * Separate from {@link resolveRegistry} because the two answer different
+ * questions: this one is "has the user pointed us at an npm registry?", which
+ * §05.2's override rewriting asks before it moves a table URL, while
+ * `resolveRegistry` always answers with *a* registry, falling back to the
+ * built-in default. `JUP_REGISTRY_<NAME>` is deliberately not a tier here:
+ * it replaces one tool's distribution origin rather than naming a registry.
  */
 export function npmProtocolRegistry(options?: {
   packageName?: string;
@@ -904,7 +896,7 @@ const REGISTRY_VARIABLE = /^(?:COREPACK|JUP)_(?:NPM_REGISTRY|REGISTRY_.+)$/;
  * there.
  *
  * Scanning `process.env` rather than asking for a list of tool names is
- * deliberate: `COREPACK_REGISTRY_<NAME>` is open-ended by construction
+ * deliberate: `JUP_REGISTRY_<NAME>` is open-ended by construction
  * (`registryVariableFor` will spell a variable for a name this build has never
  * heard of), so an enumeration of the built-in table would have holes exactly
  * where an unknown name is, which is where an attacker would put one.

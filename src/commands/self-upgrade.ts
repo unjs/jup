@@ -78,7 +78,7 @@ const SELF_PACKAGE: NpmRegistrySpec = { type: "npm", package: TOOL_NAME };
  *
  * `latest` is what the publisher points at the release they want installed, and
  * §04.6 already knows how to read it: one request, resolved server-side, coming
- * back with the digest the registry signed. `COREPACK_MINIMUM_RELEASE_AGE`
+ * back with the digest the registry signed. `JUP_MINIMUM_RELEASE_AGE`
  * applies to it exactly as it does everywhere else (§04.1), so an organisation
  * that quarantines fresh releases quarantines ours too.
  */

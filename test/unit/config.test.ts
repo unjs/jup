@@ -62,9 +62,40 @@ describe("registry table — shape (§02.5)", () => {
     expect(getDefinition("vlt")).toBeUndefined();
   });
 
-  it("pins hash-suffixed defaults", () => {
-    expect(DEFINITIONS.npm!.default).toBe("12.0.2+sha1.788d93dc8869000b1078e0395c60748a0aadc4f1");
-    expect(DEFINITIONS.pnpm!.default).toBe("11.24.0+sha1.a042a648b5e519c43c5b2c3ff99901448190cd66");
+  /**
+   * §02.5 — every `default` is pinned the way its **band** requires, and the two
+   * ways are not interchangeable.
+   *
+   * A JS band's bytes are one npm tarball, so the default carries the sha512 of
+   * the bytes `scripts/refresh-table.mjs` verified. A per-host band's bytes are a
+   * different artifact per machine, so there is no digest to write and the
+   * default is bare (§04.4).
+   *
+   * Writing a digest on a per-host default would not merely be untidy: §06.1 row
+   * 1 reads a digest-bearing reference as an explicit pin, so it would refuse the
+   * correct artifact on every machine with no `lastKnownGood.json`. pnpm is the
+   * entry that makes this reachable — it crosses from JS to native at 12.0.0, so
+   * the pin style has to cross with it. Derived from the table rather than listed
+   * per tool, so a band that changes side is caught here and not in the wild.
+   */
+  it("pins each default the way its band requires (§02.5)", () => {
+    const seen: string[] = [];
+    for (const [name, definition] of Object.entries(DEFINITIONS)) {
+      const reference = definition.default;
+      if (reference === undefined) continue;
+      const version = reference.split("+")[0]!;
+      seen.push(name);
+
+      if (isPerHost({ name, reference: version })) {
+        expect(reference, `${name}: a per-host default must be bare`).toBe(version);
+      } else {
+        expect(reference, `${name}: a JS default must be sha512-pinned`).toMatch(
+          /^\d+\.\d+\.\d+\+sha512\.[\da-f]{128}$/,
+        );
+      }
+    }
+    // The loop must actually have run over the whole table.
+    expect(seen).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "node"]);
   });
 
   /**
@@ -78,7 +109,8 @@ describe("registry table — shape (§02.5)", () => {
    */
   it("puts yarn's default on the supported major, hash-pinned (§02.5)", () => {
     const yarn = DEFINITIONS.yarn!;
-    const supported = "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85";
+    const supported =
+      "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e";
     expect(yarn.default).toBe(supported);
     expect(yarn.transparent.default).toBe(supported);
     // §06.1's asymmetry is gone, and the classic line is what it is gone *from*.
@@ -90,6 +122,12 @@ describe("registry table — shape (§02.5)", () => {
    * `<version>+<algo>.<hex>` form §06.1 row 1 checks. A default that did not
    * would be refused by `assertVerificationTier` on any machine without a
    * `lastKnownGood.json`, i.e. every fresh install.
+   *
+   * The algorithm is asserted as **sha512**, not as any `sha\d+`. It is the
+   * digest `use` writes, taken from the registry's own `dist.integrity`, so a
+   * default on a weaker algorithm splits a bare `yarn` and a pinned project
+   * across two store directories (§07.2) on the common path — and would trip
+   * §06.2's own weak-pin warning if a user had written it.
    */
   it("hash-pins every compiled-in default (§02.5)", () => {
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
@@ -111,7 +149,7 @@ describe("registry table — shape (§02.5)", () => {
         const version = parse(reference)?.version ?? reference;
         const perHost = isPerHostSpec(getSpecFor(name, version));
         expect(reference, name).toMatch(
-          perHost ? /^\d+\.\d+\.\d+$/ : /^\d+\.\d+\.\d+\+sha\d+\.[\da-f]+$/,
+          perHost ? /^\d+\.\d+\.\d+$/ : /^\d+\.\d+\.\d+\+sha512\.[\da-f]{128}$/,
         );
       }
     }
@@ -181,7 +219,6 @@ describe("registry table — shape (§02.5)", () => {
           `${name}@${range} -> https://registry.npmjs.org`,
         );
         expect(spec.registry.type).toBe("npm");
-        expect(spec.npmRegistry).toBeUndefined();
       }
       expect(definition.fetchLatestFrom.type).toBe("npm");
     }
@@ -223,7 +260,6 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
     expect(spec.url).toBe("https://registry.npmjs.org/yarn/-/yarn-{}.tgz");
     expect(spec.bin).toEqual({ yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" });
     expect(spec.registry).toEqual({ type: "npm", package: "yarn" });
-    expect(spec.npmRegistry).toBeUndefined();
   });
 
   it("gives yarn 4.14.1 the @yarnpkg/cli-dist tarball with a BinSpec (§02.5)", () => {
@@ -239,9 +275,6 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
       package: "@yarnpkg/cli-dist",
       publishedFrom: "2.4.1",
     });
-    // The conditional swap is gone: it *is* the band now, not a rewrite that
-    // waited for the user to configure an npm registry.
-    expect(spec.npmRegistry).toBeUndefined();
   });
 
   it("matches npm's single `*` band for any version", () => {
@@ -878,7 +911,7 @@ describe("nub — §03.1's fourth per-host entry", () => {
     expect(spec.commands).toEqual({ use: ["nub", "install"] });
     expect(isPerHost({ name: "nub", reference: "0.7.5" })).toBe(true);
     // Bare, because one version is many artifacts (§02.3).
-    expect(DEFINITIONS.nub!.default).toBe("0.7.5");
+    expect(DEFINITIONS.nub!.default).toBe("0.8.0");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {

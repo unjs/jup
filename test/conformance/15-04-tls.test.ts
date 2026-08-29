@@ -38,7 +38,7 @@ import {
 
 const registry = new MockRegistry();
 
-/** A PEM file holding the fixture CA, for `COREPACK_CAFILE`. */
+/** A PEM file holding the fixture CA, for `JUP_CAFILE`. */
 const caFile = join(mkdtempSync(join(tmpdir(), "jup-conf-ca-")), "bundle.pem");
 writeFileSync(caFile, `${CERT}\n`);
 
@@ -122,7 +122,7 @@ afterAll(async () => {
 beforeEach(() => registry.reset());
 
 describe("§05.1 TLS", () => {
-  it("153: an unknown authority is named as such, and names COREPACK_CAFILE", async () => {
+  it("153: an unknown authority is named as such, and names JUP_CAFILE", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -149,14 +149,14 @@ describe("§05.1 TLS", () => {
     }
   });
 
-  it("153: COREPACK_CAFILE pointing at the issuer makes the same run succeed", async () => {
+  it("153: JUP_CAFILE pointing at the issuer makes the same run succeed", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
     try {
       const result = await run(["pnpm", "--version"], {
         ...fixture,
-        env: trusted({ COREPACK_NPM_REGISTRY: front.origin, COREPACK_CAFILE: caFile }),
+        env: trusted({ COREPACK_NPM_REGISTRY: front.origin, JUP_CAFILE: caFile }),
       });
 
       // The control for the row above: same server, same certificate, and the
@@ -183,7 +183,7 @@ describe("§05.1 TLS", () => {
    * the table knows. Only a real socket does that, so the server presents a
    * genuinely expired certificate and a genuinely premature one.
    *
-   * Both fronts are trusted through `COREPACK_CAFILE`, which is what isolates
+   * Both fronts are trusted through `JUP_CAFILE`, which is what isolates
    * the date: an untrusted expired certificate fails as *untrusted*, and would
    * report the sentence from the row above.
    */
@@ -201,7 +201,7 @@ describe("§05.1 TLS", () => {
       try {
         const result = await run(["pnpm", "--version"], {
           ...fixture,
-          env: trusted({ COREPACK_NPM_REGISTRY: front.origin, COREPACK_CAFILE: bundle }),
+          env: trusted({ COREPACK_NPM_REGISTRY: front.origin, JUP_CAFILE: bundle }),
         });
 
         expect(result.exitCode).toBe(1);
@@ -223,23 +223,23 @@ describe("§05.1 TLS", () => {
     },
   );
 
-  it("COREPACK_STRICT_SSL=0 connects anyway, and says so verbatim", async () => {
+  it("JUP_STRICT_SSL=0 connects anyway, and says so verbatim", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
     try {
       const result = await run(["pnpm", "--version"], {
         ...fixture,
-        env: trusted({ COREPACK_NPM_REGISTRY: front.origin, COREPACK_STRICT_SSL: "0" }),
+        env: trusted({ COREPACK_NPM_REGISTRY: front.origin, JUP_STRICT_SSL: "0" }),
       });
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("6.6.2\n");
       // Loud, once, and byte for byte.
       expect(result.stderr).toBe(
-        "! TLS certificate verification is disabled (set by COREPACK_STRICT_SSL)\n",
+        "! TLS certificate verification is disabled (set by JUP_STRICT_SSL)\n",
       );
-      expect(result.stderr).toBe(`${messages.strictSslDisabled("COREPACK_STRICT_SSL")}\n`);
+      expect(result.stderr).toBe(`${messages.strictSslDisabled("JUP_STRICT_SSL")}\n`);
     } finally {
       await front.stop();
     }
@@ -248,7 +248,7 @@ describe("§05.1 TLS", () => {
   it("a project's .jup.env cannot disable verification or nominate a CA (§03.2)", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
-    fixture.write(".jup.env", `COREPACK_STRICT_SSL=0\nCOREPACK_CAFILE=${caFile}\n`);
+    fixture.write(".jup.env", `JUP_STRICT_SSL=0\nJUP_CAFILE=${caFile}\n`);
 
     try {
       const result = await run(["pnpm", "--version"], {
@@ -259,8 +259,8 @@ describe("§05.1 TLS", () => {
       // Both were refused, each announced, and the run still failed the way an
       // untrusted certificate should.
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("! Ignoring COREPACK_STRICT_SSL from ");
-      expect(result.stderr).toContain("! Ignoring COREPACK_CAFILE from ");
+      expect(result.stderr).toContain("! Ignoring JUP_STRICT_SSL from ");
+      expect(result.stderr).toContain("! Ignoring JUP_CAFILE from ");
       expect(result.stderr).toContain("this variable can only be set in the environment");
       expect(result.stderr).toContain("TLS certificate verification failed for");
       expect(result.stderr).not.toContain("verification is disabled");

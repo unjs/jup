@@ -275,7 +275,7 @@ describe("§13.7 registry, auth and integrity", () => {
     // row's `No compatible signature found in package metadata` is step 1's
     // message, which an *absent* signature list used to produce here too —
     // §06.1 makes that case a soft-fail instead, so row 160 asserts the step-1
-    // message on the path that still refuses (COREPACK_REQUIRE_SIGNATURES).
+    // message on the path that still refuses (JUP_REQUIRE_SIGNATURES).
     expect(result.stderr).toContain("The package was not signed by any trusted keys");
 
     registry.mode = "no_signatures";

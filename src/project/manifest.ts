@@ -458,7 +458,7 @@ function describe(
   };
 }
 
-/** §03.1 — `COREPACK_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
+/** §03.1 — `JUP_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
 function externalSpecFile(initialCwd: string): string | undefined {
   const configured = readEnv(ENV.SPEC_FILE);
   return configured === undefined || configured === ""

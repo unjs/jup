@@ -58,8 +58,8 @@ function digest(bytes, algo) {
 }
 
 /**
- * An npm-published package manager: the `latest` dist-tag, pinned to the sha1 of
- * bytes this script **verified**, not to a digest it was told.
+ * An npm-published package manager: the `latest` dist-tag, pinned to the sha512
+ * of bytes this script **verified**, not to a digest it was told.
  *
  * The chain is §06's, run in the same order and with the same code the tool
  * uses at install time:
@@ -68,8 +68,15 @@ function digest(bytes, algo) {
  *    the embedded trust store (§06.3). A registry that cannot produce one has
  *    nothing to say about what it published.
  * 2. the downloaded tarball against that signed `dist.integrity` (§06.1 row 2).
- * 3. only then, the sha1 of those same bytes, which is the form §02.5's
+ * 3. only then, the sha512 of those same bytes, which is the form §02.5's
  *    `default` takes.
+ *
+ * sha512 rather than sha1 for two reasons. §06.2 warns about weak *user* pins,
+ * and a default that would trip that warning is the tool scolding the user
+ * about an algorithm it picked for them. More practically it is the digest
+ * `use` writes, taken from the registry's own `dist.integrity`, so matching it
+ * keeps a bare `yarn` and a pinned project on **one** store directory instead
+ * of colliding into §07.2's pin-qualified one on the common path.
  *
  * Writing a `default` any other way would put an unverified digest in the one
  * place §06.1 has no second opinion about: a machine with no
@@ -97,7 +104,7 @@ async function npmDefault(packageName) {
     throw new Error(`${packageName}@${version} does not match its signed dist.integrity`);
   }
 
-  return `${version}+sha1.${digest(tarball, "sha1")}`;
+  return `${version}+sha512.${digest(tarball, "sha512")}`;
 }
 
 /**
@@ -116,8 +123,8 @@ async function npmDefault(packageName) {
  * checked because it is free — it comes in the packument — and because it is
  * what the tool will check at install time (§06.3).
  */
-async function nativeDefault(launcher, artifactFor) {
-  const { version } = await getJson(`${NPM_REGISTRY}/${launcher}/latest`);
+async function nativeDefault(launcher, artifactFor, pinnedVersion) {
+  const version = pinnedVersion ?? (await getJson(`${NPM_REGISTRY}/${launcher}/latest`)).version;
 
   await Promise.all(
     Object.values(artifactFor).map(async (packageName) => {
@@ -137,6 +144,56 @@ async function nativeDefault(launcher, artifactFor) {
   );
 
   return version;
+}
+
+/**
+ * §02.5 — the major line jup ships as pnpm's compiled-in `default`.
+ *
+ * pnpm is the only entry whose `default` is not simply the `latest` dist-tag.
+ * Upstream still points `latest` at the 11 line while publishing 12 under
+ * `next-12`, and jup ships the 12 line deliberately, so the version is resolved
+ * from the published set rather than from a tag that would drag it back. Move
+ * this number to adopt a later line; delete the special case and fall back to
+ * `npmDefault("pnpm")` once `latest` catches up and the line is JS again —
+ * which it will not be, since 12 is where pnpm went native.
+ */
+const PNPM_LINE = 12;
+
+/**
+ * §02.5 — pnpm's `default`, pinned the way its **band** requires.
+ *
+ * This is the one tool that crosses §02.4's JS/native line at a major boundary,
+ * and the pin style has to cross with it. Below 12 the bytes are the `pnpm` npm
+ * tarball and the default is hash-pinned like npm's and yarn's; from 12 the
+ * bytes are `@pnpm/exe.<host>` and there is no single digest to write, so the
+ * default is a bare version like bun's and deno's.
+ *
+ * Getting this wrong is not a cosmetic error. A hash-pinned `12.x` default would
+ * carry the digest of a tarball that is never downloaded on that band, and §06.1
+ * row 1 reads a digest-bearing reference as an explicit pin — so the correct
+ * per-host artifact would be **refused**, on every machine with no
+ * `lastKnownGood.json` of its own. That is precisely why `referenceWithHash`
+ * refuses to attach a per-host digest at runtime (§07.6); this is the same rule
+ * applied to the compiled-in literal.
+ */
+async function pnpmDefault() {
+  const packument = await getJson(`${NPM_REGISTRY}/pnpm`);
+  const stable = new RegExp(`^${PNPM_LINE}\\.(\\d+)\\.(\\d+)$`);
+  const line = Object.keys(packument.versions ?? {})
+    .map((version) => [version, stable.exec(version)])
+    .filter(([, match]) => match !== null)
+    .map(([version, match]) => [version, Number(match[1]), Number(match[2])])
+    .sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+
+  if (line.length === 0) throw new Error(`pnpm publishes no stable ${PNPM_LINE}.x release`);
+  const version = line[line.length - 1][0];
+
+  // The band decides the pin, not the caller. Reading it from the table would
+  // make the check circular (see {@link NATIVE_TARGETS}), so the boundary is
+  // named here and asserted against the table by `pnpm test`.
+  return PNPM_LINE >= 12
+    ? await nativeDefault("pnpm", NATIVE_TARGETS.pnpm, version)
+    : await npmDefault("pnpm");
 }
 
 /**
@@ -170,6 +227,20 @@ const NATIVE_TARGETS = {
   // check is "does the newest release cover what the newest band promises?", and
   // listing a host the band does not is how this script would start failing on a
   // package that has never existed.
+  // §02.5 — pnpm is the one entry that *crosses* into a per-host band at a major
+  // boundary rather than having been born on one side of it, so its targets are
+  // consulted only when the tracked line is native. `@pnpm/exe.<host>` names the
+  // host directly, so this map is the table's identity map with the scope added.
+  pnpm: {
+    "darwin-arm64": "@pnpm/exe.darwin-arm64",
+    "darwin-x64": "@pnpm/exe.darwin-x64",
+    "linux-arm64": "@pnpm/exe.linux-arm64",
+    "linux-arm64-musl": "@pnpm/exe.linux-arm64-musl",
+    "linux-x64": "@pnpm/exe.linux-x64",
+    "linux-x64-musl": "@pnpm/exe.linux-x64-musl",
+    "win32-arm64": "@pnpm/exe.win32-arm64",
+    "win32-x64": "@pnpm/exe.win32-x64",
+  },
   aube: {
     "darwin-arm64": "@endevco/aube-darwin-arm64",
     "linux-arm64": "@endevco/aube-linux-arm64",
@@ -204,7 +275,11 @@ function rewriteDefault(source, name, field, reference) {
   const body = found[2];
   // `transparent.default` is indented four spaces further than `default`.
   const indent = field === "transparent.default" ? "      " : "    ";
-  const literal = new RegExp(`(\\n${indent}default: ")([^"]*)(")`);
+  // A sha512 reference does not fit beside its key at this indent, so the
+  // formatter wraps it onto the next line. Both shapes have to be found, or the
+  // rewrite silently stops matching the moment a value crosses the print width
+  // — which is exactly what moving the table off sha1 did.
+  const literal = new RegExp(`(\\n${indent}default:(?: |\\n${indent}  )")([^"]*)(")`);
   const current = literal.exec(body);
   if (current === null) throw new Error(`No ${name}.${field} in ${TABLE}`);
   if (current[2] === reference) return source;
@@ -263,7 +338,7 @@ async function refreshKeys(source) {
 let table = readFileSync(TABLE, "utf8");
 const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
   npmDefault("npm"),
-  npmDefault("pnpm"),
+  pnpmDefault(),
   // §02.5 — Berry is an npm package now, so it takes the same verified path as
   // npm and pnpm. It used to need a branch of its own: `repo.yarnpkg.com` published
   // no signature and no digest, so the pin written here rested on TLS alone, and

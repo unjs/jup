@@ -422,14 +422,14 @@ describe("resolveRegistry — §05.2 and §05.3's precedence", () => {
     });
   });
 
-  it("lets COREPACK_REGISTRY_<NAME> beat COREPACK_NPM_REGISTRY (§05.2)", () => {
+  it("lets JUP_REGISTRY_<NAME> beat COREPACK_NPM_REGISTRY (§05.2)", () => {
     const { project } = tree();
     process.env.COREPACK_NPM_REGISTRY = "https://env.example.org";
-    process.env.COREPACK_REGISTRY_YARN = "https://yarn-mirror.example.org/";
+    process.env.JUP_REGISTRY_YARN = "https://yarn-mirror.example.org/";
 
     expect(resolveRegistry({ name: "yarn", cwd: project })).toMatchObject({
       registry: "https://yarn-mirror.example.org",
-      source: "COREPACK_REGISTRY_YARN",
+      source: "JUP_REGISTRY_YARN",
     });
     // …and only for that package manager.
     expect(resolveRegistry({ name: "pnpm", cwd: project })).toMatchObject({
@@ -456,15 +456,15 @@ describe("resolveRegistry — §05.2 and §05.3's precedence", () => {
   });
 
   it("spells the variable from the package manager's name", () => {
-    expect(registryVariableFor("yarn")).toBe("COREPACK_REGISTRY_YARN");
-    expect(registryVariableFor("pnpm")).toBe("COREPACK_REGISTRY_PNPM");
-    expect(registryVariableFor("my-pm")).toBe("COREPACK_REGISTRY_MY_PM");
+    expect(registryVariableFor("yarn")).toBe("JUP_REGISTRY_YARN");
+    expect(registryVariableFor("pnpm")).toBe("JUP_REGISTRY_PNPM");
+    expect(registryVariableFor("my-pm")).toBe("JUP_REGISTRY_MY_PM");
   });
 
   it("treats an empty value as unset, matching every other COREPACK_ flag", () => {
     const { project } = tree();
     process.env.COREPACK_NPM_REGISTRY = "";
-    process.env.COREPACK_REGISTRY_YARN = "";
+    process.env.JUP_REGISTRY_YARN = "";
     expect(resolveRegistry({ name: "yarn", cwd: project }).source).toBe("built-in");
   });
 });
@@ -481,9 +481,9 @@ describe("hasNpmProtocolRegistry — §05.2 rewrite 1's condition", () => {
     expect(hasNpmProtocolRegistry("pnpm", project)).toBe(false);
   });
 
-  it("is false for COREPACK_REGISTRY_<NAME> alone — that is a mirror, not a protocol change", () => {
+  it("is false for JUP_REGISTRY_<NAME> alone — that is a mirror, not a protocol change", () => {
     const { project } = tree();
-    process.env.COREPACK_REGISTRY_YARN = "https://yarn-mirror.example.org";
+    process.env.JUP_REGISTRY_YARN = "https://yarn-mirror.example.org";
     expect(hasNpmProtocolRegistry("@yarnpkg/cli-dist", project)).toBe(false);
   });
 });

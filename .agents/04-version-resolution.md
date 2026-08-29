@@ -109,6 +109,7 @@ lenient, because the recorded version was itself chosen by the lenient rule.
 ```
 opendir(<store>/<name>); ENOENT → null
 skip entries beginning with "."          # .DS_Store and friends
+skip entries carrying build metadata     # pin-qualified directories, §07.2
 keep the highest entry satisfying the range (lenient), ties go to the later entry
 ```
 
@@ -116,10 +117,15 @@ For an exact range this is a single `stat` rather than a scan. The probe uses
 prerelease-tolerant matching, so an installed prerelease satisfying the range is
 returned without a request.
 
-Note that a pin-qualified directory (§07.2) is itself valid semver, so a range
-scan can select one and return a reference carrying a digest the user did not
-pin. That is harmless for execution — the bytes were verified when they were
-installed — but it is worth remembering wherever such a reference is recorded.
+A range scan **MUST NOT** answer with a pin-qualified directory (§07.2). Such a
+directory is itself valid semver, and semver ignores build metadata, so
+`1.22.22+sha512.…` both satisfies a range its bare sibling satisfies and *ties*
+with it — leaving directory order to decide which one answers. The winner becomes
+`locator.reference`, so the tie would put a digest the user never pinned into the
+global defaults (§04.5); for a per-host tool it would also route around §07.6's
+refusal to attach a per-host digest, the digest arriving by directory name rather
+than from the install. Ranges are answered by bare versions. A pin-qualified
+directory is reachable only through the exact-reference path that named it.
 
 ## 4.4 Project resolution state: `jup.lock` and the memo
 

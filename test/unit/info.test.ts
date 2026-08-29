@@ -53,10 +53,10 @@ const ENV_KEYS = [
   "PREFIX",
   // §10.5 — the shim directory is now configurable, so it has to be scrubbed
   // like every other input.
-  "COREPACK_SHIM_DIRECTORY",
+  "JUP_SHIM_DIRECTORY",
   "COREPACK_NPM_REGISTRY",
   "COREPACK_NPM_TOKEN",
-  "COREPACK_FROZEN_LOCKFILE",
+  "JUP_FROZEN_LOCKFILE",
   "COREPACK_ENABLE_STRICT",
   "COREPACK_ENV_FILE",
   "CI",
@@ -363,12 +363,12 @@ describe("buildReport — resolution (§04.4, §09.9)", () => {
 
   it("reports what freezes `use` and `up`, and where it came from", async () => {
     await manifest({ packageManager: "pnpm@^11.0.0" });
-    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    process.env.JUP_FROZEN_LOCKFILE = "1";
 
     const info = report();
 
     expect(info.lockfile.frozen).toBe(true);
-    expect(info.lockfile.frozenSource).toBe("COREPACK_FROZEN_LOCKFILE");
+    expect(info.lockfile.frozenSource).toBe("JUP_FROZEN_LOCKFILE");
     // §04.4 — freezing the recorded file says nothing about *this* run: a proxy
     // run never writes it, so the resolution is reported on its own terms.
     expect(info.resolution.status).toBe("network");
@@ -379,10 +379,10 @@ describe("buildReport — resolution (§04.4, §09.9)", () => {
     process.env.CI = "1";
     expect(report().lockfile).toMatchObject({ frozen: false, frozenSource: "default" });
 
-    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    process.env.JUP_FROZEN_LOCKFILE = "1";
     expect(report().lockfile).toMatchObject({
       frozen: true,
-      frozenSource: "COREPACK_FROZEN_LOCKFILE",
+      frozenSource: "JUP_FROZEN_LOCKFILE",
     });
   });
 
@@ -683,7 +683,7 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
     // §10.5 replaced the old "wherever our own binary lives" lookup with an explicit
     // per-user chain, so the fixture names the directory instead of planting a
     // `jup` beside it.
-    process.env.COREPACK_SHIM_DIRECTORY = bin;
+    process.env.JUP_SHIM_DIRECTORY = bin;
 
     // A stub carrying the marker, plus what `enable` puts on the name: §10.3's
     // relative symlink, or §10.4's wrappers, which carry no marker and are
@@ -729,7 +729,7 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
   it.skipIf(IS_WINDOWS)("reports a shim whose stub has moved away as ours", () => {
     const bin = join(home, "bin");
     mkdirSync(bin, { recursive: true });
-    process.env.COREPACK_SHIM_DIRECTORY = bin;
+    process.env.JUP_SHIM_DIRECTORY = bin;
     // The #751 state: the link is there, `yarn.mjs` is not.
     symlinkSync("yarn.mjs", join(bin, "yarn"));
 
@@ -747,7 +747,7 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
   it.skipIf(IS_WINDOWS)("still declines a dangling link that names something else", () => {
     const bin = join(home, "bin");
     mkdirSync(bin, { recursive: true });
-    process.env.COREPACK_SHIM_DIRECTORY = bin;
+    process.env.JUP_SHIM_DIRECTORY = bin;
     symlinkSync("../elsewhere/yarn.js", join(bin, "yarn"));
 
     process.env.PATH = bin;

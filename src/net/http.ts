@@ -38,14 +38,14 @@ import { getOwnVersion } from "../utils/self.ts";
 
 /**
  * §05.1 — connect **and** idle timeout, in milliseconds, overridable with
- * `COREPACK_NETWORK_TIMEOUT`; default 30 s.
+ * `JUP_NETWORK_TIMEOUT`; default 30 s.
  */
 const DEFAULT_TIMEOUT = 30_000;
 
 /**
  * §05.1 — "3 attempts, exponential backoff with jitter".
  *
- * The spec states both "3 attempts" and a `COREPACK_NETWORK_RETRIES` default of
+ * The spec states both "3 attempts" and a `JUP_NETWORK_RETRIES` default of
  * `3`, which are only both true if the variable counts **attempts**, the first
  * one included. That is the reading taken here: `3` is three requests, `0`
  * disables retrying, and so does `1`.
@@ -142,7 +142,7 @@ class TimeoutError extends Error {
   override readonly name = "TimeoutError";
 }
 
-/** `COREPACK_NETWORK_TIMEOUT` / `COREPACK_NETWORK_RETRIES` — a positive integer or the default. */
+/** `JUP_NETWORK_TIMEOUT` / `JUP_NETWORK_RETRIES` — a positive integer or the default. */
 function envInteger(name: string, fallback: number, minimum: number, maximum: number): number {
   const raw = readEnv(name);
   if (raw === undefined || !/^\d+$/.test(raw.trim())) return fallback;
@@ -218,13 +218,13 @@ export interface HttpOptions {
    */
   registryOrigin?: string;
   /**
-   * Connect + idle timeout in ms. Defaults to `COREPACK_NETWORK_TIMEOUT`, then
+   * Connect + idle timeout in ms. Defaults to `JUP_NETWORK_TIMEOUT`, then
    * to 30_000 (§05.1).
    */
   timeout?: number;
   /**
    * §05.1 — total attempts, the first included. Defaults to
-   * `COREPACK_NETWORK_RETRIES`, then to 3. `0` or `1` means "no retry".
+   * `JUP_NETWORK_RETRIES`, then to 3. `0` or `1` means "no retry".
    */
   attempts?: number;
   /**

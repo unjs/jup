@@ -134,14 +134,13 @@ const ARTIFACT_PATH = `/native/${NAME}-${VERSION}-${process.platform}-${process.
  * exactly that host onto the mock (and only that host), which keeps the fixture
  * on `https:` and clear of §05.2's host-check and rewriting rules.
  *
- * A `url`-typed registry, like Yarn Berry's: it publishes no signatures, so §06.1
- * row 1's explicit hash pin is the whole verification story — which is also the
- * shape a package manager distributing its own per-platform builds would have.
+ * §02.2 — an npm registry like every band's. Nothing below ever queries it: every
+ * fixture pins an exact version, so §06.1 row 1's explicit hash pin is the whole
+ * verification story, which is the point of the suite.
  */
 const REGISTRY_SPEC = {
-  type: "url",
-  url: "https://registry.npmjs.org/native/tags",
-  fields: { tags: "aliases", versions: "tags" },
+  type: "npm",
+  package: NAME,
 };
 
 /** One band, parameterised only by which entry of the artifact its `bin` names. */
@@ -291,7 +290,7 @@ describe.skipIf(!POSIX)("§08.3 native package managers", () => {
       env: {
         // Row 193's "no JS runtime consulted", stated as a trap rather than an
         // absence: §08.3.1 would consult this first, and it does not exist.
-        COREPACK_NODE_EXECPATH: "/nonexistent/definitely-not-a-node",
+        JUP_NODE_EXECPATH: "/nonexistent/definitely-not-a-node",
         CI: undefined,
         ...env,
       },
@@ -350,7 +349,7 @@ describe.skipIf(!POSIX)("§08.3 native package managers", () => {
   it("193: no JavaScript runtime is consulted even when one is configured badly", async () => {
     const fixture = project();
 
-    // §08.3.1's first step is COREPACK_NODE_EXECPATH. A native band skips the
+    // §08.3.1's first step is JUP_NODE_EXECPATH. A native band skips the
     // lookup entirely, so a value that could not possibly work is invisible.
     const result = await run([NAME, "--version"], options(fixture));
     expect(result.exitCode).toBe(0);

@@ -81,7 +81,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
     expect(occurrences(result.stderr, warning)).toBe(1);
   });
 
-  it("160: the same with no pinned hash is refused under COREPACK_REQUIRE_SIGNATURES", async () => {
+  it("160: the same with no pinned hash is refused under JUP_REQUIRE_SIGNATURES", async () => {
     registry.mode = "no_signatures";
     const unset = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -93,7 +93,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+      env: mirror({ JUP_REQUIRE_SIGNATURES: "1" }),
     });
 
     expect(result.exitCode).toBe(1);
@@ -102,7 +102,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
     expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
   });
 
-  it("159: a pinned hash is not subject to COREPACK_REQUIRE_SIGNATURES", async () => {
+  it("159: a pinned hash is not subject to JUP_REQUIRE_SIGNATURES", async () => {
     // §06.1's row 1 versus its own REQUIRE_SIGNATURES rule, decided here rather than left to
     // whichever the code happened to reach first — the audit found this path
     // untested in *either* direction.
@@ -119,7 +119,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+      env: mirror({ JUP_REQUIRE_SIGNATURES: "1" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -137,7 +137,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+      env: mirror({ JUP_REQUIRE_SIGNATURES: "1" }),
     });
 
     expect(result.exitCode).toBe(1);
@@ -153,7 +153,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
       // Mandating signatures proves the fallback verified one, rather than the
       // soft-fail quietly carrying the install.
       ...fixture,
-      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+      env: mirror({ JUP_REQUIRE_SIGNATURES: "1" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -172,7 +172,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: mirror({ COREPACK_REQUIRE_SIGNATURES: "1" }),
+      env: mirror({ JUP_REQUIRE_SIGNATURES: "1" }),
     });
 
     expect(result.exitCode).toBe(0);

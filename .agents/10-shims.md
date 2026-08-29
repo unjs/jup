@@ -90,9 +90,17 @@ paths, not a string prefix: `~/.cache/jup/v1` does not contain `~/.cache/jup/v10
 > This is the most intricate mechanism in jup, and it reaches into three other
 > places: §07.9 reads shebangs back out of the shims to know what `cache clean`
 > may delete, §08.3 forwards `JUP_HOST_RUNTIME` through native children, and
-> §10.8 turns two of its failures into `enable` errors. If the pin ever moves
-> into a single state file under `<home>` that every stub reads, all four get
-> much smaller.
+> §10.8 turns two of its failures into `enable` errors.
+>
+> **Moving the pin into a state file every stub reads does not work, and is not a
+> debt to pay down.** A POSIX shim's *shebang* is what the kernel executes;
+> nothing runs before it that could read a state file. Making it work means
+> turning each shim into `#!/bin/sh` plus `exec "$(…)" stub "$@"`, which adds a
+> shell fork to every single `yarn` invocation — against §01.3's warm-path
+> budget, the property jup is built to have. The choice here is binary: keep
+> `enable node` and accept this mechanism, or drop the feature. It is kept, so
+> the intricacy above is the intrinsic price of putting `node` on `PATH` beside
+> nvm, not a design awaiting cleanup.
 
 ## 10.3 POSIX shim creation
 

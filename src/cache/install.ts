@@ -37,7 +37,6 @@ import {
   applySourceOverride,
   fetchTarballURLAndSignature,
   getRegistryUrl,
-  resolveRegistrySpec,
   verifyRegistryTrust,
   warnUnsignedRegistry,
 } from "../net/registry.ts";
@@ -126,10 +125,10 @@ export async function ensureInstalled(
   // A bad algorithm in the `packageManager` field must fail before the network,
   // not with an opaque crypto error halfway through the download (§06.2).
   //
-  // The weak-algorithm warning is scoped to a hash the *user* pinned, per §06.2:
-  // every embedded default is itself sha1 (§02.5), so warning unconditionally
-  // means a plain `yarn` in an unpinned directory scolds the user about an
-  // algorithm we picked for them and they cannot change.
+  // The weak-algorithm warning is scoped to a hash the *user* pinned, per §06.2.
+  // An embedded default is an algorithm we picked and the user cannot change, so
+  // warning about one would scold them for our choice; the scoping is what keeps
+  // a plain `yarn` in an unpinned directory quiet whatever §02.3's table holds.
   const userPinned =
     pin.digest !== undefined && !isEmbeddedReference(locator.name, locator.reference);
   const algo = assertSupportedAlgo(pin.algo, userPinned);
@@ -343,10 +342,10 @@ async function chooseSource(
   // host rather than 404ing on `@oven/bun-{target}`.
   const artifactRegistry = resolveArtifactRegistry(spec, locator);
 
-  // An artifact registry already identifies an npm tarball; otherwise resolve
-  // the configured protocol alternative for the band.
-  const registry = artifactRegistry ?? resolveRegistrySpec(spec.registry);
-  const packageName = registry.type === "npm" ? registry.package : undefined;
+  // An artifact registry already identifies an npm tarball; otherwise the
+  // band's own registry does (§02.2 — every band is on npm).
+  const registry = artifactRegistry ?? spec.registry;
+  const packageName = registry.package;
   const registryUrl = getRegistryUrl({ name, packageName });
 
   const source: ArtifactSource = {
@@ -363,7 +362,7 @@ async function chooseSource(
   // the download URL comes from the table (§05.2), and no metadata request is
   // made until §06 needs one.
   const configured = resolveRegistry({ name, packageName }).kind !== "built-in";
-  if (registry.type === "npm" && configured) {
+  if (configured) {
     // `dist.tarball` verbatim — never synthesised — already rewritten onto the
     // configured registry and validated by §05.2.
     const metadata = await fetchTarballURLAndSignature(registry, version);
@@ -613,10 +612,11 @@ async function resolveExpectedIntegrity(
   pin: HashPin,
   version: string | undefined,
 ): Promise<{ algo: string; hex: string } | undefined> {
-  // Rows 4 and 5: a url-type registry publishes no signatures at all, and
-  // `COREPACK_INTEGRITY_KEYS` in {"", "0"} disables the whole mechanism.
+  // Row 5: `COREPACK_INTEGRITY_KEYS` in {"", "0"} disables the whole mechanism.
+  // A source with no registry, or none resolved to a version, has no claim to
+  // check against.
   const registry = source.registry;
-  if (registry?.type !== "npm" || version === undefined) return undefined;
+  if (registry === undefined || version === undefined) return undefined;
   if (shouldSkipIntegrityCheck()) return undefined;
 
   const registryUrl = source.registryUrl;
@@ -675,11 +675,10 @@ async function resolveExpectedIntegrity(
  *
  * What this actually closes:
  *
- * * Yarn Berry from `repo.yarnpkg.com` — a url-type registry publishes no
- *   signatures and no digests at all (§02.5), so a version resolved from
- *   `/tags` rather than pinned had *nothing* checking it. This is the breaking
- *   half of §06.1: `packageManager: "yarn@4.x"` now needs a pinned hash, a
- *   `jup.lock` resolution (§04.4 records one, with its integrity), or
+ * * A registry that publishes no signatures and no digests, so a version
+ *   resolved from it rather than pinned had *nothing* checking it. This is the
+ *   breaking half of §06.1: such a `packageManager` spec now needs a pinned
+ *   hash, a `jup.lock` resolution (§04.4 records one, with its integrity), or
  *   the opt-out.
  * * A custom `packageManager` URL with no `#<algo>.<hex>` fragment. That path
  *   is already behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`, which permits the
@@ -731,11 +730,10 @@ export function assertDigest(expected: string, actual: string): void {
  *
  * The `.tgz` path bounds its output inside the extractor; the single-file path
  * had no cap at all, so a source that controls the served `.js` could write
- * until the disk filled. The exposure is narrow — the only non-opt-in `.js`
- * source is Yarn Berry from repo.yarnpkg.com, which §06.1 leaves at the
- * TLS-only tier, and an adversary there already controls the code we are about
- * to execute — but a counter costs nothing and the cap should not depend on
- * which branch of the download the artifact took.
+ * until the disk filled. The exposure is narrow — §02.2 leaves no non-opt-in
+ * `.js` source, and an adversary behind the opt-in already controls the code we
+ * are about to execute — but a counter costs nothing and the cap should not
+ * depend on which branch of the download the artifact took.
  */
 const MAX_SINGLE_FILE_BYTES = 512 * 1024 * 1024;
 

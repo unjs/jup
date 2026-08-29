@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   mkdirSync,
+  chmodSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -22,7 +23,7 @@ import {
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { WARM_MODULES } from "../../build.config.ts";
-import { DEFINITIONS, getSpecFor } from "../../src/config/table.ts";
+import { DEFINITIONS, getSpecFor, resolveSpecBin } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
 import { messages as cold } from "../../src/errors-cold.ts";
 import { LOCKFILE_NAME } from "../../src/project/lockfile.ts";
@@ -78,14 +79,22 @@ function installFake(home: string, name: string, reference: string, body?: strin
       ``,
     ].join("\n");
 
+  // §02.4 — a native band's `bin` carries `{exe}`, and §08.3 *spawns* what it
+  // names instead of loading it in-process. So the fake has to be a real
+  // executable: a shebang, and the execute bit `install.ts` would have set.
+  // pnpm reaches this path now that its default is on the native `>=12.0.0`
+  // band; before that every default here was JS.
+  const native = spec.exec === "native";
+  const bin = resolveSpecBin(spec);
   const targets = Array.isArray(spec.bin)
     ? [basename(new URL(spec.url.replace("{}", version)).pathname)]
-    : Object.values(spec.bin);
+    : Object.values(bin);
 
-  for (const relative of targets) {
+  for (const relative of new Set(targets)) {
     const file = join(location, relative);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, script);
+    writeFileSync(file, native ? `#!${process.execPath}\n${script}` : script);
+    if (native && process.platform !== "win32") chmodSync(file, 0o755);
   }
 
   writeFileSync(
@@ -94,7 +103,7 @@ function installFake(home: string, name: string, reference: string, body?: strin
     // has to record the digest the reference it stands for actually names.
     JSON.stringify({
       locator: { name, reference },
-      bin: spec.bin,
+      bin,
       hash: parse(reference)!.build.join(".") || "sha512.fake",
     }),
   );
@@ -725,7 +734,7 @@ describe("runProxy — the expired-memo fallback (§04.4)", () => {
 
     const result = run(cwd, home, ["pnpm", "--version"], {
       COREPACK_NPM_REGISTRY: deadRegistry,
-      COREPACK_NETWORK_RETRIES: "0",
+      JUP_NETWORK_RETRIES: "0",
     });
 
     // A connection that is refused is the case the fallback exists for.
@@ -738,13 +747,13 @@ describe("runProxy — the expired-memo fallback (§04.4)", () => {
     expect(readFileSync(memo, "utf8")).toBe(before);
   });
 
-  it("mutes the notice, not the fallback, under COREPACK_QUIET_ADVISORIES=1", () => {
+  it("mutes the notice, not the fallback, under JUP_QUIET_ADVISORIES=1", () => {
     const { cwd, home } = memoProject();
 
     const result = run(cwd, home, ["pnpm", "--version"], {
       COREPACK_NPM_REGISTRY: deadRegistry,
-      COREPACK_NETWORK_RETRIES: "0",
-      COREPACK_QUIET_ADVISORIES: "1",
+      JUP_NETWORK_RETRIES: "0",
+      JUP_QUIET_ADVISORIES: "1",
     });
 
     // §11.3 — the line is one jup adds, so the mute covers it.
@@ -772,7 +781,7 @@ describe("runProxy — the expired-memo fallback (§04.4)", () => {
 
     const result = run(cwd, home, ["pnpm", "--version"], {
       COREPACK_NPM_REGISTRY: unauthorised.url,
-      COREPACK_NETWORK_RETRIES: "0",
+      JUP_NETWORK_RETRIES: "0",
     });
     unauthorised.stop();
 
@@ -791,7 +800,7 @@ describe("runProxy — the expired-memo fallback (§04.4)", () => {
 
     const result = run(cwd, home, ["pnpm", "--version"], {
       COREPACK_NPM_REGISTRY: unavailable.url,
-      COREPACK_NETWORK_RETRIES: "0",
+      JUP_NETWORK_RETRIES: "0",
     });
     unavailable.stop();
 
@@ -1194,7 +1203,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * accessors exist to make unavailable. Neither can move off the warm path: it
    * is the warm path that reads the environment.
    *
-   * And once more, from 202,000 to 204,000, for `COREPACK_QUIET_ADVISORIES`
+   * And once more, from 202,000 to 204,000, for `JUP_QUIET_ADVISORIES`
    * (§11.3): `errors.ts` gained `advisory()` and its import of
    * `config/env-vars.ts` (+958 source bytes, most of it the comment explaining
    * *why* the mute is scoped by origin), `project/env.ts` its two deny-list
@@ -1415,7 +1424,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * | Change | Module | Bytes |
    * |---|---|---|
    * | §10.2's store-boundary test, `isInsideHome` | `cache/store.ts` | +1,158 |
-   * | §08.3's `COREPACK_HOST_RUNTIME`, and `writeEnvInto` to set it on a child | `config/env-vars.ts` | +570 |
+   * | §08.3's `JUP_HOST_RUNTIME`, and `writeEnvInto` to set it on a child | `config/env-vars.ts` | +570 |
    * | §03.2's deny-list entry for that variable | `project/env.ts` | +337 |
    * | a pointer to where the child's environment is finished | `run/exec.ts` | +122 |
    *
@@ -1448,7 +1457,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    *
    * What the warm path *lost* is not in that table and is the reason the change
    * is worth its bytes: a range run no longer writes the project root, and no
-   * longer consults `COREPACK_FROZEN_LOCKFILE` before it may resolve. What it
+   * longer consults `JUP_FROZEN_LOCKFILE` before it may resolve. What it
    * gained is one `readFileSync` of a second path, and only on a range run whose
    * recorded file had nothing to say. Two thirds of the entry is prose, on the
    * same terms as the `version-file.ts` entry above.

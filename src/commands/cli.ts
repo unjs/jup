@@ -24,7 +24,6 @@ import {
   isPerHost,
   isSupportedPackageManager,
   resolveSpecBin,
-  SUPPORTED_NAMES,
 } from "../config/table.ts";
 import { isFrozenLockfile } from "../project/env.ts";
 import { advisory, explainFetchFailure, messages, UsageError } from "../errors-cold.ts";
@@ -54,8 +53,11 @@ import {
   MARKER_NAME,
   promote,
   readLastKnownGood,
+  readMarker,
   referenceWithHash,
+  UNATTRIBUTABLE_HASH,
   writeLastKnownGood,
+  writeMarker,
 } from "../cache/store.ts";
 import { create, extract, listEntries } from "../cache/tar.ts";
 import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
@@ -65,7 +67,7 @@ const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
 import { formatHelp } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
-import { err, out, outColors } from "../utils/log.ts";
+import { out, outColors } from "../utils/log.ts";
 
 async function resolveOrThrow(descriptor: Descriptor, options: ResolveOptions): Promise<Locator> {
   let locator: Locator | null;
@@ -113,7 +115,6 @@ async function installOrExplain(
  * | `install -g` (§09.3) | set **unconditionally**, even downgrading across majors |
  * | `install -g --cache-only` | none |
  * | `pack` (§09.6) | set, deliberately: you pack what you intend to run |
- * | `hydrate` | only with `--activate` (opt-*in*, §09.11) |
  *
  * This is not §04.8's guarded bump — no "same major", no "strictly upward", no
  * "only if an entry already exists". `install -g yarn@1.0.0` makes 1.0.0 the
@@ -132,8 +133,6 @@ function fileStream(path: string): ReadableStream<Uint8Array> {
 interface ArgSpec {
   booleans?: string[];
   strings?: string[];
-  /** §09.11 — flags whose value may be omitted (`prepare --output`). */
-  optional?: string[];
 }
 
 interface ParsedArgs {
@@ -149,8 +148,7 @@ interface ParsedArgs {
  */
 function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
   const booleans = new Set(spec.booleans ?? []);
-  const optional = new Set(spec.optional ?? []);
-  const strings = new Set([...(spec.strings ?? []), ...optional]);
+  const strings = new Set(spec.strings ?? []);
 
   const flags = new Set<string>();
   const values = new Map<string, string>();
@@ -180,13 +178,6 @@ function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
     if (strings.has(name)) {
       if (equals !== -1) {
         values.set(name, arg.slice(equals + 1));
-        continue;
-      }
-      // An optional-value flag only ever takes its value through `=`: with the
-      // space form there is no way to tell `prepare --output yarn@1` (a bare
-      // flag plus a spec) from an output path.
-      if (optional.has(name)) {
-        flags.add(name);
         continue;
       }
       const next = args[index + 1];
@@ -226,14 +217,6 @@ function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
  * The byte-compatible messages say "to pack" in all four commands.
  */
 export function resolvePatternsToDescriptors(patterns: string[]): Descriptor[] {
-  return resolveDescriptorsFrom(patterns, false);
-}
-
-/**
- * Deprecated `prepare` retains its byte-exact legacy "no spec" message, which
- * omits `devEngines`.
- */
-function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor[] {
   const cwd = process.cwd();
 
   if (patterns.length > 0) {
@@ -244,7 +227,7 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
     return patterns.map((pattern) => parseSpec(pattern, CLI_SOURCE, { requireVersion: false }));
   }
 
-  return [resolveProjectSpec(legacy).descriptor];
+  return [resolveProjectSpec().descriptor];
 }
 
 /**
@@ -254,10 +237,7 @@ function resolveDescriptorsFrom(patterns: string[], legacy: boolean): Descriptor
  * declared `packageManager` range (which §04.4 refreshes in `jup.lock`)
  * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
  */
-function resolveProjectSpec(
-  legacy: boolean,
-  options?: { mutating?: boolean; here?: boolean },
-): {
+function resolveProjectSpec(options?: { mutating?: boolean; here?: boolean }): {
   descriptor: Descriptor;
   lookup: Extract<SpecResult, { type: "Found" }>;
 } {
@@ -269,7 +249,7 @@ function resolveProjectSpec(
       throw new UsageError(messages.couldntFindProject());
     }
     case "NoSpec": {
-      throw new UsageError(legacy ? messages.noSpecInProjectLegacy() : messages.noSpecInProject());
+      throw new UsageError(messages.noSpecInProject());
     }
     case "Found": {
       // A declared `devEngines.packageManager.version` outranks the exact pin.
@@ -290,7 +270,7 @@ export async function cmdInstall(args: string[]): Promise<number> {
     );
   }
 
-  const { descriptor, lookup } = resolveProjectSpec(false);
+  const { descriptor, lookup } = resolveProjectSpec();
 
   // §04.4 — warm the cache with the version the project will actually run.
   // `install` exists to fill a Docker layer, and resolving a range afresh here
@@ -328,7 +308,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
     // §09.3 — an archive argument is anything ending in `.tgz`; everything else
     // is a spec.
     if (target.endsWith(".tgz")) {
-      await installFromArchive(target, { activate: !cacheOnly, format: "pack" });
+      await installFromArchive(target, { activate: !cacheOnly });
       continue;
     }
 
@@ -359,10 +339,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
  * is **not** a security boundary, which is why the extraction below still runs
  * through §07.4's rules with nothing relaxed.
  */
-async function readArchiveEntries(
-  filePath: string,
-  format: "pack" | "prepare",
-): Promise<Map<string, Set<string>>> {
+async function readArchiveEntries(filePath: string): Promise<Map<string, Set<string>>> {
   const found = new Map<string, Set<string>>();
   let hasInvalidEntries = false;
 
@@ -393,7 +370,7 @@ async function readArchiveEntries(
   }
 
   if (hasInvalidEntries || found.size === 0) {
-    throw new UsageError(messages.invalidArchiveFormat(format));
+    throw new UsageError(messages.invalidArchiveFormat());
   }
 
   for (const name of found.keys()) {
@@ -422,17 +399,34 @@ function isPlausibleSegment(segment: string): boolean {
 }
 
 /**
+ * §07.10 — strip the unattributable `hash` from a marker the archive supplied.
+ *
+ * A marker's `hash` is a *claim*: nothing in this path hashed the bytes it
+ * describes. `pack` ships extracted `<name>/<version>/` subtrees rather than
+ * the artifact tarball the digest was taken over, so there is nothing left here
+ * to re-derive it from — which is §07.10's second clause, not its first. Left
+ * intact, the claim is exactly what `markerProvesPin` compares a pin against,
+ * so an archive could seed arbitrary bytes under a name and version some
+ * project pins and have them execute with nothing ever hashed.
+ *
+ * A marker §07.2 cannot read is left as it is: it carries no claim anyone will
+ * honour, because every consumer already treats it as no marker at all.
+ */
+function stripUnattributableHash(dir: string): void {
+  const marker = readMarker(dir);
+  if (marker === null) return;
+  writeMarker(dir, { ...marker, hash: UNATTRIBUTABLE_HASH });
+}
+
+/**
  * Extract into a temp folder **inside** the install tree, then promote each
  * validated `<name>/<version>` subtree with the same atomic rename the download
  * path uses (§07.5). Only validated subtrees are promoted, so an archive
  * carrying extra entries never contributes anything to the store.
  */
-async function installFromArchive(
-  file: string,
-  options: { activate: boolean; format: "pack" | "prepare" },
-): Promise<void> {
+async function installFromArchive(file: string, options: { activate: boolean }): Promise<void> {
   const filePath = resolvePath(process.cwd(), file);
-  const found = await readArchiveEntries(filePath, options.format);
+  const found = await readArchiveEntries(filePath);
 
   const installFolder = getInstallFolder();
   const tmp = createTempDir();
@@ -449,7 +443,11 @@ async function installFromArchive(
               : messages.addingToCache(name, reference)
           }\n`,
         );
-        promote(join(tmp, name, reference), join(installFolder, name, reference));
+        // §07.10 — before promotion, never after: the store must not hold a
+        // digest claim this never checked, not even briefly.
+        const staged = join(tmp, name, reference);
+        stripUnattributableHash(staged);
+        promote(staged, join(installFolder, name, reference));
         if (options.activate) setLastKnownGood(name, reference);
       }
     }
@@ -467,7 +465,7 @@ export async function cmdUp(args: string[]): Promise<number> {
   // §03.1 — `--here` reads and writes `cwd`'s own manifest, ignoring the walk.
   const here = hasFlag(parsed, "--here");
   const pinStyle = readPinStyle(parsed);
-  const { descriptor, lookup } = resolveProjectSpec(false, { mutating: true, here });
+  const { descriptor, lookup } = resolveProjectSpec({ mutating: true, here });
   const { name, range } = descriptor;
 
   if (!isValidVersion(range) && !isValidRange(range)) {
@@ -1063,92 +1061,6 @@ async function cleanSparing(spare: {
     .filter((_path, index) => results[index]?.status === "rejected")
     .map((path) => ({ path }));
 }
-/**
- * §09.11 — a deprecated command names its replacement, on **stderr**, and then
- * does its job.
- *
- * stderr rather than stdout for two reasons that agree: §09.14 puts warnings
- * there, and `prepare --json` writes a document to stdout that a caller pipes
- * into `jq`. "Never silently hide a command" cuts both ways — the command still
- * works, and the notice never breaks what it prints.
- */
-function deprecated(command: string, replacement: string): void {
-  err(`${messages.deprecatedCommand(command, replacement)}\n`);
-}
-
-/** §09.11 — deprecated, retained for compatibility. */
-export async function cmdHydrate(args: string[]): Promise<number> {
-  // Its replacement is `install -g <file>.tgz` (§09.11).
-  deprecated("hydrate", "install -g");
-  const parsed = parseArgs(args, { booleans: ["--activate"] });
-  const [file, ...extra] = parsed.positionals;
-
-  if (file === undefined || extra.length > 0) {
-    throw new UsageError(`The 'jup hydrate' command requires exactly one archive`);
-  }
-
-  // `prepare` accepts any file extension and activates only when requested.
-  await installFromArchive(file, {
-    activate: hasFlag(parsed, "--activate"),
-    format: "prepare",
-  });
-
-  out(`${messages.allDone()}\n`);
-  return 0;
-}
-
-export async function cmdPrepare(args: string[]): Promise<number> {
-  // §09.11's sentence, verbatim. `pack` is `prepare`'s replacement for the
-  // archive half; `--activate` is `install -g`, but the spec names one command
-  // and this is the one it names.
-  deprecated("prepare", "pack");
-  const parsed = parseArgs(args, {
-    booleans: ["--activate", "--all", "--json"],
-    optional: ["-o", "--output"],
-  });
-  const activate = hasFlag(parsed, "--activate");
-  const json = hasFlag(parsed, "--json");
-
-  if (hasFlag(parsed, "--all") && parsed.positionals.length > 0) {
-    throw new UsageError(
-      `The --all option cannot be used along with an explicit package manager specification`,
-    );
-  }
-
-  const descriptors = hasFlag(parsed, "--all")
-    ? SUPPORTED_NAMES.map((name) => ({ name, range: "*" }))
-    : // §09.11 — the legacy "no spec" error omits the `devEngines` mention.
-      resolveDescriptorsFrom(parsed.positionals, true);
-
-  const locations: string[] = [];
-  for (const descriptor of descriptors) {
-    const locator = await resolveOrThrow(descriptor, { allowTags: true });
-
-    if (!json) {
-      out(
-        `${
-          activate
-            ? messages.installing(locator.name, locator.reference)
-            : messages.addingToCache(locator.name, locator.reference)
-        }\n`,
-      );
-    }
-
-    const spec = await installOrExplain(locator, descriptor.range, { cacheOnly: !activate });
-    locations.push(spec.location);
-    if (activate)
-      setLastKnownGood(locator.name, referenceWithHash(locator.name, locator.reference, spec.hash));
-  }
-
-  // §09.11 — `--output` tolerates a bare flag, defaulting to `jup.tgz`.
-  const output = firstValue(parsed, "-o", "--output");
-  const bare = hasFlag(parsed, "-o", "--output");
-  if (output !== undefined || bare) {
-    await writeArchive(locations, resolvePath(process.cwd(), output ?? DEFAULT_ARCHIVE_NAME), json);
-  }
-
-  return 0;
-}
 function cmdVersion(): Promise<number> {
   out(`${getOwnVersion()}\n`);
   return Promise.resolve(0);
@@ -1224,12 +1136,6 @@ export async function runManagementCommand(args: string[]): Promise<number> {
     }
     case "use": {
       return cmdUse(rest);
-    }
-    case "hydrate": {
-      return cmdHydrate(rest);
-    }
-    case "prepare": {
-      return cmdPrepare(rest);
     }
     default: {
       throw new UsageError(`Unknown command "${command}"`);

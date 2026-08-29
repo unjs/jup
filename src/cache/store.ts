@@ -334,6 +334,22 @@ export function writeMarker(dir: string, marker: CorepackMarker): void {
 }
 
 /**
+ * §07.10 — the `hash` written over a claim that nothing here could attribute.
+ *
+ * `install -g <archive>.tgz` promotes markers it did not write, over bytes it
+ * never hashed (`pack` ships extracted subtrees, not the artifact tarball the
+ * digest was taken over). The claim is replaced rather than deleted, because
+ * §07.2 requires the field and a marker failing shape validation is treated as
+ * no marker at all — which would make the promoted entry unusable rather than
+ * merely unpinnable.
+ *
+ * Deliberately not spelled like an algorithm: a value reading as `sha512.…`
+ * would be a lie of a different kind. It satisfies §07.2's character class, so
+ * the marker still parses, but it can never satisfy {@link markerProvesPin}.
+ */
+export const UNATTRIBUTABLE_HASH = "unattributable.0";
+
+/**
  * §07.6 step 3 — the reference that goes into `package.json` and the store's
  * bookkeeping, carrying the hash of the bytes we actually have.
  *
@@ -360,6 +376,14 @@ export function referenceWithHash(name: string, reference: string, hash: string)
   // explicit pin and refuses the correct artifact. The store's marker is where
   // a host-local digest belongs, and it already holds one.
   if (isPerHost({ name, reference })) return parsed.version;
+
+  // §07.10 — the same reasoning, for a digest that is not a fact about anything.
+  // An archive-seeded entry carries {@link UNATTRIBUTABLE_HASH} in place of a
+  // claim nothing verified, and this is the one function standing between that
+  // marker and the user's committed `packageManager` field. A pin nobody can
+  // satisfy is worse than no pin: it would refuse the correct artifact on every
+  // other machine (§06.1 row 1) and re-download on this one.
+  if (hash === UNATTRIBUTABLE_HASH) return parsed.version;
 
   return `${parsed.version}+${hash}`;
 }
@@ -546,6 +570,19 @@ export function findInstalledVersion(name: string, range: string): string | null
     // pipeline. Strict `range.test` here makes a prerelease install re-hit the
     // network on every single run.
     if (!satisfiesWithPrereleases(entry, range)) continue;
+
+    // §04.3 — a pin-qualified directory (`1.22.22+sha512.<hex>`, §07.2) MUST NOT
+    // answer a range. Semver ignores build metadata, so such an entry both
+    // satisfies the range and *ties* with its bare sibling under `compare`,
+    // leaving `readdirSync` order to decide which one answers. What it answers
+    // with becomes `locator.reference`, so the tie would carry a digest the user
+    // never pinned into `bumpLastKnownGood` and on into `lastKnownGood.json`. For
+    // a per-host tool that also bypasses {@link referenceWithHash}'s deliberate
+    // refusal to attach a per-host digest (§07.6), because the digest would
+    // arrive by directory name rather than from the install. A range is answered
+    // by the bare version, and the pinned reference routes to its own directory
+    // through the exact branch above.
+    if (entry.includes("+")) continue;
 
     // `!== 1` accepts a tie, so the later directory entry wins.
     if (best === null || compare(best, entry) !== 1) best = entry;

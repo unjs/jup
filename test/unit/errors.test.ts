@@ -134,15 +134,15 @@ describe("advisory — §11.3", () => {
   });
 
   it("prints by default", () => {
-    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    advisory(messages.strictSslDisabled("JUP_STRICT_SSL"));
 
-    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("JUP_STRICT_SSL"));
   });
 
-  it("is silent under COREPACK_QUIET_ADVISORIES=1", () => {
-    process.env.COREPACK_QUIET_ADVISORIES = "1";
+  it("is silent under JUP_QUIET_ADVISORIES=1", () => {
+    process.env.JUP_QUIET_ADVISORIES = "1";
 
-    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    advisory(messages.strictSslDisabled("JUP_STRICT_SSL"));
 
     expect(warn).not.toHaveBeenCalled();
   });
@@ -151,7 +151,7 @@ describe("advisory — §11.3", () => {
   it("is silent under the JUP_ spelling too", () => {
     process.env.JUP_QUIET_ADVISORIES = "1";
 
-    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    advisory(messages.strictSslDisabled("JUP_STRICT_SSL"));
 
     expect(warn).not.toHaveBeenCalled();
   });
@@ -159,9 +159,9 @@ describe("advisory — §11.3", () => {
   // The value tables in §11 read `1`, not "anything truthy": `0` is how a user
   // turns the mute back off in a shell that already exports it.
   it.for([["0"], [""], ["true"], ["yes"]])("prints for the value %o", ([value]) => {
-    process.env.COREPACK_QUIET_ADVISORIES = value;
+    process.env.JUP_QUIET_ADVISORIES = value;
 
-    advisory(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    advisory(messages.strictSslDisabled("JUP_STRICT_SSL"));
 
     expect(warn).toHaveBeenCalledTimes(1);
   });

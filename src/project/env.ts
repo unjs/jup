@@ -8,6 +8,7 @@ import {
   COREPACK_PREFIX,
   corepackSpelling,
   ENV,
+  envSpellings,
   isToolEnvName,
   jupSpelling,
   readEnv,
@@ -34,6 +35,22 @@ export const DEFAULT_ENV_FILE_NAME = ".jup.env";
 export const LEGACY_ENV_FILE_NAME = ".corepack.env";
 
 /**
+ * Every spelling of every denied name, so the sets below can be asked about a
+ * name exactly as the env file spelled it.
+ *
+ * Both prefixes go in, including the `COREPACK_` spelling of a variable that is
+ * `JUP_`-only (§11) and that jup therefore never reads back. The deny-lists
+ * govern what a cloned repository may *inject* into the environment, not only
+ * what this tool consumes: `applyEnvFile` merges into `process.env`, which every
+ * child process inherits, so admitting `COREPACK_CAFILE` because jup ignores it
+ * would let a hostile repo launder a refused variable into a sibling tool that
+ * does not. The refusal is unconditional, and it stays that way.
+ */
+function deniedSpellings(names: readonly string[]): ReadonlySet<string> {
+  return new Set(names.flatMap((name) => [jupSpelling(name), corepackSpelling(name)]));
+}
+
+/**
  * §03.2 — variables an env file may never supply.
  *
  * `COREPACK_ENV_FILE` is chicken-and-egg; `COREPACK_ENABLE_DOWNLOAD_PROMPT`'s
@@ -44,7 +61,7 @@ export const LEGACY_ENV_FILE_NAME = ".corepack.env";
  * switch off (or redirect) TLS certificate verification, or nominate any of the
  * three *locations* code is loaded and run from, below.
  */
-export const ENV_FILE_INELIGIBLE = new Set<string>([
+export const ENV_FILE_INELIGIBLE = deniedSpellings([
   ENV.ENV_FILE,
   ENV.ENABLE_DOWNLOAD_PROMPT,
   ENV.INTEGRITY_KEYS,
@@ -66,7 +83,7 @@ export const ENV_FILE_INELIGIBLE = new Set<string>([
 /**
  * This set controls which denied variables emit an advisory; compatibility-denied variables remain silent.
  */
-export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
+export const SECURITY_ONLY_FROM_ENVIRONMENT = deniedSpellings([
   ENV.INTEGRITY_KEYS,
   ENV.ENABLE_UNSAFE_CUSTOM_URLS,
   ENV.NPM_TOKEN,
@@ -75,8 +92,8 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // §03.2 marks both TLS variables env-file INELIGIBLE, and for the same
   // reason as the rest of this list: a cloned repository must not be able to
   // switch certificate verification off, or to nominate the certificate
-  // authority its downloads are checked against. `COREPACK_NETWORK_TIMEOUT` and
-  // `COREPACK_NETWORK_RETRIES` are eligible — they are preferences, not trust
+  // authority its downloads are checked against. `JUP_NETWORK_TIMEOUT` and
+  // `JUP_NETWORK_RETRIES` are eligible — they are preferences, not trust
   // decisions.
   ENV.CAFILE,
   ENV.STRICT_SSL,
@@ -109,7 +126,7 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // Relocating the store stays the decision of whoever runs the tool.
   ENV.HOME,
   // §10.5 / §03.2 — the shim directory is prepended to the `PATH` the package
-  // manager and every process it spawns inherits (§08.4), which makes it the
+  // manager and every process it spawns inherits (§08.7), which makes it the
   // first place the *system* looks for `git`, `node`, and every other helper —
   // not merely where this tool's own shims are written. A repository that could
   // name it from its env file could ship the directory too, and the first
@@ -118,7 +135,7 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   ENV.SHIM_DIRECTORY,
   // §08.3 — the interpreter package managers are executed *with*. Nothing in
   // this host reads it yet, so the entry is here before the hazard is: whoever
-  // implements §08.3's "if COREPACK_NODE_EXECPATH is set, use it" would
+  // implements §08.3's "if JUP_NODE_EXECPATH is set, use it" would
   // otherwise be giving a cloned repository the ability to name the binary that
   // runs on `git clone && yarn`. Choosing the interpreter is choosing what
   // executes; it can never come from the project.
@@ -126,7 +143,7 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // §10.2 — the runtime `enable` bakes into the shim shebang when its own
   // `process.execPath` is in the store. A project able to supply it would name
   // the interpreter every shimmed `npm`, `yarn` and `pnpm` runs under from then
-  // on: `COREPACK_NODE_EXECPATH`'s decision, persisted.
+  // on: `JUP_NODE_EXECPATH`'s decision, persisted.
   ENV.HOST_RUNTIME,
 ]);
 
@@ -383,7 +400,7 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     if (!isEnvFileEligible(name)) {
       // Compatibility-denied variables remain silent; security-denied variables
       // emit an advisory.
-      if (SECURITY_ONLY_FROM_ENVIRONMENT.has(corepackSpelling(name))) {
+      if (SECURITY_ONLY_FROM_ENVIRONMENT.has(name)) {
         const seen = `${path}\0${name}`;
         if (!warnedIneligible.has(seen)) {
           warnedIneligible.add(seen);
@@ -397,10 +414,11 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     if (value === undefined) continue;
 
     // §11.6 — the real process environment always wins over the file, and a
-    // variable has two spellings, so the *pair* is what has to be checked. The
-    // spread below only shadows a file value with the same key; without this, a
-    // file's `JUP_HOME` would out-rank a real `COREPACK_HOME`, because `readEnv`
-    // prefers `JUP_` and cannot tell which of the two came from the file.
+    // compatibility setting has two spellings, so every spelling it answers to
+    // has to be checked. The spread below only shadows a file value with the
+    // same key; without this, a file's `JUP_HOME` would out-rank a real
+    // `COREPACK_HOME`, because `readEnv` prefers `JUP_` and cannot tell which of
+    // the two came from the file.
     if (isSetInEnvironment(name)) continue;
 
     eligible[name] = value;
@@ -409,17 +427,16 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
   process.env = { ...eligible, ...process.env };
 }
 
-/** Whether either spelling of `name` is set in the real process environment. */
+/** Whether any spelling `name` answers to is set in the real process environment. */
 function isSetInEnvironment(name: string): boolean {
-  const corepack = corepackSpelling(name);
-  return process.env[corepack] !== undefined || process.env[jupSpelling(corepack)] !== undefined;
+  return envSpellings(name).some((spelling) => process.env[spelling] !== undefined);
 }
 
 export function isEnvFileEligible(name: string): boolean {
-  // The deny-lists are keyed by the `COREPACK_` spelling, so `JUP_NPM_TOKEN` is
-  // canonicalised before it is checked: a variable that a project file may not
-  // supply may not be supplied under its other name either.
-  return isToolEnvName(name) && !ENV_FILE_INELIGIBLE.has(corepackSpelling(name));
+  // §11 — the deny-list carries both spellings of every entry, so a variable a
+  // project file may not supply may not be supplied under its other name
+  // either, and the name is checked exactly as the file spelled it.
+  return isToolEnvName(name) && !ENV_FILE_INELIGIBLE.has(name);
 }
 
 /** `true` only for the exact string `"1"`, matching the spec's value tables. */
@@ -433,7 +450,7 @@ export function envDisabled(name: string): boolean {
 }
 
 /**
- * §08.6 — "an unset `CI`", the way every other tool spells it: any non-empty
+ * §05.4 — "an unset `CI`", the way every other tool spells it: any non-empty
  * value means a non-interactive automated environment.
  *
  * It gates two unrelated things, which is why it lives here rather than in
@@ -448,7 +465,7 @@ export function isCI(): boolean {
 /**
  * §04.4 — whether the project's `jup.lock` may be written.
  *
- * Only `COREPACK_FROZEN_LOCKFILE=1` freezes it. Package-manager runs never edit
+ * Only `JUP_FROZEN_LOCKFILE=1` freezes it. Package-manager runs never edit
  * the recorded file; `use` and `up` are its writers.
  *
  * The cache in `node_modules` is outside this entirely (§04.4). It is not a

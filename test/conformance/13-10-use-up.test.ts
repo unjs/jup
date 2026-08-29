@@ -27,7 +27,7 @@ const registry = new MockRegistry();
 function trusted(extra?: Record<string, string | undefined>): Record<string, string | undefined> {
   return {
     COREPACK_INTEGRITY_KEYS: registry.trustStore(),
-    COREPACK_ALLOW_UNVERIFIED: "1",
+    JUP_ALLOW_UNVERIFIED: "1",
     ...extra,
   };
 }

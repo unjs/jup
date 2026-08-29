@@ -26,6 +26,7 @@ import {
   readInstalledSpec,
   readMarker,
   referenceWithHash,
+  UNATTRIBUTABLE_HASH,
   resolveInstallTarget,
   writeLastKnownGood,
   writeMarker,
@@ -361,6 +362,14 @@ describe("referenceWithHash — §07.6 step 3", () => {
     // `lastKnownGood.json` written by a build that got this wrong heals.
     expect(referenceWithHash("deno", "2.9.5+sha512.wrong", "sha512.abcd")).toBe("2.9.5");
   });
+
+  it("§07.10 — never attaches an unattributable hash to a committed reference", () => {
+    // An archive-seeded entry (§07.10) carries this in place of a claim nothing
+    // verified. Written into `packageManager` it would be a pin no machine can
+    // satisfy, refusing the correct artifact everywhere (§06.1 row 1).
+    expect(referenceWithHash("yarn", "1.22.22", UNATTRIBUTABLE_HASH)).toBe("1.22.22");
+    expect(referenceWithHash("yarn", "1.22.22+sha512.stale", UNATTRIBUTABLE_HASH)).toBe("1.22.22");
+  });
 });
 
 /* -------------------------------------------------------------------------- */
@@ -488,6 +497,20 @@ describe("findInstalledVersion — the range probe (§04.3)", () => {
     seedInstall("yarn", "1.0.0");
     expect(findInstalledVersion("yarn", "^3.0.0")).toBeNull();
     expect(findInstalledVersion("pnpm", "^3.0.0")).toBeNull();
+  });
+
+  it("§04.3 — a pin-qualified directory never answers a range", () => {
+    // Semver ignores build metadata, so `1.22.22+sha512.…` both satisfies the
+    // range and ties with its bare sibling. Without the skip, `readdirSync`
+    // order decides, and the digest rides out on `locator.reference`.
+    seedInstall("yarn", "1.22.22");
+    seedInstall("yarn", "1.22.22+sha512.deadbeef");
+    expect(findInstalledVersion("yarn", "^1.22")).toBe("1.22.22");
+  });
+
+  it("§04.3 — a pin-qualified directory is not a range hit on its own", () => {
+    seedInstall("yarn", "1.22.22+sha512.deadbeef");
+    expect(findInstalledVersion("yarn", "^1.22")).toBeNull();
   });
 });
 

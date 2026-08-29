@@ -21,10 +21,6 @@ jup up  [--here] [--pin-style=suffix|sidecar]
 jup use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>
 jup --version
 jup --help | -h | help
-
-Deprecated, retained for compatibility:
-jup hydrate [--activate] <file>
-jup prepare [--activate] [--all] [-o|--output [<path>]] [...spec]
 ```
 
 Two flags apply to every mutating command:
@@ -199,19 +195,15 @@ shape change.
 above. Both are ordinary management commands and are shadowed by proxy mode:
 `jup yarn --version` is a *proxy* invocation and prints Yarn's version.
 
-## 9.11 Deprecated commands
+## 9.11 (retired) Deprecated commands
 
-**`hydrate [--activate] <file>`** — the predecessor of `install -g <file>.tgz`.
-Same archive handling, except that the format error names `jup prepare`, there is
-no `.tgz` extension check, it prints `All done!`, and activation is opt-**in**
-rather than opt-out.
+`hydrate` and `prepare` were corepack's predecessors of `install -g <file>.tgz`
+and of `pack` + `install -g`. They were dropped before publication: they existed
+for scripts written against corepack, jup has no install base of its own, and the
+corepack compatibility suite never exercised them. `install -g <file>.tgz` and
+`pack` (§09.3, §09.6) cover both.
 
-**`prepare [--activate] [--all] [-o|--output [<path>]] [...spec]`** — the
-predecessor of `pack` + `install -g`. Its "no spec" error omits the `devEngines`
-mention, and `--output` tolerates a bare flag defaulting to `jup.tgz`.
-
-Neither has a legacy install base of jup's own; they exist for scripts written
-against corepack. They may be dropped in a major release.
+The number is kept so §09.12-§09.14 do not move. Do not reuse it.
 
 ## 9.12 `self-install`
 

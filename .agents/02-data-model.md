@@ -44,16 +44,12 @@ A URL reference carries the same information in its fragment.
 // `publishedFrom`: the earliest version the package carries, for a band that
 // covers a wider range than the package was published over.
 { "type": "npm", "package": "@yarnpkg/cli-dist", "publishedFrom": "2.4.1" }
-
-// url-style: fetch JSON and read configured fields. For a tool published
-// somewhere other than an npm registry.
-{ "type": "url", "url": "https://…/tags",
-  "fields": { "tags": "aliases", "versions": "tags" } }
 ```
 
-For `type: "url"`, `fields.versions` may name an array of versions or an object
-keyed by version; both are accepted. "Latest stable" reads
-`data[fields.tags].stable` — **`stable`**, not `latest`.
+A registry spec names an npm package and nothing else. There is deliberately no
+second shape: every band answers version questions over the npm protocol, which
+is what lets §06.1's verification tier hold for the whole table without an
+opt-in. A tool published somewhere else would need a new shape designed for it.
 
 `publishedFrom` takes no part in resolution. It selects which sentence an
 exact-version 404 prints (§04.1), and nothing else, so a stale value costs a less
@@ -101,6 +97,15 @@ platform, so `default` is a bare version and the verification tier is npm's
 signature over this host's artifact (§06.3) rather than a compiled-in literal.
 Never pin a host-specific digest anywhere portable.
 
+**pnpm is the entry where this is a live decision rather than a property of the
+tool.** Its `default` sits on the native `>=12.0.0` band and is therefore bare,
+while a `default` on any earlier band would be hash-pinned. The pin style follows
+the *band the default names*, not the tool, and `scripts/refresh-table.mjs`
+chooses it the same way. Writing a digest on a per-host `default` is not a
+cosmetic error: §06.1 row 1 reads a digest-bearing reference as an explicit pin,
+so the correct artifact would be **refused** on every machine with no
+`lastKnownGood.json` of its own.
+
 `tags` are dist-tags the table answers itself, before any request and with no
 release-age cap. `node`'s `lts` is the only one: the `node` launcher package
 publishes `latest` and `v4-lts` … `v20-lts`, and those series tags stop short of
@@ -143,7 +148,6 @@ of it. Rules:
   url: string,                        // download template; "{}" ← version
   bin: BinSpec,                       // { name: relative path }
   registry: RegistrySpec,             // which versions exist
-  npmRegistry?: NpmRegistrySpec,      // npm-protocol alternative to `registry`
   artifactRegistry?: NpmRegistrySpec, // where the BYTES come from
   commands?: { use?: string[] },      // argv run after `use`/`up`
   targets?: Record<string, string>,   // "<platform>-<arch>" → "{target}"
@@ -195,12 +199,9 @@ Two consequences follow, and both are worth weighing before adding an entry:
 An entry with no `targets` claims every host forever, which is why even an
 identity map is written out: the map is where a host leaving the set is said.
 
-### `registry`, `npmRegistry`, `artifactRegistry`
+### `registry` and `artifactRegistry`
 
 * `registry` answers §04's question — which versions and dist-tags exist.
-* `npmRegistry` is an npm-protocol alternative used in place of `registry` when
-  the user has configured an npm registry that would serve it. No band declares
-  one today; the field exists for a `type: "url"` source with an npm mirror.
 * `artifactRegistry` answers §06's and §07's — the bytes, the signed
   `dist.integrity`, and npm's signature over it.
 
@@ -294,12 +295,22 @@ touching any of them, prefer generalising or removing over adding a sixth.
 
 ## 2.6 Trust store
 
-`src/config/keys.ts` holds npm's signing keys:
+`src/config/keys.ts` holds npm's signing keys, **keyed by registry origin**:
 
 ```jsonc
-{ "npm": [ { "expires": null | "<ISO-8601>", "keyid": "SHA256:…",
-             "keytype": "…", "scheme": "…", "key": "<base64 SPKI>" } ] }
+{ "https://registry.npmjs.org":
+    [ { "expires": null | "<ISO-8601>", "keyid": "SHA256:…",
+        "keytype": "…", "scheme": "…", "key": "<base64 SPKI>" } ] }
 ```
+
+Selection parses both sides and compares origins, falling back to literal
+equality for a value that does not parse as a URL. A registry other than the
+default gets its own keys followed by npm's, deduplicated by `keyid`, so custom
+trust is additive and never silently inherits *another* custom origin's keys.
+Only the default origin is populated today.
+
+`{"npm": [...]}` is **not** this shape. It is corepack's, accepted only from the
+`INTEGRITY_KEYS` override (§11.2), where it applies to the active registry.
 
 `key` is a base64 DER SubjectPublicKeyInfo. npm's keys are NIST P-256, but the
 curve is read from the key material, so a store supplied for another registry may

@@ -125,8 +125,6 @@ which would normalise nothing and could match an unrelated URL:
   path prefix is prepended and the rest of the URL preserved.
 
 Both are idempotent, and the result must pass the tarball-host validation above.
-A band declaring `npmRegistry` uses that as its metadata source in place of
-`registry` before either rewrite applies.
 
 ## 5.3 `.npmrc`
 

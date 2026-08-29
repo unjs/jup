@@ -21,11 +21,10 @@ import {
   minimumReleaseAge,
   NPM_ACCEPT_HEADER,
   NPM_FULL_ACCEPT_HEADER,
-  resolveRegistrySpec,
   verifyRegistryTrust,
 } from "../../src/net/registry.ts";
 import { DEFINITIONS } from "../../src/config/table.ts";
-import type { NpmRegistrySpec, TrustedKey, UrlRegistrySpec } from "../../src/types.ts";
+import type { NpmRegistrySpec, TrustedKey } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *
  * A real local server per test: the wire is the contract. Routes are
@@ -93,15 +92,15 @@ const ENV_KEYS = [
   "COREPACK_NPM_REGISTRY",
   "COREPACK_ENABLE_NETWORK",
   "COREPACK_INTEGRITY_KEYS",
-  "COREPACK_REQUIRE_SIGNATURES",
+  "JUP_REQUIRE_SIGNATURES",
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",
-  "COREPACK_REGISTRY_YARN",
-  "COREPACK_REGISTRY_PNPM",
-  "COREPACK_REGISTRY_NPM",
-  "COREPACK_MINIMUM_RELEASE_AGE",
+  "JUP_REGISTRY_YARN",
+  "JUP_REGISTRY_PNPM",
+  "JUP_REGISTRY_NPM",
+  "JUP_MINIMUM_RELEASE_AGE",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -270,75 +269,6 @@ describe("npm metadata requests (§05.2)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §05.3 — url-typed registries
- * ------------------------------------------------------------------ */
-
-describe("url registries (§05.3)", () => {
-  /** Yarn's own document: tags -> "aliases", versions -> "tags". Inverted, deliberately. */
-  const yarnFields = { tags: "aliases", versions: "tags" };
-
-  it("reads an array of versions", async () => {
-    const server = await startServer({
-      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.0", "4.14.1"] },
-    });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: yarnFields,
-    };
-
-    expect(await fetchAvailableVersions(spec)).toStrictEqual(["4.14.0", "4.14.1"]);
-    expect(await fetchAvailableTags(spec)).toStrictEqual({ stable: "4.14.1" });
-  });
-
-  it("reads an object whose keys are versions", async () => {
-    const server = await startServer({
-      "/tags": {
-        aliases: { stable: "4.14.1", canary: "5.0.0-rc.1" },
-        tags: { "4.14.0": {}, "4.14.1": {} },
-      },
-    });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: yarnFields,
-    };
-
-    expect(await fetchAvailableVersions(spec)).toStrictEqual(["4.14.0", "4.14.1"]);
-    expect(await fetchAvailableTags(spec)).toStrictEqual({
-      stable: "4.14.1",
-      canary: "5.0.0-rc.1",
-    });
-  });
-
-  it("reads `stable`, not `latest`, for the latest stable version (§04.6)", async () => {
-    const server = await startServer({
-      "/tags": { aliases: { latest: "5.0.0-rc.1", stable: "4.14.1" }, tags: ["4.14.1"] },
-    });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: yarnFields,
-    };
-
-    // No hash is attached on this path.
-    expect(await fetchLatestStableVersion(spec)).toBe("4.14.1");
-  });
-
-  it("does not wrap url-path failures in the npm message", async () => {
-    const server = await startServer({ "/tags": { aliases: {}, tags: [] } });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: yarnFields,
-    };
-
-    const error = await rejection(fetchLatestStableVersion(spec));
-    expect(error.message).toBe(messages.tagNotFound("stable"));
-  });
-});
-
-/* ------------------------------------------------------------------ *
  * §04.6 — latest stable, npm
  * ------------------------------------------------------------------ */
 
@@ -474,7 +404,7 @@ describe("fetchLatestStableVersion, npm (§04.6)", () => {
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
     // §06.1 soft-fails an unsigned document onto its `integrity`, so mandating
     // signatures is what makes this one a failure to wrap at all.
-    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    process.env.JUP_REQUIRE_SIGNATURES = "1";
 
     const error = await rejection(fetchLatestStableVersion(npm("pnpm")));
 
@@ -536,20 +466,6 @@ describe("COREPACK_ENABLE_NETWORK=0 (§05.2, §12.6)", () => {
     expect((await rejection(fetchTarballURLAndSignature(npm("pnpm"), "9.1.0"))).message).toBe(
       expected,
     );
-  });
-
-  it("leaves the URL-naming message to the transport layer for url registries", async () => {
-    const server = await startServer({ "/tags": { aliases: {}, tags: [] } });
-    process.env.COREPACK_ENABLE_NETWORK = "0";
-    const url = `${server.origin}/tags`;
-
-    const error = await rejection(
-      fetchAvailableVersions({ type: "url", url, fields: { tags: "aliases", versions: "tags" } }),
-    );
-
-    expect(error).toBeInstanceOf(UsageError);
-    expect(error.message).toBe(messages.networkDisabledUrl(url));
-    expect(error.message).not.toContain("npm repository");
   });
 });
 
@@ -864,11 +780,11 @@ describe("verifyRegistryTrust (§06.1, §06.3)", () => {
     expect(error.message).toBe(messages.noRegistryDigest(packageName, "9.1.0", server.origin));
   });
 
-  it("COREPACK_REQUIRE_SIGNATURES makes the soft-fail a UsageError", async () => {
+  it("JUP_REQUIRE_SIGNATURES makes the soft-fail a UsageError", async () => {
     const packageName = freshPackage();
     const server = await startServer({ [`/${packageName}`]: { name: packageName } });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    process.env.JUP_REQUIRE_SIGNATURES = "1";
 
     const error = await rejection(
       verifyRegistryTrust({
@@ -890,7 +806,7 @@ describe("verifyRegistryTrust (§06.1, §06.3)", () => {
     const server = await startServer({ [`/${packageName}`]: { name: packageName } });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
     process.env.COREPACK_INTEGRITY_KEYS = "0";
-    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    process.env.JUP_REQUIRE_SIGNATURES = "1";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await verifyRegistryTrust({
@@ -1040,7 +956,7 @@ describe("verifyRegistryTrust (§06.1, §06.3)", () => {
 describe("per-source registries (§05.2)", () => {
   it("gives each package manager its own base URL", () => {
     process.env.COREPACK_NPM_REGISTRY = "https://shared.example.org";
-    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+    process.env.JUP_REGISTRY_YARN = "https://yarn.example.org";
 
     expect(getRegistryUrl({ name: "yarn" })).toBe("https://yarn.example.org");
     expect(getRegistryUrl({ name: "pnpm" })).toBe("https://shared.example.org");
@@ -1048,7 +964,7 @@ describe("per-source registries (§05.2)", () => {
   });
 
   it("moves a table URL off its own distribution origin — the thing #872 could not do", () => {
-    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+    process.env.JUP_REGISTRY_YARN = "https://yarn.example.org";
 
     // repo.yarnpkg.com is neither an npm registry nor the default registry, so
     // §05.2 rewrite 2 has never been able to touch it.
@@ -1064,14 +980,14 @@ describe("per-source registries (§05.2)", () => {
   });
 
   it("leaves every other package manager's URL alone", () => {
-    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
+    process.env.JUP_REGISTRY_YARN = "https://yarn.example.org";
     expect(applySourceOverride("https://registry.npmjs.org/pnpm/-/pnpm-1.0.0.tgz", "pnpm")).toBe(
       "https://registry.npmjs.org/pnpm/-/pnpm-1.0.0.tgz",
     );
   });
 
   it("prepends the override's own path prefix, once", () => {
-    process.env.COREPACK_REGISTRY_YARN = "https://mirror.example.org/artifactory/yarn/";
+    process.env.JUP_REGISTRY_YARN = "https://mirror.example.org/artifactory/yarn/";
 
     const once = applySourceOverride("https://repo.yarnpkg.com/tags", "yarn");
     expect(once).toBe("https://mirror.example.org/artifactory/yarn/tags");
@@ -1121,52 +1037,24 @@ describe("applyRegistryOverride — origins, not substrings (§05.2)", () => {
   });
 });
 
-describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
-  const berry: UrlRegistrySpec = {
-    type: "url",
-    url: "https://repo.yarnpkg.com/tags",
-    fields: { tags: "aliases", versions: "tags" },
-  };
-
-  it("leaves Berry on its own document with nothing configured", () => {
-    // Identity matters: the table's object is what carries the npm alternative.
-    const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
-    expect(resolveRegistrySpec(table)).toBe(table);
-  });
-
-  it("no longer has a switch to make: Berry is already @yarnpkg/cli-dist (§02.5)", () => {
-    // This row used to assert the rewrite — a configured npm registry moving
-    // Berry off `repo.yarnpkg.com`. §02.5 made that the band, so there is
-    // nothing conditional left: the spec is npm-typed before anything is
-    // configured, and `resolveRegistrySpec` returns it by identity either way.
-    const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
-    expect(table).toEqual({
+describe("registry selection — §05.2 / §05.3", () => {
+  it("has no switch left to make: Berry is already @yarnpkg/cli-dist (§02.2)", () => {
+    // This row used to assert §05.2 rewrite 1 — a configured npm registry
+    // moving Berry off `repo.yarnpkg.com`. §02.2 made npm the band, and the
+    // url-typed spec that rewrite existed for is gone, so the only thing left
+    // to assert is that the table names the npm package outright.
+    expect(DEFINITIONS.yarn!.ranges.at(-1)![1].registry).toEqual({
       type: "npm",
       package: "@yarnpkg/cli-dist",
       publishedFrom: "2.4.1",
     });
-    expect(resolveRegistrySpec(table)).toBe(table);
-
-    process.env.COREPACK_NPM_REGISTRY = "https://mirror.example.org";
-    expect(resolveRegistrySpec(table)).toBe(table);
   });
 
-  it("keeps Berry on its own document for COREPACK_REGISTRY_YARN — that is a mirror", () => {
-    process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
-    const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
-    expect(resolveRegistrySpec(table)).toBe(table);
-  });
-
-  it("passes through a spec the table does not declare", () => {
-    expect(resolveRegistrySpec(berry)).toBe(berry);
-  });
-
-  it("is applied by the fetchers, so a tag lookup follows the same switch", async () => {
-    // `resolve.ts` performs this substitution for `COREPACK_NPM_REGISTRY` before
-    // it calls in here, but nothing there knows about `.npmrc`. Doing it inside
-    // the fetchers as well is what makes row 150's configuration —
-    // `@yarnpkg:registry` and nothing else — move the *tag document* too, not
-    // only the download.
+  it("moves the tag document too, not only the download", async () => {
+    // `resolve.ts` substitutes `COREPACK_NPM_REGISTRY` before it calls in here,
+    // but nothing there knows about `.npmrc`. Resolving the registry inside the
+    // fetchers as well is what makes `@yarnpkg:registry` and nothing else move
+    // the *tag document* too, not only the download.
     const root = mkdtempSync(join(tmpdir(), "jup-registry-npmrc-"));
     const home = join(root, "home");
     mkdirSync(home, { recursive: true });
@@ -1205,7 +1093,7 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §04.1 — COREPACK_MINIMUM_RELEASE_AGE
+ * §04.1 — JUP_MINIMUM_RELEASE_AGE
  * ------------------------------------------------------------------ */
 
 const HOUR = 60 * 60 * 1000;
@@ -1227,26 +1115,26 @@ describe("minimumReleaseAge (§04.1)", () => {
   it("is off when unset, empty, blank or explicitly zero", () => {
     expect(minimumReleaseAge()).toBeUndefined();
     for (const value of ["", "   ", "0", "0.0"]) {
-      process.env.COREPACK_MINIMUM_RELEASE_AGE = value;
+      process.env.JUP_MINIMUM_RELEASE_AGE = value;
       expect(minimumReleaseAge(), JSON.stringify(value)).toBeUndefined();
     }
   });
 
   it("reads hours, and answers milliseconds", () => {
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
     expect(minimumReleaseAge()).toBe(24 * HOUR);
 
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = " 0.5 ";
+    process.env.JUP_MINIMUM_RELEASE_AGE = " 0.5 ";
     expect(minimumReleaseAge()).toBe(HOUR / 2);
   });
 
   it("refuses an unparseable or negative value rather than falling back to off", () => {
-    // The whole point: `COREPACK_NETWORK_TIMEOUT=abc` costing a user the default
+    // The whole point: `JUP_NETWORK_TIMEOUT=abc` costing a user the default
     // timeout is a preference gone wrong, while this silently turning a
     // supply-chain control off on the machine of someone who believes they
     // turned it on is the fail-open shape §04.1 exists to close.
     for (const value of ["24h", "-1", "abc", "NaN", "Infinity"]) {
-      process.env.COREPACK_MINIMUM_RELEASE_AGE = value;
+      process.env.JUP_MINIMUM_RELEASE_AGE = value;
       expect(() => minimumReleaseAge(), value).toThrow(UsageError);
       expect(() => minimumReleaseAge(), value).toThrow(
         `JUP_MINIMUM_RELEASE_AGE must be a non-negative number of hours, got ${JSON.stringify(value)}`,
@@ -1272,7 +1160,7 @@ describe("fetchResolvableVersions (§04.1 step 6)", () => {
   it("asks for the full document, and only then, when the gate is on", async () => {
     const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 100, "9.1.0": 1 }) });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     const candidates = await fetchResolvableVersions(npm("pnpm"));
 
@@ -1292,7 +1180,7 @@ describe("fetchResolvableVersions (§04.1 step 6)", () => {
     delete document.time["9.1.0"];
     const server = await startServer({ "/pnpm": document });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     // Undatable, so unvouchable, so not a candidate — even though it is older
     // than everything the map does date.
@@ -1304,31 +1192,12 @@ describe("fetchResolvableVersions (§04.1 step 6)", () => {
       "/pnpm": datedPackument({ "9.0.0": 100 }, { time: false }),
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     const candidates = await fetchResolvableVersions(npm("pnpm"));
 
     expect(candidates.versions).toStrictEqual(["9.0.0"]);
     expect(candidates.undatedSource).toBe(`${server.origin}/pnpm`);
-  });
-
-  it("reports a url-typed registry as an undated source (blocker 3)", async () => {
-    const server = await startServer({
-      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.0", "4.14.1"] },
-    });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: { tags: "aliases", versions: "tags" },
-    };
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
-
-    const candidates = await fetchResolvableVersions(spec);
-
-    // Nothing is filtered — there is nothing to filter *by*. The caller decides,
-    // once it knows whether this source contributes a candidate at all.
-    expect(candidates.versions).toStrictEqual(["4.14.0", "4.14.1"]);
-    expect(candidates.undatedSource).toBe(`${server.origin}/tags`);
   });
 });
 
@@ -1346,7 +1215,7 @@ describe("capToReleaseAge (§04.1 step 3)", () => {
       "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0": 100, "9.2.0": 1 }),
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     expect(await capToReleaseAge(npm("pnpm"), "9.2.0")).toBe("9.1.0");
   });
@@ -1356,7 +1225,7 @@ describe("capToReleaseAge (§04.1 step 3)", () => {
       "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0": 100, "9.2.0": 100 }),
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     // 9.2.0 is eligible too, but the tag named the 9.0.0 line and the gate is
     // not licence to move a user forward.
@@ -1368,40 +1237,36 @@ describe("capToReleaseAge (§04.1 step 3)", () => {
       "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0-rc.1": 100, "9.2.0": 1 }),
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     expect(await capToReleaseAge(npm("pnpm"), "9.2.0")).toBe("9.0.0");
     expect(await capToReleaseAge(npm("pnpm"), "9.2.0-rc.9")).toBe("9.1.0-rc.1");
   });
 
   it("refuses when the source publishes no release dates", async () => {
+    // A private registry that strips `time` is the reachable route to this
+    // refusal: the packument answers, but nothing in it can be aged.
     const server = await startServer({
-      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.0", "4.14.1"] },
+      "/pnpm": datedPackument({ "9.0.0": 100 }, { time: false }),
     });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: { tags: "aliases", versions: "tags" },
-    };
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
-    const error = await rejection(capToReleaseAge(spec, "4.14.1"));
+    const error = await rejection(capToReleaseAge(npm("pnpm"), "9.0.0"));
     expect(error).toBeInstanceOf(UsageError);
     expect(error.message).toBe(
-      `JUP_MINIMUM_RELEASE_AGE is set, but ${server.origin}/tags publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set JUP_NPM_REGISTRY to an npm registry that serves this package manager`,
+      `JUP_MINIMUM_RELEASE_AGE is set, but ${server.origin}/pnpm publishes no release dates, so the minimum age cannot be enforced there; pin an exact version, or set JUP_NPM_REGISTRY to an npm registry that serves this package manager`,
     );
   });
 
   it("refuses when nothing published is old enough", async () => {
     const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 1, "9.1.0": 2 }) });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     const error = await rejection(capToReleaseAge(npm("pnpm"), "9.1.0"));
     expect(error).toBeInstanceOf(UsageError);
-    expect(error.message).toBe(
-      "No release of pnpm is old enough for COREPACK_MINIMUM_RELEASE_AGE=24",
-    );
+    expect(error.message).toBe("No release of pnpm is old enough for JUP_MINIMUM_RELEASE_AGE=24");
   });
 });
 
@@ -1415,7 +1280,7 @@ describe("fetchLatestStableVersion under the gate (§04.1, §04.6)", () => {
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
     process.env.COREPACK_INTEGRITY_KEYS = "0";
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
 
     expect(await fetchLatestStableVersion(npm("pnpm"))).toBe(`9.1.0+sha512.${hex}`);
     // The packument (full) to learn the ages, then the version document. Never
@@ -1435,23 +1300,5 @@ describe("fetchLatestStableVersion under the gate (§04.1, §04.6)", () => {
 
     expect(await fetchLatestStableVersion(npm("pnpm"))).toBe(`9.2.0+sha512.${hex}`);
     expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm/latest"]);
-  });
-
-  it("refuses an undated url document rather than reading `stable` from it", async () => {
-    const server = await startServer({
-      "/tags": { aliases: { stable: "4.14.1" }, tags: ["4.14.1"] },
-    });
-    const spec: UrlRegistrySpec = {
-      type: "url",
-      url: `${server.origin}/tags`,
-      fields: { tags: "aliases", versions: "tags" },
-    };
-    process.env.COREPACK_MINIMUM_RELEASE_AGE = "24";
-
-    const error = await rejection(fetchLatestStableVersion(spec));
-    expect(error).toBeInstanceOf(UsageError);
-    expect(error.message).toContain("publishes no release dates");
-    // And it did not fetch the document it could not have gated anyway.
-    expect(server.requests).toStrictEqual([]);
   });
 });

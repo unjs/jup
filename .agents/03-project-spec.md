@@ -125,9 +125,14 @@ Before reading each directory's manifest, until one is found:
 * **Filter** to keys carrying `JUP_` or `COREPACK_`. Everything else is dropped.
   This prefix filter is the entire sandbox against a hostile repository.
 * **Merge** as `{...fileVars, ...process.env}` — the real environment wins.
-  "Has not set" means *neither* spelling: drop a file variable whose pair is
-  present in the real environment before merging, or a file's `JUP_HOME` would
-  out-rank a real `COREPACK_HOME`.
+  For a setting in §11.7's compatibility set, "has not set" means *neither*
+  spelling: drop a file variable whose pair is present in the real environment
+  before merging, or a file's `JUP_HOME` would out-rank a real `COREPACK_HOME`.
+  Outside that set only the `JUP_` spelling is read, so only it can shadow — a
+  real `COREPACK_CAFILE` names nothing jup consults and MUST NOT displace a
+  file's `JUP_CAFILE`. The prefix filter above still admits both spellings, and
+  §11.8's deny list still refuses both, because a merged variable is inherited
+  by every child process whether or not jup itself reads it.
 * `ENOENT` continues the walk; any other error propagates.
 * Only the **closest** file is loaded, and the search stops at the **project
   boundary** — a directory holding a `package.json` or a `.git` entry. Config

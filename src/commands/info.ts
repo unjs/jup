@@ -10,15 +10,7 @@ const {
   statSync,
 } = process.getBuiltinModule("node:fs");
 const { delimiter, dirname, join, resolve: resolvePath } = process.getBuiltinModule("node:path");
-import {
-  corepackSpelling,
-  ENV,
-  envEntry,
-  isToolEnvName,
-  jupSpelling,
-  type JupSpelling,
-  SYSTEM_ENV,
-} from "../config/env-vars.ts";
+import { ENV, envEntry, envSpellings, isToolEnvName, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, hostTarget, SUPPORTED_NAMES } from "../config/table.ts";
 import { isEnvFileEligible, parseEnvFile } from "../project/env.ts";
 import { redactUserinfo, UsageError } from "../errors-cold.ts";
@@ -39,7 +31,6 @@ import {
   loadNpmrc,
   type NpmrcLevel,
   type RegistryDecision,
-  registryVariableFor,
   resolveRegistry,
 } from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
@@ -67,7 +58,9 @@ import type { Descriptor, Manifest } from "../types.ts";
 export const INFO_REPORT_VERSION = 1;
 
 /** Variables whose value is a credential: reported as present, never printed. */
-const SECRET_VARIABLES = new Set<string>([ENV.NPM_TOKEN, ENV.NPM_PASSWORD, ENV.NPM_USERNAME]);
+const SECRET_VARIABLES = new Set<string>(
+  [ENV.NPM_TOKEN, ENV.NPM_PASSWORD, ENV.NPM_USERNAME].flatMap(envSpellings),
+);
 
 /** Long values (a trust store, a proxy list) are elided rather than dumped. */
 const MAX_VALUE_LENGTH = 120;
@@ -124,7 +117,7 @@ export interface LockfileInfo {
   resolution: Resolution | null;
   /** §04.4 — whether `use` and `up` may write the recorded file. */
   frozen: boolean;
-  frozenSource: typeof ENV.FROZEN_LOCKFILE | JupSpelling<typeof ENV.FROZEN_LOCKFILE> | "default";
+  frozenSource: typeof ENV.FROZEN_LOCKFILE | "default";
   /** §04.4 — the resolution cache in `node_modules/.jup`, which ordinary runs write. */
   cache: {
     path: string;
@@ -153,7 +146,7 @@ export interface PackageManagerInfo {
   /** The npm registry metadata and tarballs would come from. */
   registry: string;
   /**
-   * The setting that decided it: `COREPACK_REGISTRY_<NAME>`,
+   * The setting that decided it: `JUP_REGISTRY_<NAME>`,
    * `COREPACK_NPM_REGISTRY`, `.npmrc <key> (<path>)`, or `built-in` (§05.2,
    * §05.3). Naming the *actual* source is the whole point of the field — "a
    * mirror is not being honoured" is the report people run this command for.
@@ -215,7 +208,7 @@ export interface NpmrcInfo {
 export interface TlsInfo {
   /** A PEM bundle replacing the platform trust store, if one is configured. */
   cafile: string | null;
-  /** `COREPACK_CAFILE`, or `.npmrc`'s `cafile`/`ca` with its path. */
+  /** `JUP_CAFILE`, or `.npmrc`'s `cafile`/`ca` with its path. */
   cafileSource: string | null;
   /** `false` only when verification has been switched off. */
   verify: boolean;
@@ -691,7 +684,7 @@ function snapshotEnvironment(): Record<string, string> {
  * across the terminal.
  */
 function displayValue(name: string, value: string): string {
-  if (SECRET_VARIABLES.has(corepackSpelling(name))) return value === "" ? `<set, empty>` : `<set>`;
+  if (SECRET_VARIABLES.has(name)) return value === "" ? `<set, empty>` : `<set>`;
   const redacted = redactUserinfo(value);
   return redacted.length > MAX_VALUE_LENGTH
     ? `${redacted.slice(0, MAX_VALUE_LENGTH)}… (${redacted.length} chars)`
@@ -708,17 +701,14 @@ function displayValue(name: string, value: string): string {
  * `COREPACK_`-prefixed in the first place.
  */
 /**
- * §11.6 — whether the real environment already sets this variable, under either
- * spelling. `JUP_HOME` in the file is shadowed by a real `COREPACK_HOME` just as
- * surely as by a real `JUP_HOME`; `applyEnvFile` refuses both, so `info` has to
- * report both, or the two would disagree about why a line did nothing.
+ * §11.6 — whether the real environment already sets this variable, under any
+ * spelling it answers to. `JUP_HOME` in the file is shadowed by a real
+ * `COREPACK_HOME` just as surely as by a real `JUP_HOME`; `applyEnvFile` refuses
+ * both, so `info` has to report both, or the two would disagree about why a line
+ * did nothing. Both ask {@link envSpellings}, which is what keeps them agreeing.
  */
 function isShadowed(realEnvironment: Record<string, string>, name: string): boolean {
-  const corepack = corepackSpelling(name);
-  return (
-    Object.hasOwn(realEnvironment, corepack) ||
-    Object.hasOwn(realEnvironment, jupSpelling(corepack))
-  );
+  return envSpellings(name).some((spelling) => Object.hasOwn(realEnvironment, spelling));
 }
 
 function describeEnvFile(path: string, realEnvironment: Record<string, string>): EnvFileInfo {
@@ -769,44 +759,9 @@ function describePackageManagers(
     // §11.2 lets the registry embed `user:pass@`, and a report is pasted into
     // issues and CI logs far more often than an error message is.
     const registry = redactUserinfo(configured);
+    // §02.2 — every band is on the npm registry, so `registry` above already
+    // describes every one of them and there is no per-band exception to report.
     const notes: string[] = [];
-
-    for (const [range, spec] of definition.ranges) {
-      // §05.3 — a band that is not an npm registry cannot be mirrored through
-      // the npm protocol, so its fetch path follows a configured npm registry
-      // only when the table gives it an npm fallback (§02.5's
-      // `@yarnpkg/cli-dist`) — or §05.2's per-source override, which mirrors the
-      // band's own origin and needs no fallback at all.
-      if (spec.registry.type === "npm") continue;
-
-      const origin = URL.canParse(spec.url) ? new URL(spec.url).origin : spec.url;
-      const perSource = effectiveRegistry(name);
-
-      if (perSource.kind === "per-source") {
-        notes.push(
-          `${name}@${range} is fetched from ${origin}, redirected to ${redactUserinfo(perSource.registry)} by ${perSource.source}`,
-        );
-        continue;
-      }
-
-      if (spec.npmRegistry === undefined) {
-        notes.push(
-          `${name}@${range} is fetched from ${origin}; only ${registryVariableFor(name)} redirects it`,
-        );
-        continue;
-      }
-
-      const alternative = effectiveRegistry(name, spec.npmRegistry.package);
-      if (alternative.source === "built-in") {
-        notes.push(
-          `${name}@${range} is fetched from ${origin}; a configured npm registry switches it to ${spec.npmRegistry.package}, and ${registryVariableFor(name)} mirrors it as it is`,
-        );
-      } else {
-        notes.push(
-          `${name}@${range} is fetched from ${redactUserinfo(alternative.registry)} as ${spec.npmRegistry.package}  (${alternative.source})`,
-        );
-      }
-    }
 
     return {
       name,

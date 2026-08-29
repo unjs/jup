@@ -272,7 +272,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
     // would fail here rather than quietly install something unverified.
     const result = await run(
       ["bun", "--version"],
-      options(fixture, { COREPACK_REQUIRE_SIGNATURES: "1" }),
+      options(fixture, { JUP_REQUIRE_SIGNATURES: "1" }),
     );
 
     expect(result.exitCode).toBe(0);

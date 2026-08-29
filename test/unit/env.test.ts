@@ -18,15 +18,18 @@ import {
   parseEnvFile,
 } from "../../src/project/env.ts";
 import {
+  COMPATIBILITY_ENV,
   corepackSpelling,
   defaultEnv,
   ENV,
   envEntry,
+  envSpellings,
   isToolEnvName,
   jupSpelling,
   readEnv,
   registryVariableFor,
   writeEnv,
+  writeEnvInto,
 } from "../../src/config/env-vars.ts";
 import { messages } from "../../src/errors.ts";
 
@@ -574,11 +577,11 @@ describe("§11.2 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§05.1)", () => {
  * any of them is worth telling the user about.
  * ------------------------------------------------------------------ */
 
-describe("§03.2 — COREPACK_HOME, COREPACK_SHIM_DIRECTORY and COREPACK_NODE_EXECPATH", () => {
+describe("§03.2 — the three location variables", () => {
   it.for([
     ["COREPACK_HOME", "./.store"],
-    ["COREPACK_SHIM_DIRECTORY", "./tools"],
-    ["COREPACK_NODE_EXECPATH", "./tools/node"],
+    ["JUP_SHIM_DIRECTORY", "./tools"],
+    ["JUP_NODE_EXECPATH", "./tools/node"],
   ])("%s is ineligible, security-relevant, and announced", ([name, value]) => {
     expect(ENV_FILE_INELIGIBLE.has(name!)).toBe(true);
     expect(SECURITY_ONLY_FROM_ENVIRONMENT.has(name!)).toBe(true);
@@ -639,15 +642,17 @@ describe("§03.2 — COREPACK_HOME, COREPACK_SHIM_DIRECTORY and COREPACK_NODE_EX
   });
 
   it("still lets the real environment set all three", () => {
+    // §11 — `HOME` is a compatibility setting and answers to both spellings;
+    // the other two are jup's own and answer only to `JUP_`.
     process.env.COREPACK_HOME = "/home/user/.cache/jup";
     process.env.JUP_SHIM_DIRECTORY = "/home/user/.local/bin";
-    process.env.COREPACK_NODE_EXECPATH = "/usr/bin/node";
+    process.env.JUP_NODE_EXECPATH = "/usr/bin/node";
 
     applyEnvFile(
       {
         COREPACK_HOME: "./.store",
         JUP_SHIM_DIRECTORY: "./tools",
-        COREPACK_NODE_EXECPATH: "./tools/node",
+        JUP_NODE_EXECPATH: "./tools/node",
       },
       join(dir, DEFAULT_ENV_FILE_NAME),
     );
@@ -776,53 +781,91 @@ describe("isCI / isFrozenLockfile — §04.4, §11.1", () => {
   });
 
   it("freezes on an explicit 1, and on nothing else", () => {
-    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    process.env.JUP_FROZEN_LOCKFILE = "1";
     expect(isFrozenLockfile()).toBe(true);
 
     process.env.CI = "1";
-    process.env.COREPACK_FROZEN_LOCKFILE = "0";
+    process.env.JUP_FROZEN_LOCKFILE = "0";
     expect(isFrozenLockfile()).toBe(false);
 
     // An empty value is "unset", as everywhere else in this module.
-    process.env.COREPACK_FROZEN_LOCKFILE = "";
+    process.env.JUP_FROZEN_LOCKFILE = "";
+    expect(isFrozenLockfile()).toBe(false);
+  });
+
+  // §11 — jup invented this one, so corepack's spelling is not a second name
+  // for it. A CI written against corepack cannot be setting it.
+  it("does not answer to a COREPACK_ spelling", () => {
+    process.env.COREPACK_FROZEN_LOCKFILE = "1";
     expect(isFrozenLockfile()).toBe(false);
   });
 
   // §11.1 marks it env-file eligible: it is a behavioural preference, not a
   // security decision, so a project may ship it in `.jup.env`.
   it("is settable from an env file", () => {
-    expect(isEnvFileEligible("COREPACK_FROZEN_LOCKFILE")).toBe(true);
+    expect(isEnvFileEligible("JUP_FROZEN_LOCKFILE")).toBe(true);
 
-    applyEnvFile({ COREPACK_FROZEN_LOCKFILE: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    applyEnvFile({ JUP_FROZEN_LOCKFILE: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
 
-    expect(process.env.COREPACK_FROZEN_LOCKFILE).toBe("1");
+    expect(process.env.JUP_FROZEN_LOCKFILE).toBe("1");
     expect(isFrozenLockfile()).toBe(true);
   });
 });
 
-describe("the JUP_ spelling of every COREPACK_ variable", () => {
-  it("gives every variable in the table a JUP_ equivalent, and only one", () => {
+describe("the compatibility spelling (§11)", () => {
+  it("gives a second spelling to the compatibility set, and to nothing else", () => {
     const names = Object.values(ENV);
     expect(names.length).toBeGreaterThan(0);
 
     for (const name of names) {
-      expect(name.startsWith("COREPACK_")).toBe(true);
-      // The pair is the same variable spelled twice: the round trip is exact,
-      // so a deny-list keyed by one spelling governs both.
-      expect(jupSpelling(name)).toBe(`JUP_${name.slice("COREPACK_".length)}`);
-      expect(corepackSpelling(jupSpelling(name))).toBe(name);
+      // Canonical spelling and dual-ness agree by construction: a name is
+      // spelled `COREPACK_` in the table exactly when corepack defined it.
+      const dual = COMPATIBILITY_ENV.has(jupSpelling(name));
+      expect(name.startsWith(dual ? "COREPACK_" : "JUP_")).toBe(true);
+      expect(isToolEnvName(name)).toBe(true);
       expect(isToolEnvName(jupSpelling(name))).toBe(true);
+
+      // The spellings a setting actually answers to, highest precedence first.
+      expect(envSpellings(name)).toEqual(
+        dual ? [jupSpelling(name), corepackSpelling(name)] : [name],
+      );
+      // Either spelling of a compatibility setting resolves to the same answer,
+      // so nothing has to canonicalise before asking.
+      expect(envSpellings(jupSpelling(name))).toEqual(envSpellings(corepackSpelling(name)));
     }
 
-    // §11.2's names are generated rather than tabulated, and get the same pair.
-    expect(jupSpelling(registryVariableFor("yarn"))).toBe("JUP_REGISTRY_YARN");
+    // The set is closed over the names corepack itself defined. Anything jup
+    // invented — the whole of §11.3, the trust and retry knobs — is `JUP_`-only.
+    expect([...COMPATIBILITY_ENV].sort()).toEqual([
+      "JUP_DEFAULT_TO_LATEST",
+      "JUP_ENABLE_AUTO_PIN",
+      "JUP_ENABLE_DOWNLOAD_PROMPT",
+      "JUP_ENABLE_NETWORK",
+      "JUP_ENABLE_PROJECT_SPEC",
+      "JUP_ENABLE_STRICT",
+      "JUP_ENABLE_UNSAFE_CUSTOM_URLS",
+      "JUP_ENV_FILE",
+      "JUP_HOME",
+      "JUP_INTEGRITY_KEYS",
+      "JUP_MIGRATE_FROM",
+      "JUP_NPM_PASSWORD",
+      "JUP_NPM_REGISTRY",
+      "JUP_NPM_TOKEN",
+      "JUP_NPM_USERNAME",
+      "JUP_ROOT",
+    ]);
+
+    // §11.2's names are generated rather than tabulated, and jup invented them.
+    expect(registryVariableFor("yarn")).toBe("JUP_REGISTRY_YARN");
+    expect(envSpellings(registryVariableFor("yarn"))).toEqual(["JUP_REGISTRY_YARN"]);
 
     // A name belonging to neither prefix passes through both ways, which is what
-    // lets callers canonicalise an `.npmrc` origin or an ambient name blindly.
+    // lets callers translate an `.npmrc` origin or an ambient name blindly.
     for (const ambient of ["PATH", "CI", "HTTP_PROXY", "cafile (/home/u/.npmrc)"]) {
       expect(jupSpelling(ambient)).toBe(ambient);
       expect(corepackSpelling(ambient)).toBe(ambient);
       expect(isToolEnvName(ambient)).toBe(false);
+      expect(envSpellings(ambient)).toEqual([ambient]);
     }
   });
 
@@ -861,18 +904,28 @@ describe("the JUP_ spelling of every COREPACK_ variable", () => {
     process.env.JUP_FROZEN_LOCKFILE = "0";
     expect(isFrozenLockfile()).toBe(false);
 
-    // The JUP_ spelling wins over the COREPACK_ one here too.
-    process.env.COREPACK_FROZEN_LOCKFILE = "1";
-    expect(isFrozenLockfile()).toBe(false);
+    // The JUP_ spelling wins over the COREPACK_ one, for a setting that has one.
+    process.env.JUP_ENABLE_AUTO_PIN = "0";
+    process.env.COREPACK_ENABLE_AUTO_PIN = "1";
+    expect(envFlag(ENV.ENABLE_AUTO_PIN)).toBe(false);
   });
 
   it("writes both spellings for the variables handed to the package manager", () => {
     writeEnv(ENV.ROOT, "/opt/jup");
 
-    // §11.3 — corepack-aware package managers look for COREPACK_ROOT; one that
+    // §11.4 — corepack-aware package managers look for COREPACK_ROOT; one that
     // has learnt the new name finds it too.
     expect(process.env.COREPACK_ROOT).toBe("/opt/jup");
     expect(process.env.JUP_ROOT).toBe("/opt/jup");
+  });
+
+  // §08.3's forwarded runtime is jup's own, so it travels under one name and
+  // does not leave a stray `COREPACK_HOST_RUNTIME` in the child's environment.
+  it("writes one spelling for a variable jup invented", () => {
+    const forwarded: NodeJS.ProcessEnv = {};
+    writeEnvInto(forwarded, ENV.HOST_RUNTIME, "/usr/bin/node");
+
+    expect(forwarded).toEqual({ JUP_HOST_RUNTIME: "/usr/bin/node" });
   });
 
   it("lets either spelling beat a default", () => {
@@ -894,6 +947,48 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
     expect(envFlag(ENV.ENABLE_AUTO_PIN)).toBe(true);
   });
 
+  // §03.2 / §11.6 — the deny-list is what stands between a cloned repository and
+  // the credentials, trust store, TLS settings, store root, prompt, shim
+  // directory and host runtime. Narrowing the *spelling* rule (§11) must not
+  // narrow this: every protected setting stays refused under **both** prefixes,
+  // including the `COREPACK_` spelling of a name jup no longer reads, so an env
+  // file cannot launder a refused variable into a sibling tool that does.
+  it("refuses every protected setting under both prefixes", () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const protectedSettings = [
+      ENV.NPM_TOKEN,
+      ENV.NPM_USERNAME,
+      ENV.NPM_PASSWORD,
+      ENV.INTEGRITY_KEYS,
+      ENV.ALLOW_UNVERIFIED,
+      ENV.ENABLE_UNSAFE_CUSTOM_URLS,
+      ENV.CAFILE,
+      ENV.STRICT_SSL,
+      ENV.HOME,
+      ENV.ENABLE_DOWNLOAD_PROMPT,
+      ENV.SHIM_DIRECTORY,
+      ENV.NODE_EXECPATH,
+      ENV.HOST_RUNTIME,
+      ENV.ENV_FILE,
+      ENV.SPEC_FILE,
+      ENV.QUIET_ADVISORIES,
+    ];
+
+    for (const setting of protectedSettings) {
+      for (const spelling of [jupSpelling(setting), corepackSpelling(setting)]) {
+        expect(spelling.startsWith("JUP_") || spelling.startsWith("COREPACK_")).toBe(true);
+        expect(ENV_FILE_INELIGIBLE.has(spelling)).toBe(true);
+        expect(isEnvFileEligible(spelling)).toBe(false);
+
+        // And the refusal is real, not merely tabulated.
+        applyEnvFile({ [spelling]: "./evil" }, join(dir, DEFAULT_ENV_FILE_NAME));
+        expect(process.env[spelling]).toBeUndefined();
+      }
+      expect(readEnv(setting)).toBeUndefined();
+    }
+  });
+
   it("refuses an ineligible variable under either spelling", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const path = join(dir, DEFAULT_ENV_FILE_NAME);
@@ -911,20 +1006,32 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
 
   it("lets the real environment win across spellings (§11.6)", () => {
     // The merge below only shadows a file key by the *same* name, so without the
-    // pair check a file's JUP_NETWORK_TIMEOUT would out-rank a real
-    // COREPACK_NETWORK_TIMEOUT purely by being spelled the way `readEnv` prefers.
-    // The variable is an eligible one on purpose: for an ineligible name the
-    // deny-list would decide this before precedence ever ran.
+    // spelling check a file's JUP_ENABLE_AUTO_PIN would out-rank a real
+    // COREPACK_ENABLE_AUTO_PIN purely by being spelled the way `readEnv` prefers.
+    // The variable is an eligible compatibility one on purpose: a `JUP_`-only
+    // name has nothing to shadow it, and for an ineligible name the deny-list
+    // would decide this before precedence ever ran.
+    process.env.COREPACK_ENABLE_AUTO_PIN = "0";
+
+    applyEnvFile({ JUP_ENABLE_AUTO_PIN: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
+
+    expect(process.env.JUP_ENABLE_AUTO_PIN).toBeUndefined();
+    expect(readEnv(ENV.ENABLE_AUTO_PIN)).toBe("0");
+  });
+
+  it("still applies the other spelling when nothing real is set", () => {
+    applyEnvFile({ JUP_ENABLE_AUTO_PIN: "1" }, join(dir, DEFAULT_ENV_FILE_NAME));
+    expect(readEnv(ENV.ENABLE_AUTO_PIN)).toBe("1");
+  });
+
+  // §11 — a `JUP_`-only setting is not shadowed by the corepack spelling of its
+  // name, which nothing reads. Letting it shadow would make the file's value
+  // vanish in favour of a variable that has no effect.
+  it("is not shadowed by the corepack spelling of a JUP_-only setting", () => {
     process.env.COREPACK_NETWORK_TIMEOUT = "1000";
 
     applyEnvFile({ JUP_NETWORK_TIMEOUT: "5000" }, join(dir, DEFAULT_ENV_FILE_NAME));
 
-    expect(process.env.JUP_NETWORK_TIMEOUT).toBeUndefined();
-    expect(readEnv(ENV.NETWORK_TIMEOUT)).toBe("1000");
-  });
-
-  it("still applies the other spelling when nothing real is set", () => {
-    applyEnvFile({ JUP_NETWORK_TIMEOUT: "5000" }, join(dir, DEFAULT_ENV_FILE_NAME));
     expect(readEnv(ENV.NETWORK_TIMEOUT)).toBe("5000");
   });
 });

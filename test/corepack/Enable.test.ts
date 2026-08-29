@@ -21,7 +21,7 @@ beforeEach(async () => {
 describe(`EnableCommand`, () => {
   // SKIP (jup §10.5): jup does not derive the install directory from a `PATH`
   // lookup of its own name. It uses `--install-directory`, else
-  // COREPACK_SHIM_DIRECTORY, else $XDG_BIN_HOME/~/.local/bin — so the shims
+  // JUP_SHIM_DIRECTORY, else $XDG_BIN_HOME/~/.local/bin — so the shims
   // land there rather than in the directory this row puts on PATH.
   it.skip(`should add the binaries in the folder found in the PATH`, async () => {
     await xfs.mktempPromise(async cwd => {

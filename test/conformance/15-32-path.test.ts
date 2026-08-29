@@ -35,8 +35,22 @@ const POSIX = process.platform !== "win32";
 
 const TOOL = POSIX ? copyTool() : "";
 
-const PNPM = DEFINITIONS.pnpm!.default;
+/**
+ * A **JS-band** pnpm, named rather than taken from the table's `default`.
+ *
+ * §08.7 has two different `PATH` rules, and this row is about one of them: the
+ * in-process path prepends the *shim* directory, while a native artifact
+ * prepends the directory holding the binary (§08.3). pnpm's compiled-in default
+ * moved onto the native `>=12.0.0` band, so reading it here would silently swap
+ * which of the two mechanisms every assertion below is testing. The native half
+ * has its own row at the bottom of this file.
+ */
+const PNPM = "11.24.0";
 const VERSION = versionOf(PNPM);
+
+/** The table's default, which is on the native band — see the row at the end. */
+const PNPM_NATIVE = DEFINITIONS.pnpm!.default;
+const NATIVE_VERSION = versionOf(PNPM_NATIVE);
 
 /**
  * The stand-in pnpm. `exec` is #412's own command: it shells out to `pnpm` by
@@ -44,6 +58,28 @@ const VERSION = versionOf(PNPM);
  *
  * ESM, because the `>=11.0.0` band's entry point is `bin/pnpm.mjs`.
  */
+/**
+ * The native stand-in. Same behaviour as {@link SCRIPT}, written as CJS: a
+ * native band's `bin` is an extensionless file the kernel executes through its
+ * shebang, so there is no `.mjs` extension and no `type: module` beside it to
+ * make `import` legal.
+ */
+const NATIVE_SCRIPT = [
+  `const { spawnSync } = require("node:child_process");`,
+  `const args = process.argv.slice(2);`,
+  `if (args[0] === "--version") {`,
+  `  process.stdout.write(${JSON.stringify(NATIVE_VERSION)} + "\\n");`,
+  `} else if (args[0] === "exec") {`,
+  `  const nested = spawnSync("pnpm", ["--version"], { encoding: "utf8" });`,
+  `  process.stdout.write("nested:" + JSON.stringify(nested.stdout ?? null) + "\\n");`,
+  `  process.stdout.write("error:" + (nested.error ? nested.error.code : "none") + "\\n");`,
+  `  process.stdout.write("path:" + (process.env.PATH ?? "") + "\\n");`,
+  `} else {`,
+  `  process.stdout.write("pnpm@" + ${JSON.stringify(NATIVE_VERSION)} + "\\n");`,
+  `}`,
+  ``,
+].join("\n");
+
 const SCRIPT = [
   `import { spawnSync } from "node:child_process";`,
   `const args = process.argv.slice(2);`,
@@ -163,6 +199,73 @@ describe.skipIf(!POSIX)("§08.3 — the resolved package manager on PATH (row 19
     // had carried through in its original order.
     expect(field(result.stdout, "path")).toBe(
       `${shimDir}${delimiter}${childPath(options.env!.PATH)}`,
+    );
+  });
+});
+
+/**
+ * §08.3 / §08.7 — the same guarantee, reached the other way.
+ *
+ * A native artifact is spawned, so there is no in-process handover and no shim
+ * directory to prepend; what goes in front of `PATH` is the directory holding
+ * the binary. #412's requirement is unchanged — a script shelling out to `pnpm`
+ * must reach the resolved one — but the mechanism that satisfies it is
+ * different, and since pnpm's default crossed onto the native band this is the
+ * path a bare `pnpm` actually takes.
+ *
+ * Note what is *not* required here: `enable`. The native prepend happens on the
+ * strength of the run itself, which is why this row has no shim precondition.
+ */
+describe.skipIf(!POSIX)("§08.7 — a native artifact prepends its own directory", () => {
+  function nativeScene(): { location: string; decoy: string; options: Scene["options"] } {
+    const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM_NATIVE}` });
+    // CJS and no `esm` flag: the fake is an extensionless file the kernel runs
+    // through the shebang, not a module Node resolves by extension.
+    const location = seedPackageManager(fixture.home, "pnpm", PNPM_NATIVE, {
+      script: NATIVE_SCRIPT,
+    });
+
+    const decoy = join(fixture.root, "decoy");
+    mkdirSync(decoy, { recursive: true });
+    const impostor = join(decoy, "pnpm");
+    writeFileSync(impostor, `#!/bin/sh\nprintf 'DECOY\\n'\n`);
+    chmodSync(impostor, 0o755);
+
+    return {
+      location,
+      decoy,
+      options: {
+        cwd: fixture.cwd,
+        home: fixture.home,
+        bin: TOOL,
+        env: {
+          HOME: fixture.root,
+          USERPROFILE: fixture.root,
+          PATH: `${decoy}${delimiter}${process.env.PATH ?? ""}`,
+        } as Record<string, string | undefined>,
+      },
+    };
+  }
+
+  it("a nested `pnpm` reaches the resolved artifact, not the decoy", async () => {
+    const { location, options } = nativeScene();
+
+    const result = await run(["pnpm", "exec", "whatever"], options);
+
+    expect(result.exitCode).toBe(0);
+    expect(field(result.stdout, "error")).toBe("none");
+    expect(JSON.parse(field(result.stdout, "nested")) as string).toBe(`${NATIVE_VERSION}\n`);
+    // The artifact's own directory, ahead of the decoy — §08.7's native rule.
+    expect(field(result.stdout, "path").split(delimiter)[0]).toBe(location);
+  });
+
+  it("adds that one entry and nothing else", async () => {
+    const { location, options } = nativeScene();
+
+    const result = await run(["pnpm", "exec", "whatever"], options);
+
+    expect(field(result.stdout, "path")).toBe(
+      `${location}${delimiter}${childPath(options.env!.PATH)}`,
     );
   });
 });

@@ -115,10 +115,10 @@ const ENV_KEYS = [
   // §05.1 — a developer's own TLS or retry settings must not reach the
   // fixtures, and the retry default must not turn every failure assertion below
   // into three round trips plus backoff.
-  "COREPACK_CAFILE",
-  "COREPACK_STRICT_SSL",
-  "COREPACK_NETWORK_RETRIES",
-  "COREPACK_NETWORK_TIMEOUT",
+  "JUP_CAFILE",
+  "JUP_STRICT_SSL",
+  "JUP_NETWORK_RETRIES",
+  "JUP_NETWORK_TIMEOUT",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -133,7 +133,7 @@ beforeEach(() => {
   }
   // The retry-specific block below opts back in; everything else in this file
   // predates §05.1 and asserts the shape of a *single* attempt.
-  process.env.COREPACK_NETWORK_RETRIES = "0";
+  process.env.JUP_NETWORK_RETRIES = "0";
 });
 
 afterEach(async () => {
@@ -661,7 +661,7 @@ function flaky(
 describe("retries (§05.1, row 154)", () => {
   it("retries a 503 and succeeds — three attempts by default", async () => {
     // The variable left unset: this is the *default* the spec states.
-    delete process.env.COREPACK_NETWORK_RETRIES;
+    delete process.env.JUP_NETWORK_RETRIES;
     const server = await flaky(2, 503);
     const { sleep, delays } = recordingSleep();
 
@@ -691,18 +691,18 @@ describe("retries (§05.1, row 154)", () => {
     expect(server.requests).toHaveLength(3);
   });
 
-  it("COREPACK_NETWORK_RETRIES=0 fails on the first answer (row 154's other half)", async () => {
+  it("JUP_NETWORK_RETRIES=0 fails on the first answer (row 154's other half)", async () => {
     const server = await flaky(2, 503);
-    process.env.COREPACK_NETWORK_RETRIES = "0";
+    process.env.JUP_NETWORK_RETRIES = "0";
 
     await expect(httpGet(`${server.origin}/pkg`)).rejects.toThrow(/HTTP 503/);
 
     expect(server.requests).toHaveLength(1);
   });
 
-  it("honours COREPACK_NETWORK_RETRIES as a count of attempts", async () => {
+  it("honours JUP_NETWORK_RETRIES as a count of attempts", async () => {
     const server = await flaky(4, 500);
-    process.env.COREPACK_NETWORK_RETRIES = "5";
+    process.env.JUP_NETWORK_RETRIES = "5";
     const { sleep } = recordingSleep();
 
     await expect(httpGetJson(`${server.origin}/pkg`, { sleep })).resolves.toEqual({ ok: true });
@@ -843,9 +843,9 @@ describe("timeouts (§05.1, row 155)", () => {
     expect((error as Error).stack).toContain("JUP_NETWORK_TIMEOUT");
   });
 
-  it("reads COREPACK_NETWORK_TIMEOUT when the caller names no timeout", async () => {
+  it("reads JUP_NETWORK_TIMEOUT when the caller names no timeout", async () => {
     const server = await startServer(() => {});
-    process.env.COREPACK_NETWORK_TIMEOUT = "60";
+    process.env.JUP_NETWORK_TIMEOUT = "60";
     const url = `${server.origin}/slow`;
 
     const error = await httpGet(url).catch((error_: Error) => error_);
@@ -853,9 +853,9 @@ describe("timeouts (§05.1, row 155)", () => {
     expect((error as Error).stack).toContain("Timed out after 60ms");
   });
 
-  it("ignores a COREPACK_NETWORK_TIMEOUT that is not a number", async () => {
+  it("ignores a JUP_NETWORK_TIMEOUT that is not a number", async () => {
     const server = await ok();
-    process.env.COREPACK_NETWORK_TIMEOUT = "soon";
+    process.env.JUP_NETWORK_TIMEOUT = "soon";
 
     await expect(httpGetJson(`${server.origin}/pkg`)).resolves.toEqual({ ok: true });
   });

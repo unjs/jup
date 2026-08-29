@@ -36,7 +36,7 @@ export interface CliResult {
  * this to see what is left once the known-intentional divergences are removed —
  * which is the useful signal when watching for a real regression.
  *
- * A third variable joins them, `COREPACK_QUIET_ADVISORIES` (§11.3): jup emits `!`
+ * A third variable joins them, `JUP_QUIET_ADVISORIES` (§11.3): jup emits `!`
  * advisories corepack has no equivalent for — §05.1's disabled-TLS notice, §06.1's
  * "publishes no signatures", §10.5's shim diagnostics — and a row that asserts
  * stderr exactly fails on the extra text alone. The variable is scoped to the
@@ -53,7 +53,7 @@ function compatEnv(env: NodeJS.ProcessEnv, withCustomRegistry: boolean): NodeJS.
   if (!COMPAT) return env;
 
   const patched = { ...env };
-  patched.COREPACK_QUIET_ADVISORIES ??= `1`;
+  patched.JUP_QUIET_ADVISORIES ??= `1`;
 
   // The two integrity hatches below are scoped away from the mock-registry rows.
   // `_registryServer.mjs` mints its own keypair and sets
@@ -65,7 +65,7 @@ function compatEnv(env: NodeJS.ProcessEnv, withCustomRegistry: boolean): NodeJS.
   // scoped, because it changes no outcome — only how much jup says about it.
   if (withCustomRegistry) return patched;
   patched.COREPACK_INTEGRITY_KEYS ??= `0`;
-  patched.COREPACK_ALLOW_UNVERIFIED ??= `1`;
+  patched.JUP_ALLOW_UNVERIFIED ??= `1`;
   return patched;
 }
 

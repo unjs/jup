@@ -198,7 +198,7 @@ describe("§10.5 — never require elevation", () => {
     expect(report.shims.directory).toBe(join(fixture.root, ".local", "bin"));
   });
 
-  it("171: COREPACK_SHIM_DIRECTORY names the default install directory", async () => {
+  it("171: JUP_SHIM_DIRECTORY names the default install directory", async () => {
     const { fixture, options } = shimFixture();
     const configured = join(fixture.root, "configured");
 
@@ -206,7 +206,7 @@ describe("§10.5 — never require elevation", () => {
       ...options,
       env: {
         ...options.env,
-        COREPACK_SHIM_DIRECTORY: configured,
+        JUP_SHIM_DIRECTORY: configured,
         PATH: `${configured}${delimiter}${options.env.PATH ?? ""}`,
       },
     });
@@ -219,7 +219,7 @@ describe("§10.5 — never require elevation", () => {
     // usable at all.
     const removed = await run(["disable", "yarn"], {
       ...options,
-      env: { ...options.env, COREPACK_SHIM_DIRECTORY: configured },
+      env: { ...options.env, JUP_SHIM_DIRECTORY: configured },
     });
     expect(removed.exitCode).toBe(0);
     expect(existsSync(join(configured, "yarn"))).toBe(false);

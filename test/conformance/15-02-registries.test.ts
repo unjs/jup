@@ -10,7 +10,7 @@
  * and pnpm as collateral.
  *
  * **Four rows are gone**, and Berry's fixtures with them. They asserted §05.2
- * against Yarn's *own* distribution origin — that `COREPACK_REGISTRY_YARN` could
+ * against Yarn's *own* distribution origin — that `JUP_REGISTRY_YARN` could
  * move `repo.yarnpkg.com` where `COREPACK_NPM_REGISTRY` could not. §02.5 put
  * every band on the npm registry, so that origin is not in the table any more
  * and the distinction those rows drew cannot be set up. The variable itself is
@@ -79,7 +79,7 @@ describe("§05.2 — one mirror mechanism for every source", () => {
       ...fixture,
       registry: fallback,
       env: {
-        COREPACK_REGISTRY_YARN: yarnMirror.origin,
+        JUP_REGISTRY_YARN: yarnMirror.origin,
         COREPACK_INTEGRITY_KEYS: trustAll(),
       },
     });
@@ -104,7 +104,7 @@ describe("§05.2 — one mirror mechanism for every source", () => {
       ...fixture,
       registry: fallback,
       env: {
-        COREPACK_REGISTRY_YARN: yarnMirror.origin,
+        JUP_REGISTRY_YARN: yarnMirror.origin,
         COREPACK_NPM_TOKEN: "mirror-token",
         COREPACK_INTEGRITY_KEYS: trustAll(),
       },
@@ -129,7 +129,7 @@ describe("§05.2 — one mirror mechanism for every source", () => {
       ...fixture,
       env: {
         COREPACK_NPM_REGISTRY: npmMirror.origin,
-        COREPACK_REGISTRY_YARN: yarnMirror.origin,
+        JUP_REGISTRY_YARN: yarnMirror.origin,
       },
     });
 
@@ -141,7 +141,7 @@ describe("§05.2 — one mirror mechanism for every source", () => {
 
     expect(byName.get("yarn")).toMatchObject({
       registry: yarnMirror.origin,
-      registrySource: "COREPACK_REGISTRY_YARN",
+      registrySource: "JUP_REGISTRY_YARN",
     });
     expect(byName.get("pnpm")).toMatchObject({
       registry: npmMirror.origin,

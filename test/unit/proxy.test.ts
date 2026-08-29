@@ -244,10 +244,10 @@ const PROXY_KEYS = [
   "COREPACK_NPM_PASSWORD",
   // §05.1 — the tunnel now consults both, and the retry default would
   // otherwise turn each failure assertion into three round trips.
-  "COREPACK_CAFILE",
-  "COREPACK_STRICT_SSL",
-  "COREPACK_NETWORK_RETRIES",
-  "COREPACK_NETWORK_TIMEOUT",
+  "JUP_CAFILE",
+  "JUP_STRICT_SSL",
+  "JUP_NETWORK_RETRIES",
+  "JUP_NETWORK_TIMEOUT",
 ] as const;
 
 let saved: Record<string, string | undefined>;
@@ -271,7 +271,7 @@ beforeEach(() => {
   }
   // Every assertion in this file is about the shape of a single attempt; the
   // §05.1 retry schedule has its own tests in `http.test.ts`.
-  process.env.COREPACK_NETWORK_RETRIES = "0";
+  process.env.JUP_NETWORK_RETRIES = "0";
 });
 
 afterEach(async () => {
@@ -841,11 +841,11 @@ describe("TLS inside the tunnel (§05.1)", () => {
     expect((error as Error).message).toContain("JUP_CAFILE");
   });
 
-  it("verifies against COREPACK_CAFILE inside the tunnel", async () => {
+  it("verifies against JUP_CAFILE inside the tunnel", async () => {
     const origin = await startOrigin(true);
     const proxy = await startProxy(() => origin.port);
     process.env.HTTPS_PROXY = proxy.origin;
-    process.env.COREPACK_CAFILE = bundleFile();
+    process.env.JUP_CAFILE = bundleFile();
 
     await expect(httpGetJson<{ ok: boolean }>("https://example.com/pkg")).resolves.toMatchObject({
       ok: true,
@@ -853,17 +853,17 @@ describe("TLS inside the tunnel (§05.1)", () => {
     expect(proxy.connects).toEqual(["example.com:443"]);
   });
 
-  it("skips the check inside the tunnel under COREPACK_STRICT_SSL=0", async () => {
+  it("skips the check inside the tunnel under JUP_STRICT_SSL=0", async () => {
     const origin = await startOrigin(true);
     const proxy = await startProxy(() => origin.port);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     process.env.HTTPS_PROXY = proxy.origin;
-    process.env.COREPACK_STRICT_SSL = "0";
+    process.env.JUP_STRICT_SSL = "0";
 
     await expect(httpGetJson<{ ok: boolean }>("https://example.com/pkg")).resolves.toMatchObject({
       ok: true,
     });
-    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("JUP_STRICT_SSL"));
     warn.mockRestore();
   });
 });

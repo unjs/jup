@@ -125,7 +125,11 @@ const kB = (bytes) => `${(bytes / 1000).toFixed(1)} kB`;
 // only the warm set named in §16, Build shape. What it still measures honestly
 // is the bytes Node reads and compiles on every `yarn`, `npm` and `pnpm`
 // invocation on the machine.
-const WARM_ENTRIES = [join(BIN, "shim-proxy.mjs"), join(DIST, "index.mjs")];
+// `bin/` holds one stub per bin name, each `shimSource` with a different name
+// baked in, so their closures are identical and any one stands for all fifteen.
+// (This named `shim-proxy.mjs` until the emitted stubs were renamed after the
+// bin name they serve, which left the bench reading a file that is never built.)
+const WARM_ENTRIES = [join(BIN, "yarn.mjs"), join(DIST, "index.mjs")];
 
 const sizes = [
   { label: "jup, loaded on a warm proxy run", ...weigh(eagerClosure(WARM_ENTRIES)) },

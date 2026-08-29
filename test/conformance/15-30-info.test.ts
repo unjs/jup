@@ -279,10 +279,10 @@ describe("§09.9 corepack info", () => {
     const ci = await info(fixture, { env: { CI: "1" } });
     expect(ci.lockfile).toMatchObject({ frozen: false, frozenSource: "default" });
 
-    const explicit = await info(fixture, { env: { COREPACK_FROZEN_LOCKFILE: "1" } });
+    const explicit = await info(fixture, { env: { JUP_FROZEN_LOCKFILE: "1" } });
     expect(explicit.lockfile).toMatchObject({
       frozen: true,
-      frozenSource: "COREPACK_FROZEN_LOCKFILE",
+      frozenSource: "JUP_FROZEN_LOCKFILE",
     });
   });
 

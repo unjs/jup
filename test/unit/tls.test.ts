@@ -102,10 +102,10 @@ function bundleFile(...certificates: string[]): string {
 }
 
 const ENV_KEYS = [
-  "COREPACK_CAFILE",
-  "COREPACK_STRICT_SSL",
-  "COREPACK_NETWORK_RETRIES",
-  "COREPACK_NETWORK_TIMEOUT",
+  "JUP_CAFILE",
+  "JUP_STRICT_SSL",
+  "JUP_NETWORK_RETRIES",
+  "JUP_NETWORK_TIMEOUT",
   "COREPACK_ENABLE_NETWORK",
   "HTTP_PROXY",
   "http_proxy",
@@ -158,12 +158,12 @@ describe("tlsSettings (§05.1)", () => {
     expect(tlsConnectOptions()).toBeUndefined();
   });
 
-  it("takes the bundle from COREPACK_CAFILE and names the source", () => {
-    process.env.COREPACK_CAFILE = "/etc/corp.pem";
+  it("takes the bundle from JUP_CAFILE and names the source", () => {
+    process.env.JUP_CAFILE = "/etc/corp.pem";
 
     expect(tlsSettings()).toEqual({
       cafile: "/etc/corp.pem",
-      cafileSource: "COREPACK_CAFILE",
+      cafileSource: "JUP_CAFILE",
       verify: true,
     });
     expect(tlsConfigured()).toBe(true);
@@ -171,8 +171,8 @@ describe("tlsSettings (§05.1)", () => {
     expect(tlsTransportRequired()).toBe(false);
   });
 
-  it("treats an empty COREPACK_CAFILE as unset", () => {
-    process.env.COREPACK_CAFILE = "";
+  it("treats an empty JUP_CAFILE as unset", () => {
+    process.env.JUP_CAFILE = "";
 
     expect(tlsSettings().cafile).toBeUndefined();
     expect(tlsConfigured()).toBe(false);
@@ -180,13 +180,13 @@ describe("tlsSettings (§05.1)", () => {
 
   it('disables verification only for the exact string "0"', () => {
     for (const value of ["1", "true", "false", "", "00"]) {
-      process.env.COREPACK_STRICT_SSL = value;
+      process.env.JUP_STRICT_SSL = value;
       expect(tlsSettings().verify).toBe(true);
       expect(tlsTransportRequired()).toBe(false);
     }
 
-    process.env.COREPACK_STRICT_SSL = "0";
-    expect(tlsSettings()).toEqual({ verify: false, verifySource: "COREPACK_STRICT_SSL" });
+    process.env.JUP_STRICT_SSL = "0";
+    expect(tlsSettings()).toEqual({ verify: false, verifySource: "JUP_STRICT_SSL" });
     expect(tlsTransportRequired()).toBe(true);
     expect(tlsConnectOptions()).toEqual({ rejectUnauthorized: false });
   });
@@ -348,7 +348,7 @@ describe("an untrusted certificate authority (row 153)", () => {
 
   it("is not retried — a certificate is not a hiccup", async () => {
     const origin = await startTlsOrigin();
-    process.env.COREPACK_NETWORK_RETRIES = "5";
+    process.env.JUP_NETWORK_RETRIES = "5";
 
     await expect(httpGet(`https://127.0.0.1:${origin.port}/pkg`)).rejects.toThrow(
       messages.tlsUnknownAuthority(`127.0.0.1:${origin.port}`),
@@ -357,24 +357,24 @@ describe("an untrusted certificate authority (row 153)", () => {
     expect(origin.connections).toBe(1);
   });
 
-  it("succeeds once COREPACK_CAFILE names the issuer", async () => {
+  it("succeeds once JUP_CAFILE names the issuer", async () => {
     const origin = await startTlsOrigin();
-    process.env.COREPACK_CAFILE = bundleFile(CERT);
+    process.env.JUP_CAFILE = bundleFile(CERT);
 
     await expect(httpGetJson(`https://127.0.0.1:${origin.port}/pkg`)).resolves.toEqual({
       ok: true,
     });
   });
 
-  it("reports a COREPACK_CAFILE that does not exist", async () => {
+  it("reports a JUP_CAFILE that does not exist", async () => {
     const origin = await startTlsOrigin();
     const path = join(tmpdir(), "jup-missing-bundle.pem");
-    process.env.COREPACK_CAFILE = path;
+    process.env.JUP_CAFILE = path;
 
     // The variable the user actually set, not the canonical spelling: the
     // message names what to go and fix.
     await expect(httpGet(`https://127.0.0.1:${origin.port}/pkg`)).rejects.toThrow(
-      messages.cafileUnreadable(path, "COREPACK_CAFILE"),
+      messages.cafileUnreadable(path, "JUP_CAFILE"),
     );
     // Nothing was sent: the bundle is applied before a socket is opened.
     expect(origin.connections).toBe(0);
@@ -391,7 +391,7 @@ describe("a certificate for another name", () => {
     // `IP:127.0.0.1` and the `example` names — does not contain it.
     const origin = await startTlsOrigin("::1");
     // The issuer is trusted, so the only thing left to fail is the name.
-    process.env.COREPACK_CAFILE = bundleFile(CERT);
+    process.env.JUP_CAFILE = bundleFile(CERT);
 
     const error = await httpGet(`https://[::1]:${origin.port}/pkg`).catch(
       (error_: Error) => error_,
@@ -401,11 +401,11 @@ describe("a certificate for another name", () => {
   });
 });
 
-describe("COREPACK_STRICT_SSL=0", () => {
+describe("JUP_STRICT_SSL=0", () => {
   it("connects anyway, and says so once, verbatim", async () => {
     const origin = await startTlsOrigin();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    process.env.COREPACK_STRICT_SSL = "0";
+    process.env.JUP_STRICT_SSL = "0";
 
     await expect(httpGetJson(`https://127.0.0.1:${origin.port}/pkg`)).resolves.toEqual({
       ok: true,
@@ -415,9 +415,9 @@ describe("COREPACK_STRICT_SSL=0", () => {
     });
 
     expect(warn).toHaveBeenCalledWith(
-      "! TLS certificate verification is disabled (set by COREPACK_STRICT_SSL)",
+      "! TLS certificate verification is disabled (set by JUP_STRICT_SSL)",
     );
-    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("COREPACK_STRICT_SSL"));
+    expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("JUP_STRICT_SSL"));
     // A standing property of the run, announced once — not once per request.
     expect(warn).toHaveBeenCalledTimes(1);
   });
@@ -425,7 +425,7 @@ describe("COREPACK_STRICT_SSL=0", () => {
   it("streams the body, so the download pipeline still tees it", async () => {
     const origin = await startTlsOrigin();
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    process.env.COREPACK_STRICT_SSL = "0";
+    process.env.JUP_STRICT_SSL = "0";
 
     const response = await httpGet(`https://127.0.0.1:${origin.port}/pkg`);
 
@@ -461,7 +461,7 @@ describe("transport selection", () => {
 
   it("stays on native fetch for a custom CA — the store is process-wide", async () => {
     const origin = await startTlsOrigin();
-    process.env.COREPACK_CAFILE = bundleFile(CERT);
+    process.env.JUP_CAFILE = bundleFile(CERT);
     const counter = countFetches();
 
     await httpGetJson(`https://127.0.0.1:${origin.port}/pkg`);
@@ -472,7 +472,7 @@ describe("transport selection", () => {
   it("leaves fetch behind only when verification is disabled", async () => {
     const origin = await startTlsOrigin();
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    process.env.COREPACK_STRICT_SSL = "0";
+    process.env.JUP_STRICT_SSL = "0";
     const counter = countFetches();
 
     await httpGetJson(`https://127.0.0.1:${origin.port}/pkg`);
@@ -487,7 +487,7 @@ describe("applyTlsConfiguration", () => {
   it("installs the bundle into the process trust store", () => {
     const path = bundleFile(CERT);
 
-    applyTlsConfiguration({ cafile: path, cafileSource: "COREPACK_CAFILE", verify: true });
+    applyTlsConfiguration({ cafile: path, cafileSource: "JUP_CAFILE", verify: true });
 
     // Replacement, not extension: §05.1 states a precedence order ending at the
     // platform store, and npm's `cafile` replaces the default set too.
@@ -548,9 +548,9 @@ describe("applyTlsConfiguration", () => {
   });
 
   it("209: leaves the check alone when the request is not going over fetch", () => {
-    // `COREPACK_STRICT_SSL=0` routes through `node:https` with `ca` passed
+    // `JUP_STRICT_SSL=0` routes through `node:https` with `ca` passed
     // explicitly (§05.1), so the process trust store is not what carries it.
-    process.env.COREPACK_STRICT_SSL = "0";
+    process.env.JUP_STRICT_SSL = "0";
     vi.spyOn(console, "warn").mockImplementation(() => {});
     stubTls({ setDefaultCACertificates: () => {}, getCACertificates: () => defaultCertificates });
 
@@ -659,13 +659,13 @@ describe("tlsSettings — the .npmrc tier (§05.3, §05.1)", () => {
     expect(tlsConfigured()).toBe(true);
   });
 
-  it("lets COREPACK_CAFILE outrank it (§05.1's precedence)", () => {
+  it("lets JUP_CAFILE outrank it (§05.1's precedence)", () => {
     userNpmrc("cafile=/etc/ssl/corp.pem\n");
-    process.env.COREPACK_CAFILE = "/etc/ssl/env.pem";
+    process.env.JUP_CAFILE = "/etc/ssl/env.pem";
 
     expect(tlsSettings()).toMatchObject({
       cafile: "/etc/ssl/env.pem",
-      cafileSource: "COREPACK_CAFILE",
+      cafileSource: "JUP_CAFILE",
     });
   });
 
@@ -695,9 +695,9 @@ describe("tlsSettings — the .npmrc tier (§05.3, §05.1)", () => {
     warn.mockRestore();
   });
 
-  it("lets an explicit COREPACK_STRICT_SSL win in both directions", () => {
+  it("lets an explicit JUP_STRICT_SSL win in both directions", () => {
     userNpmrc("strict-ssl=false\n");
-    process.env.COREPACK_STRICT_SSL = "1";
+    process.env.JUP_STRICT_SSL = "1";
     expect(tlsSettings().verify).toBe(true);
     expect(tlsTransportRequired()).toBe(false);
   });

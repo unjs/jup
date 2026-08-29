@@ -300,10 +300,16 @@ describe("the help text — §09.14", () => {
     expect(printed).not.toContain(`${YELLOW}-user`);
   });
 
-  it("bolds a heading in the help text", async () => {
-    const printed = await helpWithColour();
+  /**
+   * Asserted over text of the row's own, because `HELP_TEXT` no longer contains
+   * a heading the rule applies to: `Usage:` is the branch above it, and the
+   * `Deprecated, retained for compatibility:` block went with §09.11's commands.
+   * The rule itself is unchanged and still reachable by any future block.
+   */
+  it("bolds a heading", async () => {
+    const printed = await paintedWithColour("A heading:\n\n  jup install\n");
 
-    expect(printed).toContain(`${BOLD}Deprecated, retained for compatibility:`);
+    expect(printed).toContain(`${BOLD}A heading:`);
   });
 
   /**

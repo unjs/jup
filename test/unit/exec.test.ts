@@ -330,13 +330,13 @@ describe("resolveBinPath — §08.1 confinement", () => {
  * file rather than to a pipe.
  * ------------------------------------------------------------------ */
 
-describe.skipIf(process.platform === "win32")("§10.2 — COREPACK_HOST_RUNTIME", () => {
+describe.skipIf(process.platform === "win32")("§10.2 — JUP_HOST_RUNTIME", () => {
   /** Both spellings (§11.6), one per line, into the file named as `$1`. */
   function probe(): string {
     const file = join(root, "probe.sh");
     writeFileSync(
       file,
-      `#!/bin/sh\nprintf '%s\\n%s\\n' "$COREPACK_HOST_RUNTIME" "$JUP_HOST_RUNTIME" > "$1"\n`,
+      `#!/bin/sh\nprintf '%s\\n%s\\n' "$JUP_HOST_RUNTIME" "$JUP_HOST_RUNTIME" > "$1"\n`,
     );
     chmodSync(file, 0o755);
     return file;
@@ -358,7 +358,7 @@ describe.skipIf(process.platform === "win32")("§10.2 — COREPACK_HOST_RUNTIME"
 
   it("writes into the child's environment and never into our own", async () => {
     // `env` defaults to `process.env`, so a forward that wrote *into* the object
-    // it was handed would set `COREPACK_HOST_RUNTIME` on this process for the
+    // it was handed would set `JUP_HOST_RUNTIME` on this process for the
     // rest of its life — §03.2 refuses that same value from an env file, and a
     // mutating default is the only other way into it. Called the way the
     // signature permits, with no environment of the caller's own.
@@ -369,7 +369,7 @@ describe.skipIf(process.platform === "win32")("§10.2 — COREPACK_HOST_RUNTIME"
       realpathSync(process.execPath),
       realpathSync(process.execPath),
     ]);
-    expect(process.env.COREPACK_HOST_RUNTIME).toBeUndefined();
+    expect(process.env.JUP_HOST_RUNTIME).toBeUndefined();
     expect(process.env.JUP_HOST_RUNTIME).toBeUndefined();
   });
 
@@ -393,7 +393,6 @@ describe.skipIf(process.platform === "win32")("§10.2 — COREPACK_HOST_RUNTIME"
     expect(
       await observed({
         ...process.env,
-        COREPACK_HOST_RUNTIME: inherited,
         JUP_HOST_RUNTIME: inherited,
       }),
     ).toEqual([inherited, inherited]);
@@ -491,7 +490,7 @@ describe("§08.3 — PATH", () => {
       "yarn",
       { yarn: "./bin/yarn.js" },
       {
-        COREPACK_SHIM_DIRECTORY: shims,
+        JUP_SHIM_DIRECTORY: shims,
         PATH: `${decoy}${delimiter}/usr/bin`,
       },
     );
@@ -535,7 +534,7 @@ describe("§08.3 — PATH", () => {
         env: {
           HOME: join(root, "nowhere"),
           USERPROFILE: join(root, "nowhere"),
-          COREPACK_SHIM_DIRECTORY: shims,
+          JUP_SHIM_DIRECTORY: shims,
           PATH: `${decoy}${delimiter}/usr/bin`,
         },
       },
@@ -561,7 +560,7 @@ describe("§08.3 — PATH", () => {
         env: {
           HOME: join(root, "nowhere"),
           USERPROFILE: join(root, "nowhere"),
-          COREPACK_SHIM_DIRECTORY: shims,
+          JUP_SHIM_DIRECTORY: shims,
           PATH: `${decoy}${delimiter}/usr/bin`,
         },
       },
@@ -582,7 +581,7 @@ describe("§08.3 — PATH", () => {
       "yarn",
       { yarn: "./bin/yarn.js" },
       {
-        COREPACK_SHIM_DIRECTORY: shims,
+        JUP_SHIM_DIRECTORY: shims,
         PATH: `${decoy}${delimiter}/usr/bin`,
       },
     );
@@ -600,7 +599,7 @@ describe("§08.3 — PATH", () => {
       "yarn",
       { yarn: "./bin/yarn.js" },
       {
-        COREPACK_SHIM_DIRECTORY: shims,
+        JUP_SHIM_DIRECTORY: shims,
         PATH: `${shims}${delimiter}${decoy}`,
       },
     );
@@ -667,7 +666,7 @@ describe("§08.3 — PATH", () => {
         {
           // Set, and deliberately irrelevant: a native artifact is not reachable
           // through a shim, so the store directory is what must win.
-          COREPACK_SHIM_DIRECTORY: shims,
+          JUP_SHIM_DIRECTORY: shims,
           PATH: decoy,
         },
       );

@@ -64,11 +64,9 @@ vi.mock("../../src/run/exec.ts", () => ({
 
 import {
   cmdCache,
-  cmdHydrate,
   cmdInstall,
   cmdInstallGlobal,
   cmdPack,
-  cmdPrepare,
   cmdUp,
   cmdUse,
   resolvePatternsToDescriptors,
@@ -77,6 +75,7 @@ import {
 import { messages, UsageError } from "../../src/errors-cold.ts";
 import { execPackageManager } from "../../src/run/exec.ts";
 import { create } from "../../src/cache/tar.ts";
+import { readInstalledSpec } from "../../src/cache/store.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 import { USAGE_LINES } from "../../src/commands/usage.ts";
 
@@ -99,9 +98,9 @@ const ENV_KEYS = [
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
   "COREPACK_ENV_FILE",
   "COREPACK_MIGRATE_FROM",
-  "COREPACK_ALLOW_UNVERIFIED",
-  "COREPACK_FROZEN_LOCKFILE",
-  "COREPACK_QUIET_ADVISORIES",
+  "JUP_ALLOW_UNVERIFIED",
+  "JUP_FROZEN_LOCKFILE",
+  "JUP_QUIET_ADVISORIES",
 ] as const;
 
 /** The origins the embedded table points at, all mapped onto `routes`. */
@@ -367,16 +366,6 @@ describe("resolvePatternsToDescriptors (§09.1)", () => {
       `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
     );
   });
-
-  it("keeps the deprecated prepare wording free of devEngines (§09.11)", async () => {
-    await manifest({ name: "no-spec" });
-
-    const error = await rejection(cmdPrepare([]));
-    expect(error.message).toBe(
-      `The local project doesn't feature a 'packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
-    );
-    expect(error.message).toBe(messages.noSpecInProjectLegacy());
-  });
 });
 
 /* ------------------------------------------------------------------ *
@@ -432,7 +421,7 @@ describe("install (§09.2, test 86)", () => {
     // §06.1: this fixture publishes no signature and pins no hash, so the
     // artifact clears no verification tier. The opt-out keeps the row about what
     // it is about — §09.2 not touching `lastKnownGood.json` on a cold install.
-    process.env.COREPACK_ALLOW_UNVERIFIED = "1";
+    process.env.JUP_ALLOW_UNVERIFIED = "1";
     await writeLastKnownGood({ yarn: "2.1.0" });
     await manifest({ packageManager: "yarn@2.2.2" });
 
@@ -731,6 +720,52 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     expect(existsSync(join(home, "v1", "yarn", "1.22.4", ".jup"))).toBe(true);
   });
 
+  /**
+   * §07.10 — a marker that arrived inside somebody else's archive carries a
+   * `hash` that nothing in this path ever checked against bytes. Left standing,
+   * it is what §06.1's cache-hit check compares a pin against, so an archive
+   * could seed arbitrary bytes under a name and version a project pins and have
+   * them run with nothing hashed. `pack` ships extracted subtrees rather than
+   * the artifact tarball, so there is nothing to re-derive the digest from and
+   * §07.10's second clause applies: the claim comes out.
+   */
+  it("does not let an archive's marker hash stand as a digest claim", async () => {
+    // The digest the victim's project pins, which the archive simply asserts is
+    // the hash of the payload sitting beside it.
+    const claimed = `sha512.${"ab".repeat(64)}`;
+
+    const source = await tempDir("jup-cli-forged-");
+    const dir = join(source, "yarn", "1.22.4");
+    await mkdir(join(dir, "bin"), { recursive: true });
+    await writeFile(join(dir, "bin", "yarn.js"), "// not the real yarn\n");
+    const forged: CorepackMarker = {
+      locator: { name: "yarn", reference: `1.22.4+${claimed}` },
+      bin: { yarn: "./bin/yarn.js" },
+      hash: claimed,
+    };
+    await writeFile(join(dir, ".jup"), JSON.stringify(forged));
+    const archive = join(project, "forged.tgz");
+    await create(source, ["yarn"], archive);
+
+    await expect(cmdInstallGlobal(["-g", "--cache-only", archive])).resolves.toBe(0);
+
+    // The claim did not survive promotion.
+    const promoted = JSON.parse(
+      readFileSync(join(home, "v1", "yarn", "1.22.4", ".jup"), "utf8"),
+    ) as CorepackMarker;
+    expect(promoted.hash).not.toBe(claimed);
+
+    // So the pin it was forged to satisfy is not a cache hit: that reference
+    // goes to the download-and-verify path instead of executing these bytes.
+    expect(readInstalledSpec({ name: "yarn", reference: `1.22.4+${claimed}` })).toBeNull();
+
+    // The entry is still usable by an unpinned reference, which is exactly what
+    // §07.10 says a stripped marker leaves behind.
+    expect(readInstalledSpec({ name: "yarn", reference: "1.22.4" })).not.toBeNull();
+
+    await rm(source, { recursive: true, force: true });
+  });
+
   it("refuses an archive naming a package manager this build doesn't support", async () => {
     const source = await tempDir("jup-cli-bogus-");
     await mkdir(join(source, "vlt", "1.0.0"), { recursive: true });
@@ -902,11 +937,11 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     expect(stderr).toContain(messages.cacheEntryNotRemoved(join(home, "v1", "yarn")));
   });
 
-  it("routes both §07.9 lines through COREPACK_QUIET_ADVISORIES", async () => {
+  it("routes both §07.9 lines through JUP_QUIET_ADVISORIES", async () => {
     // §11.3 — every `!` line this spec adds is silenced by the flag, and these
     // two were written straight to the stream. The *count* is command output and
     // is unaffected.
-    process.env.COREPACK_QUIET_ADVISORIES = "1";
+    process.env.JUP_QUIET_ADVISORIES = "1";
     shimState.interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
     await seed("node", "22.14.0");
     await seed("yarn", "2.2.2");
@@ -1062,7 +1097,7 @@ describe("use (§09.5, tests 105-110)", () => {
   });
 
   it("refuses an exact use that would delete a recorded resolution when frozen", async () => {
-    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    process.env.JUP_FROZEN_LOCKFILE = "1";
     await seed("yarn", "2.4.3");
     await manifest({ name: "demo", packageManager: "yarn@2.x" });
     await writeFile(
@@ -1084,7 +1119,7 @@ describe("use (§09.5, tests 105-110)", () => {
   });
 
   it("still allows an exact use with nothing recorded to lose", async () => {
-    process.env.COREPACK_FROZEN_LOCKFILE = "1";
+    process.env.JUP_FROZEN_LOCKFILE = "1";
     await seed("yarn", "2.4.3");
     // A range pin, but no recorded resolution: there is no file to freeze, and
     // refusing here would break every `use` in CI over a file that never
@@ -1293,78 +1328,6 @@ describe("up (§09.4, tests 111-115)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §09.11 — deprecated commands
- * ------------------------------------------------------------------ */
-
-describe("hydrate and prepare (§09.11)", () => {
-  it("hydrate names 'corepack prepare' in its format error", async () => {
-    const source = await tempDir("jup-cli-hyd-");
-    await mkdir(join(source, "stuff"), { recursive: true });
-    await writeFile(join(source, "stuff", "readme.txt"), "nope\n");
-    const archive = join(project, "legacy.tgz");
-    await create(source, ["stuff"], archive);
-
-    const error = await rejection(cmdHydrate([archive]));
-    expect(error.message).toBe(`Invalid archive format; did it get generated by 'jup prepare'?`);
-
-    await rm(source, { recursive: true, force: true });
-  });
-
-  it("hydrate opts in to activation and says All done!", async () => {
-    await seed("yarn", "2.2.2");
-    await cmdPack(["yarn@2.2.2"]);
-    const archive = join(project, "jup.tgz");
-
-    const fresh = await tempDir("jup-cli-home3-");
-    process.env.COREPACK_HOME = fresh;
-    process.env.COREPACK_ENABLE_NETWORK = "0";
-
-    // No `--activate`: cached, but not the default. Note there is no `.tgz`
-    // extension check on the argument either (§09.11).
-    stdout = "";
-    await expect(cmdHydrate([archive])).resolves.toBe(0);
-    expect(stdout).toBe(`Adding yarn@2.2.2 to the cache...\nAll done!\n`);
-    expect(existsSync(join(fresh, "lastKnownGood.json"))).toBe(false);
-
-    // With `--activate` it becomes the recorded default.
-    stdout = "";
-    await expect(cmdHydrate(["--activate", archive])).resolves.toBe(0);
-    expect(stdout).toBe(`Installing yarn@2.2.2...\nAll done!\n`);
-    expect(
-      JSON.parse(readFileSync(join(fresh, "lastKnownGood.json"), "utf8")) as Record<string, string>,
-    ).toEqual({ yarn: "2.2.2" });
-
-    await rm(fresh, { recursive: true, force: true });
-  });
-
-  it("prepare tolerates a bare --output flag, defaulting to jup.tgz", async () => {
-    await seed("yarn", "2.2.2");
-
-    // Bare: the following token is a spec, not a path, so the default is used.
-    await expect(cmdPrepare(["--output", "yarn@2.2.2"])).resolves.toBe(0);
-
-    expect(existsSync(join(project, "jup.tgz"))).toBe(true);
-    expect(stdout).toContain(`All done!`);
-
-    // With a value, `=` disambiguates it from the spec list.
-    const custom = join(project, "custom.tgz");
-    await expect(cmdPrepare([`--output=${custom}`, "yarn@2.2.2"])).resolves.toBe(0);
-    expect(existsSync(custom)).toBe(true);
-  });
-
-  it("prepare writes no archive when --output is absent, and only activates on demand", async () => {
-    await seed("yarn", "2.2.2");
-
-    await cmdPrepare(["yarn@2.2.2"]);
-    expect(existsSync(join(project, "jup.tgz"))).toBe(false);
-    expect(lastKnownGood()).toEqual({});
-
-    await cmdPrepare(["--activate", "yarn@2.2.2"]);
-    expect(lastKnownGood().yarn).toMatch(/^2\.2\.2\+sha512\./);
-  });
-});
-
-/* ------------------------------------------------------------------ *
  * §09.10 and dispatch
  * ------------------------------------------------------------------ */
 
@@ -1395,7 +1358,7 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
   });
 
   it("keeps a usage line for every command it dispatches", () => {
-    for (const command of ["cache", "install", "pack", "up", "use", "hydrate", "prepare"]) {
+    for (const command of ["cache", "install", "pack", "up", "use"]) {
       expect(USAGE_LINES[command]).toMatch(/^\$ jup /);
     }
   });

@@ -13,13 +13,11 @@ export const USAGE_LINES: Record<string, string> = {
   cache: "$ jup cache clean|clear|list",
   disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
   enable: "$ jup enable [--install-directory <path>|--system] [--exclude <name>] [--force] ...",
-  hydrate: "$ jup hydrate [--activate] <file>",
   info: "$ jup info [--json]",
   install: "$ jup install [-g,--global] [--cache-only] ...",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
   "self-install": "$ jup self-install [--install-directory <path>|--system] [--force]",
   "self-upgrade": "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
-  prepare: "$ jup prepare [--activate] [--all] [-o,--output <path>] ...",
   up: "$ jup up [--here] [--pin-style=suffix|sidecar]",
   // §09.13's other spelling. Its usage line names the word the user typed, so
   // the two entries differ by exactly that.
@@ -31,8 +29,8 @@ export const GENERIC_USAGE_LINE = "$ jup <command>";
 
 /**
  * §09.14 — {@link HELP_TEXT}, with the structure it already has picked out in
- * colour: the `Usage:`/`Deprecated…:` headings, the program name on each
- * synopsis line, the command word after it, and a trailing description.
+ * colour: the `Usage:` heading, the program name on each synopsis line, the
+ * command word after it, and a trailing description.
  *
  * Line-scoped on purpose. The prose paragraphs underneath name commands and
  * flags too ("up updates this project's packageManager field"), and a rule that
@@ -163,11 +161,6 @@ export const HELP_TEXT = `Usage: jup <command>
   jup use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>
   jup --version
   jup --help
-
-Deprecated, retained for compatibility:
-
-  jup hydrate [--activate] <file>
-  jup prepare [--activate] [--all] [-o|--output [<path>]] [...spec]
 
 self-install copies the running jup to <home>/self/<version>, which cache clean
 keeps, then links jup and corepack from enable's directory. It uses the current

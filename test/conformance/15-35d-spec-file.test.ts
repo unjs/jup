@@ -1,5 +1,5 @@
 /**
- * §03.1 — `COREPACK_SPEC_FILE`, an external file supplying the project spec.
+ * §03.1 — `JUP_SPEC_FILE`, an external file supplying the project spec.
  *
  * #682 and #402: a vendored or generated tree whose `package.json` cannot be
  * edited — sometimes because it names the *wrong* package manager, sometimes
@@ -37,14 +37,14 @@ function project() {
   return fixture;
 }
 
-describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
+describe("§03.1 — JUP_SPEC_FILE overrides the manifest", () => {
   it("supplies `packageManager` for a manifest that cannot be edited", async () => {
     const fixture = project();
     fixture.write("vendor/spec.json", `{"packageManager":"pnpm@11.1.2"}\n`);
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: { COREPACK_SPEC_FILE: "vendor/spec.json" },
+      env: { JUP_SPEC_FILE: "vendor/spec.json" },
     });
 
     expect(result.exitCode).toBe(0);
@@ -61,7 +61,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
 
     const result = await run(["yarn", "--version"], {
       ...fixture,
-      env: { COREPACK_SPEC_FILE: "vendor/spec.json" },
+      env: { JUP_SPEC_FILE: "vendor/spec.json" },
     });
 
     expect(result.exitCode).toBe(1);
@@ -80,7 +80,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: { COREPACK_SPEC_FILE: "vendor/spec.json" },
+      env: { JUP_SPEC_FILE: "vendor/spec.json" },
     });
 
     expect(result.exitCode).toBe(0);
@@ -97,7 +97,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: { COREPACK_SPEC_FILE: "spec.json" },
+      env: { JUP_SPEC_FILE: "spec.json" },
     });
 
     expect(result.exitCode).toBe(0);
@@ -109,7 +109,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: { COREPACK_SPEC_FILE: "vendor/spec.json" },
+      env: { JUP_SPEC_FILE: "vendor/spec.json" },
     });
 
     expect(result.exitCode).toBe(1);
@@ -127,7 +127,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
-      env: { COREPACK_SPEC_FILE: "vendor/spec.json" },
+      env: { JUP_SPEC_FILE: "vendor/spec.json" },
     });
 
     expect(result.exitCode).toBe(1);
@@ -138,7 +138,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
   it("§03.2: a project's .jup.env cannot set it", async () => {
     const fixture = project();
     fixture.write("vendor/spec.json", `{"packageManager":"pnpm@11.1.2"}\n`);
-    fixture.write(".jup.env", "COREPACK_SPEC_FILE=vendor/spec.json\n");
+    fixture.write(".jup.env", "JUP_SPEC_FILE=vendor/spec.json\n");
 
     // The manifest's yarn pin still governs, so `pnpm` is the mismatch it always
     // was — the repository could not redirect its own spec.
@@ -148,7 +148,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
     expect(result.stderr).toContain("This project is configured to use yarn");
     expect(result.stderr).toContain(fixture.path("package.json"));
     // §03.2 — refused loudly, because it is a security-relevant variable.
-    expect(result.stderr).toContain("COREPACK_SPEC_FILE");
+    expect(result.stderr).toContain("JUP_SPEC_FILE");
   });
 
   it("COREPACK_ENABLE_PROJECT_SPEC=0 ignores it, as it ignores the manifest", async () => {
@@ -161,7 +161,7 @@ describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
     const result = await run(["yarn", "--version"], {
       ...fixture,
       env: {
-        COREPACK_SPEC_FILE: "vendor/spec.json",
+        JUP_SPEC_FILE: "vendor/spec.json",
         COREPACK_ENABLE_PROJECT_SPEC: "0",
         // Proof by construction that neither declaration was consulted: the
         // fallback is the compiled-in default, already in the store, and any

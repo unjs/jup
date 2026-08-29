@@ -42,7 +42,7 @@ const other = new MockRegistry();
 
 const PNPM = packageManagerTarball("pnpm", "6.6.2");
 const CLI_DIST = packageManagerTarball("yarn", "4.0.0", {
-  // §02.5's `npmRegistry.bin`: the tarball is `@yarnpkg/cli-dist` and only this
+  // §02.2 — Berry's band is the npm package `@yarnpkg/cli-dist`, and only this
   // one entry is extracted (§07.4).
   binPaths: ["bin/yarn.js"],
   packageName: "@yarnpkg/cli-dist",

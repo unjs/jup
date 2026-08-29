@@ -43,11 +43,10 @@ function loadRegistry(): Promise<typeof import("../net/registry.ts")> {
  * query fans out over every band **in parallel** and unions, because a range
  * like `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry.
  *
- * Every registry this hands to the client is the band's own `registry`. §05.2
- * rewrite 1 — swapping a band onto its `npmRegistry` once the user has
- * configured an npm-protocol registry that would serve it — belongs to
- * `registry.resolveRegistrySpec`, which every fetcher below applies to its
- * argument.
+ * Every registry this hands to the client is the band's own `registry`, which
+ * §02.2 guarantees is an npm one. Where that package is actually *fetched*
+ * from — §05.2's variables, §05.3's `.npmrc` — is resolved inside the fetchers,
+ * not here.
  */
 export async function resolveDescriptor(
   descriptor: Descriptor,
@@ -134,9 +133,9 @@ export async function resolveDescriptor(
   }
 
   // 6 — fan out over every band in parallel and union the results: a range like
-  // `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry
-  // (repo.yarnpkg.com), so querying only the matching band would lose half the
-  // candidates.
+  // `>=1` legitimately spans Yarn Classic (the `yarn` package) and Yarn Berry
+  // (`@yarnpkg/cli-dist`), so querying only the matching band would lose half
+  // the candidates.
   //
   // Lenient band classification strips prerelease suffixes, but resolution must
   // not select a prerelease unless the range names one or the user opts in.
@@ -144,11 +143,11 @@ export async function resolveDescriptor(
 
   // §04.1 — `fetchResolvableVersions` is `fetchAvailableVersions` with the
   // minimum-release-age gate applied: same request, same `Accept` header, same
-  // answer while `COREPACK_MINIMUM_RELEASE_AGE` is unset. When it *is* set and a
-  // band's source publishes no release dates (§05.3's tags document), the band
-  // reports that instead of quietly resolving from it — but only a band that
-  // actually matches something refuses, so `yarn@^1.22` is unaffected by the
-  // Berry band it also fans out over.
+  // answer while `JUP_MINIMUM_RELEASE_AGE` is unset. When it *is* set and a
+  // band's source publishes no release dates (a private registry that strips
+  // `time`), the band reports that instead of quietly resolving from it — but
+  // only a band that actually matches something refuses, so `yarn@^1.22` is
+  // unaffected by the Berry band it also fans out over.
   const { fetchResolvableVersions, undatedSourceError } = await loadRegistry();
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {

@@ -19,7 +19,6 @@ An artifact is acceptable when it clears one of:
 |---|---|---|---|
 | yes | any | any | Hash check only; no signature request at all |
 | no | npm | no | Signature → `integrity` → hash check, or tier 3, or refusal |
-| no | url | — | Refuse unless `JUP_ALLOW_UNVERIFIED=1` |
 | no | any | yes | Refuse unless `JUP_ALLOW_UNVERIFIED=1` |
 
 Row 1 turns signature verification off deliberately: an explicit hash is stronger
@@ -32,8 +31,8 @@ pinned hash and `JUP_ALLOW_UNVERIFIED=1`. That opt-out is ambient-only — a
 project env file cannot set it — applies to the current run, and warns for each
 artifact it permits.
 
-What the refusal actually closes: a `type: "url"` source that publishes neither
-signatures nor digests, and a custom `packageManager` URL with no `#<algo>.<hex>`
+What the refusal actually closes: a registry that publishes neither signatures
+nor digests, and a custom `packageManager` URL with no `#<algo>.<hex>`
 fragment (that path is already behind `JUP_ENABLE_UNSAFE_CUSTOM_URLS`, which
 permits the *host*; the fragment is how the user says what should arrive from it).
 It does not fire for the ordinary entries: the table pins a hash on `default` and
@@ -154,6 +153,9 @@ An expired key is never accepted silently.
 | Tar path traversal, unsafe links, special files | yes — §07.4 |
 | A freshly published compromised release | partly — `JUP_MINIMUM_RELEASE_AGE` |
 
-One known weak spot: the built-in `default` pins carry **sha1** digests, which
-tier 1 accepts and which §6.2 would warn about coming from a user. Moving the
-table to sha512 pins would close it.
+Every built-in `default` that carries a digest carries a **sha512** one — the
+algorithm the registry serves and `use` writes — so the table no longer ships a
+pin §6.2 would warn about coming from a user. `scripts/refresh-table.mjs` records
+them after verifying npm's signature over `dist.integrity` and the tarball
+against it. A per-host entry's `default` carries no digest at all (§02.5); its
+tier is npm's signature over this host's artifact, checked at install time.

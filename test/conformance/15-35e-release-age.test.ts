@@ -1,5 +1,5 @@
 /**
- * §04.1 — `COREPACK_MINIMUM_RELEASE_AGE` (row 203).
+ * §04.1 — `JUP_MINIMUM_RELEASE_AGE` (row 203).
  *
  * The gate exists to stop a freshly-published, compromised release being picked
  * up within minutes of publication, and it is the same `minimumReleaseAge`
@@ -97,14 +97,14 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
   return (fixture.json("package.json") as { packageManager?: string }).packageManager;
 }
 
-describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
+describe("§04.1 JUP_MINIMUM_RELEASE_AGE", () => {
   it("203: a release younger than the age is filtered out of implicit resolution", async () => {
     const fixture = createFixture({ name: "app", packageManager: "pnpm@^11.0.0" });
 
     const result = await run(["pnpm", "--version"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -128,7 +128,7 @@ describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
     const result = await run(["pnpm", "--version"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -147,7 +147,7 @@ describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
     const result = await run(["use", `pnpm@${FRESH}`], {
       ...fixture,
       registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -160,7 +160,7 @@ describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
     const result = await run(["use", "pnpm"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -178,7 +178,7 @@ describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
     const result = await run(["use", "pnpm@latest"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
     });
 
     expect(result.exitCode).toBe(0);
@@ -201,10 +201,10 @@ describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
       const result = await run(["pnpm", "--version"], {
         ...fixture,
         registry,
-        env: env({ COREPACK_MINIMUM_RELEASE_AGE: value }),
+        env: env({ JUP_MINIMUM_RELEASE_AGE: value }),
       });
 
-      expect(result.exitCode, `COREPACK_MINIMUM_RELEASE_AGE=${JSON.stringify(value)}`).toBe(0);
+      expect(result.exitCode, `JUP_MINIMUM_RELEASE_AGE=${JSON.stringify(value)}`).toBe(0);
       expect(result.stdout).toBe(`${FRESH}\n`);
     }
   });
@@ -219,10 +219,10 @@ describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
       const result = await run(["pnpm", "--version"], {
         ...fixture,
         registry,
-        env: env({ COREPACK_MINIMUM_RELEASE_AGE: value }),
+        env: env({ JUP_MINIMUM_RELEASE_AGE: value }),
       });
 
-      expect(result.exitCode, `COREPACK_MINIMUM_RELEASE_AGE=${value}`).toBe(1);
+      expect(result.exitCode, `JUP_MINIMUM_RELEASE_AGE=${value}`).toBe(1);
       expect(result.stderr).toContain(
         "JUP_MINIMUM_RELEASE_AGE must be a non-negative number of hours",
       );
@@ -253,7 +253,7 @@ describe("§04.1 — unset costs nothing", () => {
         await run(["use", "pnpm"], {
           ...gated,
           registry,
-          env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24" }),
+          env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
         })
       ).exitCode,
     ).toBe(0);
@@ -319,7 +319,7 @@ describe("§04.1 — unset costs nothing", () => {
     const result = await run(["pnpm", "--version"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_MINIMUM_RELEASE_AGE: "24", COREPACK_ENABLE_NETWORK: "0" }),
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24", COREPACK_ENABLE_NETWORK: "0" }),
     });
 
     expect(result.exitCode).toBe(0);

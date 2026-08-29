@@ -230,7 +230,7 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(memoOf(inCI).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
   });
 
-  it("183: COREPACK_FROZEN_LOCKFILE=1 leaves an ordinary run alone", async () => {
+  it("183: JUP_FROZEN_LOCKFILE=1 leaves an ordinary run alone", async () => {
     const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
     record(fixture, "pnpm@^11.0.0", "11.1.2");
@@ -239,7 +239,7 @@ describe("§04.4 ranges and jup.lock", () => {
     const result = await run(["pnpm", "--version"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_FROZEN_LOCKFILE: "1", CI: "1" }),
+      env: env({ JUP_FROZEN_LOCKFILE: "1", CI: "1" }),
     });
 
     // The variable governs `use` and `up`; a proxy run never writes the file it
@@ -644,7 +644,7 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(fixture.exists("jup.lock")).toBe(false);
   });
 
-  it("use refuses to *delete* a recorded resolution under COREPACK_FROZEN_LOCKFILE=1", async () => {
+  it("use refuses to *delete* a recorded resolution under JUP_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     record(fixture, "pnpm@^11.0.0", "11.0.0");
     const before = fixture.read("jup.lock");
@@ -652,7 +652,7 @@ describe("§04.4 ranges and jup.lock", () => {
     const result = await run(["use", "pnpm@11.1.2"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_FROZEN_LOCKFILE: "1" }),
+      env: env({ JUP_FROZEN_LOCKFILE: "1" }),
     });
 
     // An exact `use` retires the range's entry — and `rm`s `jup.lock` outright
@@ -669,13 +669,13 @@ describe("§04.4 ranges and jup.lock", () => {
     );
   });
 
-  it("up refuses to refresh under an explicit COREPACK_FROZEN_LOCKFILE=1", async () => {
+  it("up refuses to refresh under an explicit JUP_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
     const frozen = await run(["up"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_FROZEN_LOCKFILE: "1" }),
+      env: env({ JUP_FROZEN_LOCKFILE: "1" }),
     });
 
     expect(frozen.exitCode).toBe(1);
@@ -714,13 +714,13 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(fixture.exists(MEMO)).toBe(false);
   });
 
-  it("use refuses to record under an explicit COREPACK_FROZEN_LOCKFILE=1", async () => {
+  it("use refuses to record under an explicit JUP_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ name: "demo" });
 
     const result = await run(["use", "pnpm@^11.0.0"], {
       ...fixture,
       registry,
-      env: env({ COREPACK_FROZEN_LOCKFILE: "1" }),
+      env: env({ JUP_FROZEN_LOCKFILE: "1" }),
     });
 
     expect(result.exitCode).toBe(1);

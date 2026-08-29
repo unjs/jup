@@ -1,5 +1,9 @@
 /**
- * Registry protocols — §05.2 (npm), §05.3 (url).
+ * The npm registry protocol — §05.2.
+ *
+ * §02.2 puts every band on the npm registry, so this is the only protocol
+ * there is: a registry spec names a package, and every question below is a
+ * packument read.
  *
  * The npm layer checks `COREPACK_ENABLE_NETWORK` itself and names the
  * *registry*; the transport layer names the *URL*. Both messages are observable
@@ -8,12 +12,12 @@
 
 import { ENV, envEntry, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
-import { isPerHost, npmAlternativeFor, packageManagerForRegistry } from "../config/table.ts";
+import { isPerHost, packageManagerForRegistry } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { advisory, messages, networkError, redactUserinfo, UsageError } from "../errors-cold.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck } from "../verify/integrity.ts";
-import { npmProtocolRegistry, registryVariableFor, resolveRegistry } from "./npmrc.ts";
+import { registryVariableFor, resolveRegistry } from "./npmrc.ts";
 import { isPrerelease, rcompare } from "../version/semver.ts";
 import { verifySignatureWithRefresh } from "../verify/trust.ts";
 import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "../types.ts";
@@ -26,7 +30,7 @@ const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;
  * mirrors 404 on a doubled slash.
  *
  * `npmrc.resolveRegistry` owns the four-tier precedence:
- * `COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc`, then the
+ * `JUP_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc`, then the
  * built-in default.
  *
  * @param options `name` selects §05.2's per-package-manager override;
@@ -36,23 +40,7 @@ export function getRegistryUrl(options?: { name?: string; packageName?: string }
   return resolveRegistry(options).registry;
 }
 
-/** Use a declared npm alternative when an applicable npm registry is configured. */
-export function resolveRegistrySpec(spec: RegistrySpec): RegistrySpec {
-  if (spec.type === "npm") return spec;
-
-  const alternative = npmAlternativeFor(spec);
-  if (alternative === undefined) return spec;
-
-  // A per-source mirror is a mirror of this very document, so it stays here.
-  const name = packageManagerForRegistry(spec);
-  if (name !== undefined && sourceOverrideFor(name) !== undefined) return spec;
-
-  return npmProtocolRegistry({ packageName: alternative.package }) === undefined
-    ? spec
-    : alternative;
-}
-
-/** §05.2's `COREPACK_REGISTRY_<NAME>`, trailing slashes stripped, or `undefined`. */
+/** §05.2's `JUP_REGISTRY_<NAME>`, trailing slashes stripped, or `undefined`. */
 function sourceOverrideFor(name: string): string | undefined {
   const configured = readEnv(registryVariableFor(name));
   if (configured === undefined || configured === "") return undefined;
@@ -61,7 +49,7 @@ function sourceOverrideFor(name: string): string | undefined {
 
 /**
  * §05.2 — move a URL derived from a package manager's **own** table entry onto
- * `COREPACK_REGISTRY_<NAME>`.
+ * `JUP_REGISTRY_<NAME>`.
  *
  * Unconditional origin replacement, unlike {@link applyRegistryOverride}: a
  * table URL is already known to use that package manager's distribution origin,
@@ -87,7 +75,7 @@ export const NPM_ACCEPT_HEADER =
  * The abbreviated packument {@link NPM_ACCEPT_HEADER} asks for deliberately
  * omits per-version publish dates, and it is an order of magnitude smaller. So
  * this header is sent on exactly one request, on exactly one path: the candidate
- * list of §04.1 step 6, and only while `COREPACK_MINIMUM_RELEASE_AGE` is set.
+ * list of §04.1 step 6, and only while `JUP_MINIMUM_RELEASE_AGE` is set.
  * Every other request — dist-tags, `latest`, the version document, §06.3's
  * signature fallback — keeps the abbreviated header whatever the gate says.
  */
@@ -149,10 +137,10 @@ function rebase(url: string, base: string): string {
  * which is how npm and pnpm spell "no minimum" for the same setting.
  *
  * **An unparseable or negative value is refused, not ignored.** Every other
- * numeric variable in this codebase (`COREPACK_NETWORK_TIMEOUT`,
- * `COREPACK_NETWORK_RETRIES`) falls back to its default on garbage, because a
+ * numeric variable in this codebase (`JUP_NETWORK_TIMEOUT`,
+ * `JUP_NETWORK_RETRIES`) falls back to its default on garbage, because a
  * mistyped timeout costs a user some latency. This one is a supply-chain
- * control: falling back would mean `COREPACK_MINIMUM_RELEASE_AGE=24h` silently
+ * control: falling back would mean `JUP_MINIMUM_RELEASE_AGE=24h` silently
  * turns the protection *off* on the machine of someone who believes they turned
  * it on, which is the same fail-open shape §04.1 exists to close.
  *
@@ -201,9 +189,9 @@ export interface VersionCandidates {
  *
  * Narrow by construction — §04.1 step 5 returns an exact version before any of
  * this runs, so the usual `packageManager: "yarn@4.14.1"` is untouched; only
- * *implicit* resolution against `repo.yarnpkg.com` is refused. And the way out
- * is named: an npm-protocol registry switches Yarn Berry onto
- * `@yarnpkg/cli-dist` (§05.2 rewrite 1), which does date its releases.
+ * *implicit* resolution is refused. §02.2 puts every band on npm, which dates
+ * its releases, so the reachable case is a private registry that strips `time`
+ * — and the message names the way out.
  */
 export function undatedSourceError(url: string): UsageError {
   return new UsageError(
@@ -229,23 +217,13 @@ function noEligibleReleaseError(packageName: string): UsageError {
  * A version the `time` map does not mention is dropped rather than kept: we
  * cannot say how old it is, and the whole point is to not choose what we cannot
  * vouch for. A response with no `time` map at all is the undated-source case —
- * some private registries strip it — and is reported the same way as §05.3's
- * url-typed sources.
+ * some private registries strip it — and the gate is refused rather than
+ * silently skipped.
  */
-export async function fetchResolvableVersions(input: RegistrySpec): Promise<VersionCandidates> {
+export async function fetchResolvableVersions(spec: RegistrySpec): Promise<VersionCandidates> {
   const minimumAge = minimumReleaseAge();
   if (minimumAge === undefined) {
-    return { versions: await fetchAvailableVersions(input) };
-  }
-
-  const spec = resolveRegistrySpec(input);
-  if (spec.type !== "npm") {
-    // §05.3's tags document has versions and aliases and nothing dated.
-    const name = packageManagerForRegistry(spec);
-    return {
-      versions: keysOrValues(asRecord(await urlGetJson(spec.url, spec))?.[spec.fields.versions]),
-      undatedSource: applySourceOverride(spec.url, name),
-    };
+    return { versions: await fetchAvailableVersions(spec) };
   }
 
   const body = asRecord(await npmGetJson(spec.package, spec, { full: true }));
@@ -281,7 +259,7 @@ export async function fetchResolvableVersions(input: RegistrySpec): Promise<Vers
  * asking for it would cost a request this can answer from the same document.
  */
 export async function capToReleaseAge(
-  input: RegistrySpec,
+  spec: RegistrySpec,
   version: string | undefined,
 ): Promise<string> {
   if (minimumReleaseAge() === undefined) {
@@ -289,7 +267,7 @@ export async function capToReleaseAge(
     return version;
   }
 
-  const candidates = await fetchResolvableVersions(input);
+  const candidates = await fetchResolvableVersions(spec);
   if (candidates.undatedSource !== undefined) {
     throw undatedSourceError(candidates.undatedSource);
   }
@@ -307,63 +285,28 @@ export async function capToReleaseAge(
     .sort(rcompare)[0];
 
   if (capped === undefined) {
-    const spec = resolveRegistrySpec(input);
-    throw noEligibleReleaseError(spec.type === "npm" ? spec.package : spec.url);
+    throw noEligibleReleaseError(spec.package);
   }
   return capped;
 }
 
-export async function fetchAvailableVersions(input: RegistrySpec): Promise<string[]> {
-  const spec = resolveRegistrySpec(input);
-
-  if (spec.type === "npm") {
-    const body = asRecord(await npmGetJson(spec.package, spec));
-    // Both packument shapes carry `versions` as an object keyed by version.
-    return keysOrValues(body?.versions);
-  }
-
-  const body = asRecord(await urlGetJson(spec.url, spec));
-  // §05.3 — an array of versions *or* an object whose keys are versions.
-  return keysOrValues(body?.[spec.fields.versions]);
+export async function fetchAvailableVersions(spec: RegistrySpec): Promise<string[]> {
+  const body = asRecord(await npmGetJson(spec.package, spec));
+  // Both packument shapes carry `versions` as an object keyed by version.
+  return keysOrValues(body?.versions);
 }
 
-export async function fetchAvailableTags(input: RegistrySpec): Promise<Record<string, string>> {
-  const spec = resolveRegistrySpec(input);
-
-  if (spec.type === "npm") {
-    const body = asRecord(await npmGetJson(spec.package, spec));
-    return stringMap(body?.["dist-tags"]);
-  }
-
-  const body = asRecord(await urlGetJson(spec.url, spec));
-  // Yarn's document maps tags -> "aliases" and versions -> "tags"; follow the
-  // mapping, not the names.
-  return stringMap(body?.[spec.fields.tags]);
+export async function fetchAvailableTags(spec: RegistrySpec): Promise<Record<string, string>> {
+  const body = asRecord(await npmGetJson(spec.package, spec));
+  return stringMap(body?.["dist-tags"]);
 }
 
 /**
- * §04.6 — npm reads `{registry}/{package}/latest` and returns a hash-bearing
- * reference; url registries read `data[fields.tags].stable` (note **stable**,
- * not `latest`) and attach no hash. Any failure in the npm path is re-thrown
- * wrapped in `messages.cannotDownloadLatest`.
+ * §04.6 — reads `{registry}/{package}/latest` and returns a hash-bearing
+ * reference. Any failure is re-thrown wrapped in
+ * `messages.cannotDownloadLatest`.
  */
-export async function fetchLatestStableVersion(input: RegistrySpec): Promise<string> {
-  const spec = resolveRegistrySpec(input);
-
-  if (spec.type !== "npm") {
-    // §04.1 — `stable` is the document choosing on the user's behalf, and this
-    // document dates nothing, so the gate cannot be enforced here at all.
-    if (minimumReleaseAge() !== undefined) {
-      throw undatedSourceError(applySourceOverride(spec.url, packageManagerForRegistry(spec)));
-    }
-    const body = asRecord(await urlGetJson(spec.url, spec));
-    const stable = stringMap(body?.[spec.fields.tags]).stable;
-    if (stable === undefined) {
-      throw new Error(messages.tagNotFound("stable"));
-    }
-    return stable;
-  }
-
+export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<string> {
   const registryUrl = registryUrlFor(spec);
 
   try {
@@ -527,7 +470,7 @@ export function warnUnsignedRegistry(
  * | `signatures` absent or empty | §06.3's retry, then soft-fail: proceed on a digest, warn once |
  * | `signatures` present | verified; an invalid one is `Signature does not match` |
  *
- * `COREPACK_REQUIRE_SIGNATURES=1` turns the soft-fail into a hard failure, for
+ * `JUP_REQUIRE_SIGNATURES=1` turns the soft-fail into a hard failure, for
  * organisations mandating signed sources. It is deliberately *not* consulted on
  * §06.1 row 1's pinned-hash path, which never reaches here: an explicit hash is
  * a stronger, user-chosen assertion than the registry's own claim (§06.1), and
@@ -623,7 +566,7 @@ async function fetchRootSignatures(
  * §05.3 + §05.2 — the base URL for one registry spec.
  *
  * The spec knows which package manager declared it (§05.2's
- * `COREPACK_REGISTRY_<NAME>`) and which npm package is being fetched (§05.3's
+ * `JUP_REGISTRY_<NAME>`) and which npm package is being fetched (§05.3's
  * `@scope:registry`), which is everything the precedence chain needs.
  */
 export function registryUrlFor(spec: NpmRegistrySpec): string {
@@ -659,20 +602,6 @@ function npmGetJson(
   });
 }
 
-/**
- * §05.3 — a url-typed registry is a plain JSON document, fetched through the
- * same HTTP layer. It is not the npm registry, so the network flag is left to
- * the transport layer (whose message names the URL), and credentials only go out
- * if the document happens to live on the configured registry's origin.
- *
- * Apply the source override to URL-registry metadata as well as artifacts, so
- * resolution and download use the same origin.
- */
-function urlGetJson(url: string, spec: RegistrySpec): Promise<unknown> {
-  const name = packageManagerForRegistry(spec);
-  const target = applySourceOverride(url, name);
-  return httpGetJson(target, { registryOrigin: getRegistryUrl({ name }) });
-}
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -718,7 +647,11 @@ function readSignatures(dist: Record<string, unknown>): RegistrySignature[] | un
   return signatures as RegistrySignature[];
 }
 
-/** §05.3 — an array of versions, or an object whose keys are versions. */
+/**
+ * §05.2 — the packument's `versions`, whose two documented shapes must both be
+ * read: the abbreviated document and the full one differ, and neither is
+ * guaranteed to be the object form.
+ */
 function keysOrValues(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.filter((entry): entry is string => typeof entry === "string");

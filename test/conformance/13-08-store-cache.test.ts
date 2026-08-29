@@ -170,7 +170,7 @@ describe("§13.8 store, cache and offline", () => {
     expect(packed.exitCode).toBe(0);
     expect(source.exists("jup.tgz")).toBe(true);
 
-    const target = createFixture({ packageManager: `yarn@${BERRY}` });
+    const target = createFixture({ packageManager: "yarn@2.2.2" });
     const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
@@ -185,13 +185,52 @@ describe("§13.8 store, cache and offline", () => {
     expect(result.stdout).toBe("2.2.2\n");
   });
 
-  it("91: the same works when the new COREPACK_HOME does not exist yet", async () => {
+  /**
+   * §07.10 — the other half of row 90, and the reason its project pins a bare
+   * version. A marker that arrived inside an archive carries a `hash` nothing on
+   * this machine ever checked against bytes, so promotion strips it: the seeded
+   * entry answers an unpinned reference and no other. The digest the *source*
+   * machine verified does not travel with the archive, because the archive holds
+   * extracted subtrees rather than the artifact tarball the digest was taken
+   * over — so there is nothing here to re-derive it from.
+   *
+   * The cost is deliberate: a pinned project cannot be seeded offline from an
+   * archive, because honouring the pin would mean trusting the claim.
+   */
+  it("90: an archive-seeded entry does not satisfy a pinned project", async () => {
     const source = createFixture();
     expect(
       (await run(["pack", `yarn@${BERRY}`], { ...source, registry, env: trusted() })).exitCode,
     ).toBe(0);
 
     const target = createFixture({ packageManager: `yarn@${BERRY}` });
+    expect(
+      (
+        await run(["install", "-g", source.path("jup.tgz")], {
+          ...target,
+          env: { COREPACK_ENABLE_NETWORK: "0" },
+        })
+      ).exitCode,
+    ).toBe(0);
+
+    // The bytes are in the store, but the pin names a digest the store cannot
+    // prove, so the run goes to the network rather than executing them.
+    const result = await run(["yarn", "--version"], {
+      ...target,
+      env: { COREPACK_ENABLE_NETWORK: "0" },
+    });
+    expect(result.exitCode).toBe(1);
+  });
+
+  it("91: the same works when the new COREPACK_HOME does not exist yet", async () => {
+    const source = createFixture();
+    expect(
+      (await run(["pack", `yarn@${BERRY}`], { ...source, registry, env: trusted() })).exitCode,
+    ).toBe(0);
+
+    // Unpinned, per §07.10 and row 90 above: an archive-seeded entry has no
+    // digest a pin could be proven against.
+    const target = createFixture({ packageManager: "yarn@2.2.2" });
     rmSync(target.home, { recursive: true, force: true });
 
     const hydrated = await run(["install", "-g", source.path("jup.tgz")], {

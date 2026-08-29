@@ -76,14 +76,24 @@ the requested pin is compared against the marker already being read, in constant
 time; a mismatch is not a usable cache entry **for that reference**.
 
 Refusing outright would be wrong, because the collision has a legitimate shape:
-the built-in defaults pin `sha1` while `use` writes the registry's `sha512`, so a
-bare `yarn` followed by a `yarn@1.22.22+sha512.…` project is a mismatch nobody
-misconfigured, whose only remedy would be wiping the cache. Instead the install
-target becomes a **pin-qualified** directory, `<version>+<algo>.<hex>` — itself
-valid semver, so still a legal `<name>/<reference>` subtree for `pack`,
-`cache list` and `info`. The plain directory keeps its name, so nothing about the
-common case changes on disk; the cost is one extra marker read, paid only by a
-reference that collides.
+two projects can pin the same version under different algorithms — a hand-written
+`+sha256.…` beside the `sha512` `use` writes — and the mismatch is nobody's
+misconfiguration, with no remedy but wiping the cache. Instead the install target
+becomes a **pin-qualified** directory, `<version>+<algo>.<hex>` — itself valid
+semver, so still a legal `<name>/<reference>` subtree for `pack`, `cache list`
+and `info`. The plain directory keeps its name, so nothing about the common case
+changes on disk; the cost is one extra marker read, paid only by a reference that
+collides.
+
+This is now an **uncommon** path rather than a routine one. The built-in defaults
+pin the same `sha512` the registry serves and `use` writes (§02.3), so the
+ordinary sequence — a bare `yarn`, then a pinned project — agrees on one
+directory. Rare is not never, and the mechanism stays.
+
+Being valid semver has one consequence that is **not** benign: a pin-qualified
+directory satisfies any range its bare sibling satisfies, and ties with it. §04.3
+therefore requires the range probe to skip entries carrying build metadata. Such a
+directory is reachable only through the exact reference that named it.
 
 The comparison is against the marker's *recorded* hash, a statement about bytes
 the store does not keep, which is sound for a marker jup wrote after checking the
@@ -95,7 +105,7 @@ download — and exactly why §7.10 treats a foreign marker differently.
 supported (non-URL) locator:
     url := spec.url with {} → version and {platform}/{arch}/{target} resolved
     if a registry override is configured:
-        registry := artifactRegistry ?? npmRegistry ?? registry
+        registry := artifactRegistry ?? registry
         if npm: GET {registry}/{package}/{version} → use dist.tarball
         apply §05.2's parsed-origin rewrite
 URL locator:

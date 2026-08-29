@@ -31,7 +31,7 @@ export interface TlsSettings {
 }
 
 /**
- * §05.1's precedence: `COREPACK_CAFILE`, then `.npmrc`'s `cafile`/`ca`, then the
+ * §05.1's precedence: `JUP_CAFILE`, then `.npmrc`'s `cafile`/`ca`, then the
  * platform trust store.
  *
  * The `.npmrc` middle tier is §05.3's, and it is read from the **user and
@@ -229,7 +229,7 @@ export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): vo
   if (certificates !== undefined && key !== undefined && installed !== key) {
     // Replaces rather than extends: §05.1 states a *precedence* order ending at
     // the platform store, and npm's own `cafile`/`ca` — the §05.3 tier feeding
-    // this same seam — replace the default set too, as does `COREPACK_CAFILE`.
+    // this same seam — replace the default set too, as does `JUP_CAFILE`.
     // A TLS-inspecting proxy re-signs everything with the CA being configured
     // here, so replacement is also the shape that actually works behind one.
     installTrustStore(certificates, settings.cafileSource ?? settings.caSource ?? ENV.CAFILE);

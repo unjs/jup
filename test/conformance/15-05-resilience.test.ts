@@ -166,14 +166,14 @@ describe("§05.1 network resilience", () => {
     }
   });
 
-  it("154: COREPACK_NETWORK_RETRIES=0 fails immediately", async () => {
+  it("154: JUP_NETWORK_RETRIES=0 fails immediately", async () => {
     const front = await startFlakyFront(() => registry.origin, 2);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
     try {
       const result = await run(["pnpm", "--version"], {
         ...fixture,
-        env: trusted({ COREPACK_NPM_REGISTRY: front.origin, COREPACK_NETWORK_RETRIES: "0" }),
+        env: trusted({ COREPACK_NPM_REGISTRY: front.origin, JUP_NETWORK_RETRIES: "0" }),
       });
 
       expect(result.exitCode).toBe(1);
@@ -209,7 +209,7 @@ describe("§05.1 network resilience", () => {
     }
   });
 
-  it("155: a registry that stalls past COREPACK_NETWORK_TIMEOUT times out, and says so", async () => {
+  it("155: a registry that stalls past JUP_NETWORK_TIMEOUT times out, and says so", async () => {
     const stalled = await startStalledServer();
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -218,8 +218,8 @@ describe("§05.1 network resilience", () => {
         ...fixture,
         env: trusted({
           COREPACK_NPM_REGISTRY: stalled.origin,
-          COREPACK_NETWORK_TIMEOUT: "300",
-          COREPACK_NETWORK_RETRIES: "0",
+          JUP_NETWORK_TIMEOUT: "300",
+          JUP_NETWORK_RETRIES: "0",
         }),
       });
 
@@ -247,7 +247,7 @@ describe("§05.1 network resilience", () => {
     try {
       const result = await run(["pnpm", "--version"], {
         ...fixture,
-        env: trusted({ COREPACK_NPM_REGISTRY: stalled.origin, COREPACK_NETWORK_TIMEOUT: "200" }),
+        env: trusted({ COREPACK_NPM_REGISTRY: stalled.origin, JUP_NETWORK_TIMEOUT: "200" }),
       });
 
       expect(result.exitCode).toBe(1);

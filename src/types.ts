@@ -117,20 +117,12 @@ export interface NpmRegistrySpec {
 }
 
 /**
- * Fetch one JSON document and read two fields out of it (§05.3).
- *
- * `fields.tags` names the tag→version object; `fields.versions` names either an
- * array of versions or an object whose *keys* are versions — both must be
- * accepted. `fetchLatestStableVersion` reads `data[fields.tags].stable`, note
- * **stable**, not `latest`.
+ * §02.2 — every band answers version questions over the npm protocol, so this
+ * is {@link NpmRegistrySpec} and nothing else. The alias survives the collapse
+ * because it reads as the role ("where versions come from") at the ~40 sites
+ * that take one, where the concrete name reads as the wire format.
  */
-export interface UrlRegistrySpec {
-  type: "url";
-  url: string;
-  fields: { tags: string; versions: string };
-}
-
-export type RegistrySpec = NpmRegistrySpec | UrlRegistrySpec;
+export type RegistrySpec = NpmRegistrySpec;
 /** §02.4 — how to download and run one version band of a tool. */
 export interface ToolSpec {
   /**
@@ -160,8 +152,6 @@ export interface ToolSpec {
    * {@link ToolSpec.artifactRegistry}.
    */
   registry: RegistrySpec;
-  /** Used *instead of* `registry` when the user has set a custom npm registry (§05.3). */
-  npmRegistry?: NpmRegistrySpec;
   /**
    * §02.4 — `<platform>-<arch>` → the string `{target}` expands to.
    *

@@ -166,7 +166,7 @@ function sniFor(hostname: string): string | undefined {
  * A `fetch`-shaped transport built on `node:http` / `node:https`.
  *
  * `http.ts` selects it only for a matched proxy (§05.1) or
- * `COREPACK_STRICT_SSL=0` (§05.1); other requests use native `fetch`.
+ * `JUP_STRICT_SSL=0` (§05.1); other requests use native `fetch`.
  */
 export const nodeFetch: typeof globalThis.fetch = async (input, init) => {
   const href =

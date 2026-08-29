@@ -91,7 +91,7 @@ describe("§06.1 — every artifact clears a verification tier", () => {
     expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("4.0.0\n");
-    // The `npmRegistry` fallback: `@yarnpkg/cli-dist`, filtered down to the one
+    // §02.2 — Berry resolves as `@yarnpkg/cli-dist`, filtered down to the one
     // entry §07.4 extracts. No pin was needed because the signature chain
     // supplied the tier.
     expect(registry.requests.map((request) => request.path)).toEqual([

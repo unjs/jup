@@ -48,7 +48,7 @@ export function perUserShimDirectory(): string | undefined {
 
   // macOS has no XDG convention; Linux and the BSDs do.
   //
-  // `resolve`d for the same reason `COREPACK_SHIM_DIRECTORY` is below: this
+  // `resolve`d for the same reason `JUP_SHIM_DIRECTORY` is below: this
   // directory is prepended to `PATH` for every child process (§08.7), and a
   // relative value there is a *cwd-relative* `PATH` entry — one that follows the
   // package manager into every directory it happens to chdir into. The XDG base

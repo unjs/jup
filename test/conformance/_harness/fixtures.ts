@@ -8,6 +8,7 @@
  */
 
 import {
+  chmodSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -19,7 +20,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { getSpecFor, isSupportedPackageManager } from "../../../src/config/table.ts";
+import {
+  getSpecFor,
+  isSupportedPackageManager,
+  resolveSpecBin,
+} from "../../../src/config/table.ts";
 import { parse } from "../../../src/version/semver.ts";
 import { hashOf, npmTarball } from "./tarball.ts";
 
@@ -212,8 +217,10 @@ export function versionOf(reference: string): string {
 export function binPathsFor(name: string, version: string): string[] {
   // §02.5 — every band is a tarball with a `BinSpec` of paths; the single-file
   // branch that used to stand here was Yarn Berry's alone.
+  // §02.4 — `resolveSpecBin` substitutes `{exe}`, which a native band's `bin`
+  // carries and which is part of the filename on Windows.
   const spec = getSpecFor(name, version);
-  return [...new Set(Object.values(spec.bin))].map((path) => path.replace(/^\.\//, ""));
+  return [...new Set(Object.values(resolveSpecBin(spec)))].map((path) => path.replace(/^\.\//, ""));
 }
 
 /**
@@ -232,10 +239,15 @@ export function seedPackageManager(
   mkdirSync(location, { recursive: true });
 
   const script = options?.script ?? pmScript(name, version);
+  // §08.3 — a native band is *spawned*, not loaded in-process, so its fake has
+  // to be a real executable: a shebang, and the execute bit §07.4 rule 6 grants.
+  // pnpm reaches this now that its default sits on the native `>=12.0.0` band.
+  const native = spec.exec === "native";
   for (const relative of binPathsFor(name, version)) {
     const file = join(location, relative);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, script);
+    writeFileSync(file, native ? `#!${process.execPath}\n${script}` : script);
+    if (native && process.platform !== "win32") chmodSync(file, 0o755);
     if (options?.esm) {
       writeFileSync(join(dirname(file), "package.json"), `{"type":"module"}\n`);
     }
@@ -250,7 +262,7 @@ export function seedPackageManager(
 
   writeFileSync(
     join(location, ".jup"),
-    JSON.stringify({ locator: { name, reference }, bin: spec.bin, hash }),
+    JSON.stringify({ locator: { name, reference }, bin: resolveSpecBin(spec), hash }),
   );
 
   return location;

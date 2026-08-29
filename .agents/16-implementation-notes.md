@@ -139,15 +139,18 @@ Carried deliberately; each is a decision, not an oversight, and each is worth
 revisiting when the surrounding code is next touched:
 
 * **The interpreter pin** (§10.2) reaches into `cache clean`, native child
-  environments and three `enable` failure modes. A single state file under
-  `<home>` would collapse all four.
+  environments and three `enable` failure modes. This is the one entry here that
+  is *not* a debt, and is listed only so the next reader stops re-deriving the
+  same dead end: the state-file collapse that suggests itself is unimplementable,
+  because a POSIX shim's shebang is what the kernel executes and nothing reads a
+  file before it. Buying it costs a `#!/bin/sh` fork per invocation, against
+  §01.3's warm-path budget. The feature is kept, so the mechanism is its price.
 * **`targets` maps** (§02.4) fail closed on a host the table has not caught up
   with, which for platform availability is a trade against a 404.
 * **`node`'s compiled-in `lts` tag** (§02.3) is a version pointer to an alias that
   moves every six months.
 * **Single-user table fields** — `publishedFrom`, `binArgs`, `tags`,
   `transparent.default`, `versionFile` — each a permanent code path for one row.
-* **`sha1` digests** on the built-in `default` pins (§06.6).
 * **§12.13's inherited message warts.**
 * **The agent colour-detection list** (§09.14) is vendored from another project
   and drifts.

@@ -209,7 +209,7 @@ describe("§13.12 execution", () => {
       // leaving §08.1's containment check untested while the row still went
       // red for the right exit code and the wrong reason. The opt-out is what
       // keeps this row about the bin path.
-      env: { COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" },
+      env: { COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", JUP_ALLOW_UNVERIFIED: "1" },
     });
 
     expect(result.exitCode).toBe(1);

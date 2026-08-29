@@ -82,7 +82,7 @@ const ENV_KEYS = [
   "COREPACK_ENABLE_DOWNLOAD_PROMPT",
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_ENABLE_NETWORK",
-  "COREPACK_REQUIRE_SIGNATURES",
+  "JUP_REQUIRE_SIGNATURES",
   "CI",
 ] as const;
 
@@ -722,10 +722,10 @@ describe("§06.1 registry metadata tiering", () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it("COREPACK_REQUIRE_SIGNATURES turns the soft-fail into a refusal", async () => {
+  it("JUP_REQUIRE_SIGNATURES turns the soft-fail into a refusal", async () => {
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.5.0"}` });
     await serve("9.5.0", { integrityOf: tarball }, tarball);
-    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    process.env.JUP_REQUIRE_SIGNATURES = "1";
 
     const error = await rejection(ensureInstalled({ name: "pnpm", reference: "9.5.0" }));
 
@@ -739,7 +739,7 @@ describe("§06.1 registry metadata tiering", () => {
     await serve("9.6.0", {}, tarball);
     // Mandating signatures must not override §06.1: the user's own hash is the
     // stronger assertion, and it is what gets checked.
-    process.env.COREPACK_REQUIRE_SIGNATURES = "1";
+    process.env.JUP_REQUIRE_SIGNATURES = "1";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     const spec = await ensureInstalled({

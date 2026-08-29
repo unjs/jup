@@ -195,7 +195,7 @@ beforeEach(() => {
   vi.stubEnv("USERPROFILE", root);
   vi.stubEnv("XDG_BIN_HOME", perUserBin);
   vi.stubEnv("LOCALAPPDATA", localAppData);
-  vi.stubEnv("COREPACK_SHIM_DIRECTORY", undefined);
+  vi.stubEnv("JUP_SHIM_DIRECTORY", undefined);
   vi.stubEnv("COREPACK_HOME", corepackHome);
   // Both candidate directories are on `PATH`, so §10.5's verification is
   // satisfied and a successful `enable` stays silent.
@@ -273,11 +273,11 @@ describe("install directory resolution (§10.5)", () => {
     expect(resolveInstallDirectory({ installDirectory: linkedBin }, false)).toBe(linkedBin);
   });
 
-  it("falls back to COREPACK_SHIM_DIRECTORY, then to the per-user default", () => {
+  it("falls back to JUP_SHIM_DIRECTORY, then to the per-user default", () => {
     expect(resolveInstallDirectory({}, false)).toBe(perUserBin);
 
     const configured = join(root, "configured");
-    vi.stubEnv("COREPACK_SHIM_DIRECTORY", configured);
+    vi.stubEnv("JUP_SHIM_DIRECTORY", configured);
     expect(resolveInstallDirectory({}, false)).toBe(configured);
 
     // --install-directory still outranks the variable.
@@ -365,8 +365,8 @@ describe("the system directory (§10.5)", () => {
     expect(shimDirectoryCandidates()).not.toContain(systemDir);
   });
 
-  it("--system names it, outranking COREPACK_SHIM_DIRECTORY", () => {
-    vi.stubEnv("COREPACK_SHIM_DIRECTORY", binDir);
+  it("--system names it, outranking JUP_SHIM_DIRECTORY", () => {
+    vi.stubEnv("JUP_SHIM_DIRECTORY", binDir);
 
     // `named`, so none of point 6's selection runs against it: no gate, no
     // `PATH` preference, no continuity scan — and no filesystem access here.
@@ -484,7 +484,7 @@ describe.skipIf(process.platform === "win32")("the PATH preference (§10.5)", ()
     }
   });
 
-  it("--install-directory and COREPACK_SHIM_DIRECTORY still outrank it", () => {
+  it("--install-directory and JUP_SHIM_DIRECTORY still outrank it", () => {
     mkdirSync(homeBin);
     vi.stubEnv("PATH", homeBin);
 
@@ -494,7 +494,7 @@ describe.skipIf(process.platform === "win32")("the PATH preference (§10.5)", ()
       directory: binDir,
       named: true,
     });
-    vi.stubEnv("COREPACK_SHIM_DIRECTORY", binDir);
+    vi.stubEnv("JUP_SHIM_DIRECTORY", binDir);
     expect(chooseInstallDirectory({})).toEqual({ directory: binDir, named: true });
   });
 

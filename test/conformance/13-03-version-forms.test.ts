@@ -154,7 +154,7 @@ describe("§13.3 version forms", () => {
       // how the user says what should arrive from it. With neither a fragment
       // nor a signature the artifact clears no tier, so the URL form now needs
       // the second, explicit opt-out — which announces itself.
-      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" }),
+      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", JUP_ALLOW_UNVERIFIED: "1" }),
     });
 
     expect(result.stderr).toBe(
@@ -192,7 +192,7 @@ describe("§13.3 version forms", () => {
       // §06.1 redirected this row too, and for the same reason as row 18: an
       // unknown package manager fetched from a bare URL has no signature and no
       // pinned hash. Row 20 is the same row with a `#sha1.…` fragment instead.
-      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" }),
+      env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", JUP_ALLOW_UNVERIFIED: "1" }),
     });
 
     expect(result.stderr).toContain("JUP_ALLOW_UNVERIFIED=1");

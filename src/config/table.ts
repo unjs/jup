@@ -167,7 +167,8 @@ const PNPM_EXE_TARGETS = {
 
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
-    default: "12.0.2+sha1.788d93dc8869000b1078e0395c60748a0aadc4f1",
+    default:
+      "12.0.2+sha512.b885e890b9418fa1693544d05f53e64f9a73ec194837d4258b15fecdd692347b1dd2a517b1b0cbaf9d31cd8e92c3b70956bd2ecc72833a57b4b3098f5bfa7943",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
       commands: [["npm", "init"], ["npx"]],
@@ -186,7 +187,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "11.24.0+sha1.a042a648b5e519c43c5b2c3ff99901448190cd66",
+    default: "12.1.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -226,9 +227,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
       //
       // `pnpx` is the one thing the per-host package cannot express by itself.
       // Its binary dispatches on `current_exe()` rather than `argv[0]`, so the
-      // name jup invokes it under does not reach the decision — pnpm's own
-      // The installer hardlinks `pnpx` to the same executable; `binArgs`
-      // supplies the equivalent `dlx` dispatch.
+      // name jup invokes it under does not reach the decision. Both `bin`
+      // entries therefore point at the same executable, and `binArgs` supplies
+      // the `dlx` dispatch that the name alone would have carried.
       [
         ">=12.0.0",
         {
@@ -249,10 +250,12 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // §02.5 / §04.6 — the default and transparent floor share the current supported
     // major but remain separate fields. The SHA-1 digest covers the signed npm
     // tarball and is refreshed by `scripts/refresh-table.mjs`.
-    default: "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85",
+    default:
+      "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e",
     fetchLatestFrom: { type: "npm", package: "yarn" },
     transparent: {
-      default: "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85",
+      default:
+        "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e",
       commands: [
         ["yarn", "init"],
         ["yarn", "dlx"],
@@ -325,7 +328,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   deno: {
-    default: "2.9.5",
+    default: "2.9.6",
     fetchLatestFrom: { type: "npm", package: "deno" },
     // `deno init` scaffolds into an empty directory, exactly as `npm init` and
     // `pnpm init` do. Nothing else on the deno CLI is project-independent:
@@ -389,7 +392,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // file. Being a package manager is not what earns a place in the default shim
   // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
-    default: "0.7.5",
+    default: "0.8.0",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
     // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
     // reached under its own name as `nubx` — fetches into a throwaway
@@ -743,19 +746,16 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
   BINARIES_BY_NAME.set(name, [...binNames]);
 }
 /**
- * Registry spec -> the package manager that declares it, and (for a url-typed
- * spec) the npm-protocol alternative its band offers.
+ * Registry spec -> the package manager that declares it.
  *
  * Identity, not equality: `getSpecFor` hands back the very objects declared
- * above, so the lookup is a `Map` hit rather than a structural comparison. Both
- * maps exist because §05.2 needs the *name* to find `COREPACK_REGISTRY_<NAME>`,
- * and §05.2 rewrite 1 needs the alternative — and `registry.ts` is handed a
- * `RegistrySpec` alone, with no way back to either.
+ * above, so the lookup is a `Map` hit rather than a structural comparison. It
+ * exists because §05.2 needs the *name* to find `JUP_REGISTRY_<NAME>`, and
+ * `registry.ts` is handed a `RegistrySpec` alone, with no way back to it.
  *
  * Built once at module load, from static data.
  */
 const NAME_BY_REGISTRY = new Map<RegistrySpec, string>();
-const NPM_ALTERNATIVE_BY_REGISTRY = new Map<RegistrySpec, NpmRegistrySpec>();
 
 /**
  * Band -> the package manager that declares it.
@@ -772,21 +772,12 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
   for (const [, spec] of definition.ranges) {
     NAME_BY_SPEC.set(spec, name);
     NAME_BY_REGISTRY.set(spec.registry, name);
-    if (spec.npmRegistry !== undefined) {
-      NAME_BY_REGISTRY.set(spec.npmRegistry, name);
-      NPM_ALTERNATIVE_BY_REGISTRY.set(spec.registry, spec.npmRegistry);
-    }
   }
 }
 
 /** The package manager whose table entry declares this registry spec, if any. */
 export function packageManagerForRegistry(spec: RegistrySpec): string | undefined {
   return NAME_BY_REGISTRY.get(spec);
-}
-
-/** Return the npm alternative declared by this spec, if any. None currently do. */
-export function npmAlternativeFor(spec: RegistrySpec): NpmRegistrySpec | undefined {
-  return NPM_ALTERNATIVE_BY_REGISTRY.get(spec);
 }
 
 /**
