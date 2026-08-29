@@ -84,26 +84,32 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 **146 rows: 96 pass, 49 skipped, 1 expected fail, 0 failing.**
 
-> Measured 2026-08-29. The per-cause table below still adds up to 45 of those
-> skips and wants a recount; the headline is what a run reports.
+> Measured 2026-08-29. The per-cause table below accounts for all 49.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
 which green means green. Without it, 41 rows fail — see *Compat mode* below.
 
-Every skip is a deliberate divergence, carries a `// SKIP (jup §…)` comment
-naming the section that makes it deliberate, and points at the jup test covering
-the behaviour instead. Nothing is skipped for being merely inconvenient: a new
-red row is a regression, which is the whole point of keeping the port.
+Every skip is a deliberate divergence, carries a `// SKIP (jup …)` comment
+naming what makes it deliberate — a section where one governs, the reason in
+words where none does — and points at the jup test covering the behaviour
+instead. Nothing is skipped for being merely inconvenient: a new red row is a
+regression, which is the whole point of keeping the port.
+
+Forty-four of the 49 are literal `it.skip` / `describe.skip` sites; the
+remaining five are the `UNREACHABLE_BERRY` rows, which `testedPackageManagers`
+skips by computing `it.skip` from the version, so they carry one comment above
+the set rather than one apiece.
 
 | Skipped | Cause |
 | --- | --- |
 | 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--pin-style`, which Corepack has no equivalent for (§15.26, §15.27). |
-| 8 | **§15.11** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
-| 6 | **§14.16 / §15.13** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
-| 5 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
+| 7 | **Naming.** The `devEngines` warnings, the validation-warning prefix, and the download notice all name the running tool, and jup calls itself `jup` where Corepack says `Corepack`. Every other assertion in those rows holds; the jup text is asserted verbatim by `test/conformance/13-04-dev-engines.test.ts` and `13-05-environment.test.ts`. |
+| 6 | **§15.11** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
+| 5 | **§14.16 / §15.13** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
 | 5 | **§15.41** — Yarn Berry comes from `@yarnpkg/cli-dist` on the npm registry, whose 2.x line starts at 2.4.1. `yarn@2.0.0-rc.30` is unreachable, and upstream's two `3.0.0-rc.2` digests were taken over `repo.yarnpkg.com`'s single-file `yarn.js`, so they name bytes jup never downloads. `3.0.0-rc.2` without a digest still runs. |
 | 4 | **§15.23** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
-| 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe env-file discovery. |
+| 4 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
+| 3 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two of the three use that string to probe env-file discovery. |
 | 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
 | 1 | **§15, #138** — `enable`'s default target set includes npm. |
 | 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |

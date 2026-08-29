@@ -48,5 +48,13 @@ language; code and executable tests remain the final check.
 | Test strategy and commands | [13 testing](./.agents/13-conformance.md) |
 | Recurring maintenance work | [16 maintenance](./.agents/16-implementation-notes.md) |
 
+§14 and §15 are labels, not missing files. `14-divergences.md` (differences from
+Corepack found in its source) and `15-gaps.md` (requirements derived from its
+issue tracker) were folded into the pages above; their numbering survives in code
+comments, conformance file names, and `test/corepack/README.md`, where a `§15.41`
+still names one requirement unambiguously. Follow such a citation to the topical
+page that owns the behavior. Keep the existing labels where they are cited, and
+do not mint new ones.
+
 The product stays focused: manage and run table entries, write only documented
 project pins/locks/memos and managed state, and expose only the commands in §09.

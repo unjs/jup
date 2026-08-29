@@ -157,6 +157,8 @@ const CH_BACKTICK = 0x60;
  * below document the corresponding mechanics.
  */
 export function parseEnvFile(content: string): Record<string, string> {
+  // Null-prototype, which is what makes a `__proto__=` line a plain own key
+  // rather than a write to a prototype — the same thing `parseEnv` does with it.
   const vars: Record<string, string> = Object.create(null) as Record<string, string>;
   const text = trimDocument(content.includes("\r") ? content.replaceAll("\r", "") : content);
 
@@ -202,11 +204,11 @@ export function parseEnvFile(content: string): Record<string, string> {
     // `export A=` keeps its prefix while `export A=1` loses it, and why an empty
     // key reaches the result here and nowhere else.
     if (i >= text.length) {
-      assign(vars, trimmed, "");
+      vars[trimmed] = "";
       break;
     }
     if (text.charCodeAt(i) === CH_LF) {
-      assign(vars, trimmed, "");
+      vars[trimmed] = "";
       i++;
       continue;
     }
@@ -221,7 +223,7 @@ export function parseEnvFile(content: string): Record<string, string> {
       const close = text.indexOf(text[i]!, i + 1);
       if (close !== -1) {
         const raw = text.slice(i + 1, close);
-        assign(vars, key, quote === CH_DOUBLE_QUOTE ? raw.replaceAll(String.raw`\n`, "\n") : raw);
+        vars[key] = quote === CH_DOUBLE_QUOTE ? raw.replaceAll(String.raw`\n`, "\n") : raw;
         // Whatever follows the closing quote on that line is discarded.
         i = endOfLine(text, close + 1) + 1;
         continue;
@@ -229,28 +231,18 @@ export function parseEnvFile(content: string): Record<string, string> {
       // Unterminated: a plain value that happens to start with a quote — one in
       // which `#` is an ordinary character and trailing blanks are kept.
       const lineEnd = endOfLine(text, i);
-      assign(vars, key, text.slice(i, lineEnd));
+      vars[key] = text.slice(i, lineEnd);
       i = lineEnd;
       continue;
     }
 
     const lineEnd = endOfLine(text, i);
     const hash = indexWithin(text, CH_HASH, i, lineEnd);
-    assign(vars, key, trimBlanks(text, i, hash === -1 ? lineEnd : hash));
+    vars[key] = trimBlanks(text, i, hash === -1 ? lineEnd : hash);
     i = lineEnd;
   }
 
   return vars;
-}
-
-/**
- * `parseEnv` has no `__proto__` key in its output, so neither does this.
- *
- * Nothing behavioural rides on it — the key cannot carry the `COREPACK_` prefix
- * §03.2 filters on — but matching it keeps the differential test exact.
- */
-function assign(vars: Record<string, string>, key: string, value: string): void {
-  if (key !== "__proto__") vars[key] = value;
 }
 
 /**

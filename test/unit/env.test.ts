@@ -86,8 +86,10 @@ describe("parseEnvFile", () => {
 
     expect(Object.getPrototypeOf(vars)).toBe(null);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-    // `parseEnv` drops the key outright, and so does this — see `assign`.
-    expect(Object.keys(vars)).toEqual(["COREPACK_ENABLE_AUTO_PIN"]);
+    // The key is kept, as `parseEnv` keeps it: on a null-prototype object it is
+    // an ordinary own property, and §03.2's prefix filter drops it downstream.
+    expect(Object.keys(vars)).toEqual(["__proto__", "COREPACK_ENABLE_AUTO_PIN"]);
+    expect(vars["__proto__"]).toBe("polluted");
   });
 });
 

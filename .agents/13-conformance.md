@@ -49,7 +49,9 @@ Use `pnpm bench` for warm-path changes.
 
 ## Test maintenance
 
-Name new or renamed tests by current behavior, not old issue or section numbers. Preserve assertions
-for exact strings in §12. When table or trust data changes, test the new data and the
-review workflow described in §16. Never make a network-dependent test part of the
-default suite.
+Name a new test by what it does. The §-numbered file names and the `<n>:` row
+prefixes are existing citation labels — `src/` and `test/corepack/README.md` point
+at them — so preserve them through a rename rather than renumbering, and do not
+mint new ones for new work. Preserve assertions for exact strings in §12. When
+table or trust data changes, test the new data and the review workflow described
+in §16. Never make a network-dependent test part of the default suite.
