@@ -1,6 +1,63 @@
 # Changelog
 
 
+## v0.1.0
+
+[compare changes](https://github.com/unjs/jup/compare/v0.0.5...v0.1.0)
+
+### 🚀 Enhancements
+
+- Use colors in logs ([d55f7b9](https://github.com/unjs/jup/commit/d55f7b9))
+- ⚠️  Prefer devEngines.packageManager over packageManager ([690cf20](https://github.com/unjs/jup/commit/690cf20))
+- ⚠️  `--no-lockfile` and `--no-integrity` ([24b9f77](https://github.com/unjs/jup/commit/24b9f77))
+- ⚠️  Documented public api ([4bc9333](https://github.com/unjs/jup/commit/4bc9333))
+- ⚠️  New public api ([1c5add9](https://github.com/unjs/jup/commit/1c5add9))
+
+### 🔥 Performance
+
+- **test:** Give the spawned tools a compile cache of our own ([a705ec5](https://github.com/unjs/jup/commit/a705ec5))
+
+### 🩹 Fixes
+
+- Improve installer ([20fbfc0](https://github.com/unjs/jup/commit/20fbfc0))
+- Link posix shims to per-name stubs ([df6717d](https://github.com/unjs/jup/commit/df6717d))
+- Name the release to pin when a band outruns its npm package (§04.1) ([2c4ad8f](https://github.com/unjs/jup/commit/2c4ad8f))
+- Keep a `__proto__` env-file key, as `parseEnv` now does ([a7b2d14](https://github.com/unjs/jup/commit/a7b2d14))
+
+### 💅 Refactors
+
+- ⚠️  Simplify ([b4f28c5](https://github.com/unjs/jup/commit/b4f28c5))
+
+### 📖 Documentation
+
+- Rewrite ([ee6e691](https://github.com/unjs/jup/commit/ee6e691))
+
+### 🏡 Chore
+
+- Rewrite agents docs ([7811b13](https://github.com/unjs/jup/commit/7811b13))
+- Update citations ([7bb9d57](https://github.com/unjs/jup/commit/7bb9d57))
+- Update docs ([29136a2](https://github.com/unjs/jup/commit/29136a2))
+
+### ✅ Tests
+
+- **corepack:** Re-port the Berry fixtures §15.41 and §07.2 moved ([87939fa](https://github.com/unjs/jup/commit/87939fa))
+- Exclude `__proto__` from the env differential, whose fate is Node's ([ac72cfa](https://github.com/unjs/jup/commit/ac72cfa))
+- Hold Windows to §10.3's unconditional rewrite, not §10.2's mtime ([0cfcbca](https://github.com/unjs/jup/commit/0cfcbca))
+- Gate the native pnpm default off Windows' fake path ([46ce163](https://github.com/unjs/jup/commit/46ce163))
+- Skip the Corepack rows §03.3 and §03.7 diverge from ([7516b88](https://github.com/unjs/jup/commit/7516b88))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Prefer devEngines.packageManager over packageManager ([690cf20](https://github.com/unjs/jup/commit/690cf20))
+- ⚠️  `--no-lockfile` and `--no-integrity` ([24b9f77](https://github.com/unjs/jup/commit/24b9f77))
+- ⚠️  Documented public api ([4bc9333](https://github.com/unjs/jup/commit/4bc9333))
+- ⚠️  New public api ([1c5add9](https://github.com/unjs/jup/commit/1c5add9))
+- ⚠️  Simplify ([b4f28c5](https://github.com/unjs/jup/commit/b4f28c5))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.0.5
 
 [compare changes](https://github.com/unjs/jup/compare/v0.0.4...v0.0.5)
