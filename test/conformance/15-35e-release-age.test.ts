@@ -142,7 +142,7 @@ describe("§04.1 JUP_MINIMUM_RELEASE_AGE", () => {
     // exact version from a single `stat` and never loads `resolve.ts` at all —
     // so on its own it cannot tell "§04.1 step 5 returns before the gate" from
     // "the gate is simply unreachable on that path". `use` has no such fast
-    // path: it calls `resolveDescriptor` directly, so this row is what pins the
+    // path: it calls `resolveSpec` directly, so this row is what pins the
     // exemption where §04.1 puts it.
     const fixture = createFixture({ name: "app" });
 

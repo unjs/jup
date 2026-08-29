@@ -4,9 +4,9 @@
  * Three types carry the whole pipeline, and keeping them distinct is what makes
  * each resolution stage checkable:
  *
- *     Descriptor   "what the project asked for"      §03 produces, §04 consumes
- *     Locator      "the exact thing to install"      §04 produces, §07 consumes
- *     InstallSpec  "where it landed on disk"         §07 produces, §08 consumes
+ *     Spec          "what the project asked for"   §03 produces, §04 consumes
+ *     ResolvedSpec  "the exact thing to install"   §04 produces, §07 consumes
+ *     Installation  "where it landed on disk"      §07 produces, §08 consumes
  */
 
 /**
@@ -50,25 +50,25 @@ export interface VersionFileSpec {
 }
 
 /** §02.1 — a tool name plus anything range-ish: version, range, tag, URL. */
-export interface Descriptor {
+export interface Spec {
   name: string;
   range: string;
 }
 
 /** §02.1 — an exact version (optionally hash-suffixed) or a URL. */
-export interface Locator {
+export interface ResolvedSpec {
   name: string;
   reference: string;
 }
 
 /**
- * §02.1 — identical to {@link Locator} except the reference is a thunk.
+ * §02.1 — identical to {@link ResolvedSpec} except the reference is a thunk.
  *
  * The laziness is load-bearing: it is the difference between "an offline project
  * with a pinned version works" and "every invocation hits the network". Never
  * materialise this until the project turns out to have no usable spec.
  */
-export interface LazyLocator {
+export interface LazyResolvedSpec {
   name: string;
   reference: () => Promise<string>;
 }
@@ -77,7 +77,7 @@ export interface LazyLocator {
 export type BinSpec = Record<string, string>;
 
 /** §07.2 — the parsed `.jup` marker plus the directory it was found in. */
-export interface InstallSpec {
+export interface Installation {
   location: string;
   /**
    * Optional: §07.7 always records one, but §07.10 promotes markers that arrived
@@ -90,8 +90,8 @@ export interface InstallSpec {
 
 /** §07.2 — the on-disk shape of the `.jup` marker file. */
 export interface CorepackMarker {
-  locator: Locator;
-  /** Optional, per §08.1 — see {@link InstallSpec.bin}. */
+  locator: ResolvedSpec;
+  /** Optional, per §08.1 — see {@link Installation.bin}. */
   bin?: BinSpec;
   hash: string;
 }
@@ -351,7 +351,7 @@ export interface DevEnginesRange {
  * §03.3 — the validated `devEngines.packageManager`, whether or not it names a
  * version.
  *
- * {@link DevEnginesRange} is the Descriptor-shaped view and exists only when a
+ * {@link DevEnginesRange} is the Spec-shaped view and exists only when a
  * `version` was declared, because §09.1 hands it straight to the resolver. This
  * is the *declaration*, and the difference is load-bearing: a `devEngines` block
  * carrying only a `name` still constrains what a pin may say, and a `writePin`
@@ -364,9 +364,20 @@ export interface DevEnginesDeclaration {
   onFail?: string;
 }
 
-/** Require a version component to be present; ranges and tags remain valid. */
+/** Options for {@link parseSpec}; every member is optional. */
 export interface ParseSpecOptions {
-  requireVersion: boolean;
+  /**
+   * §12 — what the messages call the input: `CLI arguments` (the default) or a
+   * manifest path relative to the initial cwd. Folded in here rather than being
+   * a positional argument, because a caller outside the walk has nothing better
+   * to say than the default.
+   */
+  source?: string;
+  /**
+   * Require a version component to be present; ranges and tags remain valid.
+   * Defaults to `false` — the CLI's own reading of a bare `jup pnpm`.
+   */
+  requireVersion?: boolean;
   /**
    * §03.4, §02.3 — is this string a manifest's `packageManager` field?
    *
@@ -381,14 +392,14 @@ export interface ParseSpecOptions {
 }
 
 /** §03.1 — the three outcomes of the upward walk. */
-export type SpecResult =
+export type ProjectSpec =
   | { type: "NoProject"; target: string; envFilePath?: string }
   | { type: "NoSpec"; target: string; envFilePath?: string }
   | {
       type: "Found";
       target: string;
       /** Lazy: parses and validates only when called, so `use` can overwrite a malformed field. */
-      getSpec: (opts: ParseSpecOptions) => Descriptor;
+      getSpec: (opts?: ParseSpecOptions) => Spec;
       range?: DevEnginesRange;
       /**
        * §03.3 — the declared `devEngines` member for the requested tool,

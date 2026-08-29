@@ -24,7 +24,7 @@ import {
 } from "../utils/json.ts";
 import { devEnginesFieldFor } from "../config/table.ts";
 import { integrityFromHash } from "./lockfile.ts";
-import { discoverProjectSpec, warnOrThrow } from "./manifest.ts";
+import { findProjectSpec, warnOrThrow } from "./manifest.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type { DevEnginesDeclaration, DevEnginesField, Manifest } from "../types.ts";
 
@@ -169,7 +169,7 @@ export function writePin(
 
   // 1 — re-run discovery: the file to edit is not necessarily in `cwd`. §03.1's
   // extra stop conditions apply here and only here, because this is the write.
-  const lookup = discoverProjectSpec(cwd, {
+  const lookup = findProjectSpec(cwd, {
     mutating: true,
     here: options?.here === true,
     tool: info.name,

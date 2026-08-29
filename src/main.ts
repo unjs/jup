@@ -24,22 +24,22 @@ import {
   usesLockfile,
   writeCachedResolution,
 } from "./project/lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec, reconcile } from "./project/manifest.ts";
+import { CLI_SOURCE, findProjectSpec, parseSpec, reconcile } from "./project/manifest.ts";
 import { isValidVersion, parse } from "./version/semver.ts";
 import { findInstalledVersion, readInstalledSpec, referenceWithHash } from "./cache/store.ts";
 import type {
-  Descriptor,
-  InstallSpec,
+  Spec,
+  Installation,
   Invocation,
-  LazyLocator,
-  Locator,
-  SpecResult,
+  LazyResolvedSpec,
+  ResolvedSpec,
+  ProjectSpec,
 } from "./types.ts";
 
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
 const ARG0_RE = /^([^@]*)(?:@(.*))?$/;
 
-export function classifyInvocation(argv: string[]): Invocation {
+export function parseArgs(argv: string[]): Invocation {
   const arg0 = argv[0];
 
   // No arguments at all is the CLI's business (`--help`), not the proxy's.
@@ -142,7 +142,7 @@ export async function runProxy(
   const transparent =
     name !== undefined && (isTransparentCommand(binaryName, args) || isGlobalInvocation(args));
   const requestedName = name ?? binaryName;
-  const fallback: LazyLocator =
+  const fallback: LazyResolvedSpec =
     name === undefined
       ? {
           name: binaryName,
@@ -165,7 +165,7 @@ export async function runProxy(
   // always read. Passing the resolved name rather than the binary name is what
   // makes `bunx` ask bun's question and `nubx` ask nub's; an unknown binary
   // answers `packageManager`, which is the path it already took to §12.2.
-  const specResult = discoverProjectSpec(cwd, { projectSpecFlag: true, tool: requestedName });
+  const specResult = findProjectSpec(cwd, { projectSpecFlag: true, tool: requestedName });
 
   // §03.6 — auto-pin runs *before* reconciliation, and only here: it is a proxy
   // -mode-only behaviour, so `reconcile` deliberately leaves it to this caller.
@@ -187,7 +187,8 @@ export async function runProxy(
   // rather than §12.4's build-support assertion, and lets a URL reference for an
   // unknown package manager through untouched (§04.1 step 1).
   if (!isSupportedPackageManager(descriptor.name)) {
-    parseSpec(`${descriptor.name}@${descriptor.range}`, CLI_SOURCE, {
+    parseSpec(`${descriptor.name}@${descriptor.range}`, {
+      source: CLI_SOURCE,
       requireVersion: false,
     });
   }
@@ -269,7 +270,7 @@ export async function runProxy(
  * is the correct output for a bug.
  */
 export async function runMain(argv: string[]): Promise<number> {
-  const invocation = classifyInvocation(argv);
+  const invocation = parseArgs(argv);
 
   try {
     if (invocation.mode === "proxy") {
@@ -306,7 +307,7 @@ export async function presentError(error: unknown, invocation: Invocation): Prom
   err(`${formatUnexpected(error)}\n`);
   return 1;
 }
-async function ensureInstalledLazily(locator: Locator, range: string): Promise<InstallSpec> {
+async function ensureInstalledLazily(locator: ResolvedSpec, range: string): Promise<Installation> {
   const installed = readInstalledSpec(locator);
   if (installed !== null) return installed;
 
@@ -328,7 +329,7 @@ async function ensureInstalledLazily(locator: Locator, range: string): Promise<I
   }
 }
 
-function resolveExactPin(descriptor: Descriptor): Locator | null {
+function resolveExactPin(descriptor: Spec): ResolvedSpec | null {
   // A name outside the table has no §04.1 step 2 definition, and the error for
   // it belongs to the full path. Step 1's URL branch is unreachable from here,
   // since a URL is never a valid version.
@@ -346,10 +347,10 @@ function resolveExactPin(descriptor: Descriptor): Locator | null {
 }
 
 /** §12.6 — the same diagnostic around resolution, which is where a range fails. */
-async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null> {
-  const { resolveDescriptor } = await import("./version/resolve.ts");
+async function resolveOrExplain(descriptor: Spec): Promise<ResolvedSpec | null> {
+  const { resolveSpec } = await import("./version/resolve.ts");
   try {
-    return await resolveDescriptor(descriptor, { allowTags: true });
+    return await resolveSpec(descriptor, { allowTags: true });
   } catch (error) {
     const { explainFetchFailure } = await import("./errors-cold.ts");
     throw explainFetchFailure(error, descriptor) ?? error;
@@ -389,7 +390,7 @@ async function usageLineFor(command: string | undefined): Promise<string> {
  * is produced because normalized locator identity cannot establish provenance.
  */
 interface Resolved {
-  locator: Locator;
+  locator: ResolvedSpec;
   fromRegistry: boolean;
 }
 
@@ -473,10 +474,10 @@ function versionOf(cached: CachedResolution): string {
  * window has already answered as `known`.
  */
 async function resolveWithFallback(
-  descriptor: Descriptor,
+  descriptor: Spec,
   cached: CachedResolution | null,
 ): Promise<Resolved> {
-  let resolved: Locator | null = null;
+  let resolved: ResolvedSpec | null = null;
   try {
     resolved = await resolveOrExplain(descriptor);
   } catch (error) {
@@ -515,7 +516,7 @@ async function resolveWithFallback(
  *   `NoSpec`, or a transparent-command mismatch) is the machine's default, not
  *   the project's statement, and recording it in the project would pin a version
  *   the project never asked for. `reconcile` returns the manifest's descriptor
- *   as a `Descriptor` and the fallback as a `LazyLocator`, so the `range in`
+ *   as a `Spec` and the fallback as a `LazyResolvedSpec`, so the `range in`
  *   test distinguishes them exactly.
  * * No CLI version override; one-invocation overrides must not change the
  *   project's recorded resolution.
@@ -525,9 +526,9 @@ async function resolveWithFallback(
  * and §03.7 already places project-level writes beside the selected manifest.
  */
 function resolutionDirFor(
-  specResult: SpecResult,
-  reconciled: Descriptor | LazyLocator,
-  descriptor: Descriptor,
+  specResult: ProjectSpec,
+  reconciled: Spec | LazyResolvedSpec,
+  descriptor: Spec,
   binaryVersion: string | undefined,
 ): string | undefined {
   if (specResult.type !== "Found" || binaryVersion !== undefined) return undefined;
@@ -542,7 +543,7 @@ function resolutionDirFor(
  * This is the *only* place the fallback thunk is forced, which is what keeps the
  * warm path free of `lastKnownGood.json` reads and network requests.
  */
-async function materialise(value: Descriptor | LazyLocator): Promise<Descriptor> {
+async function materialise(value: Spec | LazyResolvedSpec): Promise<Spec> {
   if ("range" in value) return value;
   return { name: value.name, range: await value.reference() };
 }
@@ -555,7 +556,7 @@ async function materialise(value: Descriptor | LazyLocator): Promise<Descriptor>
  * the pin this writes is hash-bearing, and therefore verifiable on every later
  * run.
  */
-async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<void> {
+async function autoPin(specResult: ProjectSpec, fallback: LazyResolvedSpec): Promise<void> {
   // A CLI version override does not participate: auto-pin records the project
   // default, then the override applies only to this invocation.
   const descriptor = await materialise(fallback);

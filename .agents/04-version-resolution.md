@@ -1,6 +1,6 @@
 # 04 — Version Resolution
 
-Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}`
+Input: a `Spec {name, range}` (§03). Output: a `ResolvedSpec {name, reference}`
 or `null` ("no release matches").
 
 The proxy path consults, in order: the recorded `jup.lock`, an unexpired memo,
@@ -9,12 +9,12 @@ resolver those first three steps skip.
 
 ## 4.1 The algorithm
 
-`resolveDescriptor(descriptor, {allowTags, useCache})`:
+`resolveSpec(spec, {allowTags, useCache})`:
 
 ```
 1. range parses as a URL:
      known name and JUP_ENABLE_UNSAFE_CUSTOM_URLS != 1 → UsageError "Illegal use of URL …"
-     → Locator {name, reference: range}          # passes through untouched
+     → ResolvedSpec {name, reference: range}     # passes through untouched
 2. no table entry for name → UsageError "This package manager (<name>) isn't supported…"
 3. range is neither an exact version nor a valid range → it is a TAG:
      !allowTags                → UsageError "Packages managers can't be referenced via tags…"
@@ -23,7 +23,7 @@ resolver those first three steps skip.
                                   unknown tag → UsageError "Tag not found (<tag>)"
                                   cap the target to JUP_MINIMUM_RELEASE_AGE
 4. useCache → probe the store; a hit returns immediately
-5. range is exact → Locator {name, reference: range}, unverified
+5. range is exact → ResolvedSpec {name, reference: range}, unverified
 6. query every band in parallel, union the versions satisfying the range under
    §4.2 semantics, drop prereleases unless named or JUP_ENABLE_PRERELEASES=1,
    apply JUP_MINIMUM_RELEASE_AGE, sort descending, take the highest, else null

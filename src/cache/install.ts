@@ -52,7 +52,13 @@ import {
   writeMarker,
 } from "./store.ts";
 import { extract } from "./tar.ts";
-import type { BinSpec, InstallSpec, Locator, RegistrySignature, RegistrySpec } from "../types.ts";
+import type {
+  BinSpec,
+  Installation,
+  ResolvedSpec,
+  RegistrySignature,
+  RegistrySpec,
+} from "../types.ts";
 
 /** §07.4 — the two artifact shapes the table can produce. */
 const TARBALL_EXT = ".tgz";
@@ -96,9 +102,9 @@ interface ArtifactSource {
  * closes the hole where Yarn Berry through a corporate mirror arrives unverified.
  */
 export async function ensureInstalled(
-  locator: Locator,
+  locator: ResolvedSpec,
   options?: { cacheOnly?: boolean },
-): Promise<InstallSpec> {
+): Promise<Installation> {
   const versionDir = getVersionDir(locator);
 
   // §07.2 / §01.3 — the entire warm path. No network, no directory scan, no
@@ -208,7 +214,7 @@ export async function ensureInstalled(
     writeMarker(tmp, { locator: { name: locator.name, reference: locator.reference }, bin, hash });
 
     // §07.5 — the commit point.
-    let spec: InstallSpec = { location, bin, hash };
+    let spec: Installation = { location, bin, hash };
     if (!promote(tmp, location)) {
       // Lost the rename race. The winner is a completed install, but not
       // necessarily *this* reference's artifact: the §07.2 probe that chose
@@ -315,7 +321,7 @@ export async function streamArtifact(
  * Select the artifact registry and apply its configured origin independently.
  */
 async function chooseSource(
-  locator: Locator,
+  locator: ResolvedSpec,
   versionDir: string,
   version: string | undefined,
 ): Promise<ArtifactSource> {
@@ -423,7 +429,7 @@ async function isProgramImage(path: string): Promise<boolean> {
  */
 async function makeEntryPointsExecutable(
   tmpDir: string,
-  locator: Locator,
+  locator: ResolvedSpec,
   version: string | undefined,
   bin: BinSpec,
 ): Promise<void> {
@@ -482,7 +488,7 @@ function isValidBinSpec(value: unknown): value is BinSpec {
  */
 export function resolveBin(
   tmpDir: string,
-  locator: Locator,
+  locator: ResolvedSpec,
   /** The file's basename when the artifact is a lone `.js`; absent for a tarball. */
   singleFileName?: string,
 ): BinSpec {
@@ -563,7 +569,7 @@ function sameBin(a: BinSpec, b: BinSpec): boolean {
 function confine(
   bin: BinSpec,
   tmpDir: string,
-  locator: Locator,
+  locator: ResolvedSpec,
   version: string | undefined,
 ): BinSpec {
   const root = resolve(tmpDir);
@@ -696,7 +702,7 @@ async function resolveExpectedIntegrity(
  * second, differently-spelled failure.
  */
 function assertVerificationTier(
-  locator: Locator,
+  locator: ResolvedSpec,
   source: ArtifactSource,
   pin: HashPin,
   expected: { algo: string; hex: string } | undefined,

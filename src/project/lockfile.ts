@@ -12,7 +12,7 @@ import {
   satisfiesWithPrereleases,
 } from "../version/semver.ts";
 import { hostTarget, isPerHost } from "../config/table.ts";
-import type { Descriptor, Locator } from "../types.ts";
+import type { Spec, ResolvedSpec } from "../types.ts";
 
 /**
  * Store authoritative resolutions at the project root without compatibility probes.
@@ -95,14 +95,14 @@ interface LockfileData {
  * reference is likewise self-describing (§02.1 puts its digest in the fragment).
  * Everything else — a range, or a dist-tag — needs recording.
  */
-export function usesLockfile(descriptor: Descriptor): boolean {
+export function usesLockfile(descriptor: Spec): boolean {
   const { range } = descriptor;
   if (range === "" || isValidVersion(range)) return false;
   return !URL.canParse(range);
 }
 
 /** §04.4 — `<name>@<the range as written>`, the key the file is indexed by. */
-export function resolutionKey(descriptor: Descriptor): string {
+export function resolutionKey(descriptor: Spec): string {
   return `${descriptor.name}@${descriptor.range}`;
 }
 
@@ -171,14 +171,14 @@ export function readLockfile(dir: string): LockfileData | null {
  * is what keeps `packageManager: "pnpm@latest"` meaning "recent" instead of
  * "whatever it meant the first time anyone ran it".
  */
-export function readResolution(dir: string, descriptor: Descriptor): Locator | null {
+export function readResolution(dir: string, descriptor: Spec): ResolvedSpec | null {
   const entry = readEntry(dir, descriptor);
   return entry === null ? null : locatorFor(descriptor, entry);
 }
 
 /** A cache hit, and whether its {@link CACHE_TTL_MS} window has closed. */
 export interface CachedResolution {
-  locator: Locator;
+  locator: ResolvedSpec;
   /**
    * `true` when the entry has aged out. It is returned anyway: the caller
    * resolves afresh and falls back to it only if that fails, because an expired
@@ -196,7 +196,7 @@ export interface CachedResolution {
  */
 export function readCachedResolution(
   dir: string,
-  descriptor: Descriptor,
+  descriptor: Spec,
   now = Date.now(),
 ): CachedResolution | null {
   const hit = readCachedEntry(dir, descriptor, now);
@@ -208,7 +208,7 @@ export function readCachedResolution(
 /** What a project's two files already know, without a request (§04.4). */
 export interface KnownResolution {
   /** The recorded resolution, else an unexpired memo; `null` when neither answers. */
-  locator: Locator | null;
+  locator: ResolvedSpec | null;
   /**
    * The memo as read, expired or not: an aged-out one is still §04.4's answer
    * of last resort. `null` when the recorded file answered, which outranks it.
@@ -223,7 +223,7 @@ export interface KnownResolution {
  */
 export function readKnownResolution(
   dir: string,
-  descriptor: Descriptor,
+  descriptor: Spec,
   now = Date.now(),
 ): KnownResolution {
   const recorded = readResolution(dir, descriptor);
@@ -248,7 +248,7 @@ export interface CachedEntry {
  */
 export function readCachedEntry(
   dir: string,
-  descriptor: Descriptor,
+  descriptor: Spec,
   now = Date.now(),
 ): CachedEntry | null {
   const entry = readEntry(join(dir, CACHE_DIRECTORY), descriptor);
@@ -292,8 +292,8 @@ function hasExpired(entry: Resolution, now: number): boolean {
  */
 export function writeResolution(
   dir: string,
-  descriptor: Descriptor,
-  locator: Locator,
+  descriptor: Spec,
+  locator: ResolvedSpec,
   hash: string | undefined,
   perHost = false,
 ): void {
@@ -314,8 +314,8 @@ export function writeResolution(
  */
 export function writeCachedResolution(
   dir: string,
-  descriptor: Descriptor,
-  locator: Locator,
+  descriptor: Spec,
+  locator: ResolvedSpec,
   hash: string | undefined,
   perHost = false,
   now = Date.now(),
@@ -341,8 +341,8 @@ export function writeCachedResolution(
 
 function writeEntry(
   dir: string,
-  descriptor: Descriptor,
-  locator: Locator,
+  descriptor: Spec,
+  locator: ResolvedSpec,
   hash: string | undefined,
   perHost: boolean,
   expires?: number,
@@ -429,7 +429,7 @@ function dropResolution(dir: string, key: string): void {
  * applies: a recorded version outside its range is one the run skips, so naming
  * it would describe a resolution the very next invocation refuses.
  */
-export function readEntry(dir: string, descriptor: Descriptor): Resolution | null {
+export function readEntry(dir: string, descriptor: Spec): Resolution | null {
   const data = readLockfile(dir);
   if (data === null) return null;
 
@@ -457,7 +457,7 @@ export function readEntry(dir: string, descriptor: Descriptor): Resolution | nul
  * by npm's signature over them (§06.3), and the next `use` or `up` records the
  * host map.
  */
-function locatorFor(descriptor: Descriptor, entry: Resolution): Locator {
+function locatorFor(descriptor: Spec, entry: Resolution): ResolvedSpec {
   const stale =
     typeof entry.integrity === "string" &&
     isPerHost({ name: descriptor.name, reference: entry.resolved });

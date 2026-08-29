@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../../src/errors-cold.ts";
 import {
-  discoverProjectSpec,
+  findProjectSpec,
   isValidToolName,
   NODE_MODULES_RE,
   parseSpec,
@@ -13,7 +13,7 @@ import {
   warnOrThrow,
 } from "../../src/project/manifest.ts";
 import { writePin } from "../../src/project/pin.ts";
-import type { LazyLocator, SpecResult } from "../../src/types.ts";
+import type { LazyResolvedSpec, ProjectSpec } from "../../src/types.ts";
 
 let root: string;
 let originalEnv: NodeJS.ProcessEnv;
@@ -21,7 +21,7 @@ let warn: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
   originalEnv = process.env;
-  // Work on a copy: `discoverProjectSpec` replaces `process.env` when it applies
+  // Work on a copy: `findProjectSpec` replaces `process.env` when it applies
   // an env file, and that must not leak between tests.
   process.env = { ...process.env };
   for (const key of Object.keys(process.env)) {
@@ -70,7 +70,7 @@ function expectUsageError(fn: () => unknown, message: string): void {
   expect((caught as Error).message).toBe(message);
 }
 
-function lazyFallback(name = "yarn"): LazyLocator {
+function lazyFallback(name = "yarn"): LazyResolvedSpec {
   return { name, reference: () => Promise.resolve("9.9.9") };
 }
 
@@ -81,7 +81,7 @@ const LOOSE = { requireVersion: false };
 
 describe("parseSpec — §03.4", () => {
   it("splits on the first @", () => {
-    expect(parseSpec("yarn@1.22.4", "package.json", PINNED)).toEqual({
+    expect(parseSpec("yarn@1.22.4", { ...PINNED, source: "package.json" })).toEqual({
       name: "yarn",
       range: "1.22.4",
     });
@@ -90,7 +90,7 @@ describe("parseSpec — §03.4", () => {
   it("rejects a non-string field", () => {
     for (const raw of [42, null, {}, ["yarn@1.22.4"]]) {
       expectUsageError(
-        () => parseSpec(raw, "package.json", PINNED),
+        () => parseSpec(raw, { ...PINNED, source: "package.json" }),
         messages.invalidSpecNotString("package.json"),
       );
     }
@@ -99,29 +99,23 @@ describe("parseSpec — §03.4", () => {
   // Test 2 / test 5.
   it("rejects a name with no version when an exact version is required", () => {
     expectUsageError(
-      () => parseSpec("yarn", "package.json", PINNED),
+      () => parseSpec("yarn", { ...PINNED, source: "package.json" }),
       `No version specified for yarn in "packageManager" of package.json`,
     );
     expectUsageError(
-      () => parseSpec("yarn@", "package.json", PINNED),
+      () => parseSpec("yarn@", { ...PINNED, source: "package.json" }),
       `No version specified for yarn@ in "packageManager" of package.json`,
     );
   });
 
   it("accepts a name with no version as `*` when exactness is not required", () => {
-    expect(parseSpec("yarn", "CLI arguments", LOOSE)).toEqual({ name: "yarn", range: "*" });
-    expect(parseSpec("yarn@", "CLI arguments", LOOSE)).toEqual({ name: "yarn", range: "*" });
+    expect(parseSpec("yarn", LOOSE)).toEqual({ name: "yarn", range: "*" });
+    expect(parseSpec("yarn@", LOOSE)).toEqual({ name: "yarn", range: "*" });
   });
 
   it("reports the bare name for an unsupported name-only spec", () => {
-    expectUsageError(
-      () => parseSpec("nope", "CLI arguments", LOOSE),
-      messages.unsupportedSpec("nope"),
-    );
-    expectUsageError(
-      () => parseSpec("nope@", "CLI arguments", LOOSE),
-      messages.unsupportedSpec("nope"),
-    );
+    expectUsageError(() => parseSpec("nope", LOOSE), messages.unsupportedSpec("nope"));
+    expectUsageError(() => parseSpec("nope@", LOOSE), messages.unsupportedSpec("nope"));
   });
 
   // Tests 3 / 4, rewritten by §04.4: a pin may now be a range or a dist-tag, and
@@ -129,11 +123,11 @@ describe("parseSpec — §03.4", () => {
   // therefore the only thing separating the two modes.
   it("accepts tags and ranges in a pin", () => {
     for (const options of [PINNED, LOOSE]) {
-      expect(parseSpec("yarn@stable", "package.json", options)).toEqual({
+      expect(parseSpec("yarn@stable", { ...options, source: "package.json" })).toEqual({
         name: "yarn",
         range: "stable",
       });
-      expect(parseSpec("yarn@^1.0.0", "package.json", options)).toEqual({
+      expect(parseSpec("yarn@^1.0.0", { ...options, source: "package.json" })).toEqual({
         name: "yarn",
         range: "^1.0.0",
       });
@@ -141,21 +135,18 @@ describe("parseSpec — §03.4", () => {
   });
 
   it("reports the raw string for an unsupported version-bearing spec", () => {
-    expectUsageError(
-      () => parseSpec("nope@1.0.0", "CLI arguments", LOOSE),
-      messages.unsupportedSpec("nope@1.0.0"),
-    );
+    expectUsageError(() => parseSpec("nope@1.0.0", LOOSE), messages.unsupportedSpec("nope@1.0.0"));
   });
 
   it("gives a scoped name an empty name, which fails the supported check", () => {
     expectUsageError(
-      () => parseSpec("@scope/pkg@1.0.0", "CLI arguments", LOOSE),
+      () => parseSpec("@scope/pkg@1.0.0", LOOSE),
       messages.unsupportedSpec("@scope/pkg@1.0.0"),
     );
     // §04.4 removed the exact-version check that used to fire first here, so
     // both modes now reach the same unsupported-name error.
     expectUsageError(
-      () => parseSpec("@scope/pkg@1.0.0", "package.json", PINNED),
+      () => parseSpec("@scope/pkg@1.0.0", { ...PINNED, source: "package.json" }),
       messages.unsupportedSpec("@scope/pkg@1.0.0"),
     );
   });
@@ -163,17 +154,17 @@ describe("parseSpec — §03.4", () => {
   // Tests 17, 18, 19.
   it("refuses a URL for a known package manager without the opt-in", () => {
     const raw = "yarn@https://registry.example.test/yarn-1.22.21.tgz";
-    expectUsageError(() => parseSpec(raw, "CLI arguments", LOOSE), messages.illegalUrl(raw));
+    expectUsageError(() => parseSpec(raw, LOOSE), messages.illegalUrl(raw));
 
     process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
-    expect(parseSpec(raw, "CLI arguments", LOOSE)).toEqual({
+    expect(parseSpec(raw, LOOSE)).toEqual({
       name: "yarn",
       range: "https://registry.example.test/yarn-1.22.21.tgz",
     });
   });
 
   it("allows a URL for an unknown package manager", () => {
-    expect(parseSpec("custom@https://example.test/x.tgz", "CLI arguments", LOOSE)).toEqual({
+    expect(parseSpec("custom@https://example.test/x.tgz", LOOSE)).toEqual({
       name: "custom",
       range: "https://example.test/x.tgz",
     });
@@ -207,7 +198,7 @@ describe("parseSpec — §03.4", () => {
         const raw = `${name}@https://evil.test/x.tgz#sha512.aa`;
         // The existing §12 string, not a new one.
         expectUsageError(
-          () => parseSpec(raw, "package.json", LOOSE),
+          () => parseSpec(raw, { ...LOOSE, source: "package.json" }),
           messages.unsupportedSpec(raw),
         );
       }
@@ -218,7 +209,7 @@ describe("parseSpec — §03.4", () => {
         for (const options of [PINNED, LOOSE]) {
           const raw = `${name}@1.0.0`;
           expectUsageError(
-            () => parseSpec(raw, "package.json", options),
+            () => parseSpec(raw, { ...options, source: "package.json" }),
             messages.unsupportedSpec(raw),
           );
         }
@@ -227,7 +218,7 @@ describe("parseSpec — §03.4", () => {
 
     it("keeps accepting the names a custom tool plausibly has", () => {
       for (const name of ["custom", "my-tool", "my_tool", "tool.js", "Tool2"]) {
-        expect(parseSpec(`${name}@https://example.test/x.tgz`, "CLI arguments", LOOSE)).toEqual({
+        expect(parseSpec(`${name}@https://example.test/x.tgz`, LOOSE)).toEqual({
           name,
           range: "https://example.test/x.tgz",
         });
@@ -260,11 +251,11 @@ describe("the upward walk — §03.1", () => {
   // Test 1.
   it("finds a pin in the current directory", () => {
     const target = manifest(".", { packageManager: "yarn@1.22.4" });
-    const result = discoverProjectSpec(root);
+    const result = findProjectSpec(root);
 
     expect(result.type).toBe("Found");
     expect(result.target).toBe(target);
-    expect((result as Extract<SpecResult, { type: "Found" }>).getSpec(PINNED)).toEqual({
+    expect((result as Extract<ProjectSpec, { type: "Found" }>).getSpec(PINNED)).toEqual({
       name: "yarn",
       range: "1.22.4",
     });
@@ -275,7 +266,7 @@ describe("the upward walk — §03.1", () => {
     const target = manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("node_modules/foo", { packageManager: "pnpm@6.6.2" });
 
-    const result = discoverProjectSpec(join(root, "node_modules", "foo"));
+    const result = findProjectSpec(join(root, "node_modules", "foo"));
     expect(result.target).toBe(target);
   });
 
@@ -284,7 +275,7 @@ describe("the upward walk — §03.1", () => {
     const target = manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("node_modules/@scope/foo", { packageManager: "pnpm@6.6.2" });
 
-    const result = discoverProjectSpec(join(root, "node_modules", "@scope", "foo"));
+    const result = findProjectSpec(join(root, "node_modules", "@scope", "foo"));
     expect(result.target).toBe(target);
   });
 
@@ -292,7 +283,7 @@ describe("the upward walk — §03.1", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     const nested = manifest("node_modules/foo/src", { packageManager: "pnpm@6.6.2" });
 
-    const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"));
+    const result = findProjectSpec(join(root, "node_modules", "foo", "src"));
     expect(result.target).toBe(nested);
   });
 
@@ -301,7 +292,7 @@ describe("the upward walk — §03.1", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     const closest = manifest("foo", { packageManager: "npm@6.14.2" });
 
-    const result = discoverProjectSpec(join(root, "foo")) as Extract<SpecResult, { type: "Found" }>;
+    const result = findProjectSpec(join(root, "foo")) as Extract<ProjectSpec, { type: "Found" }>;
     expect(result.target).toBe(closest);
     expect(result.getSpec(PINNED)).toEqual({ name: "npm", range: "6.14.2" });
   });
@@ -310,8 +301,8 @@ describe("the upward walk — §03.1", () => {
     const rootManifest = manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("packages/app", { name: "app" });
 
-    const result = discoverProjectSpec(join(root, "packages", "app")) as Extract<
-      SpecResult,
+    const result = findProjectSpec(join(root, "packages", "app")) as Extract<
+      ProjectSpec,
       { type: "Found" }
     >;
     expect(result.target).toBe(rootManifest);
@@ -322,7 +313,7 @@ describe("the upward walk — §03.1", () => {
     const rootManifest = manifest(".", { name: "monorepo" });
     manifest("packages/app", { name: "app" });
 
-    const result = discoverProjectSpec(join(root, "packages", "app"));
+    const result = findProjectSpec(join(root, "packages", "app"));
     expect(result.type).toBe("NoSpec");
     // The *last* manifest seen is the selection, not the closest one.
     expect(result.target).toBe(rootManifest);
@@ -331,7 +322,7 @@ describe("the upward walk — §03.1", () => {
   // Test 9.
   it("reports NoProject when there is no manifest anywhere", () => {
     const cwd = dir("empty");
-    const result = discoverProjectSpec(cwd);
+    const result = findProjectSpec(cwd);
 
     expect(result.type).toBe("NoProject");
     expect(result.target).toBe(join(cwd, "package.json"));
@@ -340,7 +331,7 @@ describe("the upward walk — §03.1", () => {
   // Test 10.
   it("reports NoSpec for an empty object manifest", () => {
     const target = manifest(".", {});
-    const result = discoverProjectSpec(root);
+    const result = findProjectSpec(root);
 
     expect(result.type).toBe("NoSpec");
     expect(result.target).toBe(target);
@@ -349,21 +340,18 @@ describe("the upward walk — §03.1", () => {
   // Test 11.
   it("rejects invalid JSON, naming the path relative to the directory examined", () => {
     write("package.json", "{ this is not json");
-    expectUsageError(() => discoverProjectSpec(root), messages.invalidPackageJson("package.json"));
+    expectUsageError(() => findProjectSpec(root), messages.invalidPackageJson("package.json"));
 
     // §03.1 says "relative to `d`" — the directory the walk is standing in when
     // it reads the file, not the initial cwd — so a malformed manifest two
     // levels up is still named `package.json`, never `../../package.json`.
     const nested = dir("packages/app");
-    expectUsageError(
-      () => discoverProjectSpec(nested),
-      messages.invalidPackageJson("package.json"),
-    );
+    expectUsageError(() => findProjectSpec(nested), messages.invalidPackageJson("package.json"));
   });
 
   it("rejects a manifest that is not an object", () => {
     write("package.json", `"yarn@1.22.4"`);
-    expectUsageError(() => discoverProjectSpec(root), messages.invalidPackageJson("package.json"));
+    expectUsageError(() => findProjectSpec(root), messages.invalidPackageJson("package.json"));
   });
 
   // Test 12.
@@ -373,7 +361,7 @@ describe("the upward walk — §03.1", () => {
       `\uFEFF${JSON.stringify({ packageManager: "yarn@1.22.4" }, undefined, 2)}\n`,
     );
 
-    const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
+    const result = findProjectSpec(root) as Extract<ProjectSpec, { type: "Found" }>;
     expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "1.22.4" });
   });
 
@@ -382,7 +370,7 @@ describe("the upward walk — §03.1", () => {
     for (const packageManager of ["yarn", "yarn@", 42]) {
       manifest(".", { packageManager });
       // Discovery itself must not throw — `use` overwrites this field.
-      const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
+      const result = findProjectSpec(root) as Extract<ProjectSpec, { type: "Found" }>;
       expect(result.type).toBe("Found");
       expect(() => result.getSpec(PINNED)).toThrow(UsageError);
     }
@@ -393,7 +381,7 @@ describe("the upward walk — §03.1", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
       write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
 
-      const result = discoverProjectSpec(root);
+      const result = findProjectSpec(root);
       expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_ENABLE_AUTO_PIN).toBe("1");
     });
@@ -404,7 +392,7 @@ describe("the upward walk — §03.1", () => {
       dir("sub");
       write("sub/.jup.env", "COREPACK_NPM_REGISTRY=https://sub.test\n");
 
-      discoverProjectSpec(join(root, "sub"));
+      findProjectSpec(join(root, "sub"));
       expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://sub.test");
     });
 
@@ -412,7 +400,7 @@ describe("the upward walk — §03.1", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
       write("node_modules/foo/.jup.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
 
-      const result = discoverProjectSpec(join(root, "node_modules", "foo"));
+      const result = findProjectSpec(join(root, "node_modules", "foo"));
       expect(result.envFilePath).toBeUndefined();
       expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
     });
@@ -421,7 +409,7 @@ describe("the upward walk — §03.1", () => {
       write(".jup.env", "COREPACK_NPM_REGISTRY=https://root.test\n");
       manifest("sub", { packageManager: "yarn@1.22.4" });
 
-      const result = discoverProjectSpec(join(root, "sub"));
+      const result = findProjectSpec(join(root, "sub"));
       expect(result.envFilePath).toBeUndefined();
       expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
     });
@@ -434,7 +422,7 @@ describe("the upward walk — §03.1", () => {
       write(".jup.env", "COREPACK_NPM_REGISTRY=https://ancestor.test\n");
       manifest("project", { name: "unpinned" });
 
-      const result = discoverProjectSpec(join(root, "project"));
+      const result = findProjectSpec(join(root, "project"));
       // The manifest walk still climbs — reading a pin from an ancestor is
       // §03.1's documented monorepo behaviour — and finds nothing here.
       expect(result.type).toBe("NoSpec");
@@ -447,7 +435,7 @@ describe("the upward walk — §03.1", () => {
       dir("checkout/.git");
       dir("checkout/src");
 
-      const result = discoverProjectSpec(join(root, "checkout", "src"));
+      const result = findProjectSpec(join(root, "checkout", "src"));
       expect(result.type).toBe("NoProject");
       expect(result.envFilePath).toBeUndefined();
       expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
@@ -458,13 +446,13 @@ describe("the upward walk — §03.1", () => {
       write("project/.jup.env", "COREPACK_NPM_REGISTRY=https://project.test\n");
 
       // From the project root itself.
-      discoverProjectSpec(join(root, "project"));
+      findProjectSpec(join(root, "project"));
       expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://project.test");
 
       // And from a plain subdirectory of it, which is not its own project.
       delete process.env.COREPACK_NPM_REGISTRY;
       dir("project/src");
-      expect(discoverProjectSpec(join(root, "project", "src")).envFilePath).toBe(
+      expect(findProjectSpec(join(root, "project", "src")).envFilePath).toBe(
         join(root, "project", ".jup.env"),
       );
       expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://project.test");
@@ -474,7 +462,7 @@ describe("the upward walk — §03.1", () => {
       write(".jup.env", "COREPACK_NPM_REGISTRY=https://ancestor.test\n");
       manifest("project", { name: "unpinned" });
 
-      const result = discoverProjectSpec(join(root, "project"), { envOnly: true });
+      const result = findProjectSpec(join(root, "project"), { envOnly: true });
       expect(result.envFilePath).toBeUndefined();
       expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
     });
@@ -488,7 +476,7 @@ describe("the upward walk — §03.1", () => {
       write(".jup.env", "COREPACK_NPM_REGISTRY=https://host.test\n");
       write("node_modules/foo/src/.jup.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
 
-      const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"));
+      const result = findProjectSpec(join(root, "node_modules", "foo", "src"));
       expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://host.test");
     });
@@ -497,7 +485,7 @@ describe("the upward walk — §03.1", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
       write("node_modules/.jup.env", "COREPACK_NPM_REGISTRY=https://vendored.test\n");
 
-      const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"));
+      const result = findProjectSpec(join(root, "node_modules", "foo", "src"));
       expect(result.envFilePath).toBeUndefined();
       expect(process.env.COREPACK_NPM_REGISTRY).toBeUndefined();
     });
@@ -507,7 +495,7 @@ describe("the upward walk — §03.1", () => {
       write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
       process.env.COREPACK_ENV_FILE = "0";
 
-      const result = discoverProjectSpec(root);
+      const result = findProjectSpec(root);
       expect(result.envFilePath).toBeUndefined();
       expect(process.env.COREPACK_ENABLE_AUTO_PIN).toBeUndefined();
     });
@@ -516,14 +504,14 @@ describe("the upward walk — §03.1", () => {
       manifest(".", { packageManager: "yarn@1.22.4" });
       write(".jup.env", "COREPACK_ENABLE_AUTO_PIN=1\n");
 
-      const result = discoverProjectSpec(root, { envOnly: true });
+      const result = findProjectSpec(root, { envOnly: true });
       expect(result.type).toBe("NoProject");
       expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_ENABLE_AUTO_PIN).toBe("1");
     });
 
     it("envOnly terminates at the filesystem root when no env file exists", () => {
-      const result = discoverProjectSpec(dir("deep/nested"), { envOnly: true });
+      const result = findProjectSpec(dir("deep/nested"), { envOnly: true });
       expect(result.type).toBe("NoProject");
       expect(result.envFilePath).toBeUndefined();
     });
@@ -535,7 +523,7 @@ describe("the upward walk — §03.1", () => {
       write("package.json", "{ this is not json");
       process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
 
-      const result = discoverProjectSpec(root, { projectSpecFlag: true });
+      const result = findProjectSpec(root, { projectSpecFlag: true });
       expect(result.type).toBe("NoProject");
     });
 
@@ -546,7 +534,7 @@ describe("the upward walk — §03.1", () => {
       });
       process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
 
-      const result = discoverProjectSpec(root, { projectSpecFlag: true });
+      const result = findProjectSpec(root, { projectSpecFlag: true });
       expect(result.type).toBe("NoProject");
       expect(warn).not.toHaveBeenCalled();
     });
@@ -555,7 +543,7 @@ describe("the upward walk — §03.1", () => {
       write("package.json", "{ this is not json");
       write(".jup.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
 
-      const result = discoverProjectSpec(root, { projectSpecFlag: true });
+      const result = findProjectSpec(root, { projectSpecFlag: true });
       expect(result.type).toBe("NoProject");
       expect(result.envFilePath).toBe(join(root, ".jup.env"));
       expect(process.env.COREPACK_ENABLE_PROJECT_SPEC).toBe("0");
@@ -575,7 +563,7 @@ describe("the upward walk — §03.1", () => {
       manifest(".", { packageManager: "pnpm@10.0.0" });
       write(".jup.env", "COREPACK_ENABLE_PROJECT_SPEC=0\n");
 
-      const result = discoverProjectSpec(join(root, "node_modules", "foo", "src"), {
+      const result = findProjectSpec(join(root, "node_modules", "foo", "src"), {
         projectSpecFlag: true,
       });
       expect(result.type).toBe("NoProject");
@@ -585,10 +573,7 @@ describe("the upward walk — §03.1", () => {
       write("package.json", "{ this is not json");
       process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
 
-      expectUsageError(
-        () => discoverProjectSpec(root),
-        messages.invalidPackageJson("package.json"),
-      );
+      expectUsageError(() => findProjectSpec(root), messages.invalidPackageJson("package.json"));
     });
   });
 });
@@ -622,7 +607,7 @@ describe("devEngines — §03.3", () => {
   it("derives `<name>@*` when only a name is declared", () => {
     manifest(".", { devEngines: { packageManager: { name: "yarn" } } });
 
-    const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
+    const result = findProjectSpec(root) as Extract<ProjectSpec, { type: "Found" }>;
     expect(result.range).toBeUndefined();
     expect(result.hasPin).toBe(false);
     expect(result.getSpec(PINNED)).toEqual({ name: "yarn", range: "*" });
@@ -632,7 +617,7 @@ describe("devEngines — §03.3", () => {
   it("derives `<name>@<range>` when a version is declared", () => {
     manifest(".", { devEngines: { packageManager: { name: "pnpm", version: "6.x" } } });
 
-    const result = discoverProjectSpec(root) as Extract<SpecResult, { type: "Found" }>;
+    const result = findProjectSpec(root) as Extract<ProjectSpec, { type: "Found" }>;
     expect(result.range).toEqual({ name: "pnpm", range: "6.x", onFail: undefined });
     expect(result.hasPin).toBe(false);
     expect(result.getSpec(PINNED)).toEqual({ name: "pnpm", range: "6.x" });
@@ -652,7 +637,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: "pnpm@6.x",
       range: { name: "pnpm", range: "6.x", onFail: undefined },
-      // §03.7 — the declaration is reported alongside the Descriptor-shaped
+      // §03.7 — the declaration is reported alongside the Spec-shaped
       // view of it, because `writePin` has to honour it even with no version.
       devEngines: { name: "pnpm", version: "6.x", onFail: undefined },
       hasPin: true,
@@ -930,12 +915,12 @@ describe("warnOrThrow — §03.3", () => {
 describe("reconcile — §03.5", () => {
   const found = (packageManager: string) => {
     manifest(".", { packageManager });
-    return discoverProjectSpec(root);
+    return findProjectSpec(root);
   };
 
   it("returns the fallback when there is no project", () => {
     const fallback = lazyFallback();
-    const result = discoverProjectSpec(dir("empty"));
+    const result = findProjectSpec(dir("empty"));
     expect(reconcile(result, fallback, { requestedName: "yarn", transparent: false })).toBe(
       fallback,
     );
@@ -945,7 +930,7 @@ describe("reconcile — §03.5", () => {
     manifest(".", {});
     const fallback = lazyFallback();
     expect(
-      reconcile(discoverProjectSpec(root), fallback, { requestedName: "yarn", transparent: false }),
+      reconcile(findProjectSpec(root), fallback, { requestedName: "yarn", transparent: false }),
     ).toBe(fallback);
   });
 
@@ -973,7 +958,7 @@ describe("reconcile — §03.5", () => {
   // the file, in the one message whose job is to say what to edit.
   it("names devEngines.packageManager when the spec came from there", () => {
     manifest(".", { devEngines: { packageManager: { name: "yarn", version: "1.0.0" } } });
-    const result = discoverProjectSpec(root);
+    const result = findProjectSpec(root);
 
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
@@ -986,7 +971,7 @@ describe("reconcile — §03.5", () => {
       packageManager: "yarn@1.0.0",
       devEngines: { packageManager: { name: "yarn" } },
     });
-    const result = discoverProjectSpec(root);
+    const result = findProjectSpec(root);
 
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
@@ -1018,7 +1003,7 @@ describe("reconcile — §03.5", () => {
 
   // Test 41 — the project is never consulted at all.
   it("short-circuits on COREPACK_ENABLE_PROJECT_SPEC=0", () => {
-    const result = found("yarn@1.0.0") as Extract<SpecResult, { type: "Found" }>;
+    const result = found("yarn@1.0.0") as Extract<ProjectSpec, { type: "Found" }>;
     const getSpec = vi.fn(result.getSpec);
     const fallback = lazyFallback();
     process.env.COREPACK_ENABLE_PROJECT_SPEC = "0";
@@ -1053,7 +1038,7 @@ describe("reconcile — §03.5", () => {
 
   it("applies the CLI version to the fallback too", () => {
     expect(
-      reconcile(discoverProjectSpec(dir("empty")), lazyFallback(), {
+      reconcile(findProjectSpec(dir("empty")), lazyFallback(), {
         requestedName: "yarn",
         transparent: false,
         binaryVersion: "1.22.4",
@@ -1286,15 +1271,12 @@ describe("writePin — §03.7", () => {
  * §03.1 — symmetric walk stop conditions
  * ------------------------------------------------------------------ */
 
-describe("discoverProjectSpec — §03.1 stop conditions", () => {
+describe("findProjectSpec — §03.1 stop conditions", () => {
   it("stops on a devEngines-only manifest instead of climbing past it", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("nested", { devEngines: { packageManager: { name: "pnpm", version: "11.1.2" } } });
 
-    const result = discoverProjectSpec(join(root, "nested")) as Extract<
-      SpecResult,
-      { type: "Found" }
-    >;
+    const result = findProjectSpec(join(root, "nested")) as Extract<ProjectSpec, { type: "Found" }>;
 
     expect(result.type).toBe("Found");
     expect(result.target).toBe(join(root, "nested", "package.json"));
@@ -1306,8 +1288,8 @@ describe("discoverProjectSpec — §03.1 stop conditions", () => {
     for (const value of [null, 42, ""]) {
       manifest("nested", { packageManager: value });
 
-      const result = discoverProjectSpec(join(root, "nested")) as Extract<
-        SpecResult,
+      const result = findProjectSpec(join(root, "nested")) as Extract<
+        ProjectSpec,
         { type: "Found" }
       >;
 
@@ -1320,10 +1302,7 @@ describe("discoverProjectSpec — §03.1 stop conditions", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("nested", { name: "nested" });
 
-    const result = discoverProjectSpec(join(root, "nested")) as Extract<
-      SpecResult,
-      { type: "Found" }
-    >;
+    const result = findProjectSpec(join(root, "nested")) as Extract<ProjectSpec, { type: "Found" }>;
 
     expect(result.target).toBe(join(root, "package.json"));
   });
@@ -1333,7 +1312,7 @@ describe("discoverProjectSpec — §03.1 stop conditions", () => {
     for (const devEngines of [{}, { packageManager: null }]) {
       manifest("nested", { devEngines });
 
-      expect(discoverProjectSpec(join(root, "nested")).target).toBe(join(root, "package.json"));
+      expect(findProjectSpec(join(root, "nested")).target).toBe(join(root, "package.json"));
     }
   });
 });
@@ -1342,7 +1321,7 @@ describe("discoverProjectSpec — §03.1 stop conditions", () => {
  * §03.1 — write targets
  * ------------------------------------------------------------------ */
 
-describe("discoverProjectSpec — §03.1 mutating walks", () => {
+describe("findProjectSpec — §03.1 mutating walks", () => {
   it("stops a mutating walk at a `workspaces` root", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("repo", { workspaces: ["packages/*"] });
@@ -1350,8 +1329,8 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
 
     const from = join(root, "repo/packages/app");
     // Reading still climbs to the ancestor pin (§03.1); only writing stops.
-    expect(discoverProjectSpec(from).target).toBe(join(root, "package.json"));
-    expect(discoverProjectSpec(from, { mutating: true }).target).toBe(
+    expect(findProjectSpec(from).target).toBe(join(root, "package.json"));
+    expect(findProjectSpec(from, { mutating: true }).target).toBe(
       join(root, "repo", "package.json"),
     );
   });
@@ -1362,7 +1341,7 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
     write("repo/pnpm-workspace.yaml", "packages:\n  - packages/*\n");
     dir("repo/packages/app");
 
-    expect(discoverProjectSpec(join(root, "repo/packages/app"), { mutating: true }).target).toBe(
+    expect(findProjectSpec(join(root, "repo/packages/app"), { mutating: true }).target).toBe(
       join(root, "repo", "package.json"),
     );
   });
@@ -1374,7 +1353,7 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
     write("repo/pnpm-workspace.yaml", "packages: []\n");
     dir("repo/packages/app");
 
-    expect(discoverProjectSpec(join(root, "repo/packages/app"), { mutating: true }).target).toBe(
+    expect(findProjectSpec(join(root, "repo/packages/app"), { mutating: true }).target).toBe(
       join(root, "package.json"),
     );
   });
@@ -1383,7 +1362,7 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("nested", { name: "nested" });
 
-    const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
+    const result = findProjectSpec(join(root, "nested"), { mutating: true, here: true });
 
     expect(result.type).toBe("NoSpec");
     expect(result.target).toBe(join(root, "nested", "package.json"));
@@ -1393,7 +1372,7 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     dir("nested");
 
-    const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
+    const result = findProjectSpec(join(root, "nested"), { mutating: true, here: true });
 
     expect(result.type).toBe("NoProject");
     expect(result.target).toBe(join(root, "nested", "package.json"));
@@ -1405,7 +1384,7 @@ describe("discoverProjectSpec — §03.1 mutating walks", () => {
     write(".jup.env", "JUP_ENABLE_PRERELEASES=1\n");
     dir("nested");
 
-    const result = discoverProjectSpec(join(root, "nested"), { mutating: true, here: true });
+    const result = findProjectSpec(join(root, "nested"), { mutating: true, here: true });
 
     expect(result.envFilePath).toBe(join(root, ".jup.env"));
     expect(process.env.JUP_ENABLE_PRERELEASES).toBe("1");

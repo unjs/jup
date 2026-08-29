@@ -14,11 +14,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { DEFINITIONS } from "../../src/config/table.ts";
 import { messages } from "../../src/errors-cold.ts";
-import {
-  getDefaultVersion,
-  getFallbackLocator,
-  resolveDescriptor,
-} from "../../src/version/resolve.ts";
+import { getDefaultVersion, getFallbackLocator, resolveSpec } from "../../src/version/resolve.ts";
 
 /* ------------------------------------------------------------------ *
  * A real local server per test, as in registry.test.ts: the wire is the
@@ -222,13 +218,13 @@ function readLastKnownGoodFile(): Record<string, string> | null {
  * §04.1 step 1 — URL references (tests 17, 18, 19)
  * ------------------------------------------------------------------ */
 
-describe("resolveDescriptor step 1 — URL references", () => {
+describe("resolveSpec step 1 — URL references", () => {
   const url = "https://example.com/yarn-1.22.21.tgz";
 
   it("refuses a URL for a known package manager (test 17)", async () => {
     const { npm, berry } = await startYarnServers();
 
-    const error = await rejection(resolveDescriptor({ name: "yarn", range: url }));
+    const error = await rejection(resolveSpec({ name: "yarn", range: url }));
     expect(error.message).toBe(messages.illegalUrl(`yarn@${url}`));
     expect(error.message).toContain("JUP_ENABLE_UNSAFE_CUSTOM_URLS=1");
     expect([...npm.requests, ...berry.requests]).toEqual([]);
@@ -239,7 +235,7 @@ describe("resolveDescriptor step 1 — URL references", () => {
     process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
 
     // Untouched: no version parsing, no registry lookup, no cache probe.
-    await expect(resolveDescriptor({ name: "yarn", range: url })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: url })).resolves.toEqual({
       name: "yarn",
       reference: url,
     });
@@ -250,14 +246,14 @@ describe("resolveDescriptor step 1 — URL references", () => {
     process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
 
     // Step 1 precedes step 2, so this never reaches `unsupportedByBuild`.
-    await expect(resolveDescriptor({ name: "cutlery", range: url })).resolves.toEqual({
+    await expect(resolveSpec({ name: "cutlery", range: url })).resolves.toEqual({
       name: "cutlery",
       reference: url,
     });
   });
 
   it("does not need the opt-in for an unknown name", async () => {
-    await expect(resolveDescriptor({ name: "cutlery", range: url })).resolves.toEqual({
+    await expect(resolveSpec({ name: "cutlery", range: url })).resolves.toEqual({
       name: "cutlery",
       reference: url,
     });
@@ -267,7 +263,7 @@ describe("resolveDescriptor step 1 — URL references", () => {
     process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = "1";
     const withHash = `${url}#sha1.abcdef`;
 
-    await expect(resolveDescriptor({ name: "yarn", range: withHash })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: withHash })).resolves.toEqual({
       name: "yarn",
       reference: withHash,
     });
@@ -278,9 +274,9 @@ describe("resolveDescriptor step 1 — URL references", () => {
  * §04.1 step 2 — unknown package manager
  * ------------------------------------------------------------------ */
 
-describe("resolveDescriptor step 2 — unknown package manager", () => {
+describe("resolveSpec step 2 — unknown package manager", () => {
   it("rejects a name the build does not know", async () => {
-    const error = await rejection(resolveDescriptor({ name: "cutlery", range: "1.0.0" }));
+    const error = await rejection(resolveSpec({ name: "cutlery", range: "1.0.0" }));
     expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
   });
 });
@@ -289,11 +285,11 @@ describe("resolveDescriptor step 2 — unknown package manager", () => {
  * §04.1 step 3 — tags (§02.3, test 145)
  * ------------------------------------------------------------------ */
 
-describe("resolveDescriptor step 3 — tags", () => {
+describe("resolveSpec step 3 — tags", () => {
   it("refuses a tag when tags are not allowed, without any network", async () => {
     const { npm, berry } = await startYarnServers();
 
-    const error = await rejection(resolveDescriptor({ name: "yarn", range: "latest" }));
+    const error = await rejection(resolveSpec({ name: "yarn", range: "latest" }));
     expect(error.message).toBe(messages.tagsNotAllowed());
     expect([...npm.requests, ...berry.requests]).toEqual([]);
   });
@@ -306,7 +302,7 @@ describe("resolveDescriptor step 3 — tags", () => {
     // registries since §02.5, so this is now a question of *which package* the
     // tag is read from rather than which protocol.
     await expect(
-      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+      resolveSpec({ name: "yarn", range: "latest" }, { allowTags: true }),
     ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
 
     expect(npm.requests).toEqual(["/@yarnpkg/cli-dist"]);
@@ -324,7 +320,7 @@ describe("resolveDescriptor step 3 — tags", () => {
     const { npm, berry } = await startYarnServers();
 
     await expect(
-      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+      resolveSpec({ name: "yarn", range: "latest" }, { allowTags: true }),
     ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
 
     expect(npm.requests).toEqual(["/@yarnpkg/cli-dist"]);
@@ -342,7 +338,7 @@ describe("resolveDescriptor step 3 — tags", () => {
     process.env.COREPACK_ENABLE_NETWORK = "0";
 
     const error = await rejection(
-      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+      resolveSpec({ name: "yarn", range: "latest" }, { allowTags: true }),
     );
     expect(error.message).toBe(messages.networkDisabledRegistry("https://registry.npmjs.org"));
   });
@@ -351,7 +347,7 @@ describe("resolveDescriptor step 3 — tags", () => {
     const { npm } = await startYarnServers();
 
     await expect(
-      resolveDescriptor({ name: "pnpm", range: "latest" }, { allowTags: true }),
+      resolveSpec({ name: "pnpm", range: "latest" }, { allowTags: true }),
     ).resolves.toEqual({ name: "pnpm", reference: "10.0.0" });
     expect(npm.requests).toEqual(["/pnpm"]);
   });
@@ -360,7 +356,7 @@ describe("resolveDescriptor step 3 — tags", () => {
     await startYarnServers();
 
     const error = await rejection(
-      resolveDescriptor({ name: "yarn", range: "nightly" }, { allowTags: true }),
+      resolveSpec({ name: "yarn", range: "nightly" }, { allowTags: true }),
     );
     expect(error.message).toBe(messages.tagNotFound("nightly"));
   });
@@ -370,7 +366,7 @@ describe("resolveDescriptor step 3 — tags", () => {
     seedInstalled("yarn", "4.9.0");
 
     await expect(
-      resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
+      resolveSpec({ name: "yarn", range: "latest" }, { allowTags: true }),
     ).resolves.toEqual({ name: "yarn", reference: "4.9.0" });
 
     // The tag lookup is unavoidable; the *version* lookup is not. With a mirror
@@ -384,12 +380,12 @@ describe("resolveDescriptor step 3 — tags", () => {
  * §04.1 step 4 — the cache probe, and the §01.3 budget
  * ------------------------------------------------------------------ */
 
-describe("resolveDescriptor step 4 — cache probe", () => {
+describe("resolveSpec step 4 — cache probe", () => {
   it("answers a range from the cache with ZERO network requests (§01.3)", async () => {
     const { npm, berry } = await startYarnServers();
     seedInstalled("yarn", "1.22.4");
 
-    await expect(resolveDescriptor({ name: "yarn", range: "^1.22.0" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: "^1.22.0" })).resolves.toEqual({
       name: "yarn",
       reference: "1.22.4",
     });
@@ -403,7 +399,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
     const { npm, berry } = await startYarnServers();
     seedInstalled("yarn", "1.22.4");
 
-    await expect(resolveDescriptor({ name: "yarn", range: "1.22.4" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: "1.22.4" })).resolves.toEqual({
       name: "yarn",
       reference: "1.22.4",
     });
@@ -416,7 +412,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
     seedInstalled("yarn", "1.22.9");
     seedInstalled("yarn", "4.9.0");
 
-    await expect(resolveDescriptor({ name: "yarn", range: "^1.0.0" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: "^1.0.0" })).resolves.toEqual({
       name: "yarn",
       reference: "1.22.9",
     });
@@ -433,7 +429,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
     // a cache hit answers with the bare version. Were step 5 to run first, the
     // hash-bearing reference would come back verbatim.
     await expect(
-      resolveDescriptor({ name: "yarn", range: "1.22.4+sha224.0123456789ab" }),
+      resolveSpec({ name: "yarn", range: "1.22.4+sha224.0123456789ab" }),
     ).resolves.toEqual({ name: "yarn", reference: "1.22.4" });
   });
 
@@ -442,7 +438,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
     seedInstalled("yarn", "1.22.4");
 
     await expect(
-      resolveDescriptor({ name: "yarn", range: "^1.22.0" }, { useCache: false }),
+      resolveSpec({ name: "yarn", range: "^1.22.0" }, { useCache: false }),
     ).resolves.toEqual({ name: "yarn", reference: "1.22.9" });
     expect(npm.requests).toContain("/yarn");
   });
@@ -452,7 +448,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
  * §04.1 step 5 — exact versions
  * ------------------------------------------------------------------ */
 
-describe("resolveDescriptor step 5 — exact versions", () => {
+describe("resolveSpec step 5 — exact versions", () => {
   it("resolves an exact version with no network at all (test 14)", async () => {
     const { npm, berry } = await startYarnServers();
 
@@ -461,7 +457,7 @@ describe("resolveDescriptor step 5 — exact versions", () => {
       ["pnpm", "4.11.6"],
       ["npm", "6.14.2"],
     ] as const) {
-      await expect(resolveDescriptor({ name, range: version })).resolves.toEqual({
+      await expect(resolveSpec({ name, range: version })).resolves.toEqual({
         name,
         reference: version,
       });
@@ -473,7 +469,7 @@ describe("resolveDescriptor step 5 — exact versions", () => {
     const { npm, berry } = await startYarnServers();
 
     // 1.99.99 is not in the packument; the 404 surfaces at download time.
-    await expect(resolveDescriptor({ name: "yarn", range: "1.99.99" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: "1.99.99" })).resolves.toEqual({
       name: "yarn",
       reference: "1.99.99",
     });
@@ -483,7 +479,7 @@ describe("resolveDescriptor step 5 — exact versions", () => {
   it("passes a pinned prerelease through (test 15)", async () => {
     await startYarnServers();
 
-    await expect(resolveDescriptor({ name: "yarn", range: "2.0.0-rc.30" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: "2.0.0-rc.30" })).resolves.toEqual({
       name: "yarn",
       reference: "2.0.0-rc.30",
     });
@@ -493,7 +489,7 @@ describe("resolveDescriptor step 5 — exact versions", () => {
     await startYarnServers();
     const reference = "1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610";
 
-    await expect(resolveDescriptor({ name: "yarn", range: reference })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: reference })).resolves.toEqual({
       name: "yarn",
       reference,
     });
@@ -504,11 +500,11 @@ describe("resolveDescriptor step 5 — exact versions", () => {
  * §04.1 step 6 — the range query
  * ------------------------------------------------------------------ */
 
-describe("resolveDescriptor step 6 — range query", () => {
+describe("resolveSpec step 6 — range query", () => {
   it("unions every band, so a range spanning Classic and Berry sees both", async () => {
     const { npm, berry } = await startYarnServers();
 
-    await expect(resolveDescriptor({ name: "yarn", range: ">=1" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: ">=1" })).resolves.toEqual({
       name: "yarn",
       reference: "4.9.0",
     });
@@ -521,7 +517,7 @@ describe("resolveDescriptor step 6 — range query", () => {
     const { npm, berry } = await startYarnServers();
 
     // Only the npm band can satisfy this, but both bands are still queried.
-    await expect(resolveDescriptor({ name: "yarn", range: ">=1 <2" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: ">=1 <2" })).resolves.toEqual({
       name: "yarn",
       reference: "1.22.9",
     });
@@ -545,7 +541,7 @@ describe("resolveDescriptor step 6 — range query", () => {
     });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
 
-    await resolveDescriptor({ name: "yarn", range: ">=1" });
+    await resolveSpec({ name: "yarn", range: ">=1" });
 
     expect(arrivals).toHaveLength(2);
     // Serial fan-out would put the second arrival a full response delay after
@@ -560,7 +556,7 @@ describe("resolveDescriptor step 6 — range query", () => {
     });
     process.env.COREPACK_NPM_REGISTRY = npm.origin;
 
-    await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+    await expect(resolveSpec({ name: "yarn", range: ">=4" })).resolves.toEqual({
       name: "yarn",
       reference: "4.9.0",
     });
@@ -569,7 +565,7 @@ describe("resolveDescriptor step 6 — range query", () => {
   it("returns null when nothing matches, so the caller can report §12.4 (test 144)", async () => {
     const { npm, berry } = await startYarnServers();
 
-    await expect(resolveDescriptor({ name: "yarn", range: "^99.0.0" })).resolves.toBeNull();
+    await expect(resolveSpec({ name: "yarn", range: "^99.0.0" })).resolves.toBeNull();
     expect([...npm.requests].sort()).toEqual(["/@yarnpkg/cli-dist", "/yarn"]);
     expect(berry.requests).toEqual([]);
 
@@ -598,7 +594,7 @@ describe("resolveDescriptor step 6 — range query", () => {
     it("takes the highest STABLE release for a plain range", async () => {
       await serveYarn();
 
-      await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+      await expect(resolveSpec({ name: "yarn", range: ">=4" })).resolves.toEqual({
         name: "yarn",
         reference: "4.9.0",
       });
@@ -608,7 +604,7 @@ describe("resolveDescriptor step 6 — range query", () => {
       await serveYarn();
       process.env.JUP_ENABLE_PRERELEASES = "1";
 
-      await expect(resolveDescriptor({ name: "yarn", range: ">=4" })).resolves.toEqual({
+      await expect(resolveSpec({ name: "yarn", range: ">=4" })).resolves.toEqual({
         name: "yarn",
         reference: "4.10.0-rc.1",
       });
@@ -619,7 +615,7 @@ describe("resolveDescriptor step 6 — range query", () => {
 
       // The band lookup and the cache probe keep the lenient rule; what narrowed
       // is the *candidate set*, and a range that names a prerelease re-admits it.
-      await expect(resolveDescriptor({ name: "yarn", range: ">=4.0.0-0" })).resolves.toEqual({
+      await expect(resolveSpec({ name: "yarn", range: ">=4.0.0-0" })).resolves.toEqual({
         name: "yarn",
         reference: "4.10.0-rc.1",
       });
@@ -634,7 +630,7 @@ describe("resolveDescriptor step 6 — range query", () => {
 
       // §04.1 says "discard", with no fallback: `Failed to successfully resolve`
       // names a real problem, where installing a dev build silently does not.
-      await expect(resolveDescriptor({ name: "yarn", range: ">=5" })).resolves.toBeNull();
+      await expect(resolveSpec({ name: "yarn", range: ">=5" })).resolves.toBeNull();
     });
   });
 });
@@ -787,7 +783,7 @@ describe("getFallbackLocator (§02.1)", () => {
     };
 
     // Step 3/4 find a spec, so step 5 resolves that instead.
-    const resolved = await resolveDescriptor({ name: "yarn", range: "1.22.4" });
+    const resolved = await resolveSpec({ name: "yarn", range: "1.22.4" });
 
     expect(resolved).toEqual({ name: "yarn", reference: "1.22.4" });
     expect(invoked).toBe(false);

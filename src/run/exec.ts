@@ -13,7 +13,7 @@ const { basename, delimiter, dirname, isAbsolute, join, resolve, sep } =
 import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
-import type { BinSpec, InstallSpec } from "../types.ts";
+import type { BinSpec, Installation } from "../types.ts";
 import { CLI_ENTRY_NAME, getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
@@ -293,7 +293,7 @@ function setPath(env: Record<string, string | undefined>, value: string): void {
  * for a marker jup did not write — §07.10 promotes those out of an archive —
  * where without it a run dies on a `TypeError` rather than the §08.1 assertion.
  */
-export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?: BinSpec): string {
+export function resolveBinPath(binName: string, spec: Installation, fallbackBin?: BinSpec): string {
   const location = resolve(spec.location);
   const bin = spec.bin ?? fallbackBin;
 
@@ -327,7 +327,7 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
  */
 export function execPackageManager(
   binName: string,
-  spec: InstallSpec,
+  spec: Installation,
   args: string[],
   fallbackBin?: BinSpec,
   execMode?: "js" | "native",

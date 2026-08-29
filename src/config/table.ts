@@ -22,7 +22,7 @@ import { parse, satisfiesWithPrereleases } from "../version/semver.ts";
 import type {
   BinSpec,
   DevEnginesField,
-  Locator,
+  ResolvedSpec,
   NpmRegistrySpec,
   RegistrySpec,
   ToolDefinition,
@@ -527,7 +527,7 @@ export function hasRangeBand(name: string, version: string): boolean {
  * The embedded table's spec for this locator, or `undefined` when there is none
  * — an unknown package manager, or a URL reference, which is its own spec.
  */
-export function getTableSpec(locator: Locator): ToolSpec | undefined {
+export function getTableSpec(locator: ResolvedSpec): ToolSpec | undefined {
   const parsed = parse(locator.reference);
   if (parsed === null || !isSupportedPackageManager(locator.name)) return undefined;
   return getSpecFor(locator.name, parsed.version);
@@ -651,7 +651,7 @@ const EXE = process.platform === "win32" ? ".exe" : "";
  * is listed in the message because it is short and because the user's next move
  * depends on it.
  */
-function targetFor(spec: ToolSpec, locator: Locator): string {
+function targetFor(spec: ToolSpec, locator: ResolvedSpec): string {
   const host = hostTarget();
   const target = spec.targets?.[host];
   if (target === undefined) {
@@ -677,7 +677,7 @@ function targetFor(spec: ToolSpec, locator: Locator): string {
  * unrecognised. It is deliberately not a 404 later on: a URL that still contains
  * the literal `{arch}` blames the registry for the host's own unsupportedness.
  */
-export function resolveSpecUrl(spec: ToolSpec, locator: Locator, version: string): string {
+export function resolveSpecUrl(spec: ToolSpec, locator: ResolvedSpec, version: string): string {
   const url = spec.url.replace("{}", version);
 
   const wantsTarget = url.includes("{target}");
@@ -810,7 +810,7 @@ export function isPerHostSpec(spec: ToolSpec): boolean {
 }
 
 /** {@link isPerHostSpec} for a locator, `false` for a URL or an unknown name. */
-export function isPerHost(locator: Locator): boolean {
+export function isPerHost(locator: ResolvedSpec): boolean {
   const spec = getTableSpec(locator);
   return spec !== undefined && isPerHostSpec(spec);
 }
@@ -855,7 +855,7 @@ const ARTIFACT_REGISTRY_CACHE = new WeakMap<ToolSpec, NpmRegistrySpec>();
 
 export function resolveArtifactRegistry(
   spec: ToolSpec,
-  locator: Locator,
+  locator: ResolvedSpec,
 ): NpmRegistrySpec | undefined {
   const declared = spec.artifactRegistry;
   if (declared === undefined) return undefined;

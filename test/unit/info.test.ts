@@ -26,7 +26,7 @@ import {
   INFO_REPORT_VERSION,
   type InfoReport,
 } from "../../src/commands/info.ts";
-import { discoverProjectSpec } from "../../src/project/manifest.ts";
+import { findProjectSpec } from "../../src/project/manifest.ts";
 import { getRegistryUrl } from "../../src/net/registry.ts";
 import { resetNpmrcCache } from "../../src/net/npmrc.ts";
 import { SHIM_MARKER } from "../../src/commands/shims.ts";
@@ -231,7 +231,7 @@ describe("buildReport — the project spec (§09.9)", () => {
     await manifest({ name: "app" }, nested);
     cwdSpy.mockReturnValue(nested);
 
-    const lookup = discoverProjectSpec(nested);
+    const lookup = findProjectSpec(nested);
     expect(lookup.type).toBe("Found");
     expect(report().project.manifest).toBe(lookup.target);
   });

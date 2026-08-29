@@ -26,7 +26,7 @@ import {
   resolutionKey,
   usesLockfile,
 } from "../project/lockfile.ts";
-import { discoverProjectSpec, NODE_MODULES_RE, parseSpec, stopsWalk } from "../project/manifest.ts";
+import { findProjectSpec, NODE_MODULES_RE, parseSpec, stopsWalk } from "../project/manifest.ts";
 import {
   loadNpmrc,
   type NpmrcLevel,
@@ -47,7 +47,7 @@ import {
   listInstalled,
   readLastKnownGood,
 } from "../cache/store.ts";
-import type { Descriptor, Manifest } from "../types.ts";
+import type { Spec, Manifest } from "../types.ts";
 
 /**
  * The `--json` schema version.
@@ -252,7 +252,7 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
 
   // The env-file walk (§03.2), which also *applies* the file — the same thing
   // every other command does, so what is reported below is what a run sees.
-  const envLookup = discoverProjectSpec(cwd, { envOnly: true });
+  const envLookup = findProjectSpec(cwd, { envOnly: true });
   const envFile =
     envLookup.envFilePath === undefined
       ? null
@@ -291,7 +291,7 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
 /**
  * §03 — what the project declares, and why it cannot be used when it cannot.
  *
- * `discoverProjectSpec` is authoritative and is asked first, so the manifest
+ * `findProjectSpec` is authoritative and is asked first, so the manifest
  * `info` names is the very file every other command reads. It *throws* for an
  * unparseable manifest and for a `devEngines` failure whose `onFail` is `error`
  * (the default), and those are among the cases most worth reporting — so the
@@ -316,7 +316,7 @@ function describeProject(cwd: string): ProjectInfo {
   let problem: string | null = null;
 
   try {
-    const lookup = discoverProjectSpec(cwd);
+    const lookup = findProjectSpec(cwd);
     target = lookup.type === "NoProject" ? undefined : lookup.target;
     status =
       lookup.type === "Found" ? "found" : lookup.type === "NoSpec" ? "no-spec" : "no-project";
@@ -349,7 +349,8 @@ function describeProject(cwd: string): ProjectInfo {
   // as the error a `yarn` invocation would actually hit. §04.4 widened what the
   // version may *be* — a range, a dist-tag — not whether a pin has to carry one.
   try {
-    const descriptor = parseSpec(declared.raw, "package.json", {
+    const descriptor = parseSpec(declared.raw, {
+      source: "package.json",
       requireVersion: true,
       packageManagerField: declared.packageManagerField,
     });
@@ -366,7 +367,7 @@ function describeProject(cwd: string): ProjectInfo {
 }
 
 /** §02.1 / §04.1 — an exact version, a range, a dist-tag, or a URL. */
-export function classifySpec(descriptor: Descriptor): SpecKind {
+export function classifySpec(descriptor: Spec): SpecKind {
   const { range } = descriptor;
   if (URL.canParse(range)) return "url";
   if (isValidVersion(range)) return "exact";
@@ -384,7 +385,7 @@ export function classifySpec(descriptor: Descriptor): SpecKind {
  * the `packageManager: 42` of §12.2, which this report has to show rather than
  * skip past on its way to a `devEngines` block that is not the field at fault.
  *
- * `SpecResult.hasPin` cannot answer this. It is `typeof pm === "string"`, which
+ * `ProjectSpec.hasPin` cannot answer this. It is `typeof pm === "string"`, which
  * neither notices the non-string shapes nor knows about the precedence above.
  */
 function describeDeclaration(manifest: Manifest | undefined): {
@@ -564,7 +565,7 @@ function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
   };
 }
 
-function descriptorOf(project: ProjectInfo): Descriptor {
+function descriptorOf(project: ProjectInfo): Spec {
   return { name: project.name ?? "", range: project.range ?? "" };
 }
 

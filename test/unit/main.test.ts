@@ -28,7 +28,7 @@ import { messages, UsageError } from "../../src/errors.ts";
 import { messages as cold } from "../../src/errors-cold.ts";
 import { LOCKFILE_NAME } from "../../src/project/lockfile.ts";
 import {
-  classifyInvocation,
+  parseArgs,
   isGlobalInvocation,
   isTransparentCommand,
   presentError,
@@ -209,11 +209,11 @@ afterAll(() => {
  * §01.2 — classification
  * ------------------------------------------------------------------ */
 
-describe("classifyInvocation — §01.2", () => {
+describe("parseArgs — §01.2", () => {
   it.for([["npm"], ["npx"], ["pnpm"], ["pnpx"], ["yarn"], ["yarnpkg"]])(
     "sends the known binary %s to proxy mode",
     ([binaryName]) => {
-      expect(classifyInvocation([binaryName!, "add", "x"])).toEqual({
+      expect(parseArgs([binaryName!, "add", "x"])).toEqual({
         mode: "proxy",
         binaryName,
         args: ["add", "x"],
@@ -222,7 +222,7 @@ describe("classifyInvocation — §01.2", () => {
   );
 
   it("carries a CLI version override", () => {
-    expect(classifyInvocation(["yarn@1.22.4", "--version"])).toEqual({
+    expect(parseArgs(["yarn@1.22.4", "--version"])).toEqual({
       mode: "proxy",
       binaryName: "yarn",
       binaryVersion: "1.22.4",
@@ -232,13 +232,13 @@ describe("classifyInvocation — §01.2", () => {
 
   it("treats a trailing @ as no version at all", () => {
     // Corepack's `binaryVersion || null`: `yarn@` behaves exactly like `yarn`.
-    expect(classifyInvocation(["yarn@"])).toEqual({ mode: "proxy", binaryName: "yarn", args: [] });
+    expect(parseArgs(["yarn@"])).toEqual({ mode: "proxy", binaryName: "yarn", args: [] });
   });
 
   it("sends an unknown name bearing an @ to proxy mode, not to the CLI", () => {
     // This is the whole point of the second branch: `foo@1.2.3` must reach the
     // unsupported-specification error rather than "unknown command".
-    expect(classifyInvocation(["foo@1.2.3"])).toEqual({
+    expect(parseArgs(["foo@1.2.3"])).toEqual({
       mode: "proxy",
       binaryName: "foo",
       binaryVersion: "1.2.3",
@@ -249,7 +249,7 @@ describe("classifyInvocation — §01.2", () => {
   it("never matches a scoped package as a name", () => {
     // `[^@]*` cannot cross the leading `@`, so the name is empty and the whole
     // remainder becomes the version.
-    expect(classifyInvocation(["@scope/pkg@1.0.0"])).toEqual({
+    expect(parseArgs(["@scope/pkg@1.0.0"])).toEqual({
       mode: "proxy",
       binaryName: "",
       binaryVersion: "scope/pkg@1.0.0",
@@ -260,7 +260,7 @@ describe("classifyInvocation — §01.2", () => {
   it.for([["enable"], ["use"], ["--version"], ["--help"], ["cache"]])(
     "sends the bare command %s to management mode with the full argv",
     ([command]) => {
-      expect(classifyInvocation([command!, "extra"])).toEqual({
+      expect(parseArgs([command!, "extra"])).toEqual({
         mode: "management",
         args: [command, "extra"],
       });
@@ -268,7 +268,7 @@ describe("classifyInvocation — §01.2", () => {
   );
 
   it("sends an empty argv to management mode", () => {
-    expect(classifyInvocation([])).toEqual({ mode: "management", args: [] });
+    expect(parseArgs([])).toEqual({ mode: "management", args: [] });
   });
 });
 

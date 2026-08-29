@@ -24,7 +24,7 @@ import {
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
 import { parse, satisfiesWithPrereleases } from "../../src/version/semver.ts";
-import type { BinSpec, Locator, ToolSpec, TrustedKey, TrustStore } from "../../src/types.ts";
+import type { BinSpec, ResolvedSpec, ToolSpec, TrustedKey, TrustStore } from "../../src/types.ts";
 
 /**
  * A locator's download URL, with `{}` substituted — `resolveSpecUrl` with the
@@ -32,7 +32,7 @@ import type { BinSpec, Locator, ToolSpec, TrustedKey, TrustStore } from "../../s
  * site (§07.3). Local to the tests: nothing in `src` needs the locator-level
  * spelling now that §08.1 no longer recovers a bin path from the URL.
  */
-function getSpecUrl(locator: Locator): string {
+function getSpecUrl(locator: ResolvedSpec): string {
   const spec = getTableSpec(locator);
   if (spec === undefined) return locator.reference;
   return resolveSpecUrl(spec, locator, parse(locator.reference)!.version);

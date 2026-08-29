@@ -8,18 +8,27 @@ them here only guarantees they go stale.
 ## 2.1 Core value types
 
 ```
-Descriptor  { name, range }              "what the project asked for"
-Locator     { name, reference }          "the exact thing to install"
-InstallSpec { location, bin, hash }      "where it landed on disk"
+Spec         { name, range }              "what the project asked for"
+ResolvedSpec { name, reference }          "the exact thing to install"
+Installation { location, bin, hash }      "where it landed on disk"
 ```
 
-* **Descriptor** — `range` is any of: an exact semver version, a semver range, a
+* **Spec** — `range` is any of: an exact semver version, a semver range, a
   dist-tag (`latest`, `lts`, …), `*`, or a URL. Produced by §03, consumed by §04.
-* **Locator** — `reference` is an exact version, optionally carrying a build
+* **ResolvedSpec** — `reference` is an exact version, optionally carrying a build
   suffix (`4.1.0+sha512.abcdef…`), or a URL. Produced by §04, consumed by §07.
-* **LazyLocator** — a Locator whose `reference` is a thunk. Used for the fallback
-  locator so that the default-version lookup, which may read `lastKnownGood.json`
-  and hit the network, happens only if the project turns out to have no spec.
+  The field is `reference`, not `version`, because it is neither only a version
+  nor only in memory: it is the key `writeMarker` serialises into the `.jup`
+  marker, which a Corepack-written cache also carries (§07.2).
+* **LazyResolvedSpec** — a ResolvedSpec whose `reference` is a thunk. Used for
+  the fallback so that the default-version lookup, which may read
+  `lastKnownGood.json` and hit the network, happens only if the project turns
+  out to have no spec.
+
+Local variables across `src/` still read `descriptor` and `locator`, and the
+marker's JSON key is `locator` (§07.2). Those are the Corepack words for the same
+two values; `spec` and `resolved` are already taken as local names in the same
+scopes, so only the exported type names carry the newer vocabulary.
   Keeping it lazy is the difference between "an offline project with a pinned
   version works" and "every invocation hits the network". `main.ts` forces it in
   exactly one place.

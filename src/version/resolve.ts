@@ -13,7 +13,7 @@ import {
   satisfiesWithPrereleases,
 } from "./semver.ts";
 import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "../cache/store.ts";
-import type { Descriptor, LazyLocator, Locator } from "../types.ts";
+import type { Spec, LazyResolvedSpec, ResolvedSpec } from "../types.ts";
 
 export interface ResolveOptions {
   allowTags?: boolean;
@@ -48,10 +48,10 @@ function loadRegistry(): Promise<typeof import("../net/registry.ts")> {
  * from — §05.2's variables, §05.3's `.npmrc` — is resolved inside the fetchers,
  * not here.
  */
-export async function resolveDescriptor(
-  descriptor: Descriptor,
+export async function resolveSpec(
+  descriptor: Spec,
   options?: ResolveOptions,
-): Promise<Locator | null> {
+): Promise<ResolvedSpec | null> {
   const allowTags = options?.allowTags ?? false;
   const useCache = options?.useCache ?? true;
   const { name } = descriptor;
@@ -235,7 +235,10 @@ export async function getDefaultVersion(name: string): Promise<string> {
  * commands whose definition declares `transparent.default` use that literal and
  * never consult `getDefaultVersion` at all.
  */
-export function getFallbackLocator(name: string, options: { transparent: boolean }): LazyLocator {
+export function getFallbackLocator(
+  name: string,
+  options: { transparent: boolean },
+): LazyResolvedSpec {
   // Table lookups are pure, so doing this eagerly costs nothing; everything
   // that touches the disk or the network stays inside the thunk.
   const transparentDefault = options.transparent

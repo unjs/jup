@@ -39,9 +39,9 @@ import {
   usesLockfile,
   writeResolution,
 } from "../project/lockfile.ts";
-import { CLI_SOURCE, discoverProjectSpec, parseSpec } from "../project/manifest.ts";
+import { CLI_SOURCE, findProjectSpec, parseSpec } from "../project/manifest.ts";
 import { type PinOptions, writePin } from "../project/pin.ts";
-import { resolveDescriptor, type ResolveOptions } from "../version/resolve.ts";
+import { resolveSpec, type ResolveOptions } from "../version/resolve.ts";
 import { isValidRange, isValidVersion, major, parse } from "../version/semver.ts";
 import {
   cacheClean,
@@ -60,7 +60,7 @@ import {
   writeMarker,
 } from "../cache/store.ts";
 import { create, extract, listEntries } from "../cache/tar.ts";
-import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
+import type { Spec, Installation, ResolvedSpec, ProjectSpec } from "../types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "jup.tgz";
@@ -69,10 +69,10 @@ import { formatHelp } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
 import { out, outColors } from "../utils/log.ts";
 
-async function resolveOrThrow(descriptor: Descriptor, options: ResolveOptions): Promise<Locator> {
-  let locator: Locator | null;
+async function resolveOrThrow(descriptor: Spec, options: ResolveOptions): Promise<ResolvedSpec> {
+  let locator: ResolvedSpec | null;
   try {
-    locator = await resolveDescriptor(descriptor, options);
+    locator = await resolveSpec(descriptor, options);
   } catch (error) {
     // §12.6 — with the network off, "can't reach <url>" is the least useful
     // thing to say; name the package manager and the command that seeds it.
@@ -92,10 +92,10 @@ async function resolveOrThrow(descriptor: Descriptor, options: ResolveOptions): 
  * seeding command; the locator supplies the version for missing-artifact errors.
  */
 async function installOrExplain(
-  locator: Locator,
+  locator: ResolvedSpec,
   range: string,
   options?: { cacheOnly?: boolean },
-): Promise<InstallSpec> {
+): Promise<Installation> {
   try {
     return await ensureInstalled(locator, options);
   } catch (error) {
@@ -216,15 +216,17 @@ function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
  *
  * The byte-compatible messages say "to pack" in all four commands.
  */
-export function resolvePatternsToDescriptors(patterns: string[]): Descriptor[] {
+export function resolvePatternsToDescriptors(patterns: string[]): Spec[] {
   const cwd = process.cwd();
 
   if (patterns.length > 0) {
     // Explicit patterns mean the project is irrelevant — but the env file is
     // not, because it can carry the registry and network settings the
     // resolution below needs.
-    discoverProjectSpec(cwd, { envOnly: true });
-    return patterns.map((pattern) => parseSpec(pattern, CLI_SOURCE, { requireVersion: false }));
+    findProjectSpec(cwd, { envOnly: true });
+    return patterns.map((pattern) =>
+      parseSpec(pattern, { source: CLI_SOURCE, requireVersion: false }),
+    );
   }
 
   return [resolveProjectSpec().descriptor];
@@ -238,12 +240,12 @@ export function resolvePatternsToDescriptors(patterns: string[]): Descriptor[] {
  * from a spec synthesised out of `devEngines` (which row 114 turns into a pin).
  */
 function resolveProjectSpec(options?: { mutating?: boolean; here?: boolean }): {
-  descriptor: Descriptor;
-  lookup: Extract<SpecResult, { type: "Found" }>;
+  descriptor: Spec;
+  lookup: Extract<ProjectSpec, { type: "Found" }>;
 } {
   // §03.1 — a command that is about to *write* must read the spec from the file
   // it will write, or `up` refreshes one manifest and pins another.
-  const lookup = discoverProjectSpec(process.cwd(), options);
+  const lookup = findProjectSpec(process.cwd(), options);
   switch (lookup.type) {
     case "NoProject": {
       throw new UsageError(messages.couldntFindProject());
@@ -312,7 +314,7 @@ export async function cmdInstallGlobal(args: string[]): Promise<number> {
       continue;
     }
 
-    const descriptor = parseSpec(target, CLI_SOURCE, { requireVersion: false });
+    const descriptor = parseSpec(target, { source: CLI_SOURCE, requireVersion: false });
     const locator = await resolveOrThrow(descriptor, { allowTags: true });
 
     out(
@@ -548,9 +550,9 @@ export async function cmdUp(args: string[]): Promise<number> {
   // major it landed in.
   const line = major(resolved.reference);
   const target = { name, range: `^${line}.0.0` };
-  let highest: Locator | null;
+  let highest: ResolvedSpec | null;
   try {
-    highest = await resolveDescriptor(target, { useCache: false });
+    highest = await resolveSpec(target, { useCache: false });
   } catch (error) {
     // Attach the same offline seeding diagnostic to the second resolution.
     throw explainFetchFailure(error, target) ?? error;
@@ -568,7 +570,7 @@ export async function cmdUp(args: string[]): Promise<number> {
  * bare `@` — is not already fatal: the project has a usable range either way, so
  * `up` refreshes on that and overwrites the broken field, as §09.5 has `use` do.
  */
-function declaredPin(lookup: Extract<SpecResult, { type: "Found" }>): Descriptor | undefined {
+function declaredPin(lookup: Extract<ProjectSpec, { type: "Found" }>): Spec | undefined {
   try {
     return lookup.getSpec({ requireVersion: false });
   } catch {
@@ -593,7 +595,7 @@ export async function cmdUse(args: string[]): Promise<number> {
   const integrity = !hasFlag(parsed, "--no-integrity");
   const lockfile = !hasFlag(parsed, "--no-lockfile");
 
-  const descriptor = parseSpec(pattern, CLI_SOURCE, { requireVersion: false });
+  const descriptor = parseSpec(pattern, { source: CLI_SOURCE, requireVersion: false });
 
   // §04.4 — preserve an explicitly typed semver range and record its resolution
   // in `jup.lock`. Exact versions, dist-tags, and bare names pin exactly.
@@ -650,8 +652,8 @@ export async function cmdUse(args: string[]): Promise<number> {
  * standing would have changed nothing about what the next run resolves.
  */
 function pinRangeToProject(
-  descriptor: Descriptor,
-  locator: Locator,
+  descriptor: Spec,
+  locator: ResolvedSpec,
   options?: PinOptions,
   lockfile = true,
 ): Promise<number> {
@@ -703,8 +705,8 @@ function pinRangeToProject(
  * `COREPACK_MIGRATE_FROM` carries into the package manager's own `use` command.
  */
 async function applyToProject(
-  locator: Locator,
-  record: (reference: string, spec: InstallSpec) => string,
+  locator: ResolvedSpec,
+  record: (reference: string, spec: Installation) => string,
 ): Promise<number> {
   out(`${messages.installingInProject(locator.name, locator.reference)}\n`);
 
@@ -718,7 +720,7 @@ async function applyToProject(
   const previousPackageManager = record(reference, spec);
 
   // A URL reference has no table band, so it has no `commands.use` either.
-  const pinned: Locator = { name: locator.name, reference };
+  const pinned: ResolvedSpec = { name: locator.name, reference };
   const tableSpec = getTableSpec(pinned);
   const useCommand = tableSpec?.commands?.use;
 
@@ -750,7 +752,7 @@ async function applyToProject(
 }
 
 /** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */
-function pinToProject(locator: Locator, options?: PinOptions): Promise<number> {
+function pinToProject(locator: ResolvedSpec, options?: PinOptions): Promise<number> {
   // §02.4 — a native package manager's artifact differs per host, so its digest
   // is not a portable fact and must not be written into a file people commit: a
   // Linux-pinned `bun@1.4.0+sha512.…` fails on a colleague's Mac with a hash
@@ -803,18 +805,14 @@ function pinToProject(locator: Locator, options?: PinOptions): Promise<number> {
  * The walk is the mutating one, with the same `--here` and the same tool, so the
  * manifest read here is the manifest the caller is about to write.
  */
-function recordedPinToRetire(
-  here: boolean,
-  tool: string,
-  also?: Descriptor,
-): Descriptor | undefined {
-  const lookup = discoverProjectSpec(process.cwd(), { mutating: true, here, tool });
+function recordedPinToRetire(here: boolean, tool: string, also?: Spec): Spec | undefined {
+  const lookup = findProjectSpec(process.cwd(), { mutating: true, here, tool });
   if (lookup.type !== "Found") return undefined;
 
   const dir = dirname(lookup.target);
   if (also !== undefined && holdsResolution(dir, also)) return also;
 
-  let pin: Descriptor;
+  let pin: Spec;
   try {
     pin = lookup.getSpec({ requireVersion: false });
   } catch {
@@ -826,7 +824,7 @@ function recordedPinToRetire(
 }
 
 /** §04.4 — does the committed `jup.lock` in `dir` hold this descriptor's entry? */
-function holdsResolution(dir: string, descriptor: Descriptor): boolean {
+function holdsResolution(dir: string, descriptor: Spec): boolean {
   if (!usesLockfile(descriptor)) return false;
   const data = readLockfile(dir);
   return data !== null && Object.hasOwn(data.resolutions, resolutionKey(descriptor));
@@ -845,7 +843,7 @@ function holdsResolution(dir: string, descriptor: Descriptor): boolean {
  * comes first: a removal that removed nothing changed no path, and naming one
  * would be a false statement about the user's tree.
  */
-function dropRecordedResolution(dir: string, descriptor: Descriptor): void {
+function dropRecordedResolution(dir: string, descriptor: Spec): void {
   const held = holdsResolution(dir, descriptor);
   removeResolution(dir, resolutionKey(descriptor));
   if (held) {

@@ -11,7 +11,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { UsageError } from "../../src/errors.ts";
 import { confirmDownload, ensureInstalled } from "../../src/cache/install.ts";
 import { create } from "../../src/cache/tar.ts";
-import type { CorepackMarker, Locator, TrustedKey } from "../../src/types.ts";
+import type { CorepackMarker, ResolvedSpec, TrustedKey } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *
  * A real mock registry on a real socket: routes are keyed by request
@@ -253,7 +253,7 @@ describe("marker hit (§07.2, test 96)", () => {
       }),
     );
 
-    const locator: Locator = { name: "pnpm", reference: "9.1.0" };
+    const locator: ResolvedSpec = { name: "pnpm", reference: "9.1.0" };
     const spec = await ensureInstalled(locator);
 
     expect(spec).toEqual({
@@ -342,7 +342,7 @@ describe("download shapes (§07.3, §07.4)", () => {
     routes["/pnpm/-/pnpm-9.1.0.tgz"] = bytesRoute(tarball);
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
 
-    const locator: Locator = { name: "pnpm", reference: "9.1.0" };
+    const locator: ResolvedSpec = { name: "pnpm", reference: "9.1.0" };
     const spec = await ensureInstalled(locator);
 
     expect(spec.location).toBe(join(home, "v1", "pnpm", "9.1.0"));

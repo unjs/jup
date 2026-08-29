@@ -200,7 +200,7 @@ a member carrying no `version` names the tool without naming the release, where
 `pm` is strictly more specific. The cross-checks still run and still report a
 disagreement through `onFail`; they no longer pick the winner.
 
-`SpecResult` carries which field the returned spec actually came from, because
+`ProjectSpec` carries which field the returned spec actually came from, because
 §3.4's runtime refusal is about the `packageManager` *field* and a spec read out
 of `de` did not come from it.
 
@@ -229,8 +229,10 @@ declared version file may then answer, and failing that §3.5's fallback.
 
 ## 3.4 Parsing a spec string
 
-`parseSpec(raw, source, {requireVersion})` → `Descriptor`. `source` is
-`CLI arguments` or the manifest path relative to the initial cwd.
+`parseSpec(raw, {source, requireVersion, packageManagerField})` → `Spec`. Every
+option is optional: `source` names the input in §12's messages and defaults to
+`CLI arguments` — the alternative is the manifest path relative to the initial
+cwd — and `requireVersion` defaults to `false`.
 
 ```
 1. not a string                       → "expected a string"

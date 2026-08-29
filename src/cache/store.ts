@@ -32,7 +32,7 @@ import {
   satisfiesWithPrereleases,
 } from "../version/semver.ts";
 import type { SemVer } from "../version/semver.ts";
-import type { CorepackMarker, InstallSpec, Locator } from "../types.ts";
+import type { CorepackMarker, Installation, ResolvedSpec } from "../types.ts";
 
 /** §07.2 — the file whose presence means "this install is complete and valid". */
 export const MARKER_NAME = ".jup";
@@ -145,12 +145,12 @@ function isBelow(root: string, file: string): boolean {
  * in their hash share one directory. URL references use
  * `encodeURIComponent(url without fragment)`.
  */
-export function getVersionDir(locator: Locator): string {
+export function getVersionDir(locator: ResolvedSpec): string {
   return versionDirFor(locator, parse(locator.reference));
 }
 
 /** {@link getVersionDir} with the parse already done — the probe needs both. */
-function versionDirFor(locator: Locator, parsed: SemVer | null): string {
+function versionDirFor(locator: ResolvedSpec, parsed: SemVer | null): string {
   if (parsed !== null) return parsed.version;
 
   // A URL reference: the fragment carries the hash (§02.1), so it is stripped
@@ -211,16 +211,16 @@ export function readMarker(dir: string): CorepackMarker | null {
  * `tar`, `integrity` and `registry` are ~36 KB of code and 70-odd native modules
  * that a warm run never executes (§16, Build shape).
  */
-export function readInstalledSpec(locator: Locator): InstallSpec | null {
+export function readInstalledSpec(locator: ResolvedSpec): Installation | null {
   return resolveInstallTarget(locator).installed;
 }
 
 /**
  * A pinned cache hit requires the marker hash to match. If the plain version directory contains another artifact, use `<version>+<algo>.<digest>` so distinct pins cannot silently share bytes.
  */
-export function resolveInstallTarget(locator: Locator): {
+export function resolveInstallTarget(locator: ResolvedSpec): {
   location: string;
-  installed: InstallSpec | null;
+  installed: Installation | null;
 } {
   const root = join(getInstallFolder(), locator.name);
   const parsed = parse(locator.reference);
@@ -657,7 +657,7 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
  * pipeline, §07.6's promotion) sit *above* `store` in the layering described in
  * §16, Source map.
  */
-export function bumpLastKnownGood(locator: Locator): void {
+export function bumpLastKnownGood(locator: ResolvedSpec): void {
   if (envDisabled(ENV.DEFAULT_TO_LATEST)) {
     return;
   }

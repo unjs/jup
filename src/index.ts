@@ -1,13 +1,13 @@
 import type { ResolveOptions } from "./version/resolve.ts";
-import type { Descriptor, InstallSpec, Locator } from "./types.ts";
+import type { Installation, ResolvedSpec, Spec } from "./types.ts";
 
 export type * from "./types.ts";
 export { UsageError } from "./errors.ts";
-export { classifyInvocation, runMain } from "./main.ts";
-export { discoverProjectSpec, parseSpec } from "./project/manifest.ts";
+export { parseArgs, runMain } from "./main.ts";
+export { findProjectSpec, parseSpec } from "./project/manifest.ts";
 
 /**
- * §04 — resolve a descriptor to a locator.
+ * §04 — resolve a {@link Spec}'s range to an exact {@link ResolvedSpec}.
  *
  * Wrapped for the same reason as {@link ensureInstalled} below: a static
  * re-export would place `resolve.ts` — and with it §04.1's tag lookup and range
@@ -15,16 +15,17 @@ export { discoverProjectSpec, parseSpec } from "./project/manifest.ts";
  * exactly the warm-chunk merge the proxy path was split to avoid
  * (§16, Build shape).
  */
-export async function resolveDescriptor(
-  descriptor: Descriptor,
+export async function resolveSpec(
+  spec: Spec,
   options?: ResolveOptions,
-): Promise<Locator | null> {
+): Promise<ResolvedSpec | null> {
   const resolve = await import("./version/resolve.ts");
-  return await resolve.resolveDescriptor(descriptor, options);
+  return await resolve.resolveSpec(spec, options);
 }
 
 /**
- * §07 — ensure a locator is installed, downloading and verifying it if not.
+ * §07 — ensure a {@link ResolvedSpec} is installed, downloading and verifying
+ * it if it is not.
  *
  * Re-exported through a wrapper rather than directly, because a static
  * re-export puts the whole download-and-verify stack (`http`, `tar`,
@@ -33,9 +34,9 @@ export async function resolveDescriptor(
  * weight on every invocation (§16, Build shape).
  */
 export async function ensureInstalled(
-  locator: Locator,
+  resolved: ResolvedSpec,
   options?: { cacheOnly?: boolean },
-): Promise<InstallSpec> {
+): Promise<Installation> {
   const install = await import("./cache/install.ts");
-  return install.ensureInstalled(locator, options);
+  return install.ensureInstalled(resolved, options);
 }

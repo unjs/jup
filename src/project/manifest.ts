@@ -23,15 +23,15 @@ import { warn } from "../utils/log.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type {
-  Descriptor,
+  Spec,
   DevEnginesDeclaration,
   DevEnginesEntry,
   DevEnginesField,
   DevEnginesRange,
-  LazyLocator,
+  LazyResolvedSpec,
   Manifest,
   ParseSpecOptions,
-  SpecResult,
+  ProjectSpec,
 } from "../types.ts";
 
 /** Directories inside a `node_modules` are skipped, so a dependency cannot hijack its host. */
@@ -196,7 +196,7 @@ function isProjectBoundary(dir: string): boolean {
  * escape hatch users reach for *because* their manifest is broken. Compatibility
  * applies it only on the proxy path; management commands always load the spec.
  */
-export function discoverProjectSpec(
+export function findProjectSpec(
   cwd: string,
   options?: {
     envOnly?: boolean;
@@ -205,7 +205,7 @@ export function discoverProjectSpec(
     here?: boolean;
     tool?: string;
   },
-): SpecResult {
+): ProjectSpec {
   const initialCwd = resolve(cwd);
   // An external spec bypasses manifest parsing while discovery continues for
   // the env file. The external-spec variable cannot be supplied by that file.
@@ -358,7 +358,7 @@ export function discoverProjectSpec(
 
   const specDisabled = projectSpecFlag && envDisabled(ENV.ENABLE_PROJECT_SPEC);
 
-  const result = ((): SpecResult => {
+  const result = ((): ProjectSpec => {
     // §03.1 — the external file is the project's declaration and outranks the
     // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
     // "never look at the project at all" covers a redirected spec too.
@@ -392,7 +392,7 @@ export function discoverProjectSpec(
 }
 
 /**
- * §03.1 — the `SpecResult` for a version file, in the `describe` shape.
+ * §03.1 — the `ProjectSpec` for a version file, in the `describe` shape.
  *
  * `hasPin` is false and no `devEngines` declaration is carried, which is the
  * truth about it: nothing here is a committed pin, so §04.4's `up` treats it as
@@ -415,23 +415,24 @@ function describeVersionFile(
   tool: string,
   initialCwd: string,
   envFilePath: string | undefined,
-): SpecResult {
+): ProjectSpec {
   const source = relative(initialCwd, file.path);
   return {
     type: "Found",
     target: file.path,
     hasPin: false,
     envFilePath,
-    getSpec: (opts: ParseSpecOptions) =>
-      parseSpec(`${tool}@${versionFileRange(file, source)}`, source, {
+    getSpec: (opts?: ParseSpecOptions) =>
+      parseSpec(`${tool}@${versionFileRange(file, source)}`, {
         ...opts,
+        source,
         packageManagerField: false,
       }),
   };
 }
 
 /**
- * The `SpecResult` for one already-read manifest — the walk's selection, or
+ * The `ProjectSpec` for one already-read manifest — the walk's selection, or
  * §03.1's external file, which get identical treatment. devEngines validation
  * is eager (a bad `onFail: "error"` must fail the run); `parseSpec` is deferred.
  */
@@ -441,7 +442,7 @@ function describe(
   initialCwd: string,
   envFilePath: string | undefined,
   field: DevEnginesField = "packageManager",
-): SpecResult {
+): ProjectSpec {
   const { raw, range, hasPin, devEngines, fromPackageManagerField } = readSpecFromManifest(
     data,
     target,
@@ -471,7 +472,7 @@ function describe(
     hasPin,
     specField,
     envFilePath,
-    getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, { ...opts, packageManagerField }),
+    getSpec: (opts?: ParseSpecOptions) => parseSpec(raw, { ...opts, source, packageManagerField }),
   };
 }
 
@@ -515,13 +516,16 @@ function readExternalSpec(path: string): Manifest {
 }
 
 /**
- * §03.4 — parse a spec string into a descriptor.
+ * §03.4 — parse a spec string into a {@link Spec}.
  *
- * `source` is `CLI arguments` or the manifest path relative to the initial cwd.
- * Note `name` is the substring before the **first** `@`, so `@scope/pkg@1.0.0`
- * yields an empty name and correctly fails the supported-name check.
+ * `options.source` names the input in §12's messages: `CLI arguments` — the
+ * default, and what every CLI caller passes — or the manifest path relative to
+ * the initial cwd. Note `name` is the substring before the **first** `@`, so
+ * `@scope/pkg@1.0.0` yields an empty name and correctly fails the
+ * supported-name check.
  */
-export function parseSpec(raw: unknown, source: string, options: ParseSpecOptions): Descriptor {
+export function parseSpec(raw: unknown, options?: ParseSpecOptions): Spec {
+  const source = options?.source ?? CLI_SOURCE;
   // 1 — a non-string field (`packageManager: 42`, `null`, an object).
   if (typeof raw !== "string") {
     throw new UsageError(messages.invalidSpecNotString(source));
@@ -532,7 +536,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
   // a manifest that names no version at all is still §12.2's error.
   const atIndex = raw.indexOf("@");
   if (atIndex === -1 || atIndex === raw.length - 1) {
-    if (options.requireVersion) {
+    if (options?.requireVersion === true) {
       throw new UsageError(messages.noVersionSpecified(raw, source));
     }
     const bareName = atIndex === -1 ? raw : raw.slice(0, -1);
@@ -542,7 +546,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
     }
     // §03.4 — the version-bearing form is checked below; a `packageManager`
     // reading exactly `node` reaches this branch and is the same mistake.
-    if (options.packageManagerField === true && isRuntime(bareName)) {
+    if (options?.packageManagerField === true && isRuntime(bareName)) {
       throw new UsageError(messages.runtimeInPackageManager(bareName));
     }
     return { name: bareName, range: "*" };
@@ -573,7 +577,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
   // than in `readSpecFromManifest` because §03.1's laziness is load-bearing:
   // `jup use pnpm@9` must be able to overwrite a manifest saying `node@22`,
   // and it can only do that if reading the field is what fails, not discovery.
-  if (options.packageManagerField === true && isRuntime(name)) {
+  if (options?.packageManagerField === true && isRuntime(name)) {
     throw new UsageError(messages.runtimeInPackageManager(name));
   }
 
@@ -871,14 +875,14 @@ export function isOutsideProject(manifestPath: string): boolean {
 
 /** §03.5 — reconcile the discovered spec with the requested binary. */
 export function reconcile(
-  result: SpecResult,
-  fallback: LazyLocator,
+  result: ProjectSpec,
+  fallback: LazyResolvedSpec,
   options: { requestedName: string; transparent: boolean; binaryVersion?: string },
-): Descriptor | LazyLocator {
+): Spec | LazyResolvedSpec {
   const { requestedName, binaryVersion } = options;
 
   // An explicit CLI version replaces the range, never the package-manager name.
-  const withBinaryVersion = (descriptor: Descriptor | LazyLocator): Descriptor | LazyLocator =>
+  const withBinaryVersion = (descriptor: Spec | LazyResolvedSpec): Spec | LazyResolvedSpec =>
     binaryVersion === undefined ? descriptor : { name: descriptor.name, range: binaryVersion };
 
   // Never look at the project at all.
