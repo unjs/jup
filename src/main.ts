@@ -34,6 +34,8 @@ import type {
   LazyResolvedSpec,
   ResolvedSpec,
   ProjectSpec,
+  RunOptions,
+  RunResult,
 } from "./types.ts";
 
 /** §01.2 — the classification regex. `[^@]*` is deliberate; see below. */
@@ -130,6 +132,7 @@ export function isGlobalInvocation(args: string[]): boolean {
 /** §01.3 — the hot path: classify, resolve, ensure installed, hand over. */
 export async function runProxy(
   invocation: Extract<Invocation, { mode: "proxy" }>,
+  run?: RunOptions,
 ): Promise<number> {
   const { binaryName, binaryVersion, args } = invocation;
 
@@ -260,6 +263,9 @@ export async function runProxy(
     // §08.3 — the argv this name needs in front of the user's, where the
     // artifact cannot recover the name it was invoked under (`pnpx` → `dlx`).
     tableSpec?.binArgs?.[binaryName],
+    // §08.2 — whether this process may be given away. Off unless the caller
+    // said otherwise, which is what makes the note above true only for a shim.
+    run,
   );
 }
 
@@ -269,19 +275,19 @@ export async function runProxy(
  * then the usage line. Anything else prints with a stack, because a stack trace
  * is the correct output for a bug.
  */
-export async function runMain(argv: string[]): Promise<number> {
+export async function runMain(argv: string[], run?: RunOptions): Promise<RunResult> {
   const invocation = parseArgs(argv);
 
   try {
     if (invocation.mode === "proxy") {
-      return await runProxy(invocation);
+      return { code: await runProxy(invocation, run) };
     }
     // Loaded lazily: the proxy path is the hot one and must not pay for the
     // command surface it never touches (§16, Build shape).
     const { runManagementCommand } = await import("./commands/cli.ts");
-    return await runManagementCommand(invocation.args);
+    return { code: await runManagementCommand(invocation.args, run) };
   } catch (error) {
-    return await presentError(error, invocation);
+    return { code: await presentError(error, invocation) };
   }
 }
 

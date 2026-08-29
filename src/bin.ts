@@ -29,8 +29,13 @@ defaultEnv(ENV.ENABLE_DOWNLOAD_PROMPT, "0");
 const { runMain } = await import("./main.ts");
 
 /**
+ * `handover: true` — §08.2's in-process handover, which the *entry point*
+ * decides for the same reason it decides the download-prompt default above: only
+ * it knows that nothing follows this call. `runMain`'s own default is the safe
+ * one, for the programmatic callers who cannot say that (§08.2, `RunOptions`).
+ *
  * Leave `exitCode` undefined after successful in-process handover: package
  * manager hooks run later and may set it only while it remains undefined.
  */
-const code = await runMain(process.argv.slice(2));
+const { code } = await runMain(process.argv.slice(2), { handover: true });
 if (code !== 0) process.exitCode = code;

@@ -569,8 +569,10 @@ describe("§11.2 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§05.1)", () => {
  *   * `COREPACK_SHIM_DIRECTORY` is prepended to the `PATH` the package
  *     manager and every process it spawns inherit (§08.4) — it decides
  *     which `git`, not merely where our shims land.
- *   * `COREPACK_NODE_EXECPATH` is §08.3.1's interpreter selector. No code
- *     in this host reads it yet; it is denied before the hazard exists.
+ *   * `COREPACK_NODE_EXECPATH` is §08.3.1's interpreter selector: it names
+ *     the runtime a spawned JavaScript entry point runs under
+ *     (`run/interpreter.ts`), so a project able to set it would choose the
+ *     binary that executes the package manager.
  *
  * All three are announced (§03.2's one warning per offending variable)
  * rather than dropped in silence, because a repository trying to relocate

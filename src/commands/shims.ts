@@ -1120,6 +1120,14 @@ function realpathOr(directory: string): string {
  * worst failure this module can produce. Deno 2.8's `node:module` has no
  * `enableCompileCache`, so that runtime is not hypothetical.
  *
+ * `{ handover: true }` is §08.2's in-process handover, asked for explicitly
+ * because `runMain` does not assume it: a stub *is* the package manager for the
+ * rest of this process's life and has nothing after the `await`, which is the
+ * only condition under which giving the process away is safe. It is what keeps a
+ * warm `yarn` run to one process; without it every invocation on the machine
+ * would spawn a second (§08.3.1). Programmatic callers get the safe default
+ * instead — see `RunOptions`.
+ *
  * @param entry The entry module's specifier relative to the stub, from
  * {@link findEntrySpecifier} — `index.ts` beside it in a source checkout,
  * `../dist/index.mjs` in a published one. Resolved against the stub's own
@@ -1144,7 +1152,7 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
     `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "1";`,
     `const entry = new URL(${JSON.stringify(entry)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
-    `const code = await runMain([${name}, ...process.argv.slice(2)]);`,
+    `const { code } = await runMain([${name}, ...process.argv.slice(2)], { handover: true });`,
     `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");
@@ -1196,7 +1204,7 @@ export function cliEntrySource(interpreter?: string): string {
     `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "0";`,
     `const entry = new URL(${JSON.stringify(BUILT_ENTRY_SPECIFIER)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
-    `const code = await runMain(process.argv.slice(2));`,
+    `const { code } = await runMain(process.argv.slice(2), { handover: true });`,
     `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");

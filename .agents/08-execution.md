@@ -46,6 +46,14 @@ This model is why the exit-code semantics in §8.4 are what they are: the tool
 sets the real exit code from its own module body, which runs strictly after
 `runProxy` returns 0.
 
+**It is opt-in.** Giving the process away is only safe for a caller with nothing
+after its `await`, which is every entry point jup ships and no host application
+that embeds it. `runMain(argv, { handover: true })` selects it; the CLI entry and
+§10's stubs pass it, `RunOptions` defaults it off, and without it a JavaScript
+entry point is spawned under §8.3.1 instead. The entry point decides, exactly as
+it decides §5.4's download-prompt default, and for the same reason: the core
+cannot know whether it is the last thing that will run.
+
 ## 8.3 The native path: spawn and wait
 
 For a band declaring `exec: "native"` there is no interpreter to choose — the
@@ -73,11 +81,29 @@ stdio: inherit all three, unmodified
   since entered the store, so a later `enable` can find a durable interpreter
   (§10.2). It is written into the child's environment block, never into jup's own.
 
-### Choosing an interpreter (JavaScript entry points only)
+### 8.3.1 Choosing an interpreter (JavaScript entry points only)
 
-Only relevant if a JavaScript entry point ever has to be spawned rather than
-loaded: `JUP_NODE_EXECPATH`, else a sibling runtime beside jup, else `node` on
-`PATH`; failing all three, an error naming `JUP_NODE_EXECPATH`.
+Reached when a JavaScript entry point is spawned rather than loaded, which is
+what handover being off means: `JUP_NODE_EXECPATH`, else the runtime hosting jup,
+else `node` on `PATH`; failing all three, an error naming `JUP_NODE_EXECPATH`.
+
+The last two tiers are §10.2's, called rather than restated — the question is the
+same one (*which runtime here is durable enough to name?*) and a second copy of
+its ordering would be a second copy of its `cache clean` hazard.
+
+Everything else about such a run is §8.3's: same argv, same inherited stdio, same
+`PATH` entry and `COREPACK_ROOT`. Two things differ from §8.2 and are the price
+of the boundary:
+
+* the child has a live `require.main`, which §8.2 clears so pnpm 4 can detect a
+  version manager. `COREPACK_ROOT` (§8.7) is the supported spelling of that
+  question and is set either way;
+* there is a second process. A warm run costs one process startup that §8.2's
+  does not, which is why the shims do not take this path.
+
+`argv[0]` is left to the runtime here, unlike §8.3's native path: the spawned
+process *is* an interpreter, so `[execPath, binPath, …]` is what it produces on
+its own — the same array §8.2 writes by hand.
 
 ## 8.4 Exit codes
 
@@ -91,6 +117,15 @@ loaded: `JUP_NODE_EXECPATH`, else a sibling runtime beside jup, else `node` on
 
 An uncaught exception resets the pending exit code to 1, and jup must not
 override that runtime behaviour.
+
+Without handover the last row is always the numeric form. Re-raising is right for
+a shim, whose exit status *is* the tool's, and is an unrecoverable death for a
+host application several frames below code that has more to do. The first four
+rows are unchanged and, unlike §8.2's, are actually *returned*: an isolated run
+answers with the tool's own exit code rather than with the placeholder `0`.
+
+`runMain` returns `{ code }`, not the bare number — an object so that a later
+fact about a run can be added without breaking every embedder a second time.
 
 For jup's **own** errors:
 
@@ -131,7 +166,9 @@ chunk.
   may be nested. Tools use it purely as an "am I under a version manager?" flag.
 * `COREPACK_MIGRATE_FROM` (and `JUP_MIGRATE_FROM`) — set during `use`/`up` only,
   before running the tool's own `use` command (§09.5), to the previous pin value
-  or the literal `unknown`.
+  or the literal `unknown`. Without handover it is put back when that command
+  returns; the child's environment block is a copy taken at spawn time, so it
+  still carries the value.
 * The resolved tool's directory is **prepended to `PATH`**, so scripts it spawns
   resolve the same tool.
 
@@ -141,3 +178,9 @@ legitimately use them to configure the tool's own registry access. What jup does
 not do is leak its own per-run bookkeeping into the parent process — the native
 path builds the child's environment block by hand so its additions cannot flow
 back.
+
+Under §8.2's handover there is no parent to protect, and `process.env` *is* the
+child's environment, so `COREPACK_ROOT` is written there. Without handover both
+additions go into the spawned block alone and this process's environment is
+unchanged by the run. What jup does not undo either way is §3.2's env-file load,
+which happens during discovery and is documented as such.

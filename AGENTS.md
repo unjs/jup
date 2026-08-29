@@ -59,5 +59,5 @@ code comments and test names and are being retired; do not add new ones. Cite th
 topical page that owns the behaviour.
 
 The product stays focused: manage and run table entries, write only the
-documented project pins, lockfiles and managed state, and expose only the
-commands in §09.
+documented project pins, lockfiles and managed state, expose only the
+commands in §09, and export only `runMain` from the package root ([16](./.agents/16-implementation-notes.md)).

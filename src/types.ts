@@ -439,3 +439,55 @@ export type Invocation =
       args: string[];
     }
   | { mode: "management"; args: string[] };
+
+/**
+ * §08.2 — how a run is allowed to end.
+ *
+ * The two handover models differ in what they do to the process that asked for
+ * the run, and only one of them is survivable by a caller with work left to do:
+ * §08.2's JavaScript path rewrites `process.argv`, `process.execArgv` and
+ * `process.mainModule`, then loads the tool as this process's entry point, and
+ * §08.5's native path re-raises a signal that killed the child so the parent
+ * shell sees a signal death. Both are exactly right for a shim, whose whole
+ * purpose is to *be* the tool, and both are fatal to a host application that
+ * calls `runMain` in the middle of a script.
+ *
+ * So the default is the safe one and the entry point opts out, which is the same
+ * shape §05.4's download-prompt default already has: the core does not know
+ * whether it is the last thing that will run, and only the entry point does.
+ */
+export interface RunOptions {
+  /**
+   * Allow the run to take over this process (default `false`).
+   *
+   * `true` selects §08.2's in-process handover for a JavaScript tool and §08.5's
+   * signal re-raise for a native one. It is what `bin/jup.mjs` and §10's shims
+   * pass — they have nothing left to do — and it costs a process: with it a warm
+   * `yarn` run is one process, without it, two.
+   *
+   * Left `false`, a JavaScript entry point is spawned under §08.3.1's
+   * interpreter instead of loaded, nothing is written to `process.argv`,
+   * `process.execArgv`, `process.mainModule` or `process.env`, a signal death
+   * comes back as `128 + N` rather than killing the caller, and the returned
+   * number is the tool's real exit code rather than §08.4's placeholder `0`.
+   */
+  handover?: boolean;
+}
+
+/**
+ * What a run answers with.
+ *
+ * An object rather than the bare number it wraps, so that a later fact about a
+ * run — which version it selected, whether it went to the network, where the
+ * artifact came from — can be added without a second breaking change to the one
+ * function every embedder calls. `code` is the only member today and is the
+ * number `jup` itself exits with.
+ *
+ * Under {@link RunOptions.handover} it is §08.4's placeholder `0`: the tool sets
+ * the process's real status from its own module body, strictly after this
+ * resolves. Without handover it is the tool's own exit code, or `128 + N` for a
+ * signal death.
+ */
+export interface RunResult {
+  code: number;
+}

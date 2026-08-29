@@ -48,6 +48,18 @@ a build. `test/unit/shims.test.ts` asserts what the hook writes.
 absolute path naming one machine into the file `npm publish` ships as our `bin`
 target.
 
+The bundle's **public surface is one function**: `src/index.ts` exports
+`runMain` and nothing else, which is what `package.json`'s `exports` gives an
+embedder (`docs/10.api.md`). `parseArgs`, `parseSpec`, `findProjectSpec`,
+`resolveSpec`, `ensureInstalled`, `UsageError` and the types were all exported
+once; each was a second contract to keep stable for a caller who had not asked
+for one, and every argument routed through `runMain` already reaches them. Add
+one back when a user names the script they cannot write — adding an export is a
+minor release, withdrawing one is not. The rule also protects the graph: a
+static re-export of `version/resolve.ts` or `cache/install.ts` drags §04's
+fan-out and the download-and-verify stack onto the warm path, which is why both
+were `await import()` wrappers while they lasted.
+
 Two rules keep the shape honest, both asserted in `test/unit/main.test.ts`:
 
 * **No `node:` builtin is imported.** A static import is hoisted to the top of the

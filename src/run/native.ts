@@ -52,6 +52,14 @@ function forwardHostRuntime(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  * a runtime that cannot re-raise — reached here only if the signal turns out to
  * be blocked or ignored, in which case exiting numerically beats hanging.
  *
+ * `reraise: false` takes that fallback deliberately, and is what
+ * {@link RunOptions.handover}`: false` selects. Dying the child's death is the
+ * right answer for a shim, whose exit status *is* the tool's, and the wrong one
+ * for a host application that called `runMain` mid-script — there the re-raise
+ * is an unrecoverable death several frames below code that has more to do. The
+ * numeric form is §08.4's own wording for the same outcome, so nothing outside
+ * this process can tell the two runs apart except by `$?` versus a signal.
+ *
  * `argv[0]` is the **name the user invoked**, which is what a direct invocation
  * gives it — §08.2's `[execPath, binPath, ...]` rewrite exists only because the
  * JS path runs an interpreter, and a native artifact that inspected `argv[0]`
@@ -78,6 +86,7 @@ export function execNative(
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
   argv0?: string,
+  options?: { reraise?: boolean },
 ): Promise<number> {
   const childEnv = forwardHostRuntime(env);
 
@@ -131,9 +140,12 @@ export function execNative(
         // §08.4 / §08.5 — die the child's death rather than translating it into
         // a number, so the parent shell reports a signal and `$?` agrees with
         // what a directly-invoked package manager would have produced.
-        process.removeAllListeners(signal);
-        process.kill(process.pid, signal);
-        // Only reachable if the signal was blocked or ignored for us.
+        if (options?.reraise !== false) {
+          process.removeAllListeners(signal);
+          process.kill(process.pid, signal);
+        }
+        // Reachable when the signal was blocked or ignored for us, and always
+        // under `reraise: false`.
         resolve(128 + (constants.signals[signal] ?? 0));
         return;
       }

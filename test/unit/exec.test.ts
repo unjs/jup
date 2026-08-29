@@ -71,7 +71,11 @@ beforeAll(() => {
     [
       `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
       `const [location, binName, binJson, ...args] = process.argv.slice(2);`,
-      `execPackageManager(binName, { location, bin: JSON.parse(binJson), hash: "" }, args);`,
+      // `handover: true` — this driver stands in for §10's shims and for
+      // `bin/jup.mjs`, the two callers for whom §08.2's in-process handover is
+      // correct. `runMain`'s default is the isolated path (`RunOptions`), which
+      // the driver below exercises.
+      `execPackageManager(binName, { location, bin: JSON.parse(binJson), hash: "" }, args, undefined, undefined, undefined, { handover: true });`,
       ``,
     ].join("\n"),
   );
@@ -641,7 +645,7 @@ describe("§08.3 — PATH", () => {
         [
           `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
           `const [location, binJson] = process.argv.slice(2);`,
-          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], undefined, "native");`,
+          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], undefined, "native", undefined, { handover: true });`,
           `console.log("parent:" + process.env.PATH);`,
           ``,
         ].join("\n"),
@@ -707,7 +711,7 @@ describe("§08.3 — PATH", () => {
           `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
           `const [location, binName] = process.argv.slice(2);`,
           `const bin = { bunny: "./bin/bunny", bunnyx: "./bin/bunny" };`,
-          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], undefined, "native");`,
+          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], undefined, "native", undefined, { handover: true });`,
           ``,
         ].join("\n"),
       );
@@ -722,6 +726,185 @@ describe("§08.3 — PATH", () => {
         // child told only the path could not tell the two invocations apart.
         expect(result.stdout.trim()).toBe(binName);
       }
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §08.2 / §08.3.1 — `RunOptions.handover`
+ *
+ * Everything above this point asks for handover explicitly, because
+ * everything above stands in for a shim. This block is the other
+ * caller: a host application that called `runMain` with work left to
+ * do, for whom giving the process away and dying the child's death are
+ * both fatal. The default is therefore off, and what stands in for
+ * §08.2 is §08.3.1's spawn.
+ *
+ * Each case is a real child process for the reason the whole file is:
+ * the claims are about what a *process* still holds after the call.
+ * ------------------------------------------------------------------ */
+
+describe("execPackageManager — the isolated path (§08.2, §08.3.1)", () => {
+  /**
+   * Run a JavaScript entry point with handover off, then report what the
+   * calling process still holds. `probe` is appended to the driver, so a
+   * case can print whatever it wants to assert about the caller.
+   */
+  function runIsolated(
+    location: string,
+    bin: BinSpec,
+    probe: string[] = [],
+    args: string[] = [],
+    env: Record<string, string> = {},
+  ): { status: number | null; stdout: string; stderr: string } {
+    const script = join(root, "isolated-driver.mjs");
+    writeFileSync(
+      script,
+      [
+        `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
+        `const [location, binJson, ...args] = process.argv.slice(2);`,
+        `const before = {`,
+        `  argv: JSON.stringify(process.argv),`,
+        `  execArgv: JSON.stringify(process.execArgv),`,
+        `  path: process.env.PATH,`,
+        `  main: process.mainModule,`,
+        `  root: process.env.COREPACK_ROOT,`,
+        `  jupRoot: process.env.JUP_ROOT,`,
+        `};`,
+        // No options argument at all: the default is what is under test.
+        `const code = await execPackageManager("yarn", { location, bin: JSON.parse(binJson), hash: "" }, args);`,
+        `console.log("code:" + code);`,
+        ...probe,
+        ``,
+      ].join("\n"),
+    );
+
+    const result = spawnSync(process.execPath, [script, location, JSON.stringify(bin), ...args], {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  it("returns the tool's real exit code instead of §08.4's placeholder 0", () => {
+    const location = fixture("isolated-code", {
+      "bin/yarn.js": `console.log("ran");\nprocess.exitCode = 42;\n`,
+    });
+
+    const result = runIsolated(location, { yarn: "./bin/yarn.js" });
+
+    expect(result.stdout).toContain("ran\n");
+    // The number §08.2 cannot produce: there the module body runs after the
+    // call returns, so the only honest answer is 0 and the process's own
+    // status carries the truth.
+    expect(result.stdout).toContain("code:42");
+    // And the caller decides its own fate: it set nothing, so it exits 0
+    // despite having just run a tool that asked for 42.
+    expect(result.status).toBe(0);
+  });
+
+  it("leaves the caller's process state exactly as it found it (§08.2)", () => {
+    const location = fixture("isolated-state", {
+      // The child is the one place §08.7's addition must be visible.
+      "bin/yarn.js": `console.log("child-root:" + (process.env.COREPACK_ROOT !== undefined));\n`,
+    });
+
+    const result = runIsolated(location, { yarn: "./bin/yarn.js" }, [
+      `console.log("argv:" + (before.argv === JSON.stringify(process.argv)));`,
+      `console.log("execArgv:" + (before.execArgv === JSON.stringify(process.execArgv)));`,
+      `console.log("path:" + (before.path === process.env.PATH));`,
+      `console.log("mainModule:" + (before.main === process.mainModule));`,
+      // Unchanged, not absent: a run nested inside another version manager
+      // inherits a `COREPACK_ROOT` that was never ours to clear (§08.7).
+      `console.log("root:" + (before.root === process.env.COREPACK_ROOT));`,
+      `console.log("jup-root:" + (before.jupRoot === process.env.JUP_ROOT));`,
+      // The point of all of it: there is still a script here to run.
+      `console.log("alive:true");`,
+    ]);
+
+    expect(result.status).toBe(0);
+    // §08.7 — the child gets `COREPACK_ROOT`; the caller's environment does not.
+    expect(result.stdout).toContain("child-root:true");
+    for (const claim of [
+      "argv:true",
+      "execArgv:true",
+      "path:true",
+      "mainModule:true",
+      "root:true",
+      "jup-root:true",
+      "alive:true",
+    ]) {
+      expect(result.stdout).toContain(claim);
+    }
+  });
+
+  it("passes the arguments through and finds itself at argv[1] (§08.3.1)", () => {
+    const location = fixture("isolated-argv", {
+      "bin/yarn.js": [
+        `console.log("args:" + JSON.stringify(process.argv.slice(2)));`,
+        // Yarn's own read: `process.argv[1]` must be the entry point, which is
+        // what a spawned `<interpreter> <binPath>` produces without a rewrite.
+        `console.log("self:" + process.argv[1].endsWith("yarn.js"));`,
+        ``,
+      ].join("\n"),
+    });
+
+    const result = runIsolated(location, { yarn: "./bin/yarn.js" }, [], ["install", "--frozen"]);
+
+    expect(result.stdout).toContain(`args:["install","--frozen"]`);
+    expect(result.stdout).toContain("self:true");
+  });
+
+  it("honours JUP_NODE_EXECPATH as the interpreter (§08.3.1)", () => {
+    const location = fixture("isolated-interpreter", { "bin/yarn.js": `\n` });
+
+    // A shell script standing in for a runtime: it can report that it was the
+    // thing spawned, and what it was handed, which no real interpreter can say
+    // about itself without ambiguity.
+    const fake = join(root, "fake-node");
+    writeFileSync(fake, `#!/bin/sh\nprintf 'interpreter:%s\\n' "$1"\nexit 7\n`);
+    chmodSync(fake, 0o755);
+
+    const result = runIsolated(location, { yarn: "./bin/yarn.js" }, [], [], {
+      JUP_NODE_EXECPATH: fake,
+    });
+
+    expect(result.stdout).toContain(join(location, "bin", "yarn.js"));
+    // The interpreter's own status is the run's, exactly as a tool's would be.
+    expect(result.stdout).toContain("code:7");
+  });
+
+  /* §08.5 — the native path's other fatality. */
+  describe.skipIf(process.platform === "win32")("a signal death", () => {
+    it("comes back as 128 + N rather than killing the caller (§08.4)", () => {
+      const location = fixture("isolated-signal", {
+        "bin/bunny": `#!/bin/sh\nkill -TERM $$\n`,
+      });
+      chmodSync(join(location, "bin", "bunny"), 0o755);
+
+      const script = join(root, "isolated-signal-driver.mjs");
+      writeFileSync(
+        script,
+        [
+          `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
+          `const [location] = process.argv.slice(2);`,
+          `const bin = { bunny: "./bin/bunny" };`,
+          `const code = await execPackageManager("bunny", { location, bin, hash: "" }, [], undefined, "native");`,
+          `console.log("code:" + code);`,
+          `console.log("alive:true");`,
+          ``,
+        ].join("\n"),
+      );
+
+      const result = spawnSync(process.execPath, [script, location], { encoding: "utf8" });
+
+      // §08.4's stated fallback, taken deliberately: `SIGTERM` is 15.
+      expect(result.stdout).toContain("code:143");
+      expect(result.stdout).toContain("alive:true");
+      // The caller is not the tool, so it did not die the tool's death: with
+      // handover it would have exited *by signal*, with no status at all.
+      expect(result.signal).toBe(null);
+      expect(result.status).toBe(0);
     });
   });
 });

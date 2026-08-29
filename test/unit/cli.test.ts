@@ -326,6 +326,24 @@ async function rejection(promise: Promise<unknown>): Promise<Error> {
 
 const execMock = vi.mocked(execPackageManager);
 
+/**
+ * §09.5 — what `COREPACK_MIGRATE_FROM` held **while the package manager ran**.
+ *
+ * Read at call time rather than off `process.env` afterwards, because §08.7 puts
+ * the variable back once a handover that was not given this process returns
+ * (`RunOptions`): the child's environment block is a copy taken at spawn time,
+ * so this is the same read one process earlier, and it stays honest for the
+ * commands' default — the isolated path — as well as for the CLI's.
+ */
+function captureMigrateFrom(): { readonly value: string | undefined } {
+  const seen: { value: string | undefined } = { value: undefined };
+  execMock.mockImplementationOnce(() => {
+    seen.value = process.env.COREPACK_MIGRATE_FROM;
+    return 0;
+  });
+  return seen;
+}
+
 /* ------------------------------------------------------------------ *
  * §09.1 — pattern resolution
  * ------------------------------------------------------------------ */
@@ -996,6 +1014,7 @@ describe("use (§09.5, tests 105-110)", () => {
     await seed("yarn", "1.22.4");
     await manifest({ name: "demo", packageManager: "yarn@1.0.0" });
 
+    const migrateFrom = captureMigrateFrom();
     await expect(cmdUse(["yarn@1.22.4"])).resolves.toBe(0);
 
     // §12.11 — the banner, then the path that was modified, then the blank
@@ -1013,16 +1032,19 @@ describe("use (§09.5, tests 105-110)", () => {
     const [binName, , args] = execMock.mock.calls[0]!;
     expect(binName).toBe("yarn");
     expect(args).toEqual(["install"]);
-    expect(process.env.COREPACK_MIGRATE_FROM).toBe("yarn@1.0.0");
+    expect(migrateFrom.value).toBe("yarn@1.0.0");
   });
 
   it("uses the literal 'unknown' when the project had no pin", async () => {
     await seed("yarn", "1.22.4");
     await manifest({ name: "demo" });
 
+    const migrateFrom = captureMigrateFrom();
     await cmdUse(["yarn@1.22.4"]);
 
-    expect(process.env.COREPACK_MIGRATE_FROM).toBe("unknown");
+    expect(migrateFrom.value).toBe("unknown");
+    // §08.7 — and it does not outlive the run it was set for.
+    expect(process.env.COREPACK_MIGRATE_FROM).toBeUndefined();
   });
 
   it("creates package.json in an empty directory (test 106)", async () => {

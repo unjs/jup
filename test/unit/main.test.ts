@@ -870,7 +870,10 @@ describe("the warm fast path — §01.3 (test 96)", () => {
         ``,
         `process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";`,
         `const { runMain } = await import(${JSON.stringify(pathToFileURL(join(REPO_ROOT, "src", "main.ts")).href)});`,
-        `const code = await runMain(process.argv.slice(2));`,
+        // `handover: true` — §01.3's budget is the *shim's* budget, and a shim
+        // is what this stands in for; the isolated path spawns and is measured
+        // separately (§08.3.1).
+        `const { code } = await runMain(process.argv.slice(2), { handover: true });`,
         `writeFileSync(${JSON.stringify(report)}, JSON.stringify({`,
         `  code,`,
         `  // Module loading itself reads files; only the store's bookkeeping matters.`,
@@ -1019,7 +1022,7 @@ function moduleGraph(entry: string): ModuleGraph {
       ``,
       `process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";`,
       `const { runMain } = await import(${JSON.stringify(pathToFileURL(join(REPO_ROOT, "src", entry)).href)});`,
-      `const code = await runMain(process.argv.slice(2));`,
+      `const { code } = await runMain(process.argv.slice(2), { handover: true });`,
       `writeFileSync(${JSON.stringify(report)}, JSON.stringify({`,
       `  code,`,
       `  natives: process.moduleLoadList.length,`,
@@ -1605,5 +1608,54 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
     ).toBeLessThanOrEqual(284_500);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §08.2 — `runMain`'s default, which is the public API's contract
+ *
+ * Everything above spawns `src/bin.ts`, and `bin.ts` asks for handover
+ * because nothing follows its `await`. A host application cannot say
+ * that, so the default is the other one: `runMain` returns the tool's
+ * real exit code, leaves the process it was called in intact, and can
+ * therefore be called twice.
+ * ------------------------------------------------------------------ */
+
+describe("runMain — the default is not to take the process (§08.2)", () => {
+  const INDEX_URL = pathToFileURL(join(REPO_ROOT, "src", "index.ts")).href;
+
+  it("runs a tool mid-script, twice, and answers with its exit code", () => {
+    const { cwd, home } = makeProject({ name: "demo", packageManager: "yarn@1.0.0" });
+    // §08.4 — a code the placeholder `0` could never carry back.
+    installFake(
+      home,
+      "yarn",
+      "1.0.0",
+      `console.log("ran " + process.argv[2]);\nprocess.exitCode = 3;\n`,
+    );
+
+    const driver = join(home, "api-driver.mjs");
+    writeFileSync(
+      driver,
+      [
+        `const { runMain } = await import(${JSON.stringify(INDEX_URL)});`,
+        `console.log("first:" + (await runMain(["yarn", "one"])).code);`,
+        // The claim in one line: there is a second statement, and it runs.
+        `console.log("second:" + (await runMain(["yarn", "two"])).code);`,
+        `console.log("argv:" + JSON.stringify(process.argv.slice(2)));`,
+        ``,
+      ].join("\n"),
+    );
+
+    const result = run(cwd, home, [], {}, driver);
+
+    expect(result.stdout).toContain("ran one\n");
+    expect(result.stdout).toContain("first:3");
+    expect(result.stdout).toContain("ran two\n");
+    expect(result.stdout).toContain("second:3");
+    // §08.2's rewrite would have left `[execPath, binPath, "one"]` here.
+    expect(result.stdout).toContain("argv:[]");
+    // Nothing set the caller's own status, so it is the caller's to set.
+    expect(result.status).toBe(0);
   });
 });

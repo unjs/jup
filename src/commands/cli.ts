@@ -18,7 +18,7 @@ const {
   sep,
 } = process.getBuiltinModule("node:path");
 const { Readable } = process.getBuiltinModule("node:stream");
-import { ENV, writeEnv } from "../config/env-vars.ts";
+import { ENV, envSpellings, writeEnv } from "../config/env-vars.ts";
 import {
   getTableSpec,
   isPerHost,
@@ -60,7 +60,7 @@ import {
   writeMarker,
 } from "../cache/store.ts";
 import { create, extract, listEntries } from "../cache/tar.ts";
-import type { Spec, Installation, ResolvedSpec, ProjectSpec } from "../types.ts";
+import type { Spec, Installation, ResolvedSpec, ProjectSpec, RunOptions } from "../types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "jup.tgz";
@@ -458,7 +458,7 @@ async function installFromArchive(file: string, options: { activate: boolean }):
   }
 }
 /** §09.4 — the two-step resolve is what confines the update to the current major line. */
-export async function cmdUp(args: string[]): Promise<number> {
+export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
   const parsed = parseArgs(args, {
     booleans: ["--here", "--no-integrity", "--no-lockfile"],
   });
@@ -519,24 +519,28 @@ export async function cmdUp(args: string[]): Promise<number> {
     // the range allows is still selected, installed and handed over; the only
     // difference is that nothing records which one it was.
     const refreshed = await resolveOrThrow(pin, { useCache: false });
-    return applyToProject(refreshed, (reference, spec) => {
-      if (lockfile) {
-        writeResolution(dir, pin, { name: pin.name, reference }, spec.hash, isPerHost(refreshed));
-        // The memo under `node_modules` answers the same key and now holds the
-        // version this command just superseded — and it answers *alone* wherever
-        // the recorded file is not visible: an `up` not yet committed, a `git
-        // stash`, a CI cache that restores `node_modules` without the lockfile.
-        // Retiring it is what stops the project silently running the old version
-        // (§04.4).
-        removeCachedResolution(dir, resolutionKey(pin));
-        // §12.11 — the resolution file is what changed, so that is what is named.
-        out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
-      } else {
-        dropRecordedResolution(dir, pin);
-      }
-      // The field is unchanged, so that is what the package manager migrates from.
-      return `${pin.name}@${pin.range}`;
-    });
+    return applyToProject(
+      refreshed,
+      (reference, spec) => {
+        if (lockfile) {
+          writeResolution(dir, pin, { name: pin.name, reference }, spec.hash, isPerHost(refreshed));
+          // The memo under `node_modules` answers the same key and now holds the
+          // version this command just superseded — and it answers *alone* wherever
+          // the recorded file is not visible: an `up` not yet committed, a `git
+          // stash`, a CI cache that restores `node_modules` without the lockfile.
+          // Retiring it is what stops the project silently running the old version
+          // (§04.4).
+          removeCachedResolution(dir, resolutionKey(pin));
+          // §12.11 — the resolution file is what changed, so that is what is named.
+          out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
+        } else {
+          dropRecordedResolution(dir, pin);
+        }
+        // The field is unchanged, so that is what the package manager migrates from.
+        return `${pin.name}@${pin.range}`;
+      },
+      run,
+    );
   }
 
   // Both resolves pass `useCache: false`: with the cache consulted they would
@@ -559,7 +563,7 @@ export async function cmdUp(args: string[]): Promise<number> {
   }
   if (highest === null) throw new UsageError(messages.upNoHighest(name, line));
 
-  return pinToProject(highest, { here, integrity });
+  return pinToProject(highest, { here, integrity }, run);
 }
 
 /**
@@ -578,7 +582,7 @@ function declaredPin(lookup: Extract<ProjectSpec, { type: "Found" }>): Spec | un
   }
 }
 /** §09.5 — writes the pin, then runs the package manager's `use` command. */
-export async function cmdUse(args: string[]): Promise<number> {
+export async function cmdUse(args: string[], run?: RunOptions): Promise<number> {
   const parsed = parseArgs(args, {
     booleans: ["--here", "--no-integrity", "--no-lockfile"],
   });
@@ -634,8 +638,8 @@ export async function cmdUse(args: string[]): Promise<number> {
 
   const options = { here, integrity };
   return range
-    ? pinRangeToProject(descriptor, resolved, options, lockfile)
-    : pinToProject(resolved, options);
+    ? pinRangeToProject(descriptor, resolved, options, lockfile, run)
+    : pinToProject(resolved, options, run);
 }
 
 /**
@@ -656,41 +660,46 @@ function pinRangeToProject(
   locator: ResolvedSpec,
   options?: PinOptions,
   lockfile = true,
+  run?: RunOptions,
 ): Promise<number> {
-  return applyToProject(locator, (_reference, spec) => {
-    const { previousPackageManager, target, written } = writePin(
-      process.cwd(),
-      // §02.4 — the digest is per-host for a native tool, so it never reaches
-      // the manifest; for a range it never does anyway, since the field holds no
-      // version for a digest to describe. `jup.lock` below is where it lands.
-      { name: descriptor.name, reference: descriptor.range, resolved: locator.reference },
-      options,
-    );
-
-    const dir = dirname(target);
-    if (lockfile) {
-      writeResolution(dir, descriptor, locator, spec.hash, isPerHost(locator));
-      // The committed resolution supersedes any host-local memo for this key.
-      removeCachedResolution(dir, resolutionKey(descriptor));
-    }
-
-    // §03.7, §12.11 — both files changed, so both are named, in the order they
-    // are read back: the field that declares the range, then the file that says
-    // what it currently means.
-    out(`${messages.updatedManifest(target, descriptor.name, written)}\n`);
-    if (lockfile) {
-      out(
-        `${messages.updatedManifest(join(dir, LOCKFILE_NAME), descriptor.name, locator.reference)}\n`,
+  return applyToProject(
+    locator,
+    (_reference, spec) => {
+      const { previousPackageManager, target, written } = writePin(
+        process.cwd(),
+        // §02.4 — the digest is per-host for a native tool, so it never reaches
+        // the manifest; for a range it never does anyway, since the field holds no
+        // version for a digest to describe. `jup.lock` below is where it lands.
+        { name: descriptor.name, reference: descriptor.range, resolved: locator.reference },
+        options,
       );
-    } else {
-      dropRecordedResolution(dir, descriptor);
-    }
 
-    const stale = staleResolutionKey(previousPackageManager);
-    if (stale !== undefined && stale !== resolutionKey(descriptor)) removeResolution(dir, stale);
+      const dir = dirname(target);
+      if (lockfile) {
+        writeResolution(dir, descriptor, locator, spec.hash, isPerHost(locator));
+        // The committed resolution supersedes any host-local memo for this key.
+        removeCachedResolution(dir, resolutionKey(descriptor));
+      }
 
-    return previousPackageManager;
-  });
+      // §03.7, §12.11 — both files changed, so both are named, in the order they
+      // are read back: the field that declares the range, then the file that says
+      // what it currently means.
+      out(`${messages.updatedManifest(target, descriptor.name, written)}\n`);
+      if (lockfile) {
+        out(
+          `${messages.updatedManifest(join(dir, LOCKFILE_NAME), descriptor.name, locator.reference)}\n`,
+        );
+      } else {
+        dropRecordedResolution(dir, descriptor);
+      }
+
+      const stale = staleResolutionKey(previousPackageManager);
+      if (stale !== undefined && stale !== resolutionKey(descriptor)) removeResolution(dir, stale);
+
+      return previousPackageManager;
+    },
+    run,
+  );
 }
 
 /**
@@ -707,6 +716,7 @@ function pinRangeToProject(
 async function applyToProject(
   locator: ResolvedSpec,
   record: (reference: string, spec: Installation) => string,
+  run?: RunOptions,
 ): Promise<number> {
   out(`${messages.installingInProject(locator.name, locator.reference)}\n`);
 
@@ -728,31 +738,68 @@ async function applyToProject(
 
   // §09.5 — what the package manager's own `use` command is told to migrate
   // from; the literal `unknown` when the project had no previous value.
+  //
+  // §08.7 puts this in the *child's* environment, and `process.env` is only that
+  // when this process is the tool's. Without handover there is a caller above
+  // whose environment outlives the run, so the variable is put back afterwards:
+  // the child's block is a copy taken at spawn time, so it still carries the
+  // value, and nothing of ours reads it after the handover returns.
+  const restore = restoreEnvAfter(run, ENV.MIGRATE_FROM);
   writeEnv(ENV.MIGRATE_FROM, previousPackageManager);
   out(`\n`);
 
-  // From here the package manager owns the process and its output is passed
-  // through untouched (§09.14). §08.3's native path is the one that has an exit
-  // code to hand back here; the JavaScript path answers 0 and sets the real one
-  // itself, later (§08.4).
-  return await execPackageManager(
-    useCommand[0]!,
-    spec,
-    useCommand.slice(1),
-    // §08.1 — `installSpec.bin ?? spec.bin`; the marker may carry no `bin`.
-    // §02.4 — `{exe}`-substituted, per `resolveSpecBin`.
-    tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
-    tableSpec?.exec,
-    // §02.4 — no band names its own `commands.use` under an aliased bin, so
-    // this is `undefined` for every entry in the table today; it is passed for
-    // the same reason the two above are, so that one handover cannot drift from
-    // the other.
-    tableSpec?.binArgs?.[useCommand[0]!],
-  );
+  try {
+    // From here the package manager owns the process and its output is passed
+    // through untouched (§09.14). §08.3's native path is the one that has an exit
+    // code to hand back here; the JavaScript path answers 0 and sets the real one
+    // itself, later (§08.4) — unless `run.handover` is off, in which case it is
+    // spawned too and this is the tool's own code either way.
+    return await execPackageManager(
+      useCommand[0]!,
+      spec,
+      useCommand.slice(1),
+      // §08.1 — `installSpec.bin ?? spec.bin`; the marker may carry no `bin`.
+      // §02.4 — `{exe}`-substituted, per `resolveSpecBin`.
+      tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
+      tableSpec?.exec,
+      // §02.4 — no band names its own `commands.use` under an aliased bin, so
+      // this is `undefined` for every entry in the table today; it is passed for
+      // the same reason the two above are, so that one handover cannot drift from
+      // the other.
+      tableSpec?.binArgs?.[useCommand[0]!],
+      run,
+    );
+  } finally {
+    restore();
+  }
+}
+
+/**
+ * A no-op under handover, and otherwise a function that puts every spelling of
+ * `name` back the way it was.
+ *
+ * Both spellings, because {@link writeEnv} sets both (§11.6) and restoring one
+ * would leave the compatibility name standing — which for
+ * `COREPACK_MIGRATE_FROM` is the one a package manager actually reads.
+ */
+function restoreEnvAfter(run: RunOptions | undefined, name: string): () => void {
+  if (run?.handover === true) return () => {};
+
+  const before = envSpellings(name).map((spelling) => [spelling, process.env[spelling]] as const);
+  return () => {
+    for (const [spelling, value] of before) {
+      if (value === undefined) delete process.env[spelling];
+      else process.env[spelling] = value;
+    }
+  };
 }
 
 /** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */
-function pinToProject(locator: ResolvedSpec, options?: PinOptions): Promise<number> {
+function pinToProject(
+  locator: ResolvedSpec,
+  options?: PinOptions,
+  run?: RunOptions,
+): Promise<number> {
   // §02.4 — a native package manager's artifact differs per host, so its digest
   // is not a portable fact and must not be written into a file people commit: a
   // Linux-pinned `bun@1.4.0+sha512.…` fails on a colleague's Mac with a hash
@@ -762,27 +809,31 @@ function pinToProject(locator: ResolvedSpec, options?: PinOptions): Promise<numb
   // per-host record in `jup.lock` for the hosts that have actually run.
   const perHost = isPerHost(locator);
 
-  return applyToProject(locator, (reference, spec) => {
-    const { previousPackageManager, target, written } = writePin(
-      process.cwd(),
-      { name: locator.name, reference, hash: perHost ? undefined : spec.hash },
-      options,
-    );
+  return applyToProject(
+    locator,
+    (reference, spec) => {
+      const { previousPackageManager, target, written } = writePin(
+        process.cwd(),
+        { name: locator.name, reference, hash: perHost ? undefined : spec.hash },
+        options,
+      );
 
-    // Name the selected manifest after the write succeeds.
-    // §03.7 — `written`, not `reference`: the member holds a clean version with
-    // the digest beside it in `integrity` (or, under `--no-integrity`, nowhere),
-    // and a line claiming otherwise would name a string that is nowhere in the
-    // file.
-    out(`${messages.updatedManifest(target, locator.name, written)}\n`);
+      // Name the selected manifest after the write succeeds.
+      // §03.7 — `written`, not `reference`: the member holds a clean version with
+      // the digest beside it in `integrity` (or, under `--no-integrity`, nowhere),
+      // and a line claiming otherwise would name a string that is nowhere in the
+      // file.
+      out(`${messages.updatedManifest(target, locator.name, written)}\n`);
 
-    // An exact pin retires the replaced range's resolution so restoring the
-    // range cannot resurrect stale state.
-    const stale = staleResolutionKey(previousPackageManager);
-    if (stale !== undefined) removeResolution(dirname(target), stale);
+      // An exact pin retires the replaced range's resolution so restoring the
+      // range cannot resurrect stale state.
+      const stale = staleResolutionKey(previousPackageManager);
+      if (stale !== undefined) removeResolution(dirname(target), stale);
 
-    return previousPackageManager;
-  });
+      return previousPackageManager;
+    },
+    run,
+  );
 }
 
 /**
@@ -1142,7 +1193,7 @@ function cmdHelp(): Promise<number> {
  * (stdout, `Usage Error: `, a blank line, then {@link USAGE_LINES}'s entry for
  * the command word).
  */
-export async function runManagementCommand(args: string[]): Promise<number> {
+export async function runManagementCommand(args: string[], run?: RunOptions): Promise<number> {
   const [command, ...rest] = args;
 
   switch (command) {
@@ -1197,10 +1248,10 @@ export async function runManagementCommand(args: string[]): Promise<number> {
       return cmdPack(rest);
     }
     case "up": {
-      return cmdUp(rest);
+      return cmdUp(rest, run);
     }
     case "use": {
-      return cmdUse(rest);
+      return cmdUse(rest, run);
     }
     default: {
       throw new UsageError(`Unknown command "${command}"`);

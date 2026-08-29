@@ -92,7 +92,7 @@ let warn: ReturnType<typeof vi.spyOn>;
 
 const ENTRY_SOURCE = `export async function runMain(argv) {
   process.stdout.write(JSON.stringify({ argv, prompt: process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT }));
-  return 0;
+  return { code: 0 };
 }
 `;
 
@@ -849,7 +849,7 @@ describe("enable (§10.3)", () => {
       join(dist, "index.mjs"),
       `export async function runMain() {
   process.once("beforeExit", () => { if (process.exitCode === undefined) process.exitCode = 42; });
-  return 0;
+  return { code: 0 };
 }
 `,
     );

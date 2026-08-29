@@ -10,10 +10,10 @@ const { runMain } = process.getBuiltinModule("node:module");
 const { homedir } = process.getBuiltinModule("node:os");
 const { basename, delimiter, dirname, isAbsolute, join, resolve, sep } =
   process.getBuiltinModule("node:path");
-import { ENV, readEnv, SYSTEM_ENV, writeEnv } from "../config/env-vars.ts";
+import { ENV, readEnv, SYSTEM_ENV, writeEnv, writeEnvInto } from "../config/env-vars.ts";
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
-import type { BinSpec, Installation } from "../types.ts";
+import type { BinSpec, Installation, RunOptions } from "../types.ts";
 import { CLI_ENTRY_NAME, getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
@@ -319,11 +319,51 @@ export function resolveBinPath(binName: string, spec: Installation, fallbackBin?
 }
 
 /**
+ * The child's environment block: the ambient one, plus §08.7's two additions,
+ * built by hand so neither can flow back into this process.
+ *
+ * `prepend` is §08.7's `PATH` entry and differs by path for the reason the two
+ * paths differ: a native artifact is an executable, so what goes in front is the
+ * directory holding it, while a JavaScript one is a module with no executable
+ * beside it and what goes in front is §10.1's self-dispatching shim directory —
+ * `undefined` when there is none to prepend, which is the ordinary state of a
+ * machine that never ran `enable`.
+ *
+ * `COREPACK_ROOT` lands here rather than on `process.env` whenever this process
+ * is not the tool's, which is §08.7's "does not leak its own per-run bookkeeping
+ * into the parent process" applied to the one caller that has a parent left to
+ * leak into.
+ */
+function childEnvironment(prepend: string | undefined, handover: boolean): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  if (!handover) writeEnvInto(env, ENV.ROOT, getOwnRoot());
+
+  if (prepend !== undefined) {
+    const path = pathWith(prepend, process.env[SYSTEM_ENV.PATH]);
+    if (path !== undefined) setPath(env, path);
+  }
+  return env;
+}
+
+/**
  * JavaScript handover rewrites process state, schedules `runMain`, and returns 0;
  * the module sets the process's eventual exit status. Deliberately do not catch
  * that load: doing so changes the runtime's uncaught-exception exit behavior.
  * Native handover instead returns the eventual child exit code. Both preserve
  * inherited stdio.
+ *
+ * Both of those are handover in {@link RunOptions}'s sense, and both are the
+ * wrong answer for a caller that is not finished: the first gives the process
+ * away, and the second dies the child's death (§08.5). `run.handover` therefore
+ * gates them, defaulting to off, and what stands in is one spawn — §08.3.1's,
+ * for a JavaScript entry point, which is the case that had no implementation
+ * until there was a caller who could not be handed over from. Everything else
+ * about the run is unchanged: same binary, same argv, same inherited stdio, same
+ * `PATH` entry and `COREPACK_ROOT` in front of it. What differs is a process
+ * boundary, a real exit code in place of §08.4's placeholder `0`, and — the one
+ * fidelity cost worth naming — a live `require.main` in the child, which §08.2
+ * clears so that pnpm 4 can recognise a version manager. `COREPACK_ROOT` is
+ * §08.7's supported spelling of that same question and is set either way.
  */
 export function execPackageManager(
   binName: string,
@@ -332,6 +372,7 @@ export function execPackageManager(
   fallbackBin?: BinSpec,
   execMode?: "js" | "native",
   binArgs?: readonly string[],
+  run?: RunOptions,
 ): number | Promise<number> {
   const binPath = resolveBinPath(binName, spec, fallbackBin);
 
@@ -342,10 +383,16 @@ export function execPackageManager(
   // the user typed.
   const argv = binArgs === undefined || binArgs.length === 0 ? args : [...binArgs, ...args];
 
+  const handover = run?.handover === true;
+
   // §08.7 — the only variable we add, and it is added the same way for both
   // models: a native child inherits `process.env` wholesale. Package managers
   // use it purely as an "am I running under a version manager?" flag.
-  writeEnv(ENV.ROOT, getOwnRoot());
+  //
+  // Only where this process is the tool's, though. Without handover there is a
+  // caller above us whose environment is not ours to edit, so the same variable
+  // is written into the child's block by {@link childEnvironment} instead.
+  if (handover) writeEnv(ENV.ROOT, getOwnRoot());
 
   if (execMode === "native") {
     // §08.7 — what goes in front of `PATH` for a native artifact is the
@@ -353,15 +400,33 @@ export function execPackageManager(
     // environment: the entry is written into *that* and `process.env.PATH` is
     // never touched, which is "MUST NOT leak into the tool's own process" in its
     // literal form.
-    const env = { ...process.env };
-    const path = pathWith(dirname(binPath), process.env[SYSTEM_ENV.PATH]);
-    if (path !== undefined) setPath(env, path);
+    const env = childEnvironment(dirname(binPath), handover);
 
     // Imported here and nowhere else: `node:child_process` must not enter the
     // module graph of a JavaScript cache hit (§01.3, §16, Build shape).
     // `binName`, not `binPath`: §08.3's artifacts dispatch on `argv[0]`, and
     // `bunx` and `bun` are the same file.
-    return import("./native.ts").then((native) => native.execNative(binPath, argv, env, binName));
+    return import("./native.ts").then((native) =>
+      native.execNative(binPath, argv, env, binName, { reraise: handover }),
+    );
+  }
+
+  if (!handover) {
+    // §08.3.1 — the JavaScript entry point, spawned rather than loaded. The argv
+    // is §08.2's own rewrite, arrived at by the runtime rather than by hand: a
+    // spawned `<interpreter> <binPath> <args…>` *is* `[execPath, binPath, …]`
+    // once the child is up, so Yarn still finds itself at `process.argv[1]`.
+    //
+    // No `argv0`: the native branch overrides it because a native artifact reads
+    // the name it was invoked under, and here `argv[0]` is the interpreter, as
+    // it is for any directly-run script.
+    const env = childEnvironment(shimDirectoryFor(binName), handover);
+
+    return import("./interpreter.ts").then(async ({ resolveInterpreter }) => {
+      const interpreter = await resolveInterpreter(binName);
+      const { execNative } = await import("./native.ts");
+      return await execNative(interpreter, [binPath, ...argv], env, undefined, { reraise: false });
+    });
   }
 
   // §08.7 — the JavaScript path hands over **in process**, so there is no child
