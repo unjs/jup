@@ -190,6 +190,7 @@ describe("§09.12 self-install", () => {
     expect((await run(["self-install"], options)).exitCode).toBe(0);
     const marker = statSync(join(selfDir, ".jup"));
     const shim = lstatSync(join(shimDir, "jup"));
+    const body = readFileSync(join(shimDir, "jup"), "utf8");
 
     const second = await run(["self-install"], options);
 
@@ -197,7 +198,11 @@ describe("§09.12 self-install", () => {
     expect(second.stderr).toBe("");
     expect(statSync(join(selfDir, ".jup")).ino).toBe(marker.ino);
     expect(statSync(join(selfDir, ".jup")).mtimeMs).toBe(marker.mtimeMs);
-    expect(lstatSync(join(shimDir, "jup")).mtimeMs).toBe(shim.mtimeMs);
+    // The shim is unchanged on both platforms, but only §10.2's link is left
+    // *untouched*: §10.3 has no idempotency short-circuit, so Windows rewrites
+    // its trio byte for byte and the mtime moves (as it does for `enable`).
+    expect(readFileSync(join(shimDir, "jup"), "utf8")).toBe(body);
+    if (!IS_WINDOWS) expect(lstatSync(join(shimDir, "jup")).mtimeMs).toBe(shim.mtimeMs);
   });
 
   it("replaces a copy of the same version whose bytes have changed", async () => {
