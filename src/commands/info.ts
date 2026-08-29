@@ -377,10 +377,15 @@ export function classifySpec(descriptor: Descriptor): SpecKind {
 /**
  * Which field carries the pin, read from the manifest itself.
  *
- * `SpecResult.hasPin` cannot answer this: it is `typeof pm === "string"`, so a
- * `packageManager: 42` — one of the shapes §12.2 exists for — would be reported
- * as coming from `devEngines`, naming the wrong field in the one report whose
- * job is to name the right one.
+ * The order is §03.3's: a `devEngines.packageManager` naming a version outranks
+ * the top-level field, and one naming no version does not, because it has not
+ * said which release the project wants. `packageManager` answers for everything
+ * else it is present for — including the shapes it is present for *badly*, like
+ * the `packageManager: 42` of §12.2, which this report has to show rather than
+ * skip past on its way to a `devEngines` block that is not the field at fault.
+ *
+ * `SpecResult.hasPin` cannot answer this. It is `typeof pm === "string"`, which
+ * neither notices the non-string shapes nor knows about the precedence above.
  */
 function describeDeclaration(manifest: Manifest | undefined): {
   field: string | null;
@@ -399,6 +404,23 @@ function describeDeclaration(manifest: Manifest | undefined): {
           onFail: (de as Record<string, unknown>).onFail,
         }
       : null;
+
+  // §03.3 — the versioned member wins, so it is named first.
+  if (
+    devEngines !== null &&
+    typeof devEngines.name === "string" &&
+    typeof devEngines.version === "string"
+  ) {
+    return {
+      field: "devEngines.packageManager",
+      spec: `${devEngines.name}@${devEngines.version}`,
+      raw: `${devEngines.name}@${devEngines.version}`,
+      // Read out of `devEngines`, so §02.3 does not apply: a runtime named
+      // there is exactly where a runtime belongs.
+      packageManagerField: false,
+      devEngines,
+    };
+  }
 
   if (manifest !== undefined && Object.hasOwn(manifest, "packageManager")) {
     const pm = manifest.packageManager;

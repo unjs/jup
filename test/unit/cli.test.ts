@@ -225,6 +225,10 @@ afterEach(async () => {
 /** A package manager already in the store: the §07.2 warm path, no network. */
 async function seed(name: string, version: string, hash?: string): Promise<string> {
   const location = join(home, "v1", name, version);
+  // Note the body length follows the version's digit count, so some versions
+  // give an odd-length hex that `integrityFromHash` cannot convert. That is
+  // deliberate — §03.7's "digest that cannot be spelled as SRI" path is
+  // exercised by `yarn@2.4.3` and not by `yarn@1.22.4`.
   const digest = hash ?? `sha512.${version.replaceAll(".", "")}${"0".repeat(32)}`;
   await mkdir(join(location, "bin"), { recursive: true });
   await writeFile(join(location, "bin", `${name}.js`), "// fake package manager\n");
@@ -244,6 +248,19 @@ async function manifest(data: unknown, dir = project): Promise<void> {
 
 function readManifest(dir = project): Record<string, unknown> {
   return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<string, unknown>;
+}
+
+/**
+ * §03.7 — the `devEngines.packageManager` member, which is where the pin now
+ * lands. The version there is always *clean*, with any digest beside it in
+ * `integrity`, so the two are read together to recover the one spec string the
+ * old top-level assertions matched against.
+ */
+function pinnedMember(dir = project): Record<string, unknown> | undefined {
+  const devEngines = readManifest(dir).devEngines as
+    | { packageManager?: Record<string, unknown> }
+    | undefined;
+  return devEngines?.packageManager;
 }
 
 /** §04.4 — the resolutions the project's committed `jup.lock` holds. */
@@ -1014,7 +1031,14 @@ describe("use (§09.5, tests 105-110)", () => {
     await cmdUse(["yarn@1.22.4"]);
 
     expect(existsSync(join(project, "package.json"))).toBe(true);
-    expect(readManifest().packageManager).toMatch(/^yarn@1\.22\.4\+sha512\./);
+    // §03.7 — neither field declared, so the member is the pin and no
+    // `packageManager` is created beside it. The default spelling keeps §02.1's
+    // digest suffix in the version.
+    expect(readManifest().packageManager).toBeUndefined();
+    expect(pinnedMember()).toEqual({
+      name: "yarn",
+      version: expect.stringMatching(/^1\.22\.4\+sha512\./) as unknown as string,
+    });
   });
 
   it("updates the ancestor manifest when run from a subfolder (test 107)", async () => {
@@ -1041,18 +1065,21 @@ describe("use (§09.5, tests 105-110)", () => {
     }
   });
 
+  // §03.7 — the mismatch that still fails is a *name* mismatch: a member naming
+  // another tool is a statement this write cannot make true, where a version
+  // outside a declared range is one the write replaces.
   it("surfaces a devEngines mismatch after the banner, on stdout (test 110)", async () => {
     await seed("yarn", "1.22.4");
     await manifest({
       name: "demo",
-      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+      devEngines: { packageManager: { name: "pnpm", version: "2.x" } },
     });
 
     const error = await rejection(cmdUse(["yarn@1.22.4"]));
 
     expect(error).toBeInstanceOf(UsageError);
     expect(error.message).toMatch(
-      /^The requested version of yarn@1\.22\.4\+sha512\..* does not match the devEngines specification \(yarn@2\.x\)$/,
+      /^The requested version of yarn@1\.22\.4\+sha512\..* does not match the devEngines specification \(pnpm@2\.x\)$/,
     );
     // The banner is already on stdout when the failure happens, and `main.ts`
     // appends the `Usage Error:` block to the same stream (§12.1).
@@ -1070,7 +1097,10 @@ describe("use (§09.5, tests 105-110)", () => {
 
     await cmdUse(["yarn@stable"]);
 
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(pinnedMember()).toEqual({
+      name: "yarn",
+      version: expect.stringMatching(/^2\.4\.3\+sha512\./) as unknown as string,
+    });
   });
 
   it("requires exactly one pattern", async () => {
@@ -1089,7 +1119,10 @@ describe("use (§09.5, tests 105-110)", () => {
 
     await expect(cmdUse(["yarn@2.x"])).resolves.toBe(0);
 
-    expect(readManifest().packageManager).toBe("yarn@2.x");
+    // §03.7 — the range pin lands in the member; §04.4 keeps its resolution in
+    // `jup.lock`, which is unchanged by where the range itself is written.
+    expect(readManifest().packageManager).toBeUndefined();
+    expect(pinnedMember()).toEqual({ name: "yarn", version: "2.x" });
     expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.4.3" } });
     // The superseded memo does not outlive the decision that replaced it: in
     // any state where the recorded file is not visible it would answer alone.
@@ -1152,6 +1185,12 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
+  // §03.3 redirected test 112. The declared range still carries `up` across the
+  // major boundary — `1.1.0` to `2.4.3` — but it is now the *pin*, not a
+  // constraint on one, so §09.4's range branch takes it: the resolution is
+  // refreshed in `jup.lock` and the fields are left as the user wrote them. The
+  // stale `packageManager` beside it is no longer read (§03.3) and no longer
+  // rewritten either.
   it("follows a devEngines range across a major boundary (test 112)", async () => {
     mockYarnRegistry();
     await seed("yarn", "2.4.3");
@@ -1163,7 +1202,8 @@ describe("up (§09.4, tests 111-115)", () => {
 
     await expect(cmdUp([])).resolves.toBe(0);
 
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(readManifest().packageManager).toBe("yarn@1.1.0");
+    expect(lockfile()).toMatchObject({ "yarn@1.x || 2.x": { resolved: "2.4.3" } });
   });
 
   it("behaves identically with onFail: ignore (test 113)", async () => {
@@ -1179,7 +1219,8 @@ describe("up (§09.4, tests 111-115)", () => {
 
     await cmdUp([]);
 
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(readManifest().packageManager).toBe("yarn@1.1.0");
+    expect(lockfile()).toMatchObject({ "yarn@1.x || 2.x": { resolved: "2.4.3" } });
   });
 
   // §03.7 redirected test 114. It used to assert that `up` on a devEngines-only
@@ -1204,10 +1245,15 @@ describe("up (§09.4, tests 111-115)", () => {
     const written = readManifest();
     expect(written.packageManager).toBeUndefined();
     // No `integrity`: this store entry is hand-planted with a placeholder digest
-    // that is not valid hex, and an unusable digest is recorded as none at all.
+    // that is odd-length hex, which §03.7 cannot spell as SRI. It is kept in the
+    // version string rather than dropped — the member is the only home the pin
+    // has, so losing it here would silently unpin the project.
     // Conformance row 189 covers the real thing, against downloaded bytes.
     expect(written.devEngines).toEqual({
-      packageManager: { name: "yarn", version: "2.4.3" },
+      packageManager: {
+        name: "yarn",
+        version: expect.stringMatching(/^2\.4\.3\+sha512\./) as unknown as string,
+      },
     });
   });
 
@@ -1241,9 +1287,12 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(stdout).toContain(`Updated ${join(project, "jup.lock")} to use yarn@2.4.3`);
   });
 
-  it("keeps a top-level range even when devEngines declares one too", async () => {
+  // §03.3 — two ranges, and the member is the one that answers. Both fields are
+  // left exactly as written; what the refreshed resolution is keyed on is the
+  // range jup actually read.
+  it("refreshes the devEngines range, not the top-level one, when both declare one", async () => {
     mockYarnRegistry();
-    await seed("yarn", "2.4.3");
+    await seed("yarn", "3.0.0");
     await manifest({
       name: "demo",
       packageManager: "yarn@2.x",
@@ -1257,9 +1306,9 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(written.devEngines).toEqual({
       packageManager: { name: "yarn", version: ">=2" },
     });
-    // The pin's key, not the devEngines range's: the pin is what the proxy path
-    // will look up.
-    expect(lockfile()).toEqual({ "yarn@2.x": { resolved: "2.4.3" } });
+    // `>=2` reaches 3.0.0, which `yarn@2.x` never would: the member's range is
+    // the one being refreshed, and it is the key the proxy path will look up.
+    expect(lockfile()).toMatchObject({ "yarn@>=2": { resolved: "3.0.0" } });
   });
 
   it("retires the memo for the key it just refreshed", async () => {
@@ -1282,9 +1331,10 @@ describe("up (§09.4, tests 111-115)", () => {
   it("refreshes on the devEngines range when the pin is too malformed to read", async () => {
     mockYarnRegistry();
     await seed("yarn", "2.4.3");
-    // A non-string `packageManager` beside a usable range: reading the pin
-    // throws §12.2, and the range is what `up` has to work from. `onFail: warn`
-    // is what keeps the mismatch a warning rather than the error test 110 covers.
+    // A non-string `packageManager` beside a usable range. §03.3 reads the
+    // member, so the unreadable field never has to be interpreted at all, and
+    // §09.4 refreshes the range's resolution. `onFail: warn` is what keeps the
+    // name mismatch against `42` a warning rather than the error test 110 covers.
     await manifest({
       name: "demo",
       packageManager: 42,
@@ -1293,7 +1343,9 @@ describe("up (§09.4, tests 111-115)", () => {
 
     await expect(cmdUp([])).resolves.toBe(0);
 
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(lockfile()).toMatchObject({ "yarn@2.x": { resolved: "2.4.3" } });
+    // Untouched: a range pin refreshes `jup.lock` and writes no field (§09.4).
+    expect(readManifest().packageManager).toBe(42);
   });
 
   it("does not consult the cache, or it could never update anything", async () => {

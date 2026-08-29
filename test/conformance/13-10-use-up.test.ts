@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  effectivePin,
   MockRegistry,
   packageManagerTarball,
   publishBerry,
@@ -32,8 +33,14 @@ function trusted(extra?: Record<string, string | undefined>): Record<string, str
   };
 }
 
+/** §03.3 — the pin the project actually declares, whichever field carries it. */
 function pinOf(fixture: { json(relative: string): unknown }): string | undefined {
-  return (fixture.json("package.json") as { packageManager?: string }).packageManager;
+  return effectivePin(fixture.json("package.json"));
+}
+
+/** The top-level field's own bytes, for the tests that are about *which* field. */
+function topLevelPinOf(fixture: { json(relative: string): unknown }): unknown {
+  return (fixture.json("package.json") as { packageManager?: unknown }).packageManager;
 }
 
 /** §03.7 — the pin lives here for a project that declares only `devEngines`. */
@@ -85,12 +92,17 @@ describe("§13.10 use / up", () => {
     expect(result.exitCode).toBe(0);
     // §12.11 added the middle line: every mutating command names the file it
     // modified, which is the whole of #607 and costs one line of output.
+    // §12.11 names `written` — the version the `devEngines` member ended up
+    // holding, which in the default spelling still carries the digest suffix.
     expect(result.stdout).toBe(
       `Installing yarn@1.22.4 in the project...\n` +
         `Updated ${fixture.path("package.json")} to use ${pinOf(fixture)}\n` +
         `\nyarn@1.22.4 install\n`,
     );
     expect(result.stderr).toBe("");
+    // §03.7 — nothing was declared, so the pin has one home and the top-level
+    // field is not created beside it.
+    expect(topLevelPinOf(fixture)).toBeUndefined();
     expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\.[\da-f]{128}$/);
   });
 
@@ -147,18 +159,24 @@ describe("§13.10 use / up", () => {
     }
   });
 
-  it("110: a devEngines mismatch surfaces after the banner, on stdout", async () => {
+  // §03.7 — a mismatch that still fails is a *name* mismatch, which is the half
+  // no write can make true: the member would go on describing another tool. A
+  // version outside a declared range no longer fails, because the write replaces
+  // that range; the row below is where the surviving check is asserted, and the
+  // banner-then-Usage-Error ordering §12.1 requires is asserted there with it.
+  it("110: use outside a declared range replaces the range rather than refusing", async () => {
     const fixture = createFixture({
       devEngines: { packageManager: { name: "yarn", version: "2.x" } },
     });
 
     const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
-    expect(result.stdout).toContain("Usage Error:");
-    expect(result.stdout).toContain("$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>");
-    expect(result.stderr).toBe("");
+    expect(devEnginesOf(fixture)).toEqual({
+      name: "yarn",
+      version: expect.stringMatching(/^1\.22\.4\+sha512\./),
+    });
   });
 
   it("110: use refuses a package manager the devEngines field does not name", async () => {
@@ -178,9 +196,13 @@ describe("§13.10 use / up", () => {
     expect(result.stdout).toMatch(
       /The requested version of yarn@1\.22\.4\+sha512\.[\da-f]+ does not match the devEngines specification \(pnpm@1\.x\)/,
     );
+    expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
+    expect(result.stdout).toContain("$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>");
     expect(result.stderr).toBe("");
-    // The pin was never written.
-    expect(pinOf(fixture)).toBeUndefined();
+    // The pin was never written: the pnpm declaration is exactly as the fixture
+    // left it, and no `packageManager` was created beside it.
+    expect(topLevelPinOf(fixture)).toBeUndefined();
+    expect(devEnginesOf(fixture)).toEqual({ name: "pnpm", version: "1.x" });
   });
 
   it("111: up bumps to the highest release of the pinned major", async () => {
@@ -192,6 +214,10 @@ describe("§13.10 use / up", () => {
     expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
+  // §03.3 redirected rows 112 and 113. The declared range still carries `up`
+  // across the major boundary — 1.1.0 to 2.4.3 — but it is the *pin* now rather
+  // than a constraint on one, so §09.4's range branch takes it: the resolution
+  // is refreshed in `jup.lock` and both fields are left as the user wrote them.
   it("112: up follows a devEngines range across a major boundary", async () => {
     const fixture = createFixture({
       packageManager: "yarn@1.1.0",
@@ -201,7 +227,10 @@ describe("§13.10 use / up", () => {
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(topLevelPinOf(fixture)).toBe("yarn@1.1.0");
+    expect(fixture.json("jup.lock")).toMatchObject({
+      resolutions: { "yarn@1.x || 2.x": { resolved: "2.4.3" } },
+    });
   });
 
   it("113: the same holds with onFail: ignore", async () => {
@@ -213,7 +242,10 @@ describe("§13.10 use / up", () => {
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(topLevelPinOf(fixture)).toBe("yarn@1.1.0");
+    expect(fixture.json("jup.lock")).toMatchObject({
+      resolutions: { "yarn@1.x || 2.x": { resolved: "2.4.3" } },
+    });
   });
 
   // §03.7 redirected row 114. It used to require `up` to *create* a
@@ -229,11 +261,11 @@ describe("§13.10 use / up", () => {
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toBeUndefined();
+    expect(topLevelPinOf(fixture)).toBeUndefined();
+    // §03.7 — the default spelling keeps §02.1's digest suffix in the version.
     expect(devEnginesOf(fixture)).toEqual({
       name: "yarn",
-      version: "2.4.3",
-      integrity: expect.stringMatching(/^sha512-[\d+/A-Za-z]+=*$/),
+      version: expect.stringMatching(/^2\.4\.3\+sha512\.[\da-f]{128}$/),
     });
 
     // §03.7's post-write requirement: the project it just edited re-reads
@@ -256,7 +288,7 @@ describe("§13.10 use / up", () => {
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toBeUndefined();
+    expect(topLevelPinOf(fixture)).toBeUndefined();
     expect(devEnginesOf(fixture)).toMatchObject({ name: "yarn", version: "2.x" });
     expect(fixture.json("jup.lock")).toMatchObject({
       resolutions: { "yarn@2.x": { resolved: "2.4.3" } },
@@ -282,8 +314,24 @@ describe("§13.10 use / up", () => {
       (await run(["use", "yarn@1.22.4"], { ...used, registry, env: trusted() })).exitCode,
     ).toBe(0);
     const afterUse = used.read("package.json");
+    // §03.7 — the pin goes to `devEngines`, created here with the document's own
+    // tabs and CRLFs; the `packageManager` already in the file is refreshed
+    // rather than left stale, and the keys that were there keep their order.
     expect(afterUse).toMatch(
-      /^\{\r\n\t"name": "crlf",\r\n\t"packageManager": "yarn@1\.22\.4\+sha512\.[\da-f]{128}"\r\n\}\r\n$/,
+      new RegExp(
+        [
+          String.raw`^\{\r\n`,
+          String.raw`\t"devEngines": \{\r\n`,
+          String.raw`\t\t"packageManager": \{\r\n`,
+          String.raw`\t\t\t"name": "yarn",\r\n`,
+          String.raw`\t\t\t"version": "1\.22\.4\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\t\t\}\r\n`,
+          String.raw`\t\},\r\n`,
+          String.raw`\t"name": "crlf",\r\n`,
+          String.raw`\t"packageManager": "yarn@1\.22\.4\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\}\r\n$`,
+        ].join(""),
+      ),
     );
     expect(afterUse.replaceAll("\r\n", "")).not.toContain("\n");
 
@@ -293,7 +341,20 @@ describe("§13.10 use / up", () => {
     expect((await run(["up"], { ...upped, registry, env: trusted() })).exitCode).toBe(0);
     const afterUp = upped.read("package.json");
     expect(afterUp).toMatch(
-      /^\{\r\n\t"name": "crlf",\r\n\t"packageManager": "yarn@2\.4\.3\+sha512\.[\da-f]{128}"\r\n\}\r\n$/,
+      new RegExp(
+        [
+          String.raw`^\{\r\n`,
+          String.raw`\t"devEngines": \{\r\n`,
+          String.raw`\t\t"packageManager": \{\r\n`,
+          String.raw`\t\t\t"name": "yarn",\r\n`,
+          String.raw`\t\t\t"version": "2\.4\.3\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\t\t\}\r\n`,
+          String.raw`\t\},\r\n`,
+          String.raw`\t"name": "crlf",\r\n`,
+          String.raw`\t"packageManager": "yarn@2\.4\.3\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\}\r\n$`,
+        ].join(""),
+      ),
     );
   });
 });

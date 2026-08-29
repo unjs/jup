@@ -6,6 +6,7 @@ export {
   cleanupFixtures,
   copyTool,
   binPathsFor,
+  effectivePin,
   packageManagerTarball,
   perUserShims,
   publishBerry,

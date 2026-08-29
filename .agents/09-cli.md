@@ -27,9 +27,10 @@ Two flags apply to every mutating command:
 
 * `--here` limits project changes to `cwd`'s own manifest; otherwise the search
   stops at a workspace root (§03.1).
-* `--pin-style=sidecar` writes a clean semver version plus
-  `devEngines.packageManager.integrity`; the default `suffix` writes
-  `<version>+<algo>.<hex>`. Both are read identically (§03.7).
+* `--pin-style=sidecar` writes a clean semver version into the member plus
+  `devEngines.packageManager.integrity`; the default `suffix` keeps
+  `<version>+<algo>.<hex>` in the version itself. Both are read identically
+  (§03.7).
 
 Every mutating command prints each path it changed.
 
@@ -45,8 +46,8 @@ no patterns    → discover the project spec
 ```
 
 `lookup.range ?? getSpec()` prefers a declared `devEngines.…​.version` range over
-the exact `packageManager` pin, which is what lets `up` follow a declared range
-across majors (§9.4).
+the top-level `packageManager` pin — the same order §3.3 reads them in — which is
+what lets `up` follow a declared range across majors (§9.4).
 
 ## 9.2 `install`
 
@@ -73,8 +74,8 @@ For an archive: §07.10.
 
 No positional arguments. Updates the project's pin.
 
-**When the project declares a range** — in `packageManager`, or in
-`devEngines.packageManager.version` where there is no top-level field — `up`
+**When the project declares a range** — in `devEngines.packageManager.version`,
+or in `packageManager` where the member names no version (§3.3) — `up`
 refreshes the recorded resolution in `jup.lock` and leaves the field alone. The
 range is the user's statement of intent, and there is no second, major-confining
 resolve because a range already says how far the user will move. `^2.0.0` derived
@@ -98,7 +99,9 @@ return the installed version and never update anything.
 Note the interaction with §9.1: when the descriptor came from a `devEngines` range
 spanning majors (`1.x || 2.x`), the *first* resolve has already crossed the
 boundary and the second pins the major it landed in. A declared range can
-therefore carry `up` across a major; a bare `packageManager` pin cannot.
+therefore carry `up` across a major; a bare `packageManager` pin cannot. The
+range survives this because `up` takes the branch above and writes no pin — only
+an explicit `jup use <exact>` replaces a declared range (§3.7).
 
 A non-semver pin is refused: "The 'jup up' command can only be used when your
 project's packageManager field is set to a semver version or semver range".
@@ -140,10 +143,12 @@ Behaviours worth knowing, all test-asserted:
 * The written pin carries a digest computed from the actual downloaded bytes,
   whatever algorithm the input pattern used — except for a per-host tool, where
   no digest reaches the manifest (§02.4).
-* A `devEngines` mismatch surfaces through `writePin`'s check and routes through
-  `onFail`. With the default, the banner has *already* reached stdout, so the
-  failure prints underneath it — banner, then `Usage Error: …`, then a blank line
-  and the usage line, all on stdout, stderr empty, exit 1.
+* A `devEngines` **name** mismatch surfaces through `writePin`'s check and routes
+  through `onFail`. With the default, the banner has *already* reached stdout, so
+  the failure prints underneath it — banner, then `Usage Error: …`, then a blank
+  line and the usage line, all on stdout, stderr empty, exit 1. A version outside
+  a declared range is *not* a mismatch here: the write replaces that range (§3.7),
+  so there is nothing left for the pin to violate.
 
 ## 9.6 `pack`
 

@@ -110,15 +110,22 @@ the *request* (§04.4).
 ## 12.5 Project enforcement (§03.5)
 
 ```
-This project is configured to use <name> because <absolute path> has a "packageManager" field
+This project is configured to use <name> because <absolute path> has a "<field>" field
 ```
 
 with this clause appended when that path resolves to the home directory or above,
 making the manifest's unusually broad scope explicit:
 
 ```
- (this manifest is outside any project — a stray "packageManager" field there affects every directory)
+ (this manifest is outside any project — a stray "<field>" field there affects every directory)
 ```
+
+`<field>` is the field the spec was **read from** (§3.3) — `packageManager` or
+`devEngines.packageManager` — and is the same in both slots. It is not simply
+whichever field exists: this is the one message whose job is to name the file and
+the field to edit, and since the member outranks the top-level field, naming
+`packageManager` unconditionally would send the reader to a field that is either
+absent or not the one being obeyed.
 
 Absolute, native-separator path, stderr, exit 1.
 
@@ -250,7 +257,7 @@ Updated <path> to use <name>@<reference>
 All done!
 ! jup is about to download <url>
 ? Do you want to continue? [Y/n] 
-! The local project doesn't define a 'packageManager' field. jup will now add one referencing <name>@<reference>.
+! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing <name>@<reference>.
 ! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
 ! Ignoring <name> from <path>: this variable can only be set in the environment
 ```

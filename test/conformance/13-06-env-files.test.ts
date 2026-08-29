@@ -12,6 +12,7 @@ import { DEFINITIONS } from "../../src/config/table.ts";
 import {
   cleanupFixtures,
   createFixture,
+  effectivePin,
   MockRegistry,
   packageManagerTarball,
   run,
@@ -41,8 +42,9 @@ function autoPinProject() {
   return fixture;
 }
 
+/** §03.3 — the pin the project declares, whichever field carries it (§03.7). */
 function pinned(fixture: { json(relative: string): unknown }): string | undefined {
-  return (fixture.json("package.json") as { packageManager?: string }).packageManager;
+  return effectivePin(fixture.json("package.json"));
 }
 
 describe("§13.6 env files", () => {

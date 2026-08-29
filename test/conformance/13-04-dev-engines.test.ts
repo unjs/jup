@@ -223,7 +223,9 @@ describe("§13.4 devEngines", () => {
     expect(result.stderr).toBe(
       `! jup validation warning: "packageManager" field is set to "${PIN}" which does not match the value defined in "devEngines.packageManager" for "pnpm" of "10.x"\n`,
     );
-    expect(result.stdout).toBe("6.6.2\n");
+    // §03.3 — the warning reports the disagreement; the member settles it. The
+    // declared `10.x` is the pin, so that is what runs.
+    expect(result.stdout).toBe("10.34.5\n");
   });
 
   it("35: a version-range mismatch with no onFail fails", async () => {
@@ -250,7 +252,10 @@ describe("§13.4 devEngines", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("37: conflicting hashes — packageManager's hash is authoritative", async () => {
+  // §03.3 — the member is the pin, so its digest is the one enforced. `satisfies`
+  // ignores build metadata, so two conflicting hashes are still not a devEngines
+  // *validation* failure; which one is checked against the bytes is precedence.
+  it("37: conflicting hashes — the devEngines hash is authoritative", async () => {
     const fixture = createFixture({
       packageManager: "pnpm@6.6.2+sha1.11111",
       devEngines: { packageManager: { name: "pnpm", version: "6.6.2+sha1.22222" } },
@@ -264,6 +269,6 @@ describe("§13.4 devEngines", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain(`Mismatch hashes. Expected 11111, got ${actual}`);
+    expect(result.stderr).toContain(`Mismatch hashes. Expected 22222, got ${actual}`);
   });
 });

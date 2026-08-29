@@ -126,11 +126,25 @@ export const messages = {
    */
   lockfileUnresolved: (name: string, range: string) =>
     `${name}@${range} is not resolved in jup.lock and lockfile updates are disabled.`,
-  /** §12.5 — identify governing manifests that sit outside any project. */
-  projectConfigured: (name: string, manifestPath: string, outsideProject?: boolean) =>
-    `This project is configured to use ${name} because ${manifestPath} has a "packageManager" field${
+  /**
+   * §12.5 — identify governing manifests that sit outside any project.
+   *
+   * `field` is the field the spec was actually read from (§03.3), not the
+   * `packageManager` this message used to name unconditionally. A user told to
+   * look at `packageManager` in a manifest that pins through
+   * `devEngines.packageManager` is sent to a field that either is not there or
+   * is not the one being obeyed — and this message exists to say which manifest
+   * and which field to edit.
+   */
+  projectConfigured: (
+    name: string,
+    manifestPath: string,
+    outsideProject?: boolean,
+    field: string = "packageManager",
+  ) =>
+    `This project is configured to use ${name} because ${manifestPath} has a "${field}" field${
       outsideProject === true
-        ? ` (this manifest is outside any project — a stray "packageManager" field there affects every directory)`
+        ? ` (this manifest is outside any project — a stray "${field}" field there affects every directory)`
         : ""
     }`,
   /** Users read the `got` value and paste it into their `packageManager` field. Keep the format. */
@@ -145,8 +159,14 @@ export const messages = {
   /** §07.5 — the rename lost to something that is not a completed install. */
   occupiedInstallDir: (target: string) =>
     `Refusing to use ${target}: a directory is already there with no ${"`"}.jup${"`"} marker, so it is not a complete install. Remove it and run again.`,
+  /**
+   * §12.11 — reworded when §03.7 moved the pin to `devEngines`. The inherited
+   * corepack spelling named `packageManager`, which is no longer the field
+   * auto-pin creates; a byte-identical message would now be a false statement
+   * about what jup just did to the user's manifest.
+   */
   autoPinNotice: (name: string, reference: string) =>
-    `! The local project doesn't define a 'packageManager' field. jup will now add one referencing ${name}@${reference}.`,
+    `! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing ${name}@${reference}.`,
 
   autoPinDocs: () =>
     `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,

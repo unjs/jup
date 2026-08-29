@@ -40,7 +40,7 @@ flowchart LR
 
 The command and its arguments stay the same. jup reads the version selected by the project, caches it for later offline use, and hands control to that version of the tool.
 
-Package managers are declared in `packageManager`; Node.js is declared in `devEngines.runtime` or, as a fallback, `.nvmrc`. Bun, Deno, nub, and Node shims are opt-in so jup does not unexpectedly replace commands already installed on your machine.
+Package managers are declared in `devEngines.packageManager`, which is where `jup use` and `jup up` write the pin; an existing `packageManager` field is still read when no version is declared beside it, and is kept up to date when the manifest already has one. Node.js is declared in `devEngines.runtime` or, as a fallback, `.nvmrc`. Bun, Deno, nub, and Node shims are opt-in so jup does not unexpectedly replace commands already installed on your machine.
 
 ## Quick start
 
@@ -75,7 +75,7 @@ Run `jup info` to inspect the selected project, version, cache, and shims.
 
 ## Credits
 
-jup builds on the work of [Corepack](https://github.com/nodejs/corepack) and its contributors. Its behavior is modeled on Corepack v0.35.0, so existing `packageManager` pins, commands, and messages keep working. Thanks to the Corepack contributors for the design jup started from.
+jup builds on the work of [Corepack](https://github.com/nodejs/corepack) and its contributors. Its behavior is modeled on Corepack v0.35.0, so existing `packageManager` pins, commands, and messages keep working — though jup now records new pins in `devEngines.packageManager`, which Corepack itself does not read. Thanks to the Corepack contributors for the design jup started from.
 
 ## License
 

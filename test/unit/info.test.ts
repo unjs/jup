@@ -178,13 +178,29 @@ describe("buildReport — the project spec (§09.9)", () => {
     expect(info.devEngines).toEqual({ name: "pnpm", version: "11.x", onFail: "error" });
   });
 
-  it("attributes a non-string packageManager to packageManager, not to devEngines", async () => {
-    // `hasPin` is `typeof pm === "string"`, so deriving the field from it names
-    // devEngines here — the wrong field, in the report whose job is to name the
-    // right one.
+  // §03.3 — a member naming a version is the pin, so a broken `packageManager`
+  // beside it is not the field the report is about: it is a field nothing reads.
+  it("attributes the spec to devEngines when it names a version, whatever packageManager holds", async () => {
     await manifest({
       packageManager: 42,
       devEngines: { packageManager: { name: "pnpm", version: "11.x", onFail: "warn" } },
+    });
+
+    const info = report().project;
+
+    expect(info.field).toBe("devEngines.packageManager");
+    expect(info.spec).toBe("pnpm@11.x");
+    expect(info.status).not.toBe("invalid");
+  });
+
+  it("attributes a non-string packageManager to packageManager, not to devEngines", async () => {
+    // §03.3 — the member names no version, so it has not answered the question
+    // and `packageManager` is the field at fault. `hasPin` is
+    // `typeof pm === "string"`, so deriving the field from it names devEngines
+    // here — the wrong field, in the report whose job is to name the right one.
+    await manifest({
+      packageManager: 42,
+      devEngines: { packageManager: { name: "pnpm", onFail: "warn" } },
     });
 
     const info = report().project;

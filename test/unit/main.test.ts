@@ -536,24 +536,32 @@ describe("runProxy — auto-pin (tests 43, 44)", () => {
 
     const manifest = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
       packageManager?: string;
+      devEngines?: { packageManager?: Record<string, unknown> };
     };
-    expect(manifest.packageManager).toMatch(/^yarn@/);
+    // §03.7 — the project declared neither field, so the auto-pin lands in
+    // `devEngines` alone, in the default suffixed spelling.
+    expect(manifest.packageManager).toBeUndefined();
     // The pin is hash-bearing, and the hash is the *installed* artifact's — the
     // fixture's marker. Since §06.1 the marker must record the digest its own
     // reference names, so for a seeded compiled-in default the two coincide.
     const pinned = YARN_DEFAULT;
-    expect(manifest.packageManager).toBe(`yarn@${pinned}`);
+    expect(manifest.devEngines?.packageManager).toEqual({ name: "yarn", version: pinned });
 
     // Verbatim, on stderr, followed by a blank line — then §12.11's line naming
     // the manifest that was modified. Everything stays on stderr because this is
     // proxy mode and stdout belongs to the package manager (§09.14).
+    // The notice names the full hash-bearing reference it is about to record;
+    // §12.11's `Updated` line names `written`, which is the clean version the
+    // member actually holds with its digest beside it in `integrity`.
     expect(result.stderr).toBe(
-      `${messages.autoPinNotice("yarn", pinned)}\n${messages.autoPinDocs()}\n\n` +
+      `${messages.autoPinNotice("yarn", YARN_DEFAULT)}\n${messages.autoPinDocs()}\n\n` +
         `${messages.updatedManifest(join(cwd, "package.json"), "yarn", pinned)}\n`,
     );
     // stdout is the fake package manager's own output, unpolluted.
     expect(result.stdout).toBe(`yarn@${versionOf(YARN_DEFAULT)} --version\n`);
-    expect(result.stderr).toContain("! The local project doesn't define a 'packageManager' field");
+    expect(result.stderr).toContain(
+      "! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry",
+    );
     expect(result.stderr).toContain("https://nodejs.org/api/packages.html#packagemanager");
   });
 
@@ -663,8 +671,9 @@ describe("runProxy — .jup.env applies before the flags are read (test 52)", ()
     expect(result.status).toBe(0);
     const manifest = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")) as {
       packageManager?: string;
+      devEngines?: { packageManager?: { version?: string } };
     };
-    expect(manifest.packageManager).toMatch(/^yarn@/);
+    expect(manifest.devEngines?.packageManager?.version).toBe(YARN_DEFAULT);
   });
 });
 

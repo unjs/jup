@@ -51,11 +51,12 @@ import { hostTarget } from "../../src/config/table.ts";
 import {
   cleanupFixtures,
   createFixture,
-  type Fixture,
+  effectivePin,
   makeTarball,
   MockRegistry,
   npmTarball,
   run,
+  type Fixture,
 } from "./_harness/index.ts";
 
 const POSIX = process.platform !== "win32";
@@ -320,9 +321,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
     // another platform with a hash mismatch — the one outcome a pin exists to
     // prevent. What stands in for it is npm's signature over the host's own
     // artifact, checked on every install.
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toBe(
-      `bun@${BUN_VERSION}`,
-    );
+    expect(effectivePin(fixture.json("package.json"))).toBe(`bun@${BUN_VERSION}`);
   });
 
   it("217: a range records one digest per host, and leaves the others alone", async () => {

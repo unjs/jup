@@ -213,6 +213,42 @@ export function versionOf(reference: string): string {
   return parsed.version;
 }
 
+/**
+ * §03.3 — the project's effective pin, as one spec string, whichever field
+ * carries it.
+ *
+ * Assertions about *what a project is pinned to* outnumber assertions about
+ * *which key holds it* by a wide margin, and §03.7 moved the pin from
+ * `packageManager` to `devEngines.packageManager`. Reading the two the way
+ * `readSpecFromManifest` reads them keeps those assertions saying what they
+ * always meant, and leaves a bare `manifest.packageManager` read to the tests
+ * that really are about the field.
+ *
+ * The digest is folded back into a build suffix, because the member spells it
+ * as sidecar SRI and the suffixed form is what a spec string looks like.
+ */
+export function effectivePin(manifest: unknown): string | undefined {
+  const data = (manifest ?? {}) as {
+    packageManager?: unknown;
+    devEngines?: { packageManager?: unknown };
+  };
+  const member = data.devEngines?.packageManager;
+  const top = typeof data.packageManager === "string" ? data.packageManager : undefined;
+
+  if (typeof member !== "object" || member === null || Array.isArray(member)) return top;
+  const { name, version, integrity } = member as Record<string, unknown>;
+  // A member naming no version has not said which release the project wants, so
+  // the top-level field is the more specific of the two (§03.3).
+  if (typeof name !== "string" || typeof version !== "string") return top;
+
+  if (typeof integrity !== "string" || parse(version) === null) return `${name}@${version}`;
+  const dash = integrity.indexOf("-");
+  if (dash <= 0) return `${name}@${version}`;
+  const algorithm = integrity.slice(0, dash);
+  const hex = Buffer.from(integrity.slice(dash + 1), "base64").toString("hex");
+  return `${name}@${version}+${algorithm}.${hex}`;
+}
+
 /** The entry-point paths the table declares for this version, tarball-relative. */
 export function binPathsFor(name: string, version: string): string[] {
   // §02.5 — every band is a tarball with a `BinSpec` of paths; the single-file

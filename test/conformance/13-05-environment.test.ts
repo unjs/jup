@@ -229,15 +229,22 @@ describe("§13.5 environment variables", () => {
     const result = await run(["yarn"], { ...fixture, env: { COREPACK_ENABLE_AUTO_PIN: "1" } });
 
     expect(result.exitCode).toBe(0);
-    const written = fixture.json("package.json") as { packageManager?: string };
-    expect(written.packageManager).toMatch(/^yarn@/);
+    // §03.7 — the project declared neither field, so the auto-pin lands in
+    // `devEngines` alone, in the default suffixed spelling.
+    const manifest = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines?: { packageManager?: { version?: string } };
+    };
+    expect(manifest.packageManager).toBeUndefined();
+    const version = manifest.devEngines?.packageManager?.version;
+    expect(version).toBe(YARN_DEFAULT);
     // §12.11 added the last line: "it also covers the auto-pin case in
     // §03.6". It stays on stderr because this is proxy mode and stdout belongs
     // entirely to the package manager (§09.14).
     expect(result.stderr).toBe(
-      `! The local project doesn't define a 'packageManager' field. jup will now add one referencing yarn@${written.packageManager!.slice("yarn@".length)}.\n` +
+      `! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing yarn@${YARN_DEFAULT}.\n` +
         `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
-        `Updated ${fixture.path("package.json")} to use ${written.packageManager}\n`,
+        `Updated ${fixture.path("package.json")} to use yarn@${YARN_DEFAULT}\n`,
     );
   });
 

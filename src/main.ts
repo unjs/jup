@@ -578,7 +578,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
   const { writePin } = await import("./project/pin.ts");
-  const { target } = writePin(dirname(specResult.target), {
+  const { target, written } = writePin(dirname(specResult.target), {
     name: locator.name,
     reference,
     hash: installSpec.hash,
@@ -587,7 +587,12 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // §03.7, §12.11 — "it also covers the auto-pin case in §03.6". On **stderr**:
   // this is proxy mode, and stdout belongs entirely to the package manager
   // (§09.14), so a line on it would corrupt `yarn --version | read`.
-  err(`${messages.updatedManifest(target, locator.name, reference)}\n`);
+  //
+  // `written`, not `reference`, for the reason `cmdUse` uses it: the pin lands
+  // in `devEngines`, whose `version` is the clean one with the digest beside it
+  // in `integrity`, so naming the suffixed reference here would quote a string
+  // that is nowhere in the file.
+  err(`${messages.updatedManifest(target, locator.name, written)}\n`);
 }
 
 /** Everything that is not a `UsageError` keeps its stack (§08.4). */

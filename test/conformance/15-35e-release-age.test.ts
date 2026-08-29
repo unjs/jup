@@ -45,6 +45,7 @@ import { NPM_ACCEPT_HEADER, NPM_FULL_ACCEPT_HEADER } from "../../src/net/registr
 import {
   cleanupFixtures,
   createFixture,
+  effectivePin,
   MockRegistry,
   packageManagerTarball,
   run,
@@ -93,8 +94,9 @@ function env(extra?: Record<string, string | undefined>): Record<string, string 
   return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), CI: undefined, ...extra };
 }
 
+/** §03.3 — the pin the project actually declares, whichever field carries it. */
 function pinOf(fixture: { json(relative: string): unknown }): string | undefined {
-  return (fixture.json("package.json") as { packageManager?: string }).packageManager;
+  return effectivePin(fixture.json("package.json"));
 }
 
 describe("§04.1 JUP_MINIMUM_RELEASE_AGE", () => {
@@ -164,9 +166,7 @@ describe("§04.1 JUP_MINIMUM_RELEASE_AGE", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toContain(
-      `pnpm@${SETTLED}`,
-    );
+    expect(pinOf(fixture)).toContain(`pnpm@${SETTLED}`);
   });
 
   it("203: an explicit dist-tag is capped, not trusted", async () => {

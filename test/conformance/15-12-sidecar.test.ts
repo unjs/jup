@@ -46,6 +46,7 @@ function manifest(integrity?: string): unknown {
   return { packageManager: "pnpm@6.6.2", devEngines: { packageManager } };
 }
 
+/** The top-level field's own bytes — these rows are about *which* field. */
 function pinOf(fixture: Fixture): string | undefined {
   return (fixture.json("package.json") as { packageManager?: string }).packageManager;
 }
@@ -132,14 +133,20 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
     expect(result.stderr).toContain("pin different hashes");
   });
 
+  // §03.7 — the pin's home moved to `devEngines`, so the two styles are now two
+  // spellings *within the member* rather than two fields. The suffixed form is
+  // still the default: it is the interoperable spelling.
   it("169: `use` keeps writing the suffixed form by default", async () => {
     const fixture = createFixture({ name: "project" });
 
     const result = await run(["use", "pnpm@6.6.2"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toMatch(/^pnpm@6\.6\.2\+sha512\.[\da-f]{128}$/);
-    expect(fixture.json("package.json")).not.toHaveProperty("devEngines");
+    expect(pinOf(fixture)).toBeUndefined();
+    expect(sidecarOf(fixture)).toEqual({
+      name: "pnpm",
+      version: expect.stringMatching(/^6\.6\.2\+sha512\.[\da-f]{128}$/) as unknown as string,
+    });
   });
 
   it("169: `--pin-style=sidecar` writes the clean version and the SRI, and it reads back", async () => {
@@ -152,7 +159,7 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
     });
 
     expect(written.exitCode).toBe(0);
-    expect(pinOf(fixture)).toBe("pnpm@6.6.2");
+    expect(pinOf(fixture)).toBeUndefined();
     expect(sidecarOf(fixture)).toEqual({
       name: "pnpm",
       version: "6.6.2",

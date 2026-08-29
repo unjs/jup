@@ -215,8 +215,8 @@ pointing both fields at it is the mistake this split prevents.
 Because one version is then many artifacts:
 
 * the digest is **not** folded into the locator's reference (§07.6), because that
-  reference is what `use`/`up` write into `packageManager`, and a per-host digest
-  committed there fails every colleague on another platform;
+  reference is what `use`/`up` write into the project pin (§03.7), and a per-host
+  digest committed there fails every colleague on another platform;
 * `jup.lock` records the digest **per host** (§04.4);
 * the store marker still records it — the store is host-local, so there it is
   exactly the right fact.

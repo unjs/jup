@@ -603,11 +603,17 @@ describe("devEngines — §03.3", () => {
     expect(read({ packageManager: "yarn@1.22.4" })).toEqual({
       raw: "yarn@1.22.4",
       hasPin: true,
+      fromPackageManagerField: true,
     });
-    expect(read({ devEngines: {} })).toEqual({ raw: undefined, hasPin: false });
+    expect(read({ devEngines: {} })).toEqual({
+      raw: undefined,
+      hasPin: false,
+      fromPackageManagerField: false,
+    });
     expect(read({ devEngines: { packageManager: null } })).toEqual({
       raw: undefined,
       hasPin: false,
+      fromPackageManagerField: false,
     });
   });
 
@@ -632,8 +638,11 @@ describe("devEngines — §03.3", () => {
     expect(result.getSpec(PINNED)).toEqual({ name: "pnpm", range: "6.x" });
   });
 
-  // Test 24.
-  it("lets a matching packageManager win", () => {
+  // Test 24, as §03.3 leaves it: the *member* wins, even though the top-level
+  // field agrees with it and is the more precise of the two. The declaration is
+  // the pin, and `6.x` is what it says; the exact version beside it — digest and
+  // all — is a second statement jup no longer reads.
+  it("lets a matching devEngines member win over packageManager", () => {
     const pm = "pnpm@6.6.2+sha224.1111111111111111111111111111111111111111111111111111111";
     expect(
       read({
@@ -641,12 +650,13 @@ describe("devEngines — §03.3", () => {
         devEngines: { packageManager: { name: "pnpm", version: "6.x" } },
       }),
     ).toEqual({
-      raw: pm,
+      raw: "pnpm@6.x",
       range: { name: "pnpm", range: "6.x", onFail: undefined },
       // §03.7 — the declaration is reported alongside the Descriptor-shaped
       // view of it, because `writePin` has to honour it even with no version.
       devEngines: { name: "pnpm", version: "6.x", onFail: undefined },
       hasPin: true,
+      fromPackageManagerField: false,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -661,6 +671,9 @@ describe("devEngines — §03.3", () => {
       // constrains what `writePin` may write.
       devEngines: { name: "pnpm", onFail: undefined },
       hasPin: true,
+      // §03.3 — a member naming no version has not said which release the
+      // project wants, so the more specific `packageManager` stands.
+      fromPackageManagerField: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -710,7 +723,7 @@ describe("devEngines — §03.3", () => {
         packageManager: pm,
         devEngines: { packageManager: [{ name: "yarn", onFail: "error" }] },
       }),
-    ).toEqual({ raw: pm, hasPin: true });
+    ).toEqual({ raw: pm, hasPin: true, fromPackageManagerField: true });
     expect(warn).toHaveBeenCalledWith(messages.devEnginesArray());
   });
 
@@ -721,6 +734,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: "pnpm@6.6.2",
       hasPin: true,
+      fromPackageManagerField: true,
     });
     expect(warn).toHaveBeenCalledWith(
       `! jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
@@ -730,6 +744,7 @@ describe("devEngines — §03.3", () => {
     expect(read({ devEngines: { packageManager: 10 } })).toEqual({
       raw: undefined,
       hasPin: false,
+      fromPackageManagerField: false,
     });
     expect(warn).toHaveBeenCalledWith(
       `! jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
@@ -769,6 +784,7 @@ describe("devEngines — §03.3", () => {
       range: undefined,
       devEngines: { name: "yarn", onFail: "ignore" },
       hasPin: true,
+      fromPackageManagerField: true,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -780,6 +796,7 @@ describe("devEngines — §03.3", () => {
       range: undefined,
       devEngines: { name: "yarn", onFail: "warn" },
       hasPin: true,
+      fromPackageManagerField: true,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
   });
@@ -796,6 +813,7 @@ describe("devEngines — §03.3", () => {
       range: undefined,
       devEngines: { name: "yarn", onFail: "explode" },
       hasPin: true,
+      fromPackageManagerField: true,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
   });
@@ -821,11 +839,14 @@ describe("devEngines — §03.3", () => {
 
   // Test 34.
   it("warns on a version mismatch with onFail: warn", () => {
+    // §03.3 — the warning reports the disagreement; it does not settle it. The
+    // member names a version, so the member is the pin.
     expect(read(versionMismatch("warn"))).toEqual({
-      raw: "pnpm@6.6.2",
+      raw: "pnpm@10.x",
       range: { name: "pnpm", range: "10.x", onFail: "warn" },
       devEngines: { name: "pnpm", version: "10.x", onFail: "warn" },
       hasPin: true,
+      fromPackageManagerField: false,
     });
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${versionMismatchMessage}`);
   });
@@ -848,10 +869,11 @@ describe("devEngines — §03.3", () => {
         devEngines: { packageManager: { name: "pnpm", version: ">=11" } },
       }),
     ).toEqual({
-      raw: "pnpm@^11.0.0",
+      raw: "pnpm@>=11",
       range: { name: "pnpm", range: ">=11", onFail: undefined },
       devEngines: { name: "pnpm", version: ">=11", onFail: undefined },
       hasPin: true,
+      fromPackageManagerField: false,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -867,8 +889,9 @@ describe("devEngines — §03.3", () => {
     );
   });
 
-  // Test 37 — build metadata is ignored, so conflicting hashes are not a
-  // devEngines failure; `packageManager`'s hash stays authoritative.
+  // Test 37 — build metadata is ignored by `satisfies`, so conflicting hashes
+  // are not a devEngines failure. Which hash then *runs* follows §03.3's
+  // precedence like everything else: the member's.
   it("ignores hash suffixes when cross-checking", () => {
     expect(
       read({
@@ -876,10 +899,11 @@ describe("devEngines — §03.3", () => {
         devEngines: { packageManager: { name: "pnpm", version: "6.6.2+sha1.22222" } },
       }),
     ).toEqual({
-      raw: "pnpm@6.6.2+sha1.11111",
+      raw: "pnpm@6.6.2+sha1.22222",
       range: { name: "pnpm", range: "6.6.2+sha1.22222", onFail: undefined },
       devEngines: { name: "pnpm", version: "6.6.2+sha1.22222", onFail: undefined },
       hasPin: true,
+      fromPackageManagerField: false,
     });
     expect(warn).not.toHaveBeenCalled();
   });
@@ -937,6 +961,33 @@ describe("reconcile — §03.5", () => {
   // Test 39 — the exact message, with the absolute manifest path.
   it("errors with the project-mismatch message", () => {
     const result = found("yarn@1.0.0");
+    expectUsageError(
+      () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
+      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field`,
+    );
+  });
+
+  // §12.5 — the message names the field the spec was *read from* (§03.3), which
+  // since the member outranks `packageManager` is often not the top-level one.
+  // Naming `packageManager` here would send the user to a field that is not in
+  // the file, in the one message whose job is to say what to edit.
+  it("names devEngines.packageManager when the spec came from there", () => {
+    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "1.0.0" } } });
+    const result = discoverProjectSpec(root);
+
+    expectUsageError(
+      () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
+      `This project is configured to use yarn because ${join(root, "package.json")} has a "devEngines.packageManager" field`,
+    );
+  });
+
+  it("still names packageManager when the member declares no version", () => {
+    manifest(".", {
+      packageManager: "yarn@1.0.0",
+      devEngines: { packageManager: { name: "yarn" } },
+    });
+    const result = discoverProjectSpec(root);
+
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
       `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field`,
@@ -1044,11 +1095,36 @@ describe("writePin — §03.7", () => {
     expect(previousPackageManager).toBe("yarn@1.22.4");
 
     const updated = readFileSync(join(root, "package.json"), "utf8");
-    expect(updated).toBe(original.replace("yarn@1.22.4", "yarn@3.0.0+sha1.abc"));
+    // §03.7 — the pin goes to `devEngines`, created here; the `packageManager`
+    // already in the file is refreshed alongside rather than left stale.
+    expect(updated).toBe(
+      [
+        "{",
+        `\t"devEngines": {`,
+        `\t\t"packageManager": {`,
+        `\t\t\t"name": "yarn",`,
+        `\t\t\t"version": "3.0.0+sha1.abc"`,
+        "\t\t}",
+        "\t},",
+        `\t"name": "demo",`,
+        `\t"packageManager": "yarn@3.0.0+sha1.abc",`,
+        `\t"scripts": {`,
+        `\t\t"build": "tsc"`,
+        "\t}",
+        "}",
+        "",
+      ].join("\r\n"),
+    );
     expect(updated).toContain("\r\n");
     expect(updated).toContain(`\t"packageManager"`);
-    // Key order is untouched.
-    expect(updated.indexOf(`"name"`)).toBeLessThan(updated.indexOf(`"packageManager"`));
+    // The created block is indented with the document's own tabs, at its depth.
+    // `sha1.abc` is odd-length hex, so §03.7 cannot spell it as SRI and keeps
+    // the digest in the version string rather than dropping it.
+    expect(updated).toContain(`\t\t\t"version": "3.0.0+sha1.abc"`);
+    // The order of the keys that were already there is untouched.
+    expect(updated.indexOf(`\t"name": "demo"`)).toBeLessThan(
+      updated.indexOf(`\t"packageManager": "yarn@`),
+    );
   });
 
   // Test 13 — the BOM survives (§03.7).
@@ -1062,14 +1138,16 @@ describe("writePin — §03.7", () => {
     expect(updated).toContain(`"packageManager": "yarn@1.22.21"`);
   });
 
-  it("inserts the field into a manifest that lacks it", () => {
+  // §03.7 row one — neither field declared, so the pin gets one home and no
+  // top-level `packageManager` is created beside it.
+  it("inserts the devEngines member into a manifest that lacks both fields", () => {
     manifest(".", { name: "demo" });
 
     const { previousPackageManager } = writePin(root, { name: "pnpm", reference: "9.0.0" });
     expect(previousPackageManager).toBe("unknown");
     expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8"))).toEqual({
       name: "demo",
-      packageManager: "pnpm@9.0.0",
+      devEngines: { packageManager: { name: "pnpm", version: "9.0.0" } },
     });
   });
 
@@ -1080,7 +1158,7 @@ describe("writePin — §03.7", () => {
     const { previousPackageManager } = writePin(cwd, { name: "yarn", reference: "1.22.4" });
     expect(previousPackageManager).toBe("unknown");
     expect(JSON.parse(readFileSync(join(cwd, "package.json"), "utf8"))).toEqual({
-      packageManager: "yarn@1.22.4",
+      devEngines: { packageManager: { name: "yarn", version: "1.22.4" } },
     });
   });
 
@@ -1114,21 +1192,34 @@ describe("writePin — §03.7", () => {
     expect(previousPackageManager).toBe("yarn@1.x");
   });
 
-  // Test 110.
-  it("throws when the pinned version violates the devEngines range", () => {
+  // §03.7 redirected test 110. A version outside a declared range is no longer
+  // a violation, because the write replaces the range it would violate — see
+  // {@link devEnginesWriteTarget}. The *name* is what a write can never make
+  // true, so that is the half the row now asserts.
+  it("throws when the pin names a package manager devEngines does not", () => {
+    manifest(".", { devEngines: { packageManager: { name: "pnpm", version: "2.x" } } });
+
+    expectUsageError(
+      () => writePin(root, { name: "yarn", reference: "1.22.4" }),
+      messages.devEnginesPinMismatch("yarn", "1.22.4", "pnpm", "2.x"),
+    );
+    // Nothing was written: the declaration is exactly as it was.
+    const after = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    expect(after.packageManager).toBeUndefined();
+    expect(after.devEngines.packageManager).toEqual({ name: "pnpm", version: "2.x" });
+  });
+
+  it("moves the pin outside a declared range, replacing the range", () => {
     manifest(".", {
       packageManager: "yarn@2.1.0",
       devEngines: { packageManager: { name: "yarn", version: "2.x" } },
     });
 
-    expectUsageError(
-      () => writePin(root, { name: "yarn", reference: "1.22.4" }),
-      messages.devEnginesPinMismatch("yarn", "1.22.4", "yarn", "2.x"),
-    );
-    // Nothing was written.
-    expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
-      "yarn@2.1.0",
-    );
+    writePin(root, { name: "yarn", reference: "1.22.4" });
+
+    const after = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    expect(after.packageManager).toBe("yarn@1.22.4");
+    expect(after.devEngines.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
   });
 
   // Test 113.
@@ -1342,6 +1433,24 @@ describe("writePin — §03.7", () => {
     });
 
     expect(read().packageManager).toBeUndefined();
+    // The default spelling keeps §02.1's suffix in the version; the sidecar row
+    // below is the same pin with the digest in `integrity` instead.
+    expect(read().devEngines?.packageManager).toEqual({
+      name: "yarn",
+      version: "1.22.4+sha512.abcdef",
+    });
+  });
+
+  it("writes the sidecar spelling into a devEngines-only project", () => {
+    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "^1.0.0" } } });
+
+    writePin(
+      root,
+      { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" },
+      { pinStyle: "sidecar" },
+    );
+
+    expect(read().packageManager).toBeUndefined();
     expect(read().devEngines?.packageManager).toEqual({
       name: "yarn",
       version: "1.22.4",
@@ -1350,8 +1459,9 @@ describe("writePin — §03.7", () => {
   });
 
   // §03.7 — the sidecar describes the version beside it. Declared beside a
-  // *range* it describes no single release, so it may not be folded into a
-  // `packageManager` pin that outranks it: the two would name different versions.
+  // *range* it describes no single release, so there is nothing for it to name
+  // and the range comes back bare. §04.4's `jup.lock` is where a range's
+  // resolved digest lives.
   it("ignores a sidecar integrity declared beside a range (§03.7)", () => {
     const spec = readSpecFromManifest(
       {
@@ -1361,7 +1471,7 @@ describe("writePin — §03.7", () => {
       join(root, "package.json"),
     );
 
-    expect(spec.raw).toBe("yarn@1.22.4");
+    expect(spec.raw).toBe("yarn@^1");
   });
 
   it("still folds a sidecar integrity declared beside the exact version (§03.7)", () => {
@@ -1411,10 +1521,17 @@ describe("writePin — §03.7", () => {
     writePin(root, { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" });
 
     expect(read().packageManager).toBe("yarn@1.22.4+sha512.abcdef");
-    expect(read().devEngines?.packageManager).toMatchObject({ version: "1.22.4" });
+    expect(read().devEngines?.packageManager).toMatchObject({
+      version: "1.22.4+sha512.abcdef",
+    });
   });
 
-  it("leaves a declared range alone when both fields exist", () => {
+  // §03.7 — the member is the pin now, so a declared range is replaced by the
+  // version being pinned. Leaving `1.x || 2.x` there would mean §03.3 read the
+  // range on the next run and this `use` never took. §09.4's cross-major `up`
+  // is unaffected: on a range descriptor it refreshes `jup.lock` and writes no
+  // pin at all, so only an explicit `use` reaches this path.
+  it("replaces a declared range when both fields exist", () => {
     manifest(".", {
       packageManager: "yarn@1.1.0",
       devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x" } },
@@ -1423,8 +1540,7 @@ describe("writePin — §03.7", () => {
     writePin(root, { name: "yarn", reference: "2.4.3" });
 
     expect(read().packageManager).toBe("yarn@2.4.3");
-    // §09.4 needs this range intact to carry the *next* `up` across a major.
-    expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.x || 2.x" });
+    expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "2.4.3" });
   });
 
   it("checks the name even when devEngines declares no version", () => {

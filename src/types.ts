@@ -404,6 +404,18 @@ export type SpecResult =
        * is what row 114 turns into a fresh pin.
        */
       hasPin?: boolean;
+      /**
+       * §12.5 — the field the returned spec came from, spelled the way a user
+       * would find it in their manifest: `packageManager`, or
+       * `devEngines.packageManager` / `devEngines.runtime`.
+       *
+       * `hasPin` cannot stand in for it. That answers whether the manifest
+       * *has* a `packageManager` string, which since §03.3's precedence is a
+       * different question from which field supplied the spec — and the
+       * enforcement message's whole job is to send the user to the field they
+       * have to edit.
+       */
+      specField?: string;
       envFilePath?: string;
     };
 export type Invocation =

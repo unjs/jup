@@ -17,6 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  effectivePin,
   MockRegistry,
   packageManagerTarball,
   run,
@@ -28,8 +29,13 @@ function env(extra?: Record<string, string | undefined>): Record<string, string 
   return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), CI: undefined, ...extra };
 }
 
+/**
+ * §03.3 — the pin one manifest declares, whichever field carries it. These rows
+ * are about *which file* the write lands in, so the field it lands in is the
+ * other section's business (§03.7).
+ */
 function pinAt(file: string, fixture: { json(relative: string): unknown }): string | undefined {
-  return (fixture.json(file) as { packageManager?: string }).packageManager;
+  return effectivePin(fixture.json(file));
 }
 
 /** A manifest in an *ancestor* of the fixture's project directory. */

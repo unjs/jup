@@ -46,6 +46,31 @@ export interface PinInfo {
 }
 
 /**
+ * §03.7 — the digest to record beside the version, as SRI, or `undefined` when
+ * there is none to record.
+ *
+ * `info.hash` is the caller's own answer and is preferred, but it is not the
+ * only place the digest lives: `referenceWithHash` has already folded one into
+ * `info.reference` as §02.1's build suffix, and not every path through §09.5
+ * plumbs the two alike. That did not matter while `packageManager` carried the
+ * reference verbatim and the sidecar was an opt-in second spelling. Now that
+ * the member is the pin and its `version` is always the *clean* one (§03.3
+ * validates it as a semver range, where a `+sha512.…` has no business), a
+ * digest that reached us only through the suffix would be dropped on the floor
+ * — turning a hash-pinned project into an unpinned one without saying so.
+ *
+ * §02.4 — a per-host locator is *not* an exception that needs handling here.
+ * `referenceWithHash` declines to attach its digest in the first place, so the
+ * suffix this reads is empty for exactly the tools whose digest must never be
+ * committed.
+ */
+function sidecarDigest(info: PinInfo): string | undefined {
+  if (info.hash !== undefined) return integrityFromHash(info.hash);
+  const build = parse(info.reference)?.build ?? [];
+  return build.length === 0 ? undefined : integrityFromHash(build.join("."));
+}
+
+/**
  * The semver text a field may hold: an exact version (digest suffix stripped),
  * or §04.4's range. `undefined` for anything a semver field cannot record —
  * a URL, or a dist-tag.
@@ -57,34 +82,69 @@ function pinText(reference: string): string | undefined {
 }
 
 /**
+ * §03.7 — the text to put in the member's `version`, per pin style.
+ *
+ * `sidecar` wants the clean version, because the digest is going into
+ * `integrity` beside it. `suffix` — the default — keeps §02.1's build suffix in
+ * the version itself, which is the interoperable spelling and the one a
+ * hand-written pin has always had. §03.3 validates the field as a semver
+ * *range* and build metadata is part of a valid semver, so both read back as
+ * the same hash-bearing exact pin.
+ *
+ * The style is a preference, not a guarantee, in one direction: `sidecar` falls
+ * back to the suffix when the digest cannot be spelled as SRI — the SRI
+ * conversion wants a lowercase algorithm name and an even-length hex body, and
+ * §02.1's suffix is not otherwise constrained to give it one. Dropping the
+ * digest instead would quietly demote a hash-pinned project to an unpinned one,
+ * and the member is now the only field the pin is guaranteed to reach, so there
+ * is no top-level string left to carry it. A pin written in the spelling the
+ * user did not ask for beats a pin written without its hash.
+ */
+function versionToRecord(info: PinInfo, integrity: string | undefined): string | undefined {
+  const clean = pinText(info.reference);
+  if (clean === undefined || integrity !== undefined) return clean;
+
+  const parsed = parse(info.reference);
+  if (parsed === null || parsed.build.length === 0) return clean;
+  return `${parsed.version}+${parsed.build.join(".")}`;
+}
+
+/**
  * §03.7, per §03.1's write-mode stop conditions — write the pin.
  *
  * Preserves indentation, line endings, key order, and (per §03.7) the BOM.
  * Returns the previous value for `COREPACK_MIGRATE_FROM`, and the path actually
  * modified so the caller can print it (§12.11).
  *
- * **Which field gets written** is §03.7's whole subject, and the rule has three
- * branches rather than one:
+ * **Which field gets written** is §03.7's whole subject. The pin goes to
+ * `devEngines` — the field §03.3 reads first, and the only one that can carry a
+ * name, a version and a digest together:
  *
  * | Manifest declares | Written |
  * |---|---|
- * | `packageManager` only, or neither | `packageManager` |
+ * | neither field | `devEngines.packageManager`, created |
  * | `devEngines.packageManager` for **this** package manager, no `packageManager` | `devEngines.packageManager.version` (+ `integrity`) |
- * | both, for this package manager | `packageManager`; `devEngines` left alone |
+ * | `packageManager` only | `devEngines.packageManager`, created; `packageManager` refreshed |
+ * | both, for this package manager | both refreshed |
+ * | `devEngines.packageManager` for a **different** package manager | `packageManager`; the mismatch reported |
  * | anything, and the pin is a **runtime** (§02.3) | `devEngines.runtime`, created if absent |
  *
- * The last row is one row because a runtime has exactly one home: there is no
- * top-level field for it (§03.4 refuses one), so the three-way question above
- * — which of two fields, or both — does not arise. What replaces it is that the
- * member may have to be *created*, which the package-manager path only ever had
- * to do for §03.7's sidecar.
+ * Rows one and two write one field because that is the whole pin: §03.3 reads
+ * the member, so nothing is served by minting a second, thinner copy of the
+ * same statement in `packageManager`. Rows three and four refresh the top-level
+ * field only because it is *already there*, and a `packageManager` left holding
+ * the version before last is a false statement about what will run — to jup,
+ * and to every other tool that reads only that field.
  *
- * Row three needs no `devEngines` update because the value being written already
- * satisfies the declared range. Rewriting `1.x || 2.x` into `2.4.3` would destroy
- * the statement of intent that §09.4 relies on to carry `up` across a major.
+ * A declared range is replaced, not preserved; {@link devEnginesWriteTarget}
+ * carries the reasoning, along with why §09.4's cross-major `up` still works.
  * §03.7's post-write requirement — "validation MUST run against the state being
  * written" — is met by the check being the same predicate §03.3 applies on read,
  * with the same `onFail`.
+ *
+ * The runtime row is separate because a runtime has exactly one home: there is
+ * no top-level field for it (§03.4 refuses one), so the question of refreshing a
+ * second field never arises.
  *
  * When the declared name is a *different* package manager, `devEngines` is not
  * describing this pin at all: the mismatch is reported through `onFail` and,
@@ -185,14 +245,19 @@ export function writePin(
   // A runtime declares no `commands.use` (§02.3), so nothing reads this for one;
   // it is still computed from the member that spoke, so the value is never a
   // statement about some other tool.
+  // The order mirrors §03.3's, because this has to name the pin that was *in
+  // effect* before the write, not whichever field happened to be present: a
+  // versioned `devEngines` member outranks `packageManager` on read, so it is
+  // what the tool is migrating from. A member naming no version falls through
+  // to the top-level field for the same reason §03.3 does.
   const previousPackageManager =
-    field === "packageManager" && typeof data.packageManager === "string"
-      ? data.packageManager
-      : range === undefined
-        ? declared === undefined
+    range !== undefined
+      ? `${range.name}@${range.range}`
+      : field === "packageManager" && typeof data.packageManager === "string"
+        ? data.packageManager
+        : declared === undefined
           ? "unknown"
-          : `${declared.name}@${declared.version ?? "*"}`
-        : `${range.name}@${range.range}`;
+          : `${declared.name}@${declared.version ?? "*"}`;
 
   // 5, 7, 8 — the rewrite preserves indentation, line endings, key order and the
   // BOM; the reference carries its freshly computed hash suffix.
@@ -210,23 +275,8 @@ export function writePin(
 
   let updated = content;
   let wroteDevEngines = false;
-  if (devEnginesTarget.write || sidecar) {
-    // The sidecar form needs a digest to move out of the version string, and a
-    // per-host tool has none to move (§04.4) - every runtime included. That is
-    // not a reason to write no pin at all, so the ordinary member write is the
-    // fallback: it lands the same clean version, just without an `integrity`
-    // line there is no hash for.
-    //
-    // The fallback is gated on the *target*, not on `sidecar`. When
-    // `devEnginesWriteTarget` said not to write — a member that speaks for
-    // another tool, a URL reference with no semver to record, a broken
-    // top-level pin — `--pin-style=sidecar` is a request about the digest's
-    // spelling, not permission to overwrite a declaration this pin does not
-    // describe. `writeSidecarPin` may still create a member where there is
-    // none, which is what §03.7 says the flag does.
-    const next =
-      (sidecar ? writeSidecarPin(updated, data, info, field) : null) ??
-      (devEnginesTarget.write ? writeIntoDevEngines(updated, data, info, field) : null);
+  if (devEnginesTarget.write) {
+    const next = writeIntoDevEngines(updated, data, info, field, sidecar);
     if (next !== null) {
       updated = next;
       wroteDevEngines = true;
@@ -234,13 +284,17 @@ export function writePin(
   }
   // What the pin field now holds, which is what the caller reports (§12.11).
   //
-  // A `devEngines` member always carries the *clean* version, with any digest
-  // beside it in `integrity`. So whenever that member is the only place the pin
-  // landed, quoting `info.reference` would name a suffixed string that is
-  // nowhere in the file. The top-level field is the one that keeps the suffix,
-  // and only while it is still being written.
-  // §04.4 — a range has no digest suffix to strip, so it passes through whole.
-  const cleanReference = (): string => parse(info.reference)?.version ?? info.reference;
+  // Whenever the member is the only place the pin landed — which §03.7 makes
+  // the common case, not the exception — the string to quote is the member's
+  // own `version`, not `info.reference`: under `--pin-style=sidecar` the digest
+  // has moved to `integrity` and the suffixed reference is nowhere in the file.
+  // {@link versionToRecord} is asked rather than re-derived, so the line cannot
+  // drift from the bytes. The top-level field, when the manifest has one to
+  // refresh, always keeps the full reference.
+  //
+  // §04.4 — a range has no digest suffix either way, so it passes through whole.
+  const memberVersion = (): string =>
+    versionToRecord(info, sidecar ? sidecarDigest(info) : undefined) ?? info.reference;
   let written = info.reference;
   // §02.3 — the fallback below is `packageManager`, and a runtime may not go
   // there (§03.4). Its write is therefore not best-effort: a member that could
@@ -250,17 +304,12 @@ export function writePin(
     if (!wroteDevEngines) {
       throw new Error(`Failed to set "devEngines.runtime" in package.json`);
     }
-    written = cleanReference();
+    written = memberVersion();
   } else if (!devEnginesTarget.exclusive || !wroteDevEngines) {
-    // A sidecar write that landed is what makes the clean version *readable*
-    // again (§03.7 reads them as one pin); one that did not must keep the
-    // suffix, or the pin would be written nowhere at all.
-    if (sidecar && wroteDevEngines) written = cleanReference();
     updated = setTopLevelString(updated, "packageManager", `${info.name}@${written}`);
   } else {
-    // Exclusively `devEngines`, and it took the write: no top-level field is
-    // left to carry the suffix.
-    written = cleanReference();
+    // Exclusively `devEngines`, and it took the write.
+    written = memberVersion();
   }
 
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
@@ -322,8 +371,29 @@ function writeManifest(target: string, content: string): void {
 }
 
 /**
- * §03.7 — exact declarations may be replaced; range constraints are preserved.
- * With no top-level `packageManager`, `exclusive` writes only to `devEngines`.
+ * §03.7 — `devEngines` is where the pin goes.
+ *
+ * It is the field §03.3 reads first, and the only one of the two that can hold
+ * a name, a version, a digest and an `onFail` policy at once, so a pin written
+ * anywhere else is a pin the next run does not honour. The member is therefore
+ * written whenever the pin has semver text to record, created if it is not
+ * there yet — the runtime path (§02.3) generalised to both members.
+ *
+ * `exclusive` is what is left of the old three-way question, and it now asks
+ * only whether the manifest *already* has a top-level `packageManager`. If it
+ * does, that field is refreshed alongside, because a stale
+ * `packageManager: "pnpm@9"` sitting beside a fresh `devEngines` member is a
+ * statement about what will run that is no longer true — for jup, and for every
+ * other tool that reads only that field. If it does not, none is created: §03.7
+ * writes one home for the pin, not two.
+ *
+ * A declared *range* is replaced rather than preserved, which reverses what
+ * this function used to do. `1.x || 2.x` beside an exact `packageManager` was a
+ * statement of intent worth keeping while the top-level field carried the pin
+ * and won the read; now that the member is the pin, leaving the range there
+ * would mean `jup use pnpm@1.9.0` resolved `1.x` on the next run and the pin
+ * never took. §09.4's cross-major `up` is unaffected: it refreshes `jup.lock`
+ * and does not call `writePin` when the descriptor is a range.
  */
 function devEnginesWriteTarget(
   data: Manifest,
@@ -351,73 +421,48 @@ function devEnginesWriteTarget(
     };
   }
 
-  // A declaration for a *different* package manager does not describe this pin;
-  // the mismatch is reported through `onFail` and the pin goes to the top level,
-  // where a reader can still see both statements.
-  if (declared === undefined || declared.name !== info.name) return none;
+  // A declaration for a *different* package manager does not describe this pin.
+  // The mismatch is reported through `onFail` and, if that does not throw, the
+  // pin goes to the top level rather than overwriting a statement about another
+  // tool — the one case where `packageManager` is still the pin's only home, and
+  // the one §03.3 still reads, since a member naming another tool is not a
+  // declaration about this one.
+  if (declared !== undefined && declared.name !== info.name) return none;
   // A URL reference has no semver to record in a semver field; §04.4's range
   // does, and goes in as written.
   if (pinText(info.reference) === undefined) return none;
 
-  // A present non-string `packageManager` is overwritten at the top level.
-  const hasPin = typeof data.packageManager === "string";
-  const hasBrokenPin =
-    Object.hasOwn(data, "packageManager") && !hasPin && data.packageManager != null;
-  if (hasBrokenPin) return none;
+  // Only the *presence* of the key matters, not whether it holds a usable pin:
+  // a `packageManager: 42` is refreshed for the same reason a stale string is,
+  // and leaving it would keep §12.2's error in a manifest jup had just written.
+  const hasTopLevelField = Object.hasOwn(data, "packageManager");
 
-  const declaredExactVersion = declared.version !== undefined && isValidVersion(declared.version);
-
-  if (!hasPin) {
-    // §03.7 — the pin lives where the declaration already is.
-    return { write: true, exclusive: true, replacesDeclaredVersion: declaredExactVersion };
-  }
-
-  // Both fields. `packageManager` is the one §03.3 reads, so it is always
-  // written; `devEngines` is only rewritten when it was itself a pin.
+  // §03.7 — "validation MUST run against the state being written, not the state
+  // on disk". The member's version is now always replaced by this write, so
+  // there is never a declared version left for the pin to violate, and
+  // `writePin`'s range cross-check is skipped for every package-manager pin.
+  //
+  // That check used to fire here, and dropping it is deliberate rather than
+  // incidental. `jup use pnpm@^10.0.0` writes `^10.0.0` into the member; with
+  // the check still armed, the very next `jup use pnpm@11.1.2` would be refused
+  // by the range its own predecessor had just written, and nothing short of a
+  // hand edit would get the project out. A declared range was a pure constraint
+  // only while `packageManager` carried the pin — now it *is* the pin, and
+  // replacing a pin is what `use` is for.
+  //
+  // What still guards the declaration is the **name** check above, which is the
+  // half that was always about a statement this pin contradicts rather than
+  // replaces: `use pnpm@6.6.2` in a project whose member says `yarn` writes a
+  // pin §03.3 would reject on every later run, and no write can make that true.
   return {
-    write: declaredExactVersion,
-    exclusive: false,
-    replacesDeclaredVersion: declaredExactVersion,
+    write: true,
+    exclusive: !hasTopLevelField,
+    replacesDeclaredVersion: true,
   };
 }
 
 /** §03.7 — where `use`/`up` put the digest. The suffixed form is the default. */
 export type PinStyle = "suffix" | "sidecar";
-
-/**
- * §03.7 — write the pin as a clean version plus a sidecar `integrity`.
- *
- * Returns `null` when the sidecar cannot be written, in which case the caller
- * falls back to the suffixed form: a pin written nowhere is worse than a pin
- * written in the interoperable spelling the user did not ask for.
- */
-function writeSidecarPin(
-  content: string,
-  data: Manifest,
-  info: PinInfo,
-  field: DevEnginesField = "packageManager",
-): string | null {
-  // A range pin carries no digest to move out of the version string (§04.4
-  // keeps its digest in `jup.lock`), so there is no sidecar to write and the
-  // ordinary member write below lands the range instead.
-  const version = parse(info.reference)?.version;
-  if (version === undefined || info.hash === undefined) return null;
-
-  const integrity = integrityFromHash(info.hash);
-  if (integrity === undefined) return null;
-
-  const block = memberOf(data, field);
-
-  // A block that is not an object, or that speaks for a different tool, is not
-  // ours to rewrite.
-  if (block !== undefined) {
-    if (typeof block !== "object" || block === null || Array.isArray(block)) return null;
-    const declaredName = (block as { name?: unknown }).name;
-    if (declaredName !== undefined && declaredName !== info.name) return null;
-  }
-
-  return writeIntoDevEngines(content, data, info, field);
-}
 
 /** The `devEngines` member, or `undefined` when the block or the member is absent. */
 function memberOf(data: Manifest, field: DevEnginesField): unknown {
@@ -514,10 +559,10 @@ function createDevEnginesMember(
  * §03.7 — write the pin into the `devEngines` member, or `null` if the surgical
  * edit could not be made.
  *
- * The version written is the **plain** semver version and the digest goes to
- * `integrity` beside it (§03.7's shape), because a `devEngines` member's
- * `version` is validated as a semver *range* by §03.3 and a `+sha512.…` suffix
- * has no business in one.
+ * `sidecar` selects §03.7's two spellings of the digest: the clean version with
+ * an SRI `integrity` beside it, or — the default — §02.1's build suffix carried
+ * in the version itself. {@link versionToRecord} owns that choice and its one
+ * fallback. Both read back identically (§03.3).
  *
  * Write a usable digest with its version. Without one, preserve integrity only
  * when re-pinning the same exact version; ranges, per-host tools, and changed
@@ -528,11 +573,11 @@ function writeIntoDevEngines(
   data: Manifest,
   info: PinInfo,
   field: DevEnginesField = "packageManager",
+  sidecar = false,
 ): string | null {
-  const version = pinText(info.reference);
+  const integrity = sidecar ? sidecarDigest(info) : undefined;
+  const version = versionToRecord(info, integrity);
   if (version === undefined) return null;
-
-  const integrity = info.hash === undefined ? undefined : integrityFromHash(info.hash);
 
   // Absent member — create it, `name` included: §03.3 reads `name` first, and a
   // member without one describes nothing.

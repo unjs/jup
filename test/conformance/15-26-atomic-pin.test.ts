@@ -62,12 +62,11 @@ describe("§03.7 atomic pin updates", () => {
 
     const written = manifestOf(fixture);
     expect(written.packageManager).toBeUndefined();
+    // §03.7's default spelling: §02.1's digest suffix in the version itself.
+    // `--pin-style=sidecar` is the other one, and row 169 covers it.
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
-      // §03.7's shape: the field stays a valid semver range, and the digest
-      // lives beside it rather than as a `+sha512.…` suffix inside it.
-      version: "11.1.2",
-      integrity: expect.stringMatching(/^sha512-[\d+/A-Za-z]+=*$/),
+      version: expect.stringMatching(/^11\.1\.2\+sha512\.[\da-f]{128}$/),
     });
 
     // The requirement, not the appearance: the project reads back cleanly.
@@ -91,8 +90,7 @@ describe("§03.7 atomic pin updates", () => {
     // Key order, two-space indent, and the nested member's own indentation.
     expect(text.indexOf(`"name": "project"`)).toBeLessThan(text.indexOf(`"devEngines"`));
     expect(text.indexOf(`"devEngines"`)).toBeLessThan(text.indexOf(`"scripts"`));
-    expect(text).toContain(`      "version": "11.1.2"`);
-    expect(text).toContain(`      "integrity": "sha512-`);
+    expect(text).toContain(`      "version": "11.1.2+sha512.`);
     expect(text).toContain(`    "build": "tsc"`);
   });
 
@@ -114,8 +112,7 @@ describe("§03.7 atomic pin updates", () => {
     expect(written.packageManager).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
-      version: "11.1.2",
-      integrity: expect.stringMatching(/^sha512-/),
+      version: expect.stringMatching(/^11\.1\.2\+sha512\./),
     });
 
     registry.reset();
@@ -125,10 +122,13 @@ describe("§03.7 atomic pin updates", () => {
     expect(rerun.stderr).toBe("");
   });
 
-  it("190: a devEngines *range* is a constraint, honoured rather than collapsed", async () => {
-    // The other half of the rule, and the reason §09.4 still works: a declared
-    // range is what carries `corepack up` across a major boundary, so rewriting
-    // it into the version just chosen would silently narrow the project.
+  // §03.7 reversed this row. While `packageManager` carried the pin and won the
+  // read, a declared range beside it was a statement of intent worth keeping.
+  // Now the member *is* the pin, so a range left there would be what the next
+  // run resolves — and `use pnpm@11.1.2` would never have taken. §09.4's
+  // cross-major `up` is unaffected: on a range descriptor it refreshes
+  // `jup.lock` and writes no pin, so only an explicit `use` reaches this path.
+  it("190: an explicit `use` replaces a declared range with the version it pinned", async () => {
     const fixture = createFixture({
       name: "project",
       packageManager: "pnpm@11.0.0",
@@ -141,7 +141,10 @@ describe("§03.7 atomic pin updates", () => {
 
     const written = manifestOf(fixture);
     expect(written.packageManager).toMatch(/^pnpm@11\.1\.2\+sha512\./);
-    expect(written.devEngines?.packageManager).toEqual({ name: "pnpm", version: "^11.0.0" });
+    expect(written.devEngines?.packageManager).toEqual({
+      name: "pnpm",
+      version: expect.stringMatching(/^11\.1\.2\+sha512\./),
+    });
 
     registry.reset();
     const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
@@ -149,23 +152,49 @@ describe("§03.7 atomic pin updates", () => {
     expect(rerun.stderr).toBe("");
   });
 
-  it("190: a declared range is still enforced — it is not silently rewritten away", async () => {
+  // §03.7 reversed this row too, and for the same reason as row 190 above. The
+  // declared range was a pure constraint only while `packageManager` carried the
+  // pin; now the member *is* the pin, and `use` replaces pins. Left enforced,
+  // the range `jup use pnpm@^11.0.0` writes would refuse the very next
+  // `jup use pnpm@10.0.0`, with nothing but a hand edit to get out.
+  it("190: an explicit `use` moves the pin outside a declared range", async () => {
     const fixture = createFixture({
       name: "project",
       devEngines: { packageManager: { name: "pnpm", version: "^11.0.0" } },
     });
 
-    // 10.0.0 is outside the declared range, and nothing about §03.7 makes that
-    // acceptable: the constraint is the user's statement, and the default
-    // `onFail` is an error (§03.3).
     const outside = await run(["use", "pnpm@10.0.0"], { ...fixture, registry, env: env() });
 
-    expect(outside.exitCode).toBe(1);
-    expect(outside.stdout).toContain("does not match the devEngines specification (pnpm@^11.0.0)");
-    // Nothing was written: the declaration is exactly as the user left it.
+    expect(outside.exitCode).toBe(0);
     expect(manifestOf(fixture).devEngines?.packageManager).toEqual({
       name: "pnpm",
-      version: "^11.0.0",
+      version: expect.stringMatching(/^10\.0\.0\+sha512\./),
+    });
+
+    // And the project reads back cleanly at the version it was moved to.
+    registry.reset();
+    const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    expect(rerun.exitCode).toBe(0);
+    expect(rerun.stdout).toBe("10.0.0\n");
+    expect(rerun.stderr).toBe("");
+  });
+
+  // The surviving guard: a member naming *another* tool is a statement no write
+  // can make true, so §03.7 refuses rather than overwriting it.
+  it("190: a member naming another package manager still refuses the pin", async () => {
+    const fixture = createFixture({
+      name: "project",
+      devEngines: { packageManager: { name: "yarn", version: "^1.0.0" } },
+    });
+
+    const result = await run(["use", "pnpm@11.1.2"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain("does not match the devEngines specification (yarn@^1.0.0)");
+    expect(manifestOf(fixture).packageManager).toBeUndefined();
+    expect(manifestOf(fixture).devEngines?.packageManager).toEqual({
+      name: "yarn",
+      version: "^1.0.0",
     });
   });
 
@@ -182,7 +211,7 @@ describe("§03.7 atomic pin updates", () => {
       0,
     );
 
-    expect(manifestOf(fixture).devEngines?.packageManager?.version).toBe("11.1.2");
+    expect(manifestOf(fixture).devEngines?.packageManager?.version).toMatch(/^11\.1\.2\+sha512\./);
   });
 
   it("189: a devEngines block naming a *different* package manager is not a write target", async () => {

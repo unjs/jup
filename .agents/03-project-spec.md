@@ -187,9 +187,22 @@ Then cross-check against `packageManager`:
 
 * **`pm` set:** if it does not start with `` `${de.name}@` ``, or `de.version` is
   set and the pinned version does not `satisfies` it (**strict** semver here),
-  `warnOrThrow`. Either way, return `pm` — the `packageManager` field always wins
-  when present.
+  `warnOrThrow`. Either way the answer is decided by `de.version`, not by the
+  warning: return `` `${de.name}@${de.version}` `` when it is set, else `pm`.
 * **`pm` absent:** return `` `${de.name}@${de.version ?? "*"}` ``.
+
+**A valid `de` naming a version wins over `packageManager`.** It is the richer
+declaration — name, range, `onFail` and a sidecar digest against one string — so
+it is the field jup treats as the pin and the field §3.7 writes. The two shapes
+that still fall back to `pm` fall back because `de` has not answered the
+question: a member failing any validation above is not a declaration at all, and
+a member carrying no `version` names the tool without naming the release, where
+`pm` is strictly more specific. The cross-checks still run and still report a
+disagreement through `onFail`; they no longer pick the winner.
+
+`SpecResult` carries which field the returned spec actually came from, because
+§3.4's runtime refusal is about the `packageManager` *field* and a spec read out
+of `de` did not come from it.
 
 A `devEngines.packageManager.integrity` is folded into the returned spec string
 as a build suffix (§3.7's sidecar form). If both spellings are present and
@@ -319,22 +332,42 @@ which package manager a project already uses.
 
 ### Which field is written
 
+The pin goes to `devEngines` — the field §3.3 reads first, and the only one that
+can carry a name, a version and a digest together.
+
 | Manifest declares | Written |
 |---|---|
-| `packageManager` only, or neither | `packageManager` |
+| neither field | `devEngines.packageManager`, created |
 | `devEngines.packageManager` for this tool, no `packageManager` | `devEngines.packageManager.version` (+ `integrity`) |
-| both, for this tool | `packageManager`; `devEngines` left alone |
+| `packageManager` only | `devEngines.packageManager`, created; `packageManager` refreshed |
+| both, for this tool | both refreshed |
+| `devEngines.packageManager` for a *different* tool | `packageManager`; the mismatch reported |
 | the pin is a **runtime** | `devEngines.runtime`, created if absent |
 
-Row three needs no `devEngines` update because the value being written already
-satisfies the declared range; rewriting `1.x || 2.x` into `2.4.3` would destroy
-the statement of intent `up` relies on (§09.4). When the declared name is a
-*different* package manager, `devEngines` is not describing this pin at all: the
-mismatch is reported through `onFail` and, if that does not throw, the pin goes to
-`packageManager` where a reader can still see both statements.
+Rows one and two write one field because that is the whole pin: §3.3 reads the
+member, and a second, thinner copy in `packageManager` states nothing the member
+does not. Rows three and four refresh the top-level field only because it is
+already there — a `packageManager` left holding the version before last is a
+false statement about what will run, to jup and to every tool that reads only
+that field. No `packageManager` is ever **created**.
 
-A runtime has exactly one home, so the three-way question does not arise; what
-replaces it is that the member may have to be **created**.
+A declared **range is replaced**, not preserved. While `packageManager` carried
+the pin and won the read, `1.x || 2.x` beside it was a statement of intent worth
+keeping; now that the member is the pin, leaving the range there would mean
+`jup use pnpm@1.9.0` resolved `1.x` on the next run and the pin never took.
+§9.4's cross-major `up` is unaffected: it refreshes `jup.lock` and does not write
+a pin when the descriptor is a range. Step 3's version cross-check still guards
+the declared constraint, since only an *exact* declared version counts as
+"replaced by this write".
+
+When the declared name is a *different* package manager, `devEngines` is not
+describing this pin at all: the mismatch is reported through `onFail` and, if
+that does not throw, the pin goes to `packageManager` where a reader can still
+see both statements — the one case where the top-level field is still the pin's
+only home.
+
+A runtime has exactly one home, so the question of refreshing a second field
+does not arise.
 
 ### Pin style
 
@@ -369,7 +402,8 @@ an unguessable name so a planted symlink is not written through, and a symlinked
 `package.json` is resolved first so the rename replaces the file rather than the
 link. The mode is carried across.
 
-`writePin` returns the previous pin value — the existing field, else the
+`writePin` returns the previous pin value, in §3.3's order — the `devEngines`
+spec where it named a version, else the existing `packageManager`, else the
 `devEngines` spec, else the literal string `unknown` — which the caller exports as
 `JUP_MIGRATE_FROM` before running the package manager's `use` command (§09.5).
 Every mutating command prints each path it changed.

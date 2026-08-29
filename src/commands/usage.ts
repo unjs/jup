@@ -176,7 +176,7 @@ the search stops at a workspace root. Every mutating command prints each path
 it changed.
 
 --pin-style=sidecar puts the digest in devEngines.packageManager.integrity and
-keeps clean semver in packageManager. The default, --pin-style=suffix, writes
+keeps clean semver in the version field. The default, --pin-style=suffix, writes
 <version>+<algo>.<hex>. Both formats are read identically.
 
 With no names, enable and disable target every supported package manager,

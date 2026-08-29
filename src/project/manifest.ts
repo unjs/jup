@@ -399,6 +399,12 @@ export function discoverProjectSpec(
  * it treats a synthesised spec and §03.6's auto-pin — which fires on `NoSpec`
  * and this is not one — leaves it alone.
  *
+ * No `specField` either, and it cannot matter: §12.5's message is the only
+ * reader, and it is reached only from §03.5's name mismatch, which a version
+ * file cannot produce. The walk consults one only for the tool that was
+ * *requested* (§03.1), so the name it yields is the requested name by
+ * construction.
+ *
  * Parsing stays lazy for the reason `describe` keeps it lazy: a malformed file
  * must fail the request that needed it, not the walk. Routing the synthesised
  * string back through {@link parseSpec} rather than returning a descriptor
@@ -436,7 +442,11 @@ function describe(
   envFilePath: string | undefined,
   field: DevEnginesField = "packageManager",
 ): SpecResult {
-  const { raw, range, hasPin, devEngines } = readSpecFromManifest(data, target, field);
+  const { raw, range, hasPin, devEngines, fromPackageManagerField } = readSpecFromManifest(
+    data,
+    target,
+    field,
+  );
   if (raw === undefined) {
     return { type: "NoSpec", target, envFilePath };
   }
@@ -446,13 +456,20 @@ function describe(
   // §03.4 — the runtime refusal is about the `packageManager` *field*, so it
   // applies exactly when `raw` came from it. A spec synthesised out of a
   // `devEngines` member did not, and neither did anything the user typed.
-  const packageManagerField = field === "packageManager" && hasPin;
+  // Since §03.3 lets a versioned member outrank a present `packageManager`,
+  // "the field holds a string" and "the field supplied this spec" have come
+  // apart; `readSpecFromManifest` reports the second.
+  const packageManagerField = field === "packageManager" && fromPackageManagerField;
+  // §12.5 — the field a user has to edit to change this answer, which is the
+  // one the spec came from and not simply the one that exists.
+  const specField = packageManagerField ? "packageManager" : `devEngines.${field}`;
   return {
     type: "Found",
     target,
     range,
     devEngines,
     hasPin,
+    specField,
     envFilePath,
     getSpec: (opts: ParseSpecOptions) => parseSpec(raw, source, { ...opts, packageManagerField }),
   };
@@ -582,10 +599,26 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
 }
 
 /**
- * §03.3 — resolve `packageManager` against `devEngines.packageManager`.
+ * §03.3 — resolve `devEngines.packageManager` against `packageManager`.
  *
  * Validation happens in a specific order because each failure has a different
- * outcome, and `packageManager` always wins when present.
+ * outcome, and a **valid `devEngines` member that names a version wins** over
+ * the top-level field. It is the richer declaration — a name, a range, an
+ * `onFail` policy and a sidecar digest, where `packageManager` has one string —
+ * so it is the one jup treats as the pin, and §03.7 writes it there.
+ *
+ * Two shapes still fall back to `pm`, and for the same reason: the member is
+ * not answering the question. A member that fails any validation below is not a
+ * declaration at all — its own `onFail` is not even trustworthy — and a member
+ * carrying no `version` says *which* tool the project is for without saying
+ * which release, so a `packageManager` beside it is strictly more specific.
+ * Reading `name@*` over an exact pin would throw away a version the manifest
+ * states plainly and send the run to the registry for the latest.
+ *
+ * The cross-checks against `pm` still run whenever both are present. They no
+ * longer decide the answer, but a manifest whose two fields disagree is a
+ * manifest whose author believes something false about what will run, and §12's
+ * messages are how they find out.
  *
  * §02.3 — `field` selects which `devEngines` member speaks. For `"runtime"`
  * there is no top-level counterpart, so `pm` is `undefined` throughout and the
@@ -604,6 +637,15 @@ export function readSpecFromManifest(
   /** §03.7 — the declaration itself, present even when it names no version. */
   devEngines?: DevEnginesDeclaration;
   hasPin: boolean;
+  /**
+   * §03.4 — whether `raw` is the `packageManager` field's own bytes.
+   *
+   * `hasPin` cannot answer this any more. It says the field holds a string;
+   * since §03.3 lets a versioned `devEngines` member outrank it, that string is
+   * often not the one being returned, and the runtime refusal keyed off it
+   * would then be about a field the spec did not come from.
+   */
+  fromPackageManagerField: boolean;
 } {
   void manifestPath; // Reserved: §03.1/§03.7 need it to report *which* file is at fault.
 
@@ -618,18 +660,18 @@ export function readSpecFromManifest(
   const hasPin = typeof pm === "string";
 
   if (de === undefined || de === null) {
-    return { raw: pm, hasPin };
+    return { raw: pm, hasPin, fromPackageManagerField: hasPin };
   }
 
   // These first two never throw, whatever `onFail` says: the field is too
   // malformed for its own `onFail` to be trustworthy.
   if (typeof de !== "object") {
     warn(messages.devEnginesNotObject(de, field));
-    return { raw: pm, hasPin };
+    return { raw: pm, hasPin, fromPackageManagerField: hasPin };
   }
   if (Array.isArray(de)) {
     warn(messages.devEnginesArray(field));
-    return { raw: pm, hasPin };
+    return { raw: pm, hasPin, fromPackageManagerField: hasPin };
   }
 
   const { name, version, onFail } = de as DevEnginesEntry;
@@ -639,12 +681,12 @@ export function readSpecFromManifest(
 
   if (typeof name !== "string" || name.includes("@")) {
     warnOrThrow(messages.devEnginesBadName(name, field), onFail);
-    return { raw: pm, hasPin };
+    return { raw: pm, hasPin, fromPackageManagerField: hasPin };
   }
   if (version !== undefined && version !== null) {
     if (typeof version !== "string" || !isValidRange(version)) {
       warnOrThrow(messages.devEnginesBadVersion(version, field), onFail);
-      return { raw: pm, hasPin };
+      return { raw: pm, hasPin, fromPackageManagerField: hasPin };
     }
   }
 
@@ -678,8 +720,40 @@ export function readSpecFromManifest(
     ) {
       warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
     }
-    // `packageManager` wins whenever it is present, even after a warning.
-    return { raw: withSidecarIntegrity(pm, integrity, version, onFail), range, devEngines, hasPin };
+    // §03.3 — the third cross-check, and the one the member's own precedence
+    // would otherwise skip past. `withSidecarIntegrity` reports two disagreeing
+    // digests only when it finds both on the *same* string, which was enough
+    // while `packageManager` was the string being returned. Now the member is,
+    // so a suffix on the top-level field is never examined — and two hashes for
+    // one artifact means at most one of them describes what will run, which is
+    // worth saying whichever field is going to win.
+    if (typeof integrity === "string" && typeof pm === "string") {
+      const suffix = parse(pm.slice(name.length + 1))?.build.join(".");
+      const declaredHash = hashFromIntegrity(integrity);
+      if (
+        suffix !== undefined &&
+        suffix !== "" &&
+        declaredHash !== undefined &&
+        suffix.toLowerCase() !== declaredHash
+      ) {
+        warnOrThrow(messages.devEnginesIntegrityMismatch(pm, integrity), onFail);
+      }
+    }
+
+    // §03.3 — a member that names no version has not answered the question, so
+    // the more specific `packageManager` stands. Anything else and the member
+    // wins, warning or no warning: the disagreement has been reported, and
+    // reporting it is not a reason to run the field jup no longer treats as
+    // the pin.
+    if (typeof version !== "string") {
+      return {
+        raw: withSidecarIntegrity(pm, integrity, version, onFail),
+        range,
+        devEngines,
+        hasPin,
+        fromPackageManagerField: hasPin,
+      };
+    }
   }
 
   return {
@@ -687,6 +761,7 @@ export function readSpecFromManifest(
     range,
     devEngines,
     hasPin,
+    fromPackageManagerField: false,
   };
 }
 
@@ -720,8 +795,8 @@ function withSidecarIntegrity(
   if (typeof raw !== "string") return raw;
 
   // §03.7 — the sidecar describes the `version` beside it, and only that. A
-  // range describes no single release, so its digest cannot be folded into a
-  // `packageManager` pin that outranks it (§03.3).
+  // range describes no single release, so there is no one artifact for the
+  // digest to name and it is left where it is (§03.3, §04.4).
   if (typeof declared === "string" && !isValidVersion(declared)) return raw;
 
   if (typeof integrity !== "string") {
@@ -830,7 +905,12 @@ export function reconcile(
           return withBinaryVersion(fallback);
         }
         throw new UsageError(
-          messages.projectConfigured(spec.name, result.target, isOutsideProject(result.target)),
+          messages.projectConfigured(
+            spec.name,
+            result.target,
+            isOutsideProject(result.target),
+            result.specField,
+          ),
         );
       }
       return withBinaryVersion(spec);

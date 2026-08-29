@@ -17,6 +17,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  effectivePin,
   MockRegistry,
   packageManagerTarball,
   run,
@@ -28,8 +29,9 @@ function env(extra?: Record<string, string | undefined>): Record<string, string 
   return { COREPACK_INTEGRITY_KEYS: registry.trustStore(), CI: undefined, ...extra };
 }
 
+/** §03.3 — the pin the project actually declares, whichever field carries it. */
 function pinOf(fixture: { json(relative: string): unknown }): string | undefined {
-  return (fixture.json("package.json") as { packageManager?: string }).packageManager;
+  return effectivePin(fixture.json("package.json"));
 }
 
 /**

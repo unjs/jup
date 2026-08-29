@@ -23,9 +23,11 @@ import {
   seedPackageManager,
 } from "./_harness/index.ts";
 
-const SUFFIX =
-  `(this manifest is outside any project — a stray "packageManager" field there ` +
+/** §12.5 — the clause names the same field the sentence before it does. */
+const suffixFor = (field: string): string =>
+  `(this manifest is outside any project — a stray "${field}" field there ` +
   `affects every directory)`;
+const SUFFIX = suffixFor("packageManager");
 
 afterAll(cleanupFixtures);
 
@@ -65,6 +67,24 @@ describe("§12.5 — a manifest outside any project says so (row 205)", () => {
     expect(result.stderr).toBe(
       `This project is configured to use yarn because ${join(fixture.root, "package.json")} ` +
         `has a "packageManager" field ${SUFFIX}\n`,
+    );
+  });
+
+  // §12.5 — both slots name the field the spec was read from (§03.3), so a
+  // stray manifest that pins through the member says so twice.
+  it("205: a stray devEngines member is flagged, and names its own field", async () => {
+    const { fixture, options } = strayHome();
+    fixture.write(
+      "../package.json",
+      `${JSON.stringify({ devEngines: { packageManager: { name: "yarn", version: "1.0.0" } } })}\n`,
+    );
+
+    const result = await run(["pnpm", "--version"], options);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe(
+      `This project is configured to use yarn because ${join(fixture.root, "package.json")} ` +
+        `has a "devEngines.packageManager" field ${suffixFor("devEngines.packageManager")}\n`,
     );
   });
 

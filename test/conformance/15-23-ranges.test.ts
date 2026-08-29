@@ -24,6 +24,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
   createFixture,
+  effectivePin,
   MockRegistry,
   packageManagerTarball,
   run,
@@ -120,10 +121,8 @@ describe("§04.4 ranges and jup.lock", () => {
     const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    // The range is the statement of intent, so the field goes on making it.
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toBe(
-      "pnpm@^11.0.0",
-    );
+    // The range is the statement of intent, so the pin goes on making it.
+    expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
     expect(result.stdout).toContain(`Updated ${fixture.path("package.json")} to use pnpm@^11.0.0`);
     expect(result.stdout).toContain(`Updated ${fixture.path("jup.lock")} to use pnpm@11.1.2`);
 
@@ -150,9 +149,7 @@ describe("§04.4 ranges and jup.lock", () => {
     const result = await run(["use", "pnpm@11.1.2"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toMatch(
-      /^pnpm@11\.1\.2\+sha512\./,
-    );
+    expect(effectivePin(fixture.json("package.json"))).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     expect(fixture.exists("jup.lock")).toBe(false);
   });
 
@@ -162,9 +159,7 @@ describe("§04.4 ranges and jup.lock", () => {
     const result = await run(["use", "pnpm@latest"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toMatch(
-      /^pnpm@11\.1\.2\+sha512\./,
-    );
+    expect(effectivePin(fixture.json("package.json"))).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     expect(fixture.exists("jup.lock")).toBe(false);
   });
 
@@ -495,7 +490,9 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
     expect(result.stderr).toBe("");
-    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+    // §03.3 — the member outranks the top-level range, so its own range is the
+    // key the resolution is recorded under.
+    expect(memoOf(fixture).resolutions["pnpm@>=11"]?.resolved).toBe("11.1.2");
   });
 
   it("install warms the cache with the recorded version, not the newest match", async () => {
@@ -515,22 +512,21 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(existsSync(join(fixture.home, "v1", "pnpm", "11.1.2"))).toBe(false);
   });
 
-  it("install looks the resolution up under the pin's key, not the devEngines range", async () => {
+  it("install looks the resolution up under the devEngines range, which is the pin", async () => {
     const fixture = createFixture({
       packageManager: "pnpm@^11.0.0",
       devEngines: { packageManager: { name: "pnpm", version: ">=10", onFail: "error" } },
     });
     fixture.write(
       "jup.lock",
-      `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
+      `${JSON.stringify({ version: 1, resolutions: { "pnpm@>=10": { resolved: "11.0.0" } } })}\n`,
     );
 
     const result = await run(["install"], { ...fixture, registry, env: env() });
 
-    // §09.1 lets a `devEngines` range outrank the pin for `up`, and that is the
-    // descriptor `install` inherits — but the key the *proxy* path will look up
-    // is the pin's, and warming the cache under any other key warms the wrong
-    // version.
+    // §03.3 — the member is the spec, so it is also the key the *proxy* path
+    // will look up. Warming the cache under any other key warms the wrong
+    // version; the stale `pnpm@^11.0.0` beside it is no longer read at all.
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Adding pnpm@11.0.0 to the cache...\n");
   });
@@ -704,9 +700,7 @@ describe("§04.4 ranges and jup.lock", () => {
     const used = await run(["use", "pnpm@11.1.2"], { ...fixture, registry, env: env() });
 
     expect(used.exitCode).toBe(0);
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toMatch(
-      /^pnpm@11\.1\.2\+sha512\./,
-    );
+    expect(effectivePin(fixture.json("package.json"))).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     // The last resolution went with the range it belonged to, and an empty
     // resolution map is no file at all — in either file, since a memo left
     // behind would come back to life the moment the range did.
