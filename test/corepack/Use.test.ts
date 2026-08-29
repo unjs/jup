@@ -46,7 +46,7 @@ describe(`UseCommand`, () => {
       });
     });
     // SKIP (jup §09): the usage line printed with the error carries
-    // jup's extra flags — `$ corepack use [--here] [--pin-style=suffix|sidecar]
+    // jup's extra flags — `$ corepack use [--here] [--no-integrity] [--no-lockfile]
     // <pattern>` — where Corepack has `$ corepack use <pattern>`. The refusal
     // itself, and its message, match.
     it.skip(`with 'devEngines.packageManager' field`, async () => {

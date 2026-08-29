@@ -317,7 +317,7 @@ which package manager a project already uses.
 
 ## 3.7 Writing the pin
 
-`writePin(cwd, info, {here, pinStyle})`:
+`writePin(cwd, info, {here, integrity})`:
 
 1. Re-run discovery in `mutating` mode from `cwd` — the file to edit is not
    necessarily in `cwd`, and the workspace stop and `--here` apply here and only
@@ -369,18 +369,22 @@ only home.
 A runtime has exactly one home, so the question of refreshing a second field
 does not arise.
 
-### Pin style
+### Where the digest goes
 
-| Style | Written |
+| Field written | Digest |
 |---|---|
-| `suffix` (default) | `<version>+<algo>.<hex>` in the version field |
-| `sidecar` | a clean semver version, with the digest in `devEngines.packageManager.integrity` as SRI |
+| `devEngines.<member>` | `integrity`, as SRI, beside a clean semver `version` |
+| `packageManager` | `<version>+<algo>.<hex>` in the string itself |
 
-Both are read identically (§3.3). `sidecar` exists because a `devEngines`
-`version` is validated as a semver *range*, where a `+sha512.…` suffix has no
-business. If the sidecar edit cannot be made, the caller falls back to the
-suffixed form: a pin written nowhere is worse than a pin written in a spelling
-the user did not ask for.
+The field decides where the digest goes. A `devEngines` version is a semver
+*range*, so its digest goes in `integrity`. The top-level string has no separate
+key, so its digest stays in the version suffix. Both forms are read the same way
+(§3.3). If `integrity` cannot be edited, the version keeps the suffix so the pin
+is still written.
+
+`--no-integrity` (§09) writes no digest and removes any existing digest from
+either field. This removes §06.1's explicit-hash check. The download is still
+checked with its signature.
 
 A **range** pin (`jup use pnpm@^11`) puts the range in the field and the resolved
 version in `jup.lock` (§04.4); no digest reaches the manifest, because the field

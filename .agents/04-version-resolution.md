@@ -208,6 +208,10 @@ a silent permanent pin.
   that key, which would otherwise answer alone wherever the recorded file is not
   visible — an uncommitted write, a `git stash`, a CI cache that restores
   `node_modules` but not the lockfile — with the version just superseded.
+* `--no-lockfile` (§09) writes no resolution. It removes the matching recorded
+  resolution and memo so the next run does not reuse them. The range still goes
+  into the manifest, and its selected release is still resolved and installed.
+  If `jup.lock` changed, §12.11's `Removed …` line names it.
 * Serialisation is chosen for `git diff`: two-space indent, sorted keys, sorted
   host maps, trailing newline. An unchanged file is not rewritten, so mtime and
   `git status` stay quiet. Writes are temp-then-rename in the destination's own
@@ -220,7 +224,9 @@ a silent permanent pin.
 `JUP_FROZEN_LOCKFILE=1` refuses creation, refresh **and deletion** — the flag
 governs the file, not one syntax of pin, so an exact `use` over a project that
 currently declares a range is refused too, because removing that entry is a
-write. The refusal happens before anything is resolved or downloaded.
+write. The refusal happens before anything is resolved or downloaded. The same
+rule applies to `--no-lockfile`: it is refused when it would remove an entry for
+the range or pin being replaced.
 
 Unknown `version` values, malformed entries, and unreadable files all read as "no
 resolutions", entry by entry, so one damaged record cannot poison the others and

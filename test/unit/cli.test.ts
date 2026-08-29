@@ -1032,12 +1032,13 @@ describe("use (§09.5, tests 105-110)", () => {
 
     expect(existsSync(join(project, "package.json"))).toBe(true);
     // §03.7 — neither field declared, so the member is the pin and no
-    // `packageManager` is created beside it. The default spelling keeps §02.1's
-    // digest suffix in the version.
+    // `packageManager` is created beside it. The digest sits in `integrity`,
+    // because the member's `version` is read as a semver range.
     expect(readManifest().packageManager).toBeUndefined();
     expect(pinnedMember()).toEqual({
       name: "yarn",
-      version: expect.stringMatching(/^1\.22\.4\+sha512\./) as unknown as string,
+      version: "1.22.4",
+      integrity: expect.stringMatching(/^sha512-/) as unknown as string,
     });
   });
 
@@ -1085,7 +1086,7 @@ describe("use (§09.5, tests 105-110)", () => {
     // appends the `Usage Error:` block to the same stream (§12.1).
     expect(stdout).toBe(`Installing yarn@1.22.4 in the project...\n`);
     expect(stderr).toBe("");
-    expect(USAGE_LINES.use).toBe("$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>");
+    expect(USAGE_LINES.use).toBe("$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>");
     expect(readManifest().packageManager).toBeUndefined();
   });
 
@@ -1399,7 +1400,9 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
     for (const args of [["--help"], ["-h"], ["help"], []]) {
       stdout = "";
       await expect(runManagementCommand(args)).resolves.toBe(0);
-      expect(stdout).toContain(`jup use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>`);
+      expect(stdout).toContain(
+        `jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>`,
+      );
       expect(stdout).toContain(`jup cache clean`);
       expect(stderr).toBe("");
     }

@@ -176,6 +176,15 @@ export const messages = {
     `Updated ${path} to use ${name}@${reference}`,
 
   /**
+   * §12.11's other half, for `--no-lockfile` (§09): the command changed the
+   * recorded file by *removing* an entry, so it names it too. Printed only when
+   * the file actually held the key — a removal that removed nothing changed no
+   * path, and naming one would be a false statement.
+   */
+  removedResolution: (path: string, name: string, range: string) =>
+    `Removed ${name}@${range} from ${path}`,
+
+  /**
    * §03.1 — `JUP_SPEC_FILE` names a file that is not there. Falling back
    * to the manifest is the worst outcome available: the variable exists for
    * trees whose manifest says the *wrong* thing, so ignoring a typo runs the

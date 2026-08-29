@@ -23,7 +23,7 @@ for a bug. The management-mode shape:
 ```
 Usage Error: The requested version of yarn@1.22.4+sha512.… does not match the devEngines specification (yarn@2.x)
 
-$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>
+$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>
 ```
 
 The usage line is keyed by the command word, falling back to `$ jup <command>`.
@@ -254,6 +254,7 @@ Adding <name>@<reference> to the cache...
 Installing <name>@<reference>...
 Installing <name>@<reference> in the project...
 Updated <path> to use <name>@<reference>
+Removed <name>@<range> from <path>
 All done!
 ! jup is about to download <url>
 ? Do you want to continue? [Y/n] 
@@ -263,6 +264,9 @@ All done!
 ```
 
 The confirmation prompt has a trailing space and no newline.
+
+`--no-lockfile` prints `Removed …` only when it removes an entry from the
+committed `jup.lock` (§09).
 
 ## 12.12 Exit codes
 

@@ -93,16 +93,18 @@ describe("§13.10 use / up", () => {
     // §12.11 added the middle line: every mutating command names the file it
     // modified, which is the whole of #607 and costs one line of output.
     // §12.11 names `written` — the version the `devEngines` member ended up
-    // holding, which in the default spelling still carries the digest suffix.
+    // holding, which is the clean one, its digest beside it in `integrity`.
     expect(result.stdout).toBe(
       `Installing yarn@1.22.4 in the project...\n` +
-        `Updated ${fixture.path("package.json")} to use ${pinOf(fixture)}\n` +
+        `Updated ${fixture.path("package.json")} to use yarn@1.22.4\n` +
         `\nyarn@1.22.4 install\n`,
     );
     expect(result.stderr).toBe("");
     // §03.7 — nothing was declared, so the pin has one home and the top-level
     // field is not created beside it.
     expect(topLevelPinOf(fixture)).toBeUndefined();
+    // §03.3 folds the sidecar back into one hash-bearing pin on read, which is
+    // what makes the two spellings the same statement.
     expect(pinOf(fixture)).toMatch(/^yarn@1\.22\.4\+sha512\.[\da-f]{128}$/);
   });
 
@@ -175,7 +177,8 @@ describe("§13.10 use / up", () => {
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
     expect(devEnginesOf(fixture)).toEqual({
       name: "yarn",
-      version: expect.stringMatching(/^1\.22\.4\+sha512\./),
+      version: "1.22.4",
+      integrity: expect.stringMatching(/^sha512-/),
     });
   });
 
@@ -197,7 +200,9 @@ describe("§13.10 use / up", () => {
       /The requested version of yarn@1\.22\.4\+sha512\.[\da-f]+ does not match the devEngines specification \(pnpm@1\.x\)/,
     );
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
-    expect(result.stdout).toContain("$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>");
+    expect(result.stdout).toContain(
+      "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
+    );
     expect(result.stderr).toBe("");
     // The pin was never written: the pnpm declaration is exactly as the fixture
     // left it, and no `packageManager` was created beside it.
@@ -262,10 +267,11 @@ describe("§13.10 use / up", () => {
 
     expect(result.exitCode).toBe(0);
     expect(topLevelPinOf(fixture)).toBeUndefined();
-    // §03.7 — the default spelling keeps §02.1's digest suffix in the version.
+    // §03.7 — a clean version in the member, with the digest beside it.
     expect(devEnginesOf(fixture)).toEqual({
       name: "yarn",
-      version: expect.stringMatching(/^2\.4\.3\+sha512\.[\da-f]{128}$/),
+      version: "2.4.3",
+      integrity: expect.stringMatching(/^sha512-/),
     });
 
     // §03.7's post-write requirement: the project it just edited re-reads
@@ -324,7 +330,8 @@ describe("§13.10 use / up", () => {
           String.raw`\t"devEngines": \{\r\n`,
           String.raw`\t\t"packageManager": \{\r\n`,
           String.raw`\t\t\t"name": "yarn",\r\n`,
-          String.raw`\t\t\t"version": "1\.22\.4\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\t\t\t"version": "1\.22\.4",\r\n`,
+          String.raw`\t\t\t"integrity": "sha512-[^"]+"\r\n`,
           String.raw`\t\t\}\r\n`,
           String.raw`\t\},\r\n`,
           String.raw`\t"name": "crlf",\r\n`,
@@ -347,7 +354,8 @@ describe("§13.10 use / up", () => {
           String.raw`\t"devEngines": \{\r\n`,
           String.raw`\t\t"packageManager": \{\r\n`,
           String.raw`\t\t\t"name": "yarn",\r\n`,
-          String.raw`\t\t\t"version": "2\.4\.3\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\t\t\t"version": "2\.4\.3",\r\n`,
+          String.raw`\t\t\t"integrity": "sha512-[^"]+"\r\n`,
           String.raw`\t\t\}\r\n`,
           String.raw`\t\},\r\n`,
           String.raw`\t"name": "crlf",\r\n`,

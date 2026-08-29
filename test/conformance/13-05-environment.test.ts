@@ -230,21 +230,22 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(0);
     // §03.7 — the project declared neither field, so the auto-pin lands in
-    // `devEngines` alone, in the default suffixed spelling.
+    // `devEngines` alone: a clean version with its digest beside it.
     const manifest = fixture.json("package.json") as {
       packageManager?: string;
-      devEngines?: { packageManager?: { version?: string } };
+      devEngines?: { packageManager?: { version?: string; integrity?: string } };
     };
     expect(manifest.packageManager).toBeUndefined();
     const version = manifest.devEngines?.packageManager?.version;
-    expect(version).toBe(YARN_DEFAULT);
+    expect(version).toBe(versionOf(YARN_DEFAULT));
+    expect(manifest.devEngines?.packageManager?.integrity).toMatch(/^sha512-/);
     // §12.11 added the last line: "it also covers the auto-pin case in
     // §03.6". It stays on stderr because this is proxy mode and stdout belongs
     // entirely to the package manager (§09.14).
     expect(result.stderr).toBe(
       `! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing yarn@${YARN_DEFAULT}.\n` +
         `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
-        `Updated ${fixture.path("package.json")} to use yarn@${YARN_DEFAULT}\n`,
+        `Updated ${fixture.path("package.json")} to use yarn@${versionOf(YARN_DEFAULT)}\n`,
     );
   });
 

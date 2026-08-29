@@ -53,18 +53,18 @@ export interface PinInfo {
  * only place the digest lives: `referenceWithHash` has already folded one into
  * `info.reference` as §02.1's build suffix, and not every path through §09.5
  * plumbs the two alike. That did not matter while `packageManager` carried the
- * reference verbatim and the sidecar was an opt-in second spelling. Now that
- * the member is the pin and its `version` is always the *clean* one (§03.3
- * validates it as a semver range, where a `+sha512.…` has no business), a
- * digest that reached us only through the suffix would be dropped on the floor
- * — turning a hash-pinned project into an unpinned one without saying so.
+ * reference verbatim. Now that the member is the pin and its `version` is the
+ * *clean* one (§03.3 validates it as a semver range, where a `+sha512.…` has no
+ * business), a digest that reached us only through the suffix would be dropped
+ * on the floor — turning a hash-pinned project into an unpinned one without
+ * saying so.
  *
  * §02.4 — a per-host locator is *not* an exception that needs handling here.
  * `referenceWithHash` declines to attach its digest in the first place, so the
  * suffix this reads is empty for exactly the tools whose digest must never be
  * committed.
  */
-function sidecarDigest(info: PinInfo): string | undefined {
+function memberDigest(info: PinInfo): string | undefined {
   if (info.hash !== undefined) return integrityFromHash(info.hash);
   const build = parse(info.reference)?.build ?? [];
   return build.length === 0 ? undefined : integrityFromHash(build.join("."));
@@ -82,27 +82,32 @@ function pinText(reference: string): string | undefined {
 }
 
 /**
- * §03.7 — the text to put in the member's `version`, per pin style.
+ * §03.7 — the text to put in the member's `version`.
  *
- * `sidecar` wants the clean version, because the digest is going into
- * `integrity` beside it. `suffix` — the default — keeps §02.1's build suffix in
- * the version itself, which is the interoperable spelling and the one a
- * hand-written pin has always had. §03.3 validates the field as a semver
- * *range* and build metadata is part of a valid semver, so both read back as
- * the same hash-bearing exact pin.
+ * The member's `version` is the clean one. §03.3 validates it as a semver
+ * *range*, where §02.1's `+<algo>.<hex>` has no business, so the digest goes to
+ * `integrity` beside it — and under `--no-integrity` there is no digest to place
+ * at all. Either way the field holds plain semver.
  *
- * The style is a preference, not a guarantee, in one direction: `sidecar` falls
- * back to the suffix when the digest cannot be spelled as SRI — the SRI
+ * One case still carries the suffix, and it is a fallback rather than a choice:
+ * a digest that *is* being recorded but cannot be spelled as SRI. The
  * conversion wants a lowercase algorithm name and an even-length hex body, and
  * §02.1's suffix is not otherwise constrained to give it one. Dropping the
  * digest instead would quietly demote a hash-pinned project to an unpinned one,
- * and the member is now the only field the pin is guaranteed to reach, so there
- * is no top-level string left to carry it. A pin written in the spelling the
- * user did not ask for beats a pin written without its hash.
+ * and the member is the only field the pin is guaranteed to reach, so there is
+ * no top-level string left to carry it. A pin written in a spelling nobody
+ * asked for beats a pin written without the hash it was asked to record.
+ *
+ * `record` is what separates that fallback from `--no-integrity`: the user who
+ * asked for no digest gets none, and never the consolation suffix.
  */
-function versionToRecord(info: PinInfo, integrity: string | undefined): string | undefined {
+function versionToRecord(
+  info: PinInfo,
+  integrity: string | undefined,
+  record: boolean,
+): string | undefined {
   const clean = pinText(info.reference);
-  if (clean === undefined || integrity !== undefined) return clean;
+  if (clean === undefined || integrity !== undefined || !record) return clean;
 
   const parsed = parse(info.reference);
   if (parsed === null || parsed.build.length === 0) return clean;
@@ -154,7 +159,7 @@ function versionToRecord(info: PinInfo, integrity: string | undefined): string |
 export function writePin(
   cwd: string,
   info: PinInfo,
-  options?: { here?: boolean; pinStyle?: PinStyle },
+  options?: PinOptions,
 ): { previousPackageManager: string; target: string; written: string } {
   // §02.3 — which field encodes this pin, decided by the tool's kind and by
   // nothing the manifest says. It steers the discovery walk too: `use node@22`
@@ -267,16 +272,17 @@ export function writePin(
   // other. A `devEngines` write that could not be made surgically falls back to
   // the top-level field: writing the pin somewhere is always better than writing
   // it nowhere and reporting success.
-  // §03.7 — `--pin-style=sidecar` moves the digest out of the version string
-  // and into `devEngines.packageManager.integrity`, creating the block when the
-  // manifest has none. The suffixed form stays the default: it is the
-  // interoperable spelling and §13 asserts it.
-  const sidecar = options?.pinStyle === "sidecar";
+  // §03.7 — the digest is recorded by default, and `--no-integrity` is the
+  // opt-out. *Where* it lands is not a second question the caller answers: it
+  // follows the field. The member gets `integrity` beside a clean `version`,
+  // because §03.3 validates that version as a semver range; the top-level
+  // string has no room for a second key, so it keeps §02.1's build suffix.
+  const record = options?.integrity !== false;
 
   let updated = content;
   let wroteDevEngines = false;
   if (devEnginesTarget.write) {
-    const next = writeIntoDevEngines(updated, data, info, field, sidecar);
+    const next = writeIntoDevEngines(updated, data, info, field, record);
     if (next !== null) {
       updated = next;
       wroteDevEngines = true;
@@ -286,16 +292,17 @@ export function writePin(
   //
   // Whenever the member is the only place the pin landed — which §03.7 makes
   // the common case, not the exception — the string to quote is the member's
-  // own `version`, not `info.reference`: under `--pin-style=sidecar` the digest
-  // has moved to `integrity` and the suffixed reference is nowhere in the file.
+  // own `version`, not `info.reference`: the digest lives in `integrity`, or
+  // nowhere, and the suffixed reference is not in the file either way.
   // {@link versionToRecord} is asked rather than re-derived, so the line cannot
   // drift from the bytes. The top-level field, when the manifest has one to
-  // refresh, always keeps the full reference.
+  // refresh, keeps the full reference — minus the digest under `--no-integrity`,
+  // which is the one place that flag has to reach past the member.
   //
   // §04.4 — a range has no digest suffix either way, so it passes through whole.
   const memberVersion = (): string =>
-    versionToRecord(info, sidecar ? sidecarDigest(info) : undefined) ?? info.reference;
-  let written = info.reference;
+    versionToRecord(info, record ? memberDigest(info) : undefined, record) ?? info.reference;
+  let written = record ? info.reference : (pinText(info.reference) ?? info.reference);
   // §02.3 — the fallback below is `packageManager`, and a runtime may not go
   // there (§03.4). Its write is therefore not best-effort: a member that could
   // not be written is a pin written nowhere, and saying so beats reporting a
@@ -461,8 +468,17 @@ function devEnginesWriteTarget(
   };
 }
 
-/** §03.7 — where `use`/`up` put the digest. The suffixed form is the default. */
-export type PinStyle = "suffix" | "sidecar";
+/**
+ * §03.7 / §09 — the two flags every pin write accepts.
+ *
+ * `integrity` defaults to `true`; `--no-integrity` is what sets it `false`, and
+ * it says *whether* a digest is committed, never where. Placement follows the
+ * field the pin lands in, so there is nothing left for a caller to choose.
+ */
+export interface PinOptions {
+  here?: boolean;
+  integrity?: boolean;
+}
 
 /** The `devEngines` member, or `undefined` when the block or the member is absent. */
 function memberOf(data: Manifest, field: DevEnginesField): unknown {
@@ -559,24 +575,25 @@ function createDevEnginesMember(
  * §03.7 — write the pin into the `devEngines` member, or `null` if the surgical
  * edit could not be made.
  *
- * `sidecar` selects §03.7's two spellings of the digest: the clean version with
- * an SRI `integrity` beside it, or — the default — §02.1's build suffix carried
- * in the version itself. {@link versionToRecord} owns that choice and its one
- * fallback. Both read back identically (§03.3).
+ * The member spells the digest one way: a clean semver `version` with an SRI
+ * `integrity` beside it. {@link versionToRecord} owns the single fallback out of
+ * that shape. `record` is `--no-integrity` inverted — false means no digest is
+ * committed at all, which is a different thing from having none to commit.
  *
  * Write a usable digest with its version. Without one, preserve integrity only
- * when re-pinning the same exact version; ranges, per-host tools, and changed
- * versions remove it. Missing members are created with `name`.
+ * when re-pinning the same exact version; ranges, per-host tools, changed
+ * versions and `--no-integrity` remove it. Missing members are created with
+ * `name`.
  */
 function writeIntoDevEngines(
   content: string,
   data: Manifest,
   info: PinInfo,
   field: DevEnginesField = "packageManager",
-  sidecar = false,
+  record = true,
 ): string | null {
-  const integrity = sidecar ? sidecarDigest(info) : undefined;
-  const version = versionToRecord(info, integrity);
+  const integrity = record ? memberDigest(info) : undefined;
+  const version = versionToRecord(info, integrity, record);
   if (version === undefined) return null;
 
   // Absent member — create it, `name` included: §03.3 reads `name` first, and a
@@ -613,9 +630,14 @@ function writeIntoDevEngines(
   // so it survives only when that version has not moved — and only when what is
   // being written is an exact version, since a digest beside a range describes
   // nothing §03.7 can read back. Anything else is stale and comes out.
+  //
+  // `--no-integrity` takes precedence over that survival: the digest there is
+  // not stale, it is *unwanted*, and a flag that asked for no integrity and left
+  // one sitting in the file did nothing. Removing it is the opt-out.
   const stale =
     Object.hasOwn(member as object, "integrity") &&
-    !(isValidVersion(version) && (member as { version?: unknown }).version === version);
+    (!record ||
+      !(isValidVersion(version) && (member as { version?: unknown }).version === version));
   if (!stale) return updated;
 
   // A member left half-corrected is the trap this branch exists to defuse, so a

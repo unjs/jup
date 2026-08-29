@@ -278,7 +278,7 @@ describe("the help text — §09.14", () => {
     expect(printed).toContain(`${YELLOW}-o`);
     expect(printed).toContain(`${YELLOW}-g`);
     // The name is the flag; the value after `=` is not.
-    expect(printed).toContain(`${YELLOW}--pin-style${RESET}=suffix`);
+    expect(printed).toContain(`${YELLOW}--no-integrity${RESET}`);
   });
 
   it("takes a flag in the command word's position as a flag", async () => {

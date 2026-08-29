@@ -17,20 +17,26 @@ jup install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup pack [--json] [-o|--output <path>] [...name[@<version>]]
 jup self-install [--install-directory <path>|--system] [--force]
 jup self-upgrade | upgrade [--install-directory <path>|--system] [--force]
-jup up  [--here] [--pin-style=suffix|sidecar]
-jup use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>
+jup up  [--here] [--no-integrity] [--no-lockfile]
+jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>
 jup --version
 jup --help | -h | help
 ```
 
-Two flags apply to every mutating command:
+Three flags apply to every mutating command:
 
 * `--here` limits project changes to `cwd`'s own manifest; otherwise the search
   stops at a workspace root (§03.1).
-* `--pin-style=sidecar` writes a clean semver version into the member plus
-  `devEngines.packageManager.integrity`; the default `suffix` keeps
-  `<version>+<algo>.<hex>` in the version itself. Both are read identically
-  (§03.7).
+* `--no-integrity` writes only the version and removes any existing digest.
+  Otherwise, `devEngines` stores the digest in `integrity`, while the top-level
+  `packageManager` stores it in `<version>+<algo>.<hex>`. Both forms are read the
+  same way (§03.7).
+* `--no-lockfile` writes no resolution to `jup.lock` and removes any resolution
+  already recorded for the pin. It names the file only when the file changed
+  (§12.11). Only range and tag pins record resolutions (§04.4), so the flag does
+  nothing for an exact pin. A range is still resolved, installed, and written to
+  the manifest. `JUP_FROZEN_LOCKFILE=1` refuses the run if an entry would be
+  removed.
 
 Every mutating command prints each path it changed.
 

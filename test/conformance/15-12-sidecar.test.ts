@@ -5,9 +5,10 @@
  * maintainers defend it as a deliberate tradeoff (#316) — but it means
  * `packageManager` no longer round-trips through tooling that reads the field as
  * a version, which is what #726 and #620 keep asking about. §03.7's answer is
- * to keep writing the suffixed form (it is the interoperable one, and §13
- * asserts it) while *reading* an explicit sidecar as the same thing, and to add
- * `--pin-style=sidecar` for projects that would rather hold a clean version.
+ * the sidecar: the member holds a clean version with the digest beside it in
+ * `integrity`, the top-level string keeps the suffix because it has nowhere else
+ * to put one, and both are read as the same hash-bearing pin. `--no-integrity`
+ * is the opt-out for a project that wants no digest committed at all.
  *
  * "Treated exactly like a build-suffix hash (§06.1)" is the requirement, so the
  * rows below assert the consequence rather than the storage: a wrong sidecar
@@ -133,30 +134,13 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
     expect(result.stderr).toContain("pin different hashes");
   });
 
-  // §03.7 — the pin's home moved to `devEngines`, so the two styles are now two
-  // spellings *within the member* rather than two fields. The suffixed form is
-  // still the default: it is the interoperable spelling.
-  it("169: `use` keeps writing the suffixed form by default", async () => {
+  // §03.7 — the pin's home moved to `devEngines`, and the member's `version` is
+  // validated as a semver *range*, where a `+sha512.…` has no business. So the
+  // digest goes beside it rather than into it, with no flag to ask for that.
+  it("169: `use` writes the clean version and the SRI, and it reads back", async () => {
     const fixture = createFixture({ name: "project" });
 
-    const result = await run(["use", "pnpm@6.6.2"], { ...fixture, registry, env: trusted() });
-
-    expect(result.exitCode).toBe(0);
-    expect(pinOf(fixture)).toBeUndefined();
-    expect(sidecarOf(fixture)).toEqual({
-      name: "pnpm",
-      version: expect.stringMatching(/^6\.6\.2\+sha512\.[\da-f]{128}$/) as unknown as string,
-    });
-  });
-
-  it("169: `--pin-style=sidecar` writes the clean version and the SRI, and it reads back", async () => {
-    const fixture = createFixture({ name: "project" });
-
-    const written = await run(["use", "--pin-style=sidecar", "pnpm@6.6.2"], {
-      ...fixture,
-      registry,
-      env: trusted(),
-    });
+    const written = await run(["use", "pnpm@6.6.2"], { ...fixture, registry, env: trusted() });
 
     expect(written.exitCode).toBe(0);
     expect(pinOf(fixture)).toBeUndefined();
@@ -178,17 +162,13 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
     expect(reread.stdout).toBe("6.6.2\n");
   });
 
-  it("169: `--pin-style=sidecar` updates an existing devEngines block in place", async () => {
+  it("169: `use` updates an existing devEngines block in place", async () => {
     const fixture = createFixture({
       name: "project",
       devEngines: { packageManager: { name: "pnpm", version: "5.0.0", onFail: "ignore" } },
     });
 
-    const result = await run(["use", "--pin-style=sidecar", "pnpm@6.6.2"], {
-      ...fixture,
-      registry,
-      env: trusted(),
-    });
+    const result = await run(["use", "pnpm@6.6.2"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
     // §03.7 bullet 2: a devEngines-only project gets no top-level
@@ -202,19 +182,52 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
     });
   });
 
-  it("169: an unknown --pin-style is rejected before anything is installed", async () => {
+  // §09 — the opt-out. Not a third spelling of the digest: no digest.
+  it("169: `--no-integrity` pins the version alone, and it reads back", async () => {
     const fixture = createFixture({ name: "project" });
 
-    const result = await run(["use", "--pin-style=hash", "pnpm@6.6.2"], {
+    const written = await run(["use", "--no-integrity", "pnpm@6.6.2"], {
       ...fixture,
       registry,
       env: trusted(),
     });
 
-    expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain(`Option "--pin-style" accepts only "suffix" or "sidecar"`);
-    expect(fixture.exists("package.json")).toBe(true);
+    expect(written.exitCode).toBe(0);
     expect(pinOf(fixture)).toBeUndefined();
-    expect(registry.requests).toEqual([]);
+    expect(sidecarOf(fixture)).toEqual({ name: "pnpm", version: "6.6.2" });
+
+    // Still a working pin from a cold store — what it loses is §06.1's explicit
+    // hash tier, so the signature is what verifies it and the trust store is
+    // needed again.
+    const cold = createFixture();
+    const reread = await run(["pnpm", "--version"], {
+      cwd: fixture.cwd,
+      home: cold.home,
+      registry,
+      env: trusted(),
+    });
+    expect(reread.exitCode).toBe(0);
+    expect(reread.stdout).toBe("6.6.2\n");
+  });
+
+  // A flag that asked for no integrity and left one in the file did nothing.
+  it("169: `--no-integrity` removes a digest already in the manifest", async () => {
+    const fixture = createFixture({
+      name: "project",
+      packageManager: "pnpm@6.6.2+sha512." + "0".repeat(128),
+      devEngines: { packageManager: { name: "pnpm", version: "6.6.2", integrity: WRONG } },
+    });
+
+    const result = await run(["use", "--no-integrity", "pnpm@6.6.2"], {
+      ...fixture,
+      registry,
+      env: trusted(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(sidecarOf(fixture)).toEqual({ name: "pnpm", version: "6.6.2" });
+    // The top-level string is refreshed because it was already there, and the
+    // opt-out reaches its suffix too — that field has no second key to strip.
+    expect(pinOf(fixture)).toBe("pnpm@6.6.2");
   });
 });

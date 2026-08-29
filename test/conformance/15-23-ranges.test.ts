@@ -708,6 +708,111 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(fixture.exists(MEMO)).toBe(false);
   });
 
+  // §09 — the opt-out. The pin is unchanged; only the record is skipped.
+  it("--no-lockfile keeps the range and records nothing", async () => {
+    const fixture = withModules({ name: "demo" });
+
+    const result = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
+    expect(result.stdout).toContain(`Updated ${fixture.path("package.json")} to use pnpm@^11.0.0`);
+    // No file, so no line naming one (§12.11).
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(result.stdout).not.toContain("jup.lock");
+
+    // Still a working project: the range resolves, it just resolves afresh.
+    const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    expect(rerun.exitCode).toBe(0);
+    expect(rerun.stdout).toBe("11.1.2\n");
+  });
+
+  // A flag that asked for no lockfile and left the old entry standing would not
+  // have changed what the next run resolves, which is the whole point of it.
+  it("--no-lockfile retires an entry a previous run recorded, and says so", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    record(fixture, "pnpm@^11.0.0", "11.0.0");
+    // A run under the range, so there is a memo to retire beside the record.
+    expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
+      0,
+    );
+
+    const result = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
+    // §12.11 — the removal changed the file, so the file is named.
+    expect(result.stdout).toContain(`Removed pnpm@^11.0.0 from ${fixture.path("jup.lock")}`);
+    // The memo goes with it, or it would answer alone for the same key.
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(fixture.exists(MEMO)).toBe(false);
+  });
+
+  it("`up --no-lockfile` drops the record and still moves the project forward", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    record(fixture, "pnpm@^11.0.0", "11.0.0");
+
+    const result = await run(["up", "--no-lockfile"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    // The newest release the range allows is still resolved and installed — the
+    // flag governs what is committed, not what `up` means.
+    expect(result.stdout).toContain("Installing pnpm@11.1.2 in the project...");
+    expect(result.stdout).toContain(`Removed pnpm@^11.0.0 from ${fixture.path("jup.lock")}`);
+    expect(fixture.exists("jup.lock")).toBe(false);
+    // The range in the manifest is untouched, as it is for an ordinary `up`.
+    expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
+  });
+
+  it("`up --no-lockfile` on a project with no record changes nothing and names nothing", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+
+    const result = await run(["up", "--no-lockfile"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(fixture.exists("jup.lock")).toBe(false);
+    // §12.11 names each path the command *changed*; this one changed none.
+    expect(result.stdout).not.toContain("jup.lock");
+  });
+
+  // §04.4 — the flag writes nothing, so the freeze binds it only where it would
+  // still change the committed file.
+  it("--no-lockfile is refused under JUP_FROZEN_LOCKFILE=1 only when it would remove", async () => {
+    const clean = createFixture({ name: "demo" });
+    const allowed = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+      ...clean,
+      registry,
+      env: env({ JUP_FROZEN_LOCKFILE: "1" }),
+    });
+    expect(allowed.exitCode).toBe(0);
+    expect(effectivePin(clean.json("package.json"))).toBe("pnpm@^11.0.0");
+    expect(clean.exists("jup.lock")).toBe(false);
+
+    const recorded = createFixture({ packageManager: "pnpm@^11.0.0" });
+    record(recorded, "pnpm@^11.0.0", "11.0.0");
+    const before = recorded.read("jup.lock");
+
+    const refused = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+      ...recorded,
+      registry,
+      env: env({ JUP_FROZEN_LOCKFILE: "1" }),
+    });
+
+    expect(refused.exitCode).toBe(1);
+    expect(refused.stdout).toContain(
+      `Usage Error: pnpm@^11.0.0 is not resolved in jup.lock and lockfile updates are disabled.`,
+    );
+    expect(recorded.read("jup.lock")).toBe(before);
+  });
+
   it("use refuses to record under an explicit JUP_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ name: "demo" });
 

@@ -18,11 +18,11 @@ export const USAGE_LINES: Record<string, string> = {
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
   "self-install": "$ jup self-install [--install-directory <path>|--system] [--force]",
   "self-upgrade": "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
-  up: "$ jup up [--here] [--pin-style=suffix|sidecar]",
+  up: "$ jup up [--here] [--no-integrity] [--no-lockfile]",
   // §09.13's other spelling. Its usage line names the word the user typed, so
   // the two entries differ by exactly that.
   upgrade: "$ jup upgrade [--install-directory <path>|--system] [--force]",
-  use: "$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>",
+  use: "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
 };
 
 export const GENERIC_USAGE_LINE = "$ jup <command>";
@@ -81,7 +81,7 @@ function paintEnvNames(line: string, colors: Palette): string {
 }
 
 /**
- * `--install-directory`, `-o`, and the name half of `--pin-style=suffix`.
+ * `--install-directory`, `-o`, `--no-integrity`, `--no-lockfile`.
  *
  * The lookbehind is what keeps it off the prose: a hyphen inside a word
  * ("package-manager", "read-only", "self-install") is not the start of a flag,
@@ -157,8 +157,8 @@ export const HELP_TEXT = `Usage: jup <command>
   jup pack [--json] [-o|--output <path>] [...name[@<version>]]
   jup self-install [--install-directory <path>|--system] [--force]
   jup self-upgrade [--install-directory <path>|--system] [--force]
-  jup up [--here] [--pin-style=suffix|sidecar]
-  jup use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>
+  jup up [--here] [--no-integrity] [--no-lockfile]
+  jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>
   jup --version
   jup --help
 
@@ -168,16 +168,22 @@ bytes without resolving or downloading anything. Pass --force to replace names
 owned by another tool, including Node's bundled corepack.
 
 self-upgrade downloads and verifies the latest jup, then updates the same links.
-Its alias is upgrade. It differs from up: up changes this project's
-packageManager field; self-upgrade changes jup.
+Its alias is upgrade. It differs from up: up changes this project's pin;
+self-upgrade changes jup.
 
 --here limits project changes to the current directory's manifest. Otherwise,
 the search stops at a workspace root. Every mutating command prints each path
 it changed.
 
---pin-style=sidecar puts the digest in devEngines.packageManager.integrity and
-keeps clean semver in the version field. The default, --pin-style=suffix, writes
-<version>+<algo>.<hex>. Both formats are read identically.
+A pin records the release's digest, in the field the pin itself lands in: an
+SRI integrity key beside a clean version in devEngines, or the
+<version>+<algo>.<hex> suffix in the top-level packageManager string. Both are
+read identically. Pass --no-integrity to pin the version alone and drop any
+digest already there.
+
+A range pin also records the release it resolved to, in jup.lock beside the
+manifest. Pass --no-lockfile to pin the range alone and drop any entry already
+recorded for it. An exact pin never records one.
 
 With no names, enable and disable target every supported package manager,
 including npm. Pass --exclude npm to keep npm unchanged. Shims use a per-user

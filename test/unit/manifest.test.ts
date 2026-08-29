@@ -1433,29 +1433,58 @@ describe("writePin — §03.7", () => {
     });
 
     expect(read().packageManager).toBeUndefined();
-    // The default spelling keeps §02.1's suffix in the version; the sidecar row
-    // below is the same pin with the digest in `integrity` instead.
-    expect(read().devEngines?.packageManager).toEqual({
-      name: "yarn",
-      version: "1.22.4+sha512.abcdef",
-    });
-  });
-
-  it("writes the sidecar spelling into a devEngines-only project", () => {
-    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "^1.0.0" } } });
-
-    writePin(
-      root,
-      { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" },
-      { pinStyle: "sidecar" },
-    );
-
-    expect(read().packageManager).toBeUndefined();
+    // §03.7 — the member's `version` is validated as a semver *range*, so the
+    // digest goes beside it in `integrity` rather than into the version text.
     expect(read().devEngines?.packageManager).toEqual({
       name: "yarn",
       version: "1.22.4",
       integrity: "sha512-q83v",
     });
+  });
+
+  it("records no digest under `--no-integrity`", () => {
+    manifest(".", { devEngines: { packageManager: { name: "yarn", version: "^1.0.0" } } });
+
+    writePin(
+      root,
+      { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" },
+      { integrity: false },
+    );
+
+    expect(read().packageManager).toBeUndefined();
+    // Neither spelling: not the `integrity` key, and not §02.1's suffix as a
+    // consolation prize either. The version alone is what was asked for.
+    expect(read().devEngines?.packageManager).toEqual({
+      name: "yarn",
+      version: "1.22.4",
+    });
+  });
+
+  // §03.7 — a digest already in the file is not stale, it is *unwanted*: an
+  // opt-out that left one behind would have done nothing.
+  it("removes an existing integrity under `--no-integrity`, same version included", () => {
+    manifest(".", {
+      devEngines: { packageManager: { name: "pnpm", version: "10.5.0", integrity: "sha512-q83v" } },
+    });
+
+    writePin(root, { name: "pnpm", reference: "10.5.0" }, { integrity: false });
+
+    expect(read().devEngines?.packageManager).toEqual({ name: "pnpm", version: "10.5.0" });
+  });
+
+  it("strips the digest from the top-level field under `--no-integrity`", () => {
+    manifest(".", { packageManager: "yarn@1.22.0+sha512.beef" });
+
+    writePin(
+      root,
+      { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" },
+      { integrity: false },
+    );
+
+    // The top-level string has no second key to hold a digest, so the opt-out
+    // has to reach the suffix itself.
+    expect(read().packageManager).toBe("yarn@1.22.4");
+    expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
   });
 
   // §03.7 — the sidecar describes the version beside it. Declared beside a
@@ -1488,9 +1517,9 @@ describe("writePin — §03.7", () => {
     expect(spec.raw).toBe("yarn@1.22.4+sha512.abcdef");
   });
 
-  // `--pin-style=sidecar` is a request about how the digest is spelled, not
-  // permission to overwrite a member that speaks for another tool.
-  it("sidecar style does not write into another tool's devEngines member", () => {
+  // The sidecar `integrity` is where this pin's digest goes, not permission to
+  // overwrite a member that speaks for another tool.
+  it("does not write the sidecar into another tool's devEngines member", () => {
     manifest(".", {
       packageManager: "yarn@1.22.0",
       devEngines: {
@@ -1498,11 +1527,7 @@ describe("writePin — §03.7", () => {
       },
     });
 
-    writePin(
-      root,
-      { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" },
-      { pinStyle: "sidecar" },
-    );
+    writePin(root, { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" });
 
     expect(read().packageManager).toBe("yarn@1.22.4+sha512.abcdef");
     expect(read().devEngines?.packageManager).toEqual({
@@ -1520,9 +1545,12 @@ describe("writePin — §03.7", () => {
 
     writePin(root, { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" });
 
+    // Both fields, each in its own spelling: the string carries §02.1's suffix
+    // because it has nowhere else to put the digest; the member has `integrity`.
     expect(read().packageManager).toBe("yarn@1.22.4+sha512.abcdef");
     expect(read().devEngines?.packageManager).toMatchObject({
-      version: "1.22.4+sha512.abcdef",
+      version: "1.22.4",
+      integrity: "sha512-q83v",
     });
   });
 
@@ -1618,11 +1646,7 @@ describe("writePin — §03.7", () => {
   it("writes a fresh digest when a range is narrowed back to an exact version", () => {
     manifest(".", { devEngines: { packageManager: { name: "pnpm", version: "^11.0.0" } } });
 
-    writePin(
-      root,
-      { name: "pnpm", reference: "11.1.2+sha512.abcdef", hash: "sha512.abcdef" },
-      { pinStyle: "sidecar" },
-    );
+    writePin(root, { name: "pnpm", reference: "11.1.2+sha512.abcdef", hash: "sha512.abcdef" });
 
     expect(read().devEngines?.packageManager).toMatchObject({
       name: "pnpm",

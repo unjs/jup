@@ -62,11 +62,12 @@ describe("§03.7 atomic pin updates", () => {
 
     const written = manifestOf(fixture);
     expect(written.packageManager).toBeUndefined();
-    // §03.7's default spelling: §02.1's digest suffix in the version itself.
-    // `--pin-style=sidecar` is the other one, and row 169 covers it.
+    // §03.7 — the member's `version` is read as a semver range, so the digest
+    // goes beside it as SRI. Row 169 owns that spelling and its opt-out.
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
-      version: expect.stringMatching(/^11\.1\.2\+sha512\.[\da-f]{128}$/),
+      version: "11.1.2",
+      integrity: expect.stringMatching(/^sha512-/),
     });
 
     // The requirement, not the appearance: the project reads back cleanly.
@@ -90,7 +91,8 @@ describe("§03.7 atomic pin updates", () => {
     // Key order, two-space indent, and the nested member's own indentation.
     expect(text.indexOf(`"name": "project"`)).toBeLessThan(text.indexOf(`"devEngines"`));
     expect(text.indexOf(`"devEngines"`)).toBeLessThan(text.indexOf(`"scripts"`));
-    expect(text).toContain(`      "version": "11.1.2+sha512.`);
+    expect(text).toContain(`      "version": "11.1.2"`);
+    expect(text).toContain(`      "integrity": "sha512-`);
     expect(text).toContain(`    "build": "tsc"`);
   });
 
@@ -112,7 +114,8 @@ describe("§03.7 atomic pin updates", () => {
     expect(written.packageManager).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
-      version: expect.stringMatching(/^11\.1\.2\+sha512\./),
+      version: "11.1.2",
+      integrity: expect.stringMatching(/^sha512-/),
     });
 
     registry.reset();
@@ -143,7 +146,8 @@ describe("§03.7 atomic pin updates", () => {
     expect(written.packageManager).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
-      version: expect.stringMatching(/^11\.1\.2\+sha512\./),
+      version: "11.1.2",
+      integrity: expect.stringMatching(/^sha512-/),
     });
 
     registry.reset();
@@ -168,7 +172,8 @@ describe("§03.7 atomic pin updates", () => {
     expect(outside.exitCode).toBe(0);
     expect(manifestOf(fixture).devEngines?.packageManager).toEqual({
       name: "pnpm",
-      version: expect.stringMatching(/^10\.0\.0\+sha512\./),
+      version: "10.0.0",
+      integrity: expect.stringMatching(/^sha512-/),
     });
 
     // And the project reads back cleanly at the version it was moved to.
@@ -211,7 +216,7 @@ describe("§03.7 atomic pin updates", () => {
       0,
     );
 
-    expect(manifestOf(fixture).devEngines?.packageManager?.version).toMatch(/^11\.1\.2\+sha512\./);
+    expect(manifestOf(fixture).devEngines?.packageManager?.version).toBe("11.1.2");
   });
 
   it("189: a devEngines block naming a *different* package manager is not a write target", async () => {

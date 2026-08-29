@@ -77,9 +77,9 @@ describe("§03.7 write targets", () => {
     expect(pinAt("packages/app/package.json", fixture)).toBeUndefined();
 
     // §12.11 — the line that makes the choice visible instead of surprising.
-    expect(result.stdout).toContain(
-      `Updated ${fixture.path("package.json")} to use ${pinAt("package.json", fixture)}`,
-    );
+    // It names `written`: the clean version the member holds, not the pin
+    // `pinAt` reconstructs by folding the sidecar back in.
+    expect(result.stdout).toContain(`Updated ${fixture.path("package.json")} to use pnpm@11.1.2`);
   });
 
   it("191: a pnpm-workspace.yaml is a boundary too, even with no `workspaces` field", async () => {

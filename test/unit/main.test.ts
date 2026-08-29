@@ -419,7 +419,7 @@ describe("presentError — §08.4, §12.1", () => {
     expect(code).toBe(1);
     expect(sink.err.join("")).toBe("");
     expect(sink.out.join("")).toBe(
-      "Usage Error: boom\n\n$ jup use [--here] [--pin-style=suffix|sidecar] <pattern>\n",
+      "Usage Error: boom\n\n$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>\n",
     );
   });
 
@@ -539,13 +539,17 @@ describe("runProxy — auto-pin (tests 43, 44)", () => {
       devEngines?: { packageManager?: Record<string, unknown> };
     };
     // §03.7 — the project declared neither field, so the auto-pin lands in
-    // `devEngines` alone, in the default suffixed spelling.
+    // `devEngines` alone: a clean version with the digest beside it.
     expect(manifest.packageManager).toBeUndefined();
     // The pin is hash-bearing, and the hash is the *installed* artifact's — the
     // fixture's marker. Since §06.1 the marker must record the digest its own
     // reference names, so for a seeded compiled-in default the two coincide.
-    const pinned = YARN_DEFAULT;
-    expect(manifest.devEngines?.packageManager).toEqual({ name: "yarn", version: pinned });
+    const pinned = versionOf(YARN_DEFAULT);
+    expect(manifest.devEngines?.packageManager).toEqual({
+      name: "yarn",
+      version: pinned,
+      integrity: expect.stringMatching(/^sha512-/) as unknown as string,
+    });
 
     // Verbatim, on stderr, followed by a blank line — then §12.11's line naming
     // the manifest that was modified. Everything stays on stderr because this is
@@ -673,7 +677,7 @@ describe("runProxy — .jup.env applies before the flags are read (test 52)", ()
       packageManager?: string;
       devEngines?: { packageManager?: { version?: string } };
     };
-    expect(manifest.devEngines?.packageManager?.version).toBe(YARN_DEFAULT);
+    expect(manifest.devEngines?.packageManager?.version).toBe(versionOf(YARN_DEFAULT));
   });
 });
 

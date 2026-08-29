@@ -102,7 +102,7 @@ the set rather than one apiece.
 
 | Skipped | Cause |
 | --- | --- |
-| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--pin-style`, which Corepack has no equivalent for (§03.1, §03.7). |
+| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--no-integrity` / `--no-lockfile`, which Corepack has no equivalent for (§03.1, §03.7). |
 | 7 | **Naming.** The `devEngines` warnings, the validation-warning prefix, and the download notice all name the running tool, and jup calls itself `jup` where Corepack says `Corepack`. Every other assertion in those rows holds; the jup text is asserted verbatim by `test/conformance/13-04-dev-engines.test.ts` and `13-05-environment.test.ts`. |
 | 6 | **§06.1** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
 | 5 | **§10.6 / §10.5** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
