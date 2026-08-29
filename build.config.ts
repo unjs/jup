@@ -77,6 +77,7 @@ export const WARM_MODULES = [
   "project/version-file.ts",
   "run/exec.ts",
   "utils/json.ts",
+  "utils/log.ts",
   "utils/self.ts",
   "version/semver.ts",
 ];

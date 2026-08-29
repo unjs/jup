@@ -263,6 +263,34 @@ A conforming implementation MUST NOT wrap, prefix, colourise, or buffer the pack
 manager's own output. `<tool> yarn --version` prints exactly `1.22.4\n` and nothing
 else.
 
+### Colour
+
+Our *own* lines MAY be coloured, under three constraints:
+
+- **The text is unchanged.** Colour wraps characters a message already contains —
+  §12's strings are matched byte for byte, and an escape sequence MUST NOT add,
+  drop, or reorder one. What is styled is decoration only: the leading `!` of a
+  marked line, the `Usage Error:` label, and — in `--help` — the headings, the
+  program name and command word on each synopsis line, a synopsis line's
+  trailing description, every flag (`--install-directory`, `-o`, and the name
+  half of `--pin-style=suffix`), and every environment-variable name in the
+  prose (`JUP_SHIM_DIRECTORY`, `$XDG_BIN_HOME`, `%LOCALAPPDATA%`, `PATH`).
+- **It is decided per stream, per write.** Colour is emitted only when that
+  stream is a terminal that reports colour support. A redirected stream, a pipe,
+  `NO_COLOR`, or `TERM=dumb` MUST produce the same bytes an uncoloured
+  implementation would; `FORCE_COLOR` overrides in the other direction (§11.4).
+- **An AI coding agent is not a person at a terminal.** Agents commonly capture
+  our streams through a pty, so the TTY test says "terminal" and every escape
+  lands verbatim in a transcript with no use for it. When the environment
+  announces one (§11.4), colour is suppressed even where the stream would take
+  it. `FORCE_COLOR` still wins: an explicit ask beats a read of the ambient
+  environment, and it is the only way back to colour under an agent.
+
+A run with colour disabled is therefore byte-identical to one from an
+implementation that has no colour at all, which is what lets §13 assert exact
+output. Package-manager output stays untouched either way: it never passes
+through this layer.
+
 ## 9.12 `self-install`
 
 ```

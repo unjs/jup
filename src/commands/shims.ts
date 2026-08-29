@@ -72,6 +72,7 @@ const { fileURLToPath } = process.getBuiltinModule("node:url");
 import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
+import { warn } from "../utils/log.ts";
 import {
   isOurShim,
   perUserShimDirectory as perUserDefault,
@@ -1746,7 +1747,7 @@ async function linkPosixEntry(
       if (!options.force) {
         if (await isYarnSwitch(binName, file)) {
           // This compatibility message is not suppressed with advisories.
-          console.warn(messages.yarnSwitchSkip(binName, file));
+          warn(messages.yarnSwitchSkip(binName, file));
           return undefined;
         }
         // Symlinks are ours to manage — §10.2 corrects one that points elsewhere.
@@ -1794,7 +1795,7 @@ export async function removePosixLink(
   if (!options.force) {
     if (await isYarnSwitch(binName, file)) {
       // This compatibility message is not suppressed with advisories.
-      console.warn(messages.yarnSwitchSkip(binName, file));
+      warn(messages.yarnSwitchSkip(binName, file));
       return;
     }
     // Leave entries not created by this tool alone.

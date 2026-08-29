@@ -15,6 +15,7 @@ import {
 } from "./config/table.ts";
 import { envDisabled, envFlag } from "./project/env.ts";
 import { advisory, messages, UsageError } from "./errors.ts";
+import { err, out, outColors } from "./utils/log.ts";
 import { execPackageManager } from "./run/exec.ts";
 import {
   type CachedResolution,
@@ -288,19 +289,21 @@ export async function presentError(error: unknown, invocation: Invocation): Prom
     if (invocation.mode === "proxy") {
       // Bare, on stderr, no stack: the user typed something the project forbids,
       // and a stack would only bury the sentence that explains it.
-      process.stderr.write(`${error.message}\n`);
+      err(`${error.message}\n`);
       return 1;
     }
 
     // Management mode puts it on **stdout**, with the offending command's usage
     // line underneath. The stream split between the two modes is test-asserted.
+    // Only the label is coloured; the message and the usage block underneath it
+    // are §12.1's verbatim shape.
     const usage = await usageLineFor(invocation.args[0]);
-    process.stdout.write(`Usage Error: ${error.message}\n\n${usage}\n`);
+    out(`${outColors.red("Usage Error:")} ${error.message}\n\n${usage}\n`);
     return 1;
   }
 
   // Unexpected failures retain their stack for diagnosis.
-  process.stderr.write(`${formatUnexpected(error)}\n`);
+  err(`${formatUnexpected(error)}\n`);
   return 1;
 }
 async function ensureInstalledLazily(locator: Locator, range: string): Promise<InstallSpec> {
@@ -570,9 +573,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // exactly the artifact that is on disk.
   const reference = referenceWithHash(locator.name, locator.reference, installSpec.hash);
 
-  process.stderr.write(
-    `${messages.autoPinNotice(locator.name, reference)}\n${messages.autoPinDocs()}\n\n`,
-  );
+  err(`${messages.autoPinNotice(locator.name, reference)}\n${messages.autoPinDocs()}\n\n`);
 
   // §03.7 — the pin goes next to the manifest the walk selected, which in a
   // monorepo is the root rather than the directory the user was standing in.
@@ -586,7 +587,7 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
   // §15.27, §15.35l — "it also covers the auto-pin case in §03.6". On **stderr**:
   // this is proxy mode, and stdout belongs entirely to the package manager
   // (§09.11), so a line on it would corrupt `yarn --version | read`.
-  process.stderr.write(`${messages.updatedManifest(target, locator.name, reference)}\n`);
+  err(`${messages.updatedManifest(target, locator.name, reference)}\n`);
 }
 
 /** Everything that is not a `UsageError` keeps its stack (§08.4). */

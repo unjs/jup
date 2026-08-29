@@ -16,6 +16,7 @@
  */
 
 import { ENV, readEnv } from "./config/env-vars.ts";
+import { warn } from "./utils/log.ts";
 
 /**
  * §12.1 — the user asked for something impossible or contradictory.
@@ -43,8 +44,8 @@ export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
  * §11.5 — an advisory line **this** implementation adds, which
  * `COREPACK_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
  *
- * Compatibility advisories call `console.warn` or stderr directly because §13
- * fixes their text. Routing only additional advisories here lets "quiet" leave
+ * Compatibility advisories call `warn()` or stderr directly because §13 fixes
+ * their text. Routing only additional advisories here lets "quiet" leave
  * contract output intact (§14.23).
  *
  * `readEnv`, not `envFlag`: `project/env.ts` imports this module, so reaching
@@ -52,7 +53,7 @@ export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
  */
 export function advisory(message: string): void {
   if (readEnv(ENV.QUIET_ADVISORIES) === "1") return;
-  console.warn(message);
+  warn(message);
 }
 
 /**

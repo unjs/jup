@@ -61,6 +61,14 @@ Two rules keep it honest, both test-asserted in `test/unit/main.test.ts`:
 The generated shim stubs (§10) follow the first rule too: they are parsed on every
 warm run, and four static builtin imports cost ~2 ms of one.
 
+`process.getBuiltinModule` is not the only way to spend the budget. The first read of
+`process.stdout` or `process.stderr` *constructs* the stream, which loads 20 native
+modules (`stream`, `string_decoder`, the `internal/streams/*` set); a warm run prints
+nothing, so `src/utils/log.ts` reaches for a stream only inside the call that writes,
+never at module load. `node:util` itself is free — it is in Node's startup snapshot —
+and `styleText` adds one module (`internal/util/colors`) when a line is actually
+coloured.
+
 ## Built-in table and trust keys
 
 The table in §02 is closed, ordered data. A change requires:

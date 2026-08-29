@@ -39,6 +39,7 @@ import {
 } from "../cache/store.ts";
 import { extract } from "../cache/tar.ts";
 import { messages, UsageError } from "../errors-cold.ts";
+import { out } from "../utils/log.ts";
 import {
   fetchLatestStableVersion,
   fetchTarballURLAndSignature,
@@ -273,7 +274,7 @@ export async function cmdSelfUpgrade(args: string[], command: string): Promise<n
   sweepSuperseded(selfFolder);
   const dest = join(selfFolder, release.version);
 
-  process.stdout.write(`${messages.installing(TOOL_NAME, release.version)}\n`);
+  out(`${messages.installing(TOOL_NAME, release.version)}\n`);
 
   // §07.2's marker is what says an install is complete. Unlike §09.12 the
   // *contents* are not compared: there are no local bytes to compare against

@@ -63,12 +63,9 @@ import type { Descriptor, InstallSpec, Locator, SpecResult } from "../types.ts";
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
-import { HELP_TEXT } from "./usage.ts";
+import { formatHelp } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
-/** §09.11 — informational output is stdout, unbuffered, unprefixed. */
-function out(text: string): void {
-  process.stdout.write(text);
-}
+import { err, out, outColors } from "../utils/log.ts";
 
 async function resolveOrThrow(descriptor: Descriptor, options: ResolveOptions): Promise<Locator> {
   let locator: Locator | null;
@@ -1076,7 +1073,7 @@ async function cleanSparing(spare: {
  * works, and the notice never breaks what it prints.
  */
 function deprecated(command: string, replacement: string): void {
-  process.stderr.write(`${messages.deprecatedCommand(command, replacement)}\n`);
+  err(`${messages.deprecatedCommand(command, replacement)}\n`);
 }
 
 /** §09.10 — deprecated, retained for compatibility. */
@@ -1158,7 +1155,7 @@ function cmdVersion(): Promise<number> {
 }
 
 function cmdHelp(): Promise<number> {
-  out(HELP_TEXT);
+  out(formatHelp(outColors));
   return Promise.resolve(0);
 }
 /**

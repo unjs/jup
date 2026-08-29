@@ -19,6 +19,7 @@ import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { hashFromIntegrity } from "./lockfile.ts";
 import { loadVersionFile, type VersionFile, versionFileRange } from "./version-file.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
+import { warn } from "../utils/log.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
 import type {
@@ -623,11 +624,11 @@ export function readSpecFromManifest(
   // These first two never throw, whatever `onFail` says: the field is too
   // malformed for its own `onFail` to be trustworthy.
   if (typeof de !== "object") {
-    console.warn(messages.devEnginesNotObject(de, field));
+    warn(messages.devEnginesNotObject(de, field));
     return { raw: pm, hasPin };
   }
   if (Array.isArray(de)) {
-    console.warn(messages.devEnginesArray(field));
+    warn(messages.devEnginesArray(field));
     return { raw: pm, hasPin };
   }
 
@@ -773,7 +774,7 @@ export function warnOrThrow(message: string, onFail?: unknown): void {
     default: {
       // Includes `"warn"` — and anything unrecognised, which degrades here
       // rather than becoming an error about the error handling.
-      console.warn(`${VALIDATION_WARNING_PREFIX}${message}`);
+      warn(`${VALIDATION_WARNING_PREFIX}${message}`);
     }
   }
 }

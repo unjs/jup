@@ -35,6 +35,7 @@ const {
 const { basename, dirname, join, sep } = process.getBuiltinModule("node:path");
 import { createTempDir, getSelfFolder, promote, readMarker, writeMarker } from "../cache/store.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
+import { out } from "../utils/log.ts";
 import { isValidVersion } from "../version/semver.ts";
 import {
   chooseInstallDirectory,
@@ -457,7 +458,7 @@ export async function linkSelf(
   install: Omit<SelfInstall, "directory">,
   options: ShimOptions,
 ): Promise<void> {
-  process.stdout.write(`${installedTo(version, dest)}\n`);
+  out(`${installedTo(version, dest)}\n`);
 
   // §15.13 — choose, announce, probe, then fall back; nothing is written before
   // the directory is known to be writable. `enable`'s chain exactly, because the
@@ -479,7 +480,7 @@ export async function linkSelf(
   );
 
   if (installed.length > 0) {
-    process.stdout.write(
+    out(
       `${shimmedInto(
         installed.map(([binName]) => binName),
         installDirectory,
@@ -509,7 +510,7 @@ export async function cmdSelfInstall(args: string[]): Promise<number> {
   const dest = join(selfFolder, payload.version);
   const hash = digestPayload(payload.files);
 
-  process.stdout.write(`${messages.installing(TOOL_NAME, payload.version)}\n`);
+  out(`${messages.installing(TOOL_NAME, payload.version)}\n`);
 
   // The whole of the "already installed" test. §07.2's marker is what says an
   // install is complete, and its recorded hash is what says it is *this* one.

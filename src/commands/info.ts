@@ -43,6 +43,7 @@ import {
   resolveRegistry,
 } from "../net/npmrc.ts";
 import { getOwnRoot, getOwnVersion } from "../utils/self.ts";
+import { out } from "../utils/log.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
 import { resolveInstallDirectory } from "./shims.ts";
 import { isOurShim } from "../run/exec.ts";
@@ -1238,7 +1239,7 @@ function wantsJson(args: string[], command: string): boolean {
 export async function cmdInfo(args: string[]): Promise<number> {
   const json = wantsJson(args, `jup info`);
   const report = buildReport();
-  process.stdout.write(json ? `${JSON.stringify(report, undefined, 2)}\n` : formatReport(report));
+  out(json ? `${JSON.stringify(report, undefined, 2)}\n` : formatReport(report));
   return 0;
 }
 
@@ -1247,9 +1248,7 @@ export async function cmdInfo(args: string[]): Promise<number> {
 export async function cmdCacheList(args: string[]): Promise<number> {
   const json = wantsJson(args, `jup cache list`);
   const report = buildReport();
-  process.stdout.write(
-    json ? `${JSON.stringify(cacheListView(report), undefined, 2)}\n` : formatCacheList(report),
-  );
+  out(json ? `${JSON.stringify(cacheListView(report), undefined, 2)}\n` : formatCacheList(report));
   return 0;
 }
 

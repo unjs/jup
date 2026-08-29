@@ -22,6 +22,7 @@ import {
 } from "../config/table.ts";
 import { envFlag, isCI } from "../project/env.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
+import { err, errColors, warn } from "../utils/log.ts";
 import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
@@ -255,13 +256,13 @@ export async function confirmDownload(url: string): Promise<void> {
   // the confirmation, from every entry point, unconditionally.
   if (!envFlag(ENV.ENABLE_DOWNLOAD_PROMPT)) return;
 
-  process.stderr.write(`${messages.aboutToDownload(url)}\n`);
+  err(`${messages.aboutToDownload(url)}\n`);
 
   // §08.6 — stdin is never touched unless we are actually going to ask. An
   // empty `CI` counts as unset.
   if (process.stdin.isTTY !== true || isCI()) return;
 
-  process.stderr.write(messages.downloadPrompt());
+  err(messages.downloadPrompt());
 
   const first = await readFirstByte();
   // 0x6e / 0x4e. Anything else — including a bare newline, and including EOF —
@@ -270,7 +271,7 @@ export async function confirmDownload(url: string): Promise<void> {
     throw new UsageError(messages.abortedByUser());
   }
 
-  process.stderr.write("\n");
+  err("\n");
 }
 
 /**
@@ -596,7 +597,7 @@ function debugNote(message: string): void {
     debug === "*" ||
     (debug !== undefined && (debug.includes("jup") || debug.includes("corepack")))
   ) {
-    console.warn(`! ${message}`);
+    warn(`! ${errColors.dim(message)}`);
   }
 }
 /**

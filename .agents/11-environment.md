@@ -58,6 +58,10 @@ always wins over the file.
 | `PATH` | Shim install-directory lookup (§10.4); locating a JavaScript runtime in a native implementation (§08.3). |
 | `ProgramData` | Windows only: `--system`'s shim directory, `%ProgramData%\jup\bin`. |
 | `DEBUG` | Containing `jup` — or `corepack`, which the reference implementation documents — enables verbose diagnostic logging to stderr. |
+| `NO_COLOR` | Set to any value: our own output is never coloured (§09.11). Contract text is unaffected either way. |
+| `FORCE_COLOR` | Colour our own output even when the stream is not a terminal. Takes precedence over `NO_COLOR` and over agent detection; `0` disables. |
+| `AI_AGENT`, `CLAUDECODE`, `CLAUDE_CODE`, `REPL_ID`, `GEMINI_CLI`, `CODEX_SANDBOX`, `CODEX_THREAD_ID`, `OPENCODE`, `AUGMENT_AGENT`, `GOOSE_PROVIDER`, `JUNIE_DATA`, `JUNIE_SHIM_PATH`, `CURSOR_AGENT` | Set by an AI coding agent: our own output is not coloured (§09.11). Presence alone is the signal. The list is `unjs/std-env`'s agent table. |
+| `PATH` containing `.pi/agent`, `EDITOR` matching `devin`, `TERM_PROGRAM` matching `kiro` | The same table's three agents that announce themselves by value rather than by a variable of their own. |
 
 ## 11.5 Additional settings
 

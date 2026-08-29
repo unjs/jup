@@ -22,6 +22,10 @@ network services. Assert exit or signal status, exact stdout/stderr where contra
 and relevant filesystem state. Shared fixtures and helpers are exported from
 `test/conformance/_harness/index.ts`.
 
+Both vitest configs set `NO_COLOR=1`. Rows match §12's text byte for byte, and the
+runner's own stdout is a terminal when the suite is run by hand (§09.11) — so colour
+is pinned off rather than left to depend on how the suite was launched.
+
 Keep security cases for credential origin/path scope, redirect stripping, TLS,
 project-env deny rules, digest and signature failures, archive traversal/links,
 read-only caches, atomic install races, and foreign shim ownership. Keep platform
