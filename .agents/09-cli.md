@@ -1,378 +1,322 @@
 # 09 — Command Surface
 
 This is the complete surface. Anything not here is out of scope (§01.7).
+`--help` prints it; `src/commands/usage.ts` holds the text.
 
 ```
-<tool> <binary>[@<version>] [...args]     proxy mode (§01.2)
+jup <binary>[@<version>] [...args]     proxy mode (§01.2)
 
-<tool> cache clean [--all]
-<tool> cache clear [--all]
-<tool> disable [--install-directory <path>|--system] [...name]
-<tool> enable  [--install-directory <path>|--system] [--force] [--exclude npm] [...name]
-<tool> install
-<tool> install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
-<tool> pack [--json] [-o|--output <path>] [...name[@<version>]]
-<tool> self-install [--install-directory <path>|--system] [--force]
-<tool> self-upgrade | upgrade [--install-directory <path>|--system] [--force]
-<tool> up
-<tool> use <name[@<version>]>
-<tool> --version
-<tool> --help | -h | help
+jup cache clean [--all]
+jup cache clear [--all]
+jup cache list [--json]
+jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
+jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
+jup info [--json]
+jup install
+jup install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
+jup pack [--json] [-o|--output <path>] [...name[@<version>]]
+jup self-install [--install-directory <path>|--system] [--force]
+jup self-upgrade | upgrade [--install-directory <path>|--system] [--force]
+jup up  [--here] [--pin-style=suffix|sidecar]
+jup use [--here] [--pin-style=suffix|sidecar] <name[@<version>]>
+jup --version
+jup --help | -h | help
+
+Deprecated, retained for compatibility:
+jup hydrate [--activate] <file>
+jup prepare [--activate] [--all] [-o|--output [<path>]] [...spec]
 ```
 
-Deprecated, retained for compatibility only:
+Two flags apply to every mutating command:
+
+* `--here` limits project changes to `cwd`'s own manifest; otherwise the search
+  stops at a workspace root (§03.1).
+* `--pin-style=sidecar` writes a clean semver version plus
+  `devEngines.packageManager.integrity`; the default `suffix` writes
+  `<version>+<algo>.<hex>`. Both are read identically (§03.7).
+
+Every mutating command prints each path it changed.
+
+## 9.1 Pattern resolution (`install`, `pack`, `up`, `use`)
 
 ```
-<tool> hydrate [--activate] <file>
-<tool> prepare [--activate] [--all] [-o|--output [<path>]] [...spec]
-```
-
-> A minimal re-implementation MAY omit `hydrate` and `prepare` entirely and print a
-> pointer to `install -g` / `pack`. They are strict subsets of the modern commands.
-
-## 9.1 Pattern resolution (shared by `install`, `pack`, `up`, `use`)
-
-```
-resolvePatternsToDescriptors(patterns):
-    if patterns is non-empty:
-        load ONLY the env file (§03.2, envOnly mode)
-        return patterns.map(p => parseSpec(p, "CLI arguments", {enforceExactVersion: false}))
-
-    # no patterns — fall back to the project
-    lookup := discoverProjectSpec(cwd)
-    NoProject → UsageError `Couldn't find a project in the local directory - please
-                specify the package manager to pack, or run this command from a valid project`
-    NoSpec    → UsageError `The local project doesn't feature a 'packageManager' field
-                nor a 'devEngines.packageManager' field - please specify the package
-                manager to pack, or update the manifest to reference it`
+patterns given → load ONLY the env file (envOnly, §03.2)
+                 parse each with requireVersion: false
+no patterns    → discover the project spec
+    NoProject → "Couldn't find a project in the local directory …"
+    NoSpec    → "The local project doesn't feature a 'packageManager' field nor …"
     Found     → [lookup.range ?? lookup.getSpec()]
 ```
 
-Note `lookup.range ?? lookup.getSpec()` — when `devEngines.packageManager.version` is
-present it is preferred over the exact `packageManager` pin. This is what makes
-`jup up` follow a declared range across majors (§09.4).
-
-The exact messages retain the words `to pack`; §12 and conformance tests are
-authoritative.
+`lookup.range ?? getSpec()` prefers a declared `devEngines.…​.version` range over
+the exact `packageManager` pin, which is what lets `up` follow a declared range
+across majors (§9.4).
 
 ## 9.2 `install`
 
-```
-descriptor := resolvePatternsToDescriptors([])         # project only, no args
-locator    := resolve(descriptor, {allowTags: true})
-    null → UsageError `Failed to successfully resolve '<range>' to a valid <name> release`
-stdout: `Adding <name>@<reference> to the cache...\n`
-ensureInstalled(locator)
-```
+Resolves the project's spec (tags allowed), prints `Adding <name>@<ref> to the
+cache...`, and installs it. It does **not** touch `lastKnownGood.json`. It reads
+`jup.lock` through the same path the proxy does, so a warmed Docker layer and the
+run it warms cannot disagree about which version the files name. Exit 0, stderr
+empty.
 
-Downloads and caches the project's package manager. Does **not** touch
-`lastKnownGood.json` — the global default is unchanged. Exit 0, stderr empty.
+## 9.3 `install -g` / `--global`
 
-Primary use: warming a Docker layer so the runtime image needs no network.
+Accepts a mixed list of specs and `.tgz` archive paths; `--cache-only` downloads
+and extracts without making anything the default.
 
-## 9.3 `install -g` / `install --global`
+For a spec: resolve (tags allowed), print `Installing <name>@<ref>...` (or
+`Adding … to the cache...` with `--cache-only`), install, and — unless
+`--cache-only` — set the last-known-good **unconditionally**. Unlike §04.8's
+guarded bump, `install -g yarn@1.0.0` sets the default to 1.0.0 even when the
+current default is 4.x.
 
-Accepts a mixed list of specs and archive paths. `--cache-only` downloads/extracts
-without making anything the global default.
-
-**Spec argument** (`name`, `name@version`, `name@range`, `name@tag`):
-
-```
-descriptor := parseSpec(arg, "CLI arguments", {enforceExactVersion: false})
-locator    := resolve(descriptor, {allowTags: true})
-    null → UsageError `Failed to successfully resolve '<range>' to a valid <name> release`
-stdout: `Installing <name>@<reference>...\n`          (or `Adding … to the cache...` with --cache-only)
-ensureInstalled(locator)
-unless --cache-only: lastKnownGood[name] = reference; write
-```
-
-Unlike the automatic bump in §04.7, this is **unconditional** — `install -g yarn@1.0.0`
-sets the default to 1.0.0 even if the current default is 4.x.
-
-**Archive argument** (ends in `.tgz`): see §07.10.
+For an archive: §07.10.
 
 ## 9.4 `up`
 
-No arguments. Updates the project's pin.
+No positional arguments. Updates the project's pin.
+
+**When the project declares a range** — in `packageManager`, or in
+`devEngines.packageManager.version` where there is no top-level field — `up`
+refreshes the recorded resolution in `jup.lock` and leaves the field alone. The
+range is the user's statement of intent, and there is no second, major-confining
+resolve because a range already says how far the user will move. `^2.0.0` derived
+from a `~2.1.0` pin would pick a version the pin itself rejects. The memo for
+that key is retired at the same time. A dist-tag pin is refused, and
+`JUP_FROZEN_LOCKFILE=1` makes the refresh a hard error.
+
+**Otherwise** — an exact pin — two resolves, both with `useCache: false` and tags
+**not** allowed:
 
 ```
-descriptor := resolvePatternsToDescriptors([])
-if descriptor.range is neither a valid version nor a valid range:
-    → UsageError `The 'jup up' command can only be used when your project's
-      packageManager field is set to a semver version or semver range`
-
-resolved := resolve(descriptor, {useCache: false})     # note: tags NOT allowed
-    null → UsageError `Failed to successfully resolve '<range>' to a valid <name> release`
-
-target := { name, range: `^<major(resolved.reference)>.0.0` }
-highest := resolve(target, {useCache: false})
-    null → UsageError `Failed to find the highest release for <name> <major>.x`
-
-stdout: `Installing <name>@<reference> in the project...\n`
-ensureInstalled(highest)
-writePin(highest)  and run the package manager's `use` command (§09.5)
+resolved := resolve(descriptor)            # null → "Failed to successfully resolve …"
+highest  := resolve(^major(resolved).0.0)  # null → "Failed to find the highest release …"
+install, write the pin, run the tool's `use` command (§9.5)
 ```
 
-For a **declared range**, when the pin the project declares
-holds one — in `packageManager`, or in `devEngines.packageManager.version` where
-there is no top-level field — `up` refreshes the recorded
-resolution in `jup.lock` and leaves that field alone — the range is the user's statement of intent, and there is no second,
-major-confining resolve, because a range already says how far the user will move. A
-dist-tag pin is still refused by the error above, and `COREPACK_FROZEN_LOCKFILE=1`
-turns the refresh into a hard error.
+The second resolve is what confines the update to the current major line.
+`useCache: false` on both is required — with the cache consulted, `up` would
+return the installed version and never update anything.
 
-The two-step resolve is what confines the update to the current major line. But note
-the interaction with §09.1: if `devEngines.packageManager.version` declares a range
-like `"1.x || 2.x"`, the *first* resolve already picks the highest version in that
-whole range, and the second step then pins to that version's major. So a declared
-`devEngines` range **can** carry `up` across a major boundary; a bare
-`packageManager` pin cannot. This is intended and is exercised by the conformance
-suite.
+Note the interaction with §9.1: when the descriptor came from a `devEngines` range
+spanning majors (`1.x || 2.x`), the *first* resolve has already crossed the
+boundary and the second pins the major it landed in. A declared range can
+therefore carry `up` across a major; a bare `packageManager` pin cannot.
 
-`useCache: false` on both resolves is required — otherwise `up` would return the
-already-installed version and never update anything.
+A non-semver pin is refused: "The 'jup up' command can only be used when your
+project's packageManager field is set to a semver version or semver range".
 
 ## 9.5 `use <pattern>`
 
-```
-descriptor := parseSpec(pattern, "CLI arguments", {enforceExactVersion: false})
-resolved   := resolve(descriptor, {allowTags: true, useCache: false})
-    null → UsageError `Failed to successfully resolve '<range>' to a valid <name> release`
-stdout: `Installing <name>@<reference> in the project...\n`
-info := ensureInstalled(resolved)
-writePin(info)                                            # §03.7
-```
+Parse the pattern (`requireVersion: false`), resolve it with tags allowed and
+`useCache: false`, print `Installing <name>@<ref> in the project...`, install,
+then write the pin (§03.7).
 
-Then, if the resolved range's spec declares `commands.use`:
+**A typed semver range** — so neither a bare `jup use pnpm` nor a dist-tag — goes
+into the field as written, and the version it resolved to is recorded in
+`jup.lock` beside the manifest. Both paths are printed, the digest goes to the
+lockfile rather than the field, the replaced key's resolution is retired, and
+`JUP_FROZEN_LOCKFILE=1` refuses the command *before* it resolves. Every other
+pattern pins exactly.
+
+Then, if the resolved band declares `commands.use`:
 
 ```
-COREPACK_MIGRATE_FROM := previousPackageManager    # "unknown" if there was none
-stdout: `\n`
-run the package manager: argv = commands.use        # e.g. ["yarn", "install"]
+JUP_MIGRATE_FROM := the previous pin, or "unknown"
+stdout: a blank line
+run the tool: argv = commands.use            # e.g. ["yarn", "install"]
 ```
 
 So `jup use yarn@4` prints the banner, a blank line, then everything `yarn
-install` prints. If `commands.use` is absent the command returns 0 immediately after
-writing the pin — which is every `use` of a runtime (§02.3), so `jup use node@22`
-writes `devEngines.runtime` (§03.7) and stops there.
+install` prints. With no `commands.use` the command returns 0 after writing —
+which is every `use` of a runtime, so `jup use node@22` writes
+`devEngines.runtime` and stops there.
 
-When the pattern names a **semver range** — typed, so neither
-a bare `jup use pnpm` nor a dist-tag counts — the range goes into the field as written
-and the version it resolved to is recorded in `jup.lock` beside the manifest. Both
-paths are printed, the digest goes to the recorded file rather than the field,
-and `COREPACK_FROZEN_LOCKFILE=1` refuses the command *before* it resolves. Every other
-pattern pins exactly, as below.
+Behaviours worth knowing, all test-asserted:
 
-Notable behaviours, all test-asserted:
-
-* An **existing malformed `packageManager` field** (a range, a bare name, a trailing
-  `@`, a non-string) does not block `use` — it is simply overwritten. This is why
-  spec parsing is lazy (§03.1).
-* If no `package.json` exists anywhere, one is **created** at `cwd`.
-* If the project root is an ancestor of `cwd`, the **ancestor's** manifest is updated.
-* The written pin always carries a `sha512` hash computed from the actual downloaded
-  bytes, regardless of what algorithm the input pattern used.
-* Update every existing field that encodes the package-manager pin atomically and
-  print each modified path. Do not create a top-level field that conflicts with an
-  existing `devEngines.packageManager` declaration.
-* A `devEngines` mismatch surfaces here through `writePin`'s check, which routes
-  through `onFail` (§03.7). With the default `onFail`, the banner has *already* been
-  printed to stdout, so the failure output is:
-  ```
-  Installing yarn@1.22.4 in the project...
-  Usage Error: The requested version of yarn@1.22.4+sha512.… does not match the devEngines specification (yarn@2.x)
-
-  $ jup use [--here] [--pin-style=suffix|sidecar] <pattern>
-  ```
-  on **stdout**, with stderr empty and exit code 1.
+* An existing **malformed** `packageManager` (a range, a bare name, a trailing
+  `@`, a non-string) does not block `use`; it is overwritten. This is why spec
+  parsing is lazy (§03.1).
+* If no `package.json` exists anywhere, one is created at `cwd`.
+* If the project root is an ancestor of `cwd`, the ancestor's manifest is updated
+  — unless `--here`.
+* The written pin carries a digest computed from the actual downloaded bytes,
+  whatever algorithm the input pattern used — except for a per-host tool, where
+  no digest reaches the manifest (§02.4).
+* A `devEngines` mismatch surfaces through `writePin`'s check and routes through
+  `onFail`. With the default, the banner has *already* reached stdout, so the
+  failure prints underneath it — banner, then `Usage Error: …`, then a blank line
+  and the usage line, all on stdout, stderr empty, exit 1.
 
 ## 9.6 `pack`
 
-```
-descriptors := resolvePatternsToDescriptors(args)
-for each:
-    resolved := resolve(descriptor, {allowTags: true})
-        null → UsageError `Failed to successfully resolve '<range>' to a valid <name> release`
-    info := ensureInstalled(resolved)
-    setLastKnownGood(resolved)
-    collect info.location
+Resolve each pattern (tags allowed), install it, set it as last-known-good, and
+tar the resulting store subtrees rooted at the install folder into
+`--output` (default `./jup.tgz`). `--json` prints the output path as JSON instead
+of the human log.
 
-output := --output ?? "./jup.tgz"
-tar.create({gzip: true, cwd: <installFolder>, file: resolve(output)},
-           locations.map(l => relative(<installFolder>, l)))
+`pack` updating last-known-good is deliberate: you pack what you intend to run.
 
-if --json: stdout JSON.stringify(outputPath)
-else:      human-readable log
-```
+## 9.7 `cache clean` / `clear` / `list`
 
-Note `pack` **does** update last-known-good as a side effect. That is intentional:
-you pack what you intend to run.
-
-## 9.7 `cache clean` / `cache clear`
-
-Both aliases use the cache-clean behavior and exact output defined in §07.9.
+`clean` and `clear` are aliases; behaviour and output are in §07.9. `cache list`
+is the store half of `info` — the installed versions per tool, with `--json`
+sharing `info`'s report shape.
 
 ## 9.8 `enable` / `disable`
 
-Syntax:
-
-```
-enable  [--install-directory <path> | --system] [--force] [--exclude npm] [...name]
-disable [--install-directory <path> | --system] [...name]
-```
-
 §10 defines directory selection, validation, target expansion, ownership,
-replacement, restoration, output, and idempotency.
+replacement, restoration, output and idempotency. `--exclude <name>` removes a
+name from the default set (`--exclude npm` being the common case).
 
-## 9.9 `--version`, `--help`
+## 9.9 `info`
 
-`--version` prints the tool's own version. `--help` / `-h` / `help` prints usage.
-Both are ordinary management-mode commands and are shadowed by proxy mode — note
-that `<tool> yarn --version` is a *proxy* invocation and prints **Yarn's** version.
+Prints, with **no request of any kind**, what the next run would do and why:
 
-## 9.10 Deprecated commands
+* the project — which manifest or version file speaks, which field carries the
+  pin, whether the spec is exact, a range, a tag or a URL, and why it cannot be
+  used when it cannot;
+* the recorded resolution and the memo, read through the same range gate and
+  expiry rule a run applies, so it reports what the next run would accept — for a
+  per-host tool it prints the whole host map;
+* what the next run would resolve to, following §01.3's own order;
+* every installed version, every shim and what each name on `PATH` currently
+  resolves to — including entries that are not shimmed by default, because for
+  `bun` the interesting answer is usually someone else's install;
+* the effective `.npmrc` settings with the file and key that supplied each, and
+  what TLS verification the next request would do and who decided;
+* the environment snapshot, taken **before** the env file is applied. Credentials
+  (`*_TOKEN`, `*_PASSWORD`, `*_USERNAME`) are reported as present, never printed;
+  long values are elided.
 
-**`hydrate [--activate] <file>`** — the predecessor of `install -g <file>.tgz`. Same
-archive handling, except:
-* the format error reads `did it get generated by 'jup prepare'?`
-* there is no `.tgz` extension check on the argument
-* it prints `All done!` on completion
-* activation is opt-in (`--activate`) rather than opt-out (`--cache-only`)
+`--json` emits the same report with a `version` field, bumped only for a breaking
+shape change.
 
-**`prepare [--activate] [--all] [-o|--output [<path>]] [...spec]`** — the predecessor
-of `pack` + `install -g`. Its "no spec in project" error omits the `devEngines`
-mention: `The local project doesn't feature a 'packageManager' field - please specify
-the package manager to pack, or update the manifest to reference it`. `--output`
-tolerates a bare flag, defaulting to `jup.tgz`.
+## 9.10 `--version`, `--help`
 
-## 9.11 Output stream discipline
+`--version` prints jup's own version; `--help`/`-h`/`help` prints the surface
+above. Both are ordinary management commands and are shadowed by proxy mode:
+`jup yarn --version` is a *proxy* invocation and prints Yarn's version.
 
-| Content | Stream |
-|---|---|
-| `Adding … to the cache...`, `Installing …`, `Installing … in the project...` | stdout |
-| `--json` output | stdout |
-| Management-mode `Usage Error: …` + usage block | **stdout** |
-| Validation warnings (`! jup validation warning: …`) | stderr |
-| Auto-pin notice (`! The local project doesn't define …`) | stderr |
-| Download prompt (`! jup is about to download …`) | stderr |
-| Yarn Switch skip notice | stderr |
-| Proxy-mode `UsageError` message | stderr |
-| Everything the package manager prints | passthrough, unmodified |
+## 9.11 Deprecated commands
 
-A conforming implementation MUST NOT wrap, prefix, colourise, or buffer the package
-manager's own output. `<tool> yarn --version` prints exactly `1.22.4\n` and nothing
-else.
+**`hydrate [--activate] <file>`** — the predecessor of `install -g <file>.tgz`.
+Same archive handling, except that the format error names `jup prepare`, there is
+no `.tgz` extension check, it prints `All done!`, and activation is opt-**in**
+rather than opt-out.
 
-### Colour
+**`prepare [--activate] [--all] [-o|--output [<path>]] [...spec]`** — the
+predecessor of `pack` + `install -g`. Its "no spec" error omits the `devEngines`
+mention, and `--output` tolerates a bare flag defaulting to `jup.tgz`.
 
-Our *own* lines MAY be coloured, under three constraints:
-
-- **The text is unchanged.** Colour wraps characters a message already contains —
-  §12's strings are matched byte for byte, and an escape sequence MUST NOT add,
-  drop, or reorder one. What is styled is decoration only: the leading `!` of a
-  marked line, the `Usage Error:` label, and — in `--help` — the headings, the
-  program name and command word on each synopsis line, a synopsis line's
-  trailing description, every flag (`--install-directory`, `-o`, and the name
-  half of `--pin-style=suffix`), and every environment-variable name in the
-  prose (`JUP_SHIM_DIRECTORY`, `$XDG_BIN_HOME`, `%LOCALAPPDATA%`, `PATH`).
-- **It is decided per stream, per write.** Colour is emitted only when that
-  stream is a terminal that reports colour support. A redirected stream, a pipe,
-  `NO_COLOR`, or `TERM=dumb` MUST produce the same bytes an uncoloured
-  implementation would; `FORCE_COLOR` overrides in the other direction (§11.4).
-- **An AI coding agent is not a person at a terminal.** Agents commonly capture
-  our streams through a pty, so the TTY test says "terminal" and every escape
-  lands verbatim in a transcript with no use for it. When the environment
-  announces one (§11.4), colour is suppressed even where the stream would take
-  it. `FORCE_COLOR` still wins: an explicit ask beats a read of the ambient
-  environment, and it is the only way back to colour under an agent.
-
-A run with colour disabled is therefore byte-identical to one from an
-implementation that has no colour at all, which is what lets §13 assert exact
-output. Package-manager output stays untouched either way: it never passes
-through this layer.
+Neither has a legacy install base of jup's own; they exist for scripts written
+against corepack. They may be dropped in a major release.
 
 ## 9.12 `self-install`
 
-```
-<tool> self-install [--install-directory <path>|--system] [--force]
-```
-
-Installs **the tool itself**: it copies the running installation into the store and
-puts its own two names (§10.8) on `PATH`.
+Installs **jup itself**: copies the running installation into the store and puts
+jup's own two names on `PATH`.
 
 ```
 payload := the running installation — <root>/dist, <root>/bin, <root>/package.json
-  a source checkout (no dist/ and no bin/) → UsageError naming what it looked for
-version := the tool's own version
+           a source checkout (no dist/, no bin/) → UsageError naming what it looked for
 hash    := digest over the payload's (relative path, mode bit, bytes)
 
-stdout: `Installing <tool>@<version>...\n`
-unless readMarker(<home>/self/<version>).hash === hash:
-    stage the payload in a temp directory, write its .jup marker, promote it
-    an occupied <home>/self/<version> is renamed aside first and deleted after
-stdout: `<tool> <version> -> <home>/self/<version>\n`
-
-install the shims (§10.8) into §10.4's directory
-stdout: `<names> -> <install directory>\n`      omitted when nothing was installed
-verify the result is on PATH (§15.29)
+stdout: `Installing jup@<version>...`
+unless the store's marker already records that hash:
+    stage the payload, write its marker, promote it (§07.11)
+stdout: `jup <version> -> <home>/self/<version>`
+install the shims (§10.9) into §10.5's directory
+stdout: `<names> -> <install directory>`      omitted when nothing was installed
+verify the result is what `PATH` resolves
 ```
 
-It resolves nothing, opens no socket, and never reads the project: the bytes it
-installs are the ones already running, which is the only way a command that installs
-the tool can be run by the tool it installs. It does not touch
-`lastKnownGood.json` — the tool is not a table entry.
+It resolves nothing, opens no socket and never reads the project: the bytes it
+installs are the ones already running, which is the only way a command that
+installs jup can be run by the jup it installs. It does not touch
+`lastKnownGood.json` — jup is not a table entry.
 
-Both halves are idempotent. An unchanged payload writes nothing to the store, and a
-shim that is already correct is left alone (§10.2 property 4). The digest is what
-makes the first of those true, and it is also what makes a *changed* payload at the
-same version replace what is there — the case §07.5's promotion alone would treat as
-a lost race.
+Both halves are idempotent. An unchanged payload writes nothing, and a correct
+shim is left alone (§10.3). The digest is what makes the first true, and also
+what makes a *changed* payload at the same version replace what is there — the
+case §07.5's promotion alone would treat as a lost race.
 
-The flags are §10.4's and §14.16's, with the meanings they have for `enable`.
-`--force` is what takes a name another tool owns, which is what replacing a
-Node-bundled `corepack` needs.
+`--force` takes a name another tool owns, which is what replacing a Node-bundled
+`corepack` needs.
 
 ## 9.13 `self-upgrade` (also spelled `upgrade`)
 
-```
-<tool> self-upgrade [--install-directory <path>|--system] [--force]
-```
-
-§09.12 with the payload fetched from the registry instead of copied from the
-running process. It is the only command that installs **the tool** from the network,
-and the only one whose artifact is not a table entry.
+§9.12 with the payload fetched from the registry rather than copied. It is the
+only command that installs **jup** from the network, and the only one whose
+artifact is not a table entry.
 
 ```
-version+digest := §04.5's `latest` lookup for the tool's own package
-    signature-verified, release-age gated, and refused outright when it clears
-    no verification tier (§15.11)
-a version that is not semver → UsageError naming what the registry answered
-
-stdout: `Installing <tool>@<version>...\n`
+version+digest := §04.6's `latest` lookup for jup's own package
+    signature-verified, release-age gated, refused outright with no verification tier
+    a non-semver answer → UsageError naming what the registry said
+stdout: `Installing jup@<version>...`
 unless <home>/self/<version> holds a readable marker:
-    metadata → tarball URL (§07.3), download prompt (§05.5),
-    one pass: hash the stream while extracting it (§16.5, §07.4 strip 1)
-    digest mismatch → discard the temp directory, install nothing (§06.2)
-    the archive must contain dist/ and bin/<cli entry>, the file §10.8 points
-      both names at, otherwise UsageError — a registry publishing something
-      else under our name
-    grant the execute bit to that file (§15.45)
-    write the .jup marker, promote (§07.5), replacing as §09.12 replaces
-
-<same as §09.12 from here>: announce, shim (§10.8), verify on PATH (§15.29)
+    metadata → tarball URL (§07.3), download prompt (§05.4)
+    one pass: hash the stream while extracting it (strip 1)
+    digest mismatch → discard, install nothing
+    the archive must contain dist/ and the bin/ CLI entry both names point at,
+      otherwise UsageError — a registry publishing something else under our name
+    grant the execute bit to that entry, write the marker, promote as §9.12 does
+<same as §9.12 from here>
 ```
 
-Two differences from §09.12 are normative.
+Two differences are load-bearing:
 
-1. **The marker's `hash` is the artifact's digest**, as it is for every other
-   download (§07.2) — not §09.12's digest over the copied payload. Nothing compares
-   contents here: a complete marker for that version is what says the work is done,
-   and it is what makes a second run cost one metadata request and no transfer.
-2. **Nothing downloaded is rewritten.** The shims are linked at the *published*
-   CLI entry (§10.8); regenerating it from the running version's source would put an
-   old entry in front of a new bundle. The one permitted edit is §15.46's shebang,
-   and only under the condition that already governs it.
+1. **The marker's `hash` is the artifact's digest**, as for every other download —
+   not §9.12's digest over a copied payload. Nothing compares contents here: a
+   complete marker for that version is what says the work is done, which makes a
+   second run cost one metadata request and no transfer.
+2. **Nothing downloaded is rewritten.** The shims link the *published* CLI entry;
+   regenerating it from the running version's source would put an old entry in
+   front of a new bundle. The only permitted edit is §10.2's shebang pin, under
+   the condition that already governs it.
 
-`upgrade` is an accepted spelling of the same command. It is deliberately not `up`,
-which writes the project's `packageManager` field (§09.4); §12.1's usage line names
-whichever word was typed.
+`upgrade` is an accepted spelling. It is deliberately not `up`, which writes the
+project's pin; the usage line names whichever word was typed.
+
+## 9.14 Output streams
+
+| Content | Stream |
+|---|---|
+| `Adding …`, `Installing …`, `Updated <path> …` from a management command | stdout |
+| `--json` output, `info`, `cache list` | stdout |
+| Management-mode `Usage Error: …` and its usage block | **stdout** |
+| Validation warnings, advisories, the download prompt, Yarn Switch notices | stderr |
+| Auto-pin's notice and its `Updated …` line (proxy mode) | stderr |
+| Proxy-mode `UsageError` | stderr |
+| Everything the tool itself prints | passthrough, unmodified |
+
+Never wrap, prefix, colourise or buffer the tool's own output: `jup yarn
+--version` prints exactly `1.22.4\n` and nothing else.
+
+### Colour
+
+jup's own lines may be coloured under three constraints:
+
+* **The text is unchanged.** Colour wraps characters a message already contains;
+  an escape sequence may not add, drop or reorder one. What is styled is
+  decoration: the leading `!`, the `Usage Error:` label, and — in `--help` — the
+  headings, the program name and command word, a trailing description, every
+  flag, and every environment-variable name in the prose.
+* **Decided per stream, per write**, and only when that stream is a terminal
+  reporting colour support. A pipe, a redirect, `NO_COLOR` or `TERM=dumb` must
+  produce the bytes an uncoloured implementation would; `FORCE_COLOR` overrides
+  in the other direction.
+* **An AI coding agent is not a person at a terminal.** Agents commonly capture
+  streams through a pty, so escapes land verbatim in a transcript with no use for
+  them; when the environment announces one (§11.4), colour is suppressed.
+  `FORCE_COLOR` still wins — an explicit ask beats a read of the environment.
+
+A run with colour off is byte-identical to one from an implementation with no
+colour at all, which is what lets §13 assert exact output.
+
+The agent-detection list is a vendored copy of someone else's table and a moving
+target. It buys a nicer transcript and costs recurring maintenance; if it ever
+starts producing surprises, dropping back to `NO_COLOR`/`FORCE_COLOR`/TTY is a
+reasonable retreat.

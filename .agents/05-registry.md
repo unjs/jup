@@ -1,182 +1,174 @@
-# 05 — Network & Registry Protocol
+# 05 — Network & Registry
+
+This page describes observable behaviour, not the transport implementation.
+`src/net/` holds it: `http.ts` (transport), `registry.ts` (npm protocol),
+`npmrc.ts`, `tls.ts`, `proxy.ts`.
 
 ## 5.1 The HTTP layer
 
-This section defines observable behavior, not the transport implementation.
-
-### Request construction
-
 For every metadata and artifact request:
 
-1. If networking is disabled, raise the matching message from §12.6.
-2. Parse the URL. Strip userinfo before sending or formatting errors.
+1. If networking is disabled, raise the matching message (§12).
+2. Parse the URL. Strip userinfo before sending, logging, or formatting an error.
 3. Select credentials once:
-   - URL userinfo wins and becomes Basic auth.
-   - Otherwise, send no credentials when the URL origin differs from the configured
-     registry origin.
-   - On the registry origin, a present token becomes Bearer auth; otherwise a
-     present username and password pair becomes Basic auth.
-4. Follow 301, 302, 303, 307, and 308 redirects, with at most 10 hops. Drop
-   authorization on a cross-origin hop.
-5. Use a connect and idle timeout (`JUP_NETWORK_TIMEOUT`, default 30000 ms). Retry
-   only idempotent GETs, on transport failures and HTTP 408, 425, 429, and 5xx, up
-   to `JUP_NETWORK_RETRIES` attempts (default 3). Use exponential backoff with
-   jitter and honor `Retry-After`; `JUP_NETWORK_RETRIES=0` disables retries. Never
-   retry another 4xx. After the final attempt, include the underlying errno or TLS
-   cause in the error.
-6. Drain non-2xx response bodies, then raise the matching §12.6 error. Never expose
-   authorization, URL userinfo, or secrets in logs or errors.
+   * URL userinfo wins and becomes Basic auth;
+   * otherwise send nothing when the URL's origin differs from the configured
+     registry's origin;
+   * on the registry origin, a token becomes Bearer auth, else a username and
+     password pair becomes Basic auth.
+4. Follow 301/302/303/307/308, at most 10 hops, **dropping authorization on a
+   cross-origin hop**.
+5. Apply a connect and idle timeout (`JUP_NETWORK_TIMEOUT`, default 30000 ms).
+   Retry only idempotent GETs, only on transport failures from a known-retryable
+   errno list and on HTTP 408, 425, 429 and 5xx, up to `JUP_NETWORK_RETRIES`
+   attempts (default 3, `0` disables, hard cap 10). Exponential backoff with
+   jitter; honour `Retry-After`, except that one longer than 30 s is honoured by
+   *not* retrying. Never retry another 4xx. After the last attempt, include the
+   underlying errno or TLS cause.
+6. Drain a bounded prefix of a non-2xx body — enough to keep the connection
+   reusable, not enough to be a denial of service — then raise the matching
+   error. Never expose authorization, userinfo, or secrets in logs or errors.
+7. Parsed JSON documents are size-capped.
 
-TLS certificates MUST be verified using system trust and optional `JUP_CAFILE`.
-A configured CA bundle MUST be installed into the request's trust store and then
-validated through the runtime's trust-store inspection API when available. If the
-runtime cannot install or confirm it, fail with a message naming the ignored setting
-instead of continuing with default trust.
+### TLS
 
-`JUP_STRICT_SSL=0`, or user/global `.npmrc` `strict-ssl=false`, disables verification
-and MUST emit exactly `! TLS certificate verification is disabled (set by <source>)`.
-Project files cannot set auth or weaken TLS. Classify common TLS failures rather than
-wrapping them as generic transport errors:
+Certificates are verified using system trust plus an optional `JUP_CAFILE`. A
+configured bundle must be installed into the request's trust store **and then
+confirmed** through the runtime's trust-store inspection API where one exists; if
+it cannot be installed or confirmed, fail with a message naming the ignored
+setting rather than continuing on default trust.
 
-- unknown CA: `TLS certificate verification failed for <host>: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.`
-- expired or not-yet-valid: `TLS certificate for <host> is expired or not yet valid (check the system clock).`
-- hostname mismatch: `TLS certificate for <host> does not match that hostname.`
+`JUP_STRICT_SSL=0`, or user/global `.npmrc` `strict-ssl=false`, disables
+verification and prints the disabled-verification warning naming its source.
+Project files can neither set auth nor weaken TLS.
 
-Honor `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and lowercase forms directly.
-Lowercase `http_proxy` wins. `NO_PROXY` is comma-separated; `*` disables proxying,
-a leading dot or bare suffix matches subdomains, and `:port` narrows a match.
-HTTPS uses `CONNECT`; HTTP uses an absolute-form request line.
+Common TLS failures are classified rather than wrapped as generic transport
+errors: unknown authority (pointing at `JUP_CAFILE` for TLS-inspecting proxies),
+expired or not-yet-valid (pointing at the clock), and hostname mismatch.
 
-## 5.2 npm registry protocol
+### Proxies
 
-### Base URL
+`HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` and `NO_PROXY` are honoured in both
+cases, lowercase first — the CGI-safety rule. `NO_PROXY` is comma-separated; `*`
+disables proxying, a leading dot or bare suffix matches subdomains, and `:port`
+narrows a match. HTTPS uses `CONNECT`; HTTP uses an absolute-form request line.
 
-```
-registryUrl := (COREPACK_NPM_REGISTRY || "https://registry.npmjs.org")
-                  with all trailing "/" stripped
+## 5.2 The npm protocol
 
-if COREPACK_ENABLE_NETWORK === "0":
-    → UsageError `Network access disabled by the environment; can't reach npm repository <registryUrl>`
-```
+### Base URL and precedence
 
-Note this is a **second, distinct** network-disabled message: the npm-registry layer
-checks the flag itself and names the *registry*, while the transport layer (§5.1)
-names the *URL*. Both strings are observable and both MUST be reproduced.
+The registry for a request is chosen from four tiers, highest first:
 
-Trailing-slash stripping is **required**: some mirrors (e.g. `registry.npmmirror.com`)
-return 404 for a doubled slash.
+1. `JUP_REGISTRY_<NAME>` — per-tool, where `<NAME>` is the upper-cased tool name
+   with non-alphanumerics folded to `_`;
+2. `JUP_NPM_REGISTRY` — the whole table;
+3. `.npmrc` (`registry`, or `@scope:registry` for a scoped package);
+4. the built-in default, `https://registry.npmjs.org`.
 
-### Default headers
+All trailing slashes are stripped: some mirrors 404 on a doubled slash.
+
+`JUP_ENABLE_NETWORK=0` is checked *here* as well as in the transport, and this
+layer's message names the **registry** where the transport's names the **URL**.
+Both are observable.
+
+### Headers
 
 ```
 Accept: application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8
 ```
 
-This requests the **abbreviated packument**, which omits per-version metadata the tool
-does not need. The `q=0.8` fallback to plain JSON exists because some third-party
-registries do not implement the abbreviated format. A conforming implementation MUST
-send this exact header and MUST parse both response shapes.
+This asks for the abbreviated packument, which omits per-version metadata jup
+does not need; the `q=0.8` fallback exists because some third-party registries do
+not implement it. Both response shapes are parsed. The one exception is §04.1's
+candidate list under `JUP_MINIMUM_RELEASE_AGE`, which asks for `application/json`
+because only the full document carries `time`.
 
-No `User-Agent` is set by the reference implementation. A re-implementation SHOULD
-send one identifying itself and its version (native HTTP stacks generally must send
-something), and MUST NOT send anything identifying the user or machine.
+No `User-Agent` identifying the user or machine is ever sent.
 
 ### Endpoints
 
-| Purpose | Request | Response fields used |
+| Purpose | Request | Fields used |
 |---|---|---|
-| All versions | `GET {registry}/{package}` | `Object.keys(body.versions)` |
-| Dist-tags | `GET {registry}/{package}` | `body["dist-tags"]` |
-| Latest stable | `GET {registry}/{package}/latest` | `body.version`, `body.dist.{integrity, signatures, shasum}` |
-| One version's metadata | `GET {registry}/{package}/{version}` | `body.dist.{tarball, integrity, signatures}` |
+| All versions | `GET {registry}/{package}` | `versions` keys |
+| Dist-tags | `GET {registry}/{package}` | `dist-tags` |
+| Latest stable | `GET {registry}/{package}/latest` | `version`, `dist.{integrity, signatures, shasum}` |
+| One version | `GET {registry}/{package}/{version}` | `dist.{tarball, integrity, signatures}` |
 
-`{package}` is inserted **without percent-encoding**. Scoped names therefore appear
-literally: `https://registry.npmjs.org/@yarnpkg/cli-dist`. This matches npm registry
-convention and MUST be preserved.
+`{package}` is inserted without percent-encoding, so scoped names appear
+literally (`…/@yarnpkg/cli-dist`), matching npm registry convention. `{version}`
+may be a dist-tag, which the registry resolves server-side — that is how "latest"
+costs one request rather than two.
 
-`{version}` may be a literal dist-tag string; the registry resolves it server-side.
-That is how "latest" is fetched in one request rather than two.
+### Tarball URLs
 
-### Tarball URL
+For a known tool the download URL normally comes from the table (`spec.url` with
+`{}` and the host placeholders substituted). The packument's `dist.tarball` is
+read verbatim when a registry override is in play, and it is validated:
 
-The tool never synthesises a tarball URL from an npm packument — it reads
-`body.dist.tarball` verbatim, and validates it:
+* it must parse, and its scheme must be `https:` — or `http:` only when the
+  configured registry itself is `http:`, so a plain-HTTP mirror can neither be
+  silently upgraded nor downgraded;
+* its host must match the configured registry's host, otherwise the download is
+  refused by name. A compromised or hostile mirror can otherwise redirect the
+  download to an arbitrary server.
 
-```
-if tarball is undefined or does not start with "http":
-    → Error `<packageName>@<version> does not have a valid tarball.`
-```
+### Override rewriting
 
-> **Requirement:** `startsWith("http")` also accepts `httpfoo://…`. A conforming
-> implementation MUST require the URL to parse and its scheme to be exactly `https:`
-> (or `http:` when the configured registry itself is `http:` — a plain-HTTP mirror
-> must not be able to be silently upgraded/downgraded). It MUST additionally reject a
-> `dist.tarball` whose host differs from the configured registry's host unless the
-> user has opted in, since a compromised or hostile mirror can otherwise redirect the
-> download to an arbitrary server.
+Rewriting is always done by parsing both URLs, never by substring replacement,
+which would normalise nothing and could match an unrelated URL:
 
-For *known* package managers the download URL normally comes from the embedded table
-(`spec.url` with `{}` replaced by the version), **not** from the packument. The
-packument path is only taken when `COREPACK_NPM_REGISTRY` is set.
+* a URL derived from a tool's **own** table entry is moved onto
+  `JUP_REGISTRY_<NAME>` unconditionally — a table URL is already known to use
+  that tool's distribution origin;
+* a URL on the **default** registry origin is moved onto `JUP_NPM_REGISTRY` when
+  the origins match by scheme, host (case-insensitively) and port; the override's
+  path prefix is prepended and the rest of the URL preserved.
 
-### Registry override rewriting
-
-When `COREPACK_NPM_REGISTRY` is set, parse both the download URL and the default
-registry URL. Compare their origins by scheme, host, and port, treating host names
-case-insensitively. If the origins match, rebuild the download URL with the override's
-scheme, host, and port, prepend the override's path prefix to the original path, and
-preserve the remaining URL components. Never rewrite a URL by substring replacement.
-The resulting host must pass the tarball-host validation above.
-
-If a range spec declares `npmRegistry`, use that package metadata source instead of
-its ordinary `registry` before applying the same parsed-origin override rule.
+Both are idempotent, and the result must pass the tarball-host validation above.
+A band declaring `npmRegistry` uses that as its metadata source in place of
+`registry` before either rewrite applies.
 
 ## 5.3 `.npmrc`
 
-Read these files from lowest to highest precedence:
+Read lowest precedence to highest:
 
-1. `<prefix>/etc/npmrc` (global),
+1. `<prefix>/etc/npmrc` (global; `<prefix>` from `npm_config_prefix`/`PREFIX`),
 2. `$HOME/.npmrc` or `%USERPROFILE%\.npmrc` (user),
-3. the closest `.npmrc` found by walking from the working directory to the project
-   root, skipping directories inside `node_modules` (project).
+3. the closest `.npmrc` walking from cwd to the project root, skipping package
+   directories inside `node_modules` (project); closer files override farther.
 
-Honor only `registry`, `@scope:registry`, `//host/path/:_authToken`,
-`//host/path/:_auth`, `//host/path/:username` with `:_password`, `cafile`, `ca`, and
-`strict-ssl`. `_authToken` is Bearer credentials, `_auth` is pre-encoded Basic
-credentials, and `_password` is base64. A scoped registry overrides the default for
-that scope; closer project files override farther ones.
+Only these keys are honoured: `registry`, `@scope:registry`,
+`//host/path/:_authToken`, `//host/path/:_auth`, `//host/path/:username` with
+`:_password`, `cafile`, `ca`, `strict-ssl`. `_authToken` is Bearer, `_auth` is
+pre-encoded Basic, `_password` is base64. Auth is matched by the longest
+origin/path prefix and never sent to a redirected origin.
 
-Configuration precedence is ambient registry/auth environment settings, eligible
-env-file settings, `.npmrc` in the order above, then the built-in registry. Project
-`.npmrc` files may set only `registry` and `@scope:registry`; ignore project
-credentials, `ca`, `cafile`, and `strict-ssl`. Interpolate only environment variables
-already present; do not run commands or expand unlisted configuration. Match auth by
-the longest origin/path prefix and never send it to a redirected origin.
+A **project** `.npmrc` may set only `registry` and `@scope:registry`. Its
+credentials, `ca`, `cafile` and `strict-ssl` are ignored. `${VAR}` interpolation
+substitutes only environment variables already present; no commands are run and
+no unlisted configuration is expanded. Section headers are skipped rather than
+honoured.
 
-## 5.5 The download prompt
+Parsing is memoised and stays off the warm path. `jup info` reports which file
+and key supplied each effective setting.
 
-Before streaming any **artifact** download (not metadata JSON):
+## 5.4 The download prompt
+
+Before streaming any **artifact** download — never before metadata:
 
 ```
-if COREPACK_ENABLE_DOWNLOAD_PROMPT === "1":
-    stderr: `! jup is about to download <url>\n`
-    if stdin is a TTY and the CI env var is not set:
+JUP_ENABLE_DOWNLOAD_PROMPT=1:
+    stderr: `! jup is about to download <url>`
+    if stdin is a TTY and CI is unset:
         stderr: `? Do you want to continue? [Y/n] `
-        read one chunk from stdin
-        if first byte is 'n' (0x6e) or 'N' (0x4e):
-            → UsageError `Aborted by the user`
-        stderr: `\n`
+        read one chunk; a leading 'n' or 'N' aborts
 ```
 
-Any other input — including a bare newline — is treated as yes.
+Any other input, a bare newline included, means yes. Exactly one chunk is read,
+and only under the TTY condition, so buffered stdin the tool did not need is left
+for the package manager.
 
-The default value of `COREPACK_ENABLE_DOWNLOAD_PROMPT` is set **by the entry point**,
-not by the tool's core (§10.1):
-
-| Entry point | Default |
-|---|---|
-| The tool's own name (`jup …`) | `0` — the user explicitly asked for it |
-| A package-manager shim (`yarn …`) | `1` — the user did not ask to download anything |
-
-Both are `??=`-style defaults, so a real environment variable overrides them. This
-default MUST NOT be settable from `.jup.env` (§03.2).
+The **default** is set by the entry point, not by the core: `0` when jup was
+invoked by its own name (the user asked for it), `1` through a package-manager
+shim (the user asked for `yarn`, not for a download). Both are defaults a real
+environment variable overrides, and neither may be set from an env file (§03.2).

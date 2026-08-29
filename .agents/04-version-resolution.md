@@ -1,239 +1,302 @@
 # 04 — Version Resolution
 
-Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}` or
-`null` (meaning "no release matches").
+Input: a `Descriptor {name, range}` (§03). Output: a `Locator {name, reference}`
+or `null` ("no release matches").
+
+The proxy path consults, in order: the recorded `jup.lock`, an unexpired memo,
+the store, and only then the registry (§4.4). Everything below describes the
+resolver those first three steps skip.
 
 ## 4.1 The algorithm
 
 `resolveDescriptor(descriptor, {allowTags, useCache})`:
 
 ```
- 1. If descriptor.range parses as a URL:
-        if name is a known package manager and COREPACK_ENABLE_UNSAFE_CUSTOM_URLS !== "1":
-            → UsageError `Illegal use of URL for known package manager. Instead, select
-              a specific version, or set COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1 in your
-              environment (<name>@<range>)`
-        → Locator { name, reference: range }        # URL passes through untouched
-
- 2. Look up the definition for `name`.
-        missing → UsageError `This package manager (<name>) isn't supported by this jup build`
-
- 3. If range is neither a valid exact version nor a valid semver range → it is a TAG:
-        if !allowTags → UsageError `Packages managers can't be referenced via tags in this context`
-        if definition.tags has own property `range` →
-            range := definition.tags[range]   # compiled-in, NO request, no age cap
-        else:
-            registry := registry of the LAST range entry in the definition   (§02.3)
-            tags     := fetchAvailableTags(registry)                          [NETWORK]
-            if !(range in tags) → UsageError `Tag not found (<range>)`
-            range := tags[range]        # now an exact version
-
- 4. If range is exact:
-        if useCache, probe its one marker path; return the cached reference if valid
-        otherwise return Locator {name, reference: range}
-
- 5. If useCache, find the highest installed version satisfying the range and return it.
-
- 6. Query every range band in parallel and union versions satisfying the requested
-    range under §4.2 band semantics. Unless `JUP_ENABLE_PRERELEASES=1`, exclude
-    prereleases not named explicitly. Apply `JUP_MINIMUM_RELEASE_AGE` to implicit
-    candidates; exact pins and compiled-in tags are exempt. Sort descending and
-    return the highest candidate, or null.
+1. range parses as a URL:
+     known name and JUP_ENABLE_UNSAFE_CUSTOM_URLS != 1 → UsageError "Illegal use of URL …"
+     → Locator {name, reference: range}          # passes through untouched
+2. no table entry for name → UsageError "This package manager (<name>) isn't supported…"
+3. range is neither an exact version nor a valid range → it is a TAG:
+     !allowTags                → UsageError "Packages managers can't be referenced via tags…"
+     definition.tags has it    → substitute, NO request, no age cap
+     else                      → fetch dist-tags from the LAST band's registry
+                                  unknown tag → UsageError "Tag not found (<tag>)"
+                                  cap the target to JUP_MINIMUM_RELEASE_AGE
+4. useCache → probe the store; a hit returns immediately
+5. range is exact → Locator {name, reference: range}, unverified
+6. query every band in parallel, union the versions satisfying the range under
+   §4.2 semantics, drop prereleases unless named or JUP_ENABLE_PRERELEASES=1,
+   apply JUP_MINIMUM_RELEASE_AGE, sort descending, take the highest, else null
 ```
 
-A compiled-in tag is checked with an own-property test and uses no network or age
-filter. Other tags use the registry of the last range band. Range queries span every
-band because one requested range may cross package channels. `useCache: false` is
-used by `use` and `up`. If artifact download returns 404 for an exact version, report
-`<name>@<version> does not exist in <registry>. Run 'jup info' to see the resolved spec and where it came from.`
+Order matters in ways that are easy to get wrong. Step 4 comes **before** step 5:
+for an exact version both return the same reference, so the probe is one `stat`,
+and shedding a `+<hash>` suffix on a cache hit is what lets §07.2 re-attach the
+marker's own hash instead of demanding a pin-qualified directory. Step 3 resolves
+tags against the last band because dist-tags belong to the newest distribution
+channel. Step 6 fans out over **every** band because one range may cross package
+channels.
 
-A band MAY declare `registry.publishedFrom` — the earliest version its npm package
-carries — when the band covers a wider range than the package was published over. On
-the 404 above, and only there, a version below it reports instead:
+Step 5 returns without checking that the version exists, so a typo surfaces later
+as a 404 on a tarball URL the user never typed. That 404 is mapped back to
+`<name>@<version> does not exist in <registry>. Run 'jup info' …`, or, for a band
+declaring `publishedFrom` below which the package was never published, to the
+sentence naming the earliest release the user can pin instead. `publishedFrom`
+selects a sentence after a 404 and never gates a request.
 
-`<name>@<version> does not exist in <registry>. jup installs <name> from <package>, whose earliest published version is <publishedFrom>; releases before it were only ever distributed elsewhere. Pin <publishedFrom> or newer.`
+`useCache: false` is used by `use` and `up`, which must not return the version
+already installed.
 
-The first sentence is the same one, verbatim. `publishedFrom` MUST NOT gate a
-request, filter a candidate, or take part in resolution: it selects a sentence after
-a 404 has already happened, so a stale value can only make a message less specific.
-Today Yarn Berry is its one user — `@yarnpkg/cli-dist` begins at 2.4.1, while the
-band claims `>=2.0.0`, and everything between exists only on a host §15.41 stopped
-reading.
+### Minimum release age
+
+`JUP_MINIMUM_RELEASE_AGE` (hours) filters implicit choices: step 6's candidates
+and step 3's dist-tag target, which is the registry choosing on the user's
+behalf. An exact pin and a compiled-in tag are exempt — those are the user, or
+this table, choosing.
+
+It changes one request: the candidate list is fetched with `Accept:
+application/json` instead of the abbreviated packument, because only the full
+document carries `time`. Every other request keeps the abbreviated header. A
+version the `time` map does not mention is dropped, and a source that publishes
+no dates at all is **refused** rather than silently resolved from — a security
+control that reports success without having been applied is worse than one that
+stops. Only a band that actually matched something refuses, so a range confined
+to another band is unaffected.
+
+Unparseable or negative values are refused, not defaulted. Every other numeric
+variable falls back on garbage because a mistyped timeout costs latency; this one
+would silently turn the protection off on the machine of someone who believes
+they turned it on.
 
 ## 4.2 The semver subset
 
-A conforming zero-dependency implementation must provide exactly these operations.
-Nothing more is needed.
+`src/version/semver.ts` is zero-dependency and provides exactly:
 
 | Operation | Used by |
 |---|---|
-| `parse(version) → {major, minor, patch, prerelease[], build[]}` | build-suffix extraction, LKG bump |
-| `isValidVersion(s)` | descriptor classification |
-| `isValidRange(s)` | descriptor classification, `devEngines.version` validation |
-| `compare(a, b)` / `rcompare` | picking the highest match, sorting |
-| `lt(a, b)` | LKG bump guard, npm 9.7.0 compile-cache guard |
-| `major(v)` | `jup up` |
-| `satisfies(v, range)` | `devEngines` cross-check (**strict**, standard semver) |
-| `satisfiesWithPrereleases(v, range)` | everywhere else (**lenient**, see below) |
+| `parse` | build-suffix extraction, LKG bump, directory naming |
+| `isValidVersion` / `isValidRange` | descriptor classification, `devEngines` validation |
+| `compare` / `rcompare` / `lt` | picking the highest match, LKG bump guard |
+| `major` | `up` |
+| `satisfies` | the `devEngines` cross-checks — **strict**, standard semver |
+| `satisfiesWithPrereleases` | everywhere else — **lenient** |
 
-### Range grammar to support
-
-`||` (union of comparator sets), whitespace-joined comparators (intersection),
-`^`, `~`, `>`, `>=`, `<`, `<=`, `=`, exact versions, `*`, `x`/`X` wildcards
-(`6.x`, `1.2.x`), and hyphen ranges. This is the full semver range grammar; the
-built-in table alone uses `*`, `<6.0.0`, `6.x || 7.x || 8.x || 9.x || 10.x`,
-`>=11.0.0`, `<2.0.0`, `>=2.0.0`, and `up` synthesises `^<major>.0.0`.
+Range grammar: `||`, whitespace-joined comparators, `^`, `~`, `>`, `>=`, `<`,
+`<=`, `=`, exact versions, `*`, `x`/`X` wildcards, hyphen ranges, and partial
+versions with an optional leading `v`.
 
 ### `satisfiesWithPrereleases`
 
-Standard semver deliberately excludes prereleases from ranges: `2.0.0-rc.0` does
-**not** satisfy `>=1.0.0`. That is wrong for this tool — a user pinning
-`yarn@4.0.0-rc.1` must still land in the `>=2.0.0` band.
-
-Normative algorithm:
+Standard semver excludes prereleases from ranges: `2.0.0-rc.0` does not satisfy
+`>=1.0.0`. That is wrong here — a user pinning `yarn@4.0.0-rc.1` must still land
+in the `>=2.0.0` band.
 
 ```
-satisfiesWithPrereleases(version, range, loose = false):
-    rangeAst := parseRange(range, loose)         # on parse failure → false
-    if version is empty/null → false
-    v := parseVersion(version, loose)            # on parse failure → false
-    v.prerelease := []                           # strip
-    return rangeAst.comparatorSets.some(set =>
-        set.every(cmp => {
-            cmp2 := cmp with cmp.version.prerelease := []
-            return cmp2.test(v)
-        }))
+strip the prerelease tag from the version AND from every comparator,
+then test normally; false, never a throw, on malformed input
 ```
 
-That is: **strip the prerelease tag from both sides, then test normally**. This is
-not semver's `includePrerelease` behavior. Build metadata is ignored throughout, per
-semver, so `4.1.0+sha224.abc` compares equal to `4.1.0`.
+This is not semver's `includePrerelease`. Build metadata is ignored throughout,
+so `4.1.0+sha512.abc` compares equal to `4.1.0`.
 
-Returns `false` — never throws — on any malformed input.
+Keep the two distinct. The strict form is used only for the `devEngines`
+cross-check on read (§03.3) and the same check on write (§03.7); everywhere else
+— band selection, cache probe, lockfile validity, candidate filtering — is
+lenient, because the recorded version was itself chosen by the lenient rule.
 
-> Where **strict** `satisfies` is used instead (the `devEngines` cross-check in §03.3
-> and the `use`-time devEngines check in §03.7), the standard prerelease-excluding
-> behaviour applies. A conforming implementation MUST keep the two distinct.
-
-## 4.3 Cache probe — `findInstalledVersion`
+## 4.3 The store probe
 
 ```
-dir := <store>/<name>
-opendir(dir)
-    ENOENT → null
-    other  → propagate
-best := null
-for each entry name E in dir:
-    if E starts with "." → skip          # .DS_Store and friends
-    if range.test(E) and (best is null or compare(best, E) !== 1):
-        best = E
-return best
+opendir(<store>/<name>); ENOENT → null
+skip entries beginning with "."          # .DS_Store and friends
+keep the highest entry satisfying the range (lenient), ties go to the later entry
 ```
 
-Dot-entries such as `.DS_Store` are skipped. The comparison accepts a candidate
-that is greater than or equal to the current best, so an equal candidate replaces
-the earlier directory entry. The probe uses prerelease-tolerant range matching, so
-an installed prerelease that satisfies the requested range is returned without a
-registry request.
+For an exact range this is a single `stat` rather than a scan. The probe uses
+prerelease-tolerant matching, so an installed prerelease satisfying the range is
+returned without a request.
 
-## 4.4 The last-known-good file
+Note that a pin-qualified directory (§07.2) is itself valid semver, so a range
+scan can select one and return a reference carrying a digest the user did not
+pin. That is harmless for execution — the bytes were verified when they were
+installed — but it is worth remembering wherever such a reference is recorded.
 
-`<COREPACK_HOME>/lastKnownGood.json`, a flat `{"<pm name>": "<version reference>"}`
-map. It is the *global* default: the version used when a project has no spec.
+## 4.4 Project resolution state: `jup.lock` and the memo
 
-**Reading** (`getLastKnownGood`) is maximally forgiving. Every failure mode returns
-`{}` rather than erroring:
+A project spec that is a **range or a dist-tag** has no single answer, and asking
+the registry on every run is both slow and non-reproducible. Two files close that
+gap. Both are keyed by `<name>@<the range exactly as written>`, both hold
+`{version, resolutions}` in the same shape, and both degrade to "no answer" on
+anything they cannot read.
 
-| Condition | Result |
-|---|---|
-| File missing (`ENOENT`) | `{}` |
-| Other I/O error | propagate |
-| Not valid JSON | `{}` |
-| Parses to a falsy value | `{}` |
-| Parses to a non-object (incl. arrays? — `typeof [] === "object"`, so arrays pass) | `{}` if not an object |
-| Individual entry whose value is not a string | that key is deleted; rest kept |
+| | `<project>/jup.lock` | `<project>/node_modules/.jup/jup.lock` |
+|---|---|---|
+| Written by | `use` and `up` only | any proxy run whose answer came from the registry |
+| Committed | yes | no — it lives in `node_modules` |
+| Expiry | never; a committed decision does not rot | 24 h stamp |
+| Rank | first | second |
 
-**Writing** (`createLastKnownGoodFile`): `mkdir -p` the home folder, then write
-`JSON.stringify(lkg, null, 2) + "\n"` in UTF-8. Not atomic. Writes are skipped
-entirely when the value is unchanged.
+`<project>` is the directory of the manifest (or version file) the walk selected,
+not the cwd.
 
-> **Requirement:** the write is a plain non-atomic `writeFile`, so two
-> concurrent processes can interleave and produce a truncated file. Because reads
-> tolerate corruption by returning `{}`, the failure is silent-but-degrading (the
-> global default is lost). Use **write-temp-then-rename** here.
+An **exact version** or a **URL** never touches either file: the pin is already
+its own record.
 
-## 4.5 Default version selection
-
-`getDefaultVersion(packageManager)` — invoked lazily, only when the project has no
-usable spec:
-
-```
-1. lkg := readLastKnownGood()
-   if lkg has an entry for this package manager → return it              [NO NETWORK]
-
-2. if COREPACK_DEFAULT_TO_LATEST === "0" → return definition.default     [NO NETWORK]
-      (the compiled-in, hash-pinned version)
-
-3. reference := fetchLatestStableVersion(definition.fetchLatestFrom)      [NETWORK]
-   try to record it as the new LKG; swallow any error
-   return reference
+```jsonc
+{ "version": 1,
+  "resolutions": {
+    "pnpm@^11.0.0": { "resolved": "11.24.0", "integrity": "sha512-…" },
+    "bun@^1.4":     { "resolved": "1.4.0",
+                      "integrity": { "linux-x64": "sha512-…", "darwin-arm64": "sha512-…" } },
+    "pnpm@latest":  { "resolved": "11.24.0", "expires": 1767225600000 }
+  } }
 ```
 
-Step 1 is why a machine that has ever run the tool online keeps working offline
-without a project spec.
+* `integrity` is SRI, as npm spells it. It becomes the locator's build suffix,
+  which is what makes it *used* rather than merely stored: §06.1 treats a
+  reference-borne hash as an explicit pin and checks the bytes against it.
+* For a **per-host** tool it is a map keyed by normalised `<platform>-<arch>`, so
+  a Linux CI job and a Mac laptop pin the same *version* by the same recorded
+  decision and each still checks the bytes it downloads. A host with no key yet
+  resolves the version from the file with no request and verifies through npm's
+  signature, then records its own key. Other hosts' keys are carried across a
+  rewrite only while the version is unchanged. A **bare** digest found on a
+  per-host entry is dropped rather than applied — it cannot be this host's fact.
+* `expires` is memo-only, and is believed only inside the window it may claim: an
+  entry without one reads as expired, and so does one further out than the TTL
+  from now. A `node_modules` restored from an image, or written under a fast
+  clock, would otherwise hold a range pinned for as long as its stamp said.
 
-### `fetchLatestStableVersion` by registry type
+### Reading
 
-* **npm** — `GET {registry}/{package}/latest`, then (unless integrity checks are
-  disabled) verify the signature over that version's metadata (§06.3), then return
-  a hash-bearing reference:
-  * if `dist.integrity` is present → `` `${version}+sha512.${hex(base64decode(integrity.slice(7)))}` ``
-  * else (legacy registries) → `` `${version}+sha1.${dist.shasum}` ``
-* **npm, per-host entry** — `GET` as above, but return the **bare
-  `version`**, attaching no hash and consulting no `dist`. A per-host entry's
-  `fetchLatestFrom` names its *launcher* package (§02.4), so everything in `dist`
-  here describes a tarball that is never downloaded; pinning it makes §06.1 row 1
-  compare a launcher's digest against the artifact's bytes, which cannot match. The
-  artifact's own signature is verified at download time instead (§06.3), which is a
-  check about the bytes that will run. This also means the recorded last-known-good
-  (step 3) is a bare version for such an entry.
-* **url** — `GET spec.url`, return `data[spec.fields.tags].stable`. Note **`stable`**,
-  not `latest`. No hash is attached on this path.
+Recorded file first; an unexpired memo second. A recorded resolution is checked
+against the range it is keyed by (lenient) and skipped if it no longer satisfies
+it; a dist-tag key has no range to violate, so a recorded entry for one stands
+until a hand edit removes it, and the memo's TTL is what keeps `pnpm@latest`
+meaning "recent".
 
-On failure in the npm path, rethrow with the exact jup message in §12.6.
+An **expired** memo is still returned to the caller as the answer of last resort.
+If the fresh resolution then fails because the registry is unreachable or
+degraded — a transport failure, or 408/425/429/5xx — jup runs the stale version
+and says so on stderr, naming the memo's path. The stamp is **not** extended, so
+the notice repeats until the registry answers again.
 
-### Fallback reference for transparent commands
+That fallback is scoped to availability and nothing else. A disabled network, a
+minimum-release-age refusal, 401, 403, 404, and TLS failures all propagate: each
+is a statement about the *request*, which an older memo does not make less true,
+and failing open there would turn a rotated credential or a security control into
+a silent permanent pin.
 
-When the invocation is a transparent command (§01.4) and the definition declares
-`transparent.default`, that literal string is the fallback reference and
-`getDefaultVersion` is **not** consulted at all — no LKG read, no network.
+### Writing
 
-`transparent.default` is a floor, not an override: a newer compatible user-recorded
-default wins.
+* A proxy run writes the **memo**, and only when the answer came from the
+  registry. Re-stamping an unexpired entry churns a file for no new fact;
+  re-stamping an expired one that only stood in because the network was down
+  would quietly turn an outage into a pin.
+* The memo is never created outside an existing `node_modules`: conjuring the
+  package manager's own directory — possibly in a repository holding nothing but
+  an `.nvmrc` — for a run asked only to print a version is not jup's to do. The
+  `.jup` directory inside it is jup's own and is created on demand.
+* `use <name>@<range>` creates the **recorded** resolution and retires the
+  replaced key's; `up` refreshes an existing one. Both then drop the memo for
+  that key, which would otherwise answer alone wherever the recorded file is not
+  visible — an uncommitted write, a `git stash`, a CI cache that restores
+  `node_modules` but not the lockfile — with the version just superseded.
+* Serialisation is chosen for `git diff`: two-space indent, sorted keys, sorted
+  host maps, trailing newline. An unchanged file is not rewritten, so mtime and
+  `git status` stay quiet. Writes are temp-then-rename in the destination's own
+  directory, under a dot-prefixed temp name so an orphan does not turn up beside
+  the file it failed to become.
+* A write failure is swallowed: a read-only checkout must still be able to run,
+  and the cost is one extra resolution next time. Emptying the last entry removes
+  the file.
 
-## 4.6 CLI version override
+`JUP_FROZEN_LOCKFILE=1` refuses creation, refresh **and deletion** — the flag
+governs the file, not one syntax of pin, so an exact `use` over a project that
+currently declares a range is refused too, because removing that entry is a
+write. The refusal happens before anything is resolved or downloaded.
 
-If the invocation was `<binary>@<version>` (e.g. `jup yarn@4.1.0 install`), then
-after project reconciliation the descriptor's `range` is replaced by that version
-verbatim, and `enforceExactVersion` was already relaxed for the project spec parse.
-The *name* check still applies: `jup pnpm@9 install` in a Yarn-pinned project is
-still an error.
+Unknown `version` values, malformed entries, and unreadable files all read as "no
+resolutions", entry by entry, so one damaged record cannot poison the others and
+a future format bump costs one extra network resolution rather than a broken
+checkout.
 
-## 4.7 Last-known-good auto-bump
+## 4.5 The last-known-good file
 
-After a successful install of a **supported** (non-URL) package manager, and unless
-`COREPACK_DEFAULT_TO_LATEST === "0"`:
+`<home>/lastKnownGood.json`, a flat `{"<name>": "<reference>"}` map: the *global*
+default, used when a project has no spec. It lives outside `v1`, so `cache clean`
+spares it.
+
+Reading is maximally forgiving — missing, unparseable, or non-object content all
+read as `{}`, and an entry whose value is not a string is dropped while the rest
+are kept. Only an I/O error other than `ENOENT` propagates.
+
+Writing is `mkdir -p` then a temp-then-rename replacement, skipped entirely when
+the value is unchanged. A plain truncating write would let two concurrent
+processes interleave into a truncated file; because reads tolerate corruption,
+the failure would be silent, and the global default would simply vanish.
+
+## 4.6 Default version selection
+
+Consulted lazily, only when the project has no usable spec:
 
 ```
-lkg := readLastKnownGood()
-current := lkg[locator.name]
-if current exists
+1. lastKnownGood has an entry for this tool → return it            [NO NETWORK]
+2. JUP_DEFAULT_TO_LATEST=0 → return the compiled-in default        [NO NETWORK]
+3. fetch the latest stable version                                 [NETWORK]
+   record it as the new last-known-good, swallowing any error
+```
+
+Step 1 is why a machine that has ever run online keeps working offline without a
+project spec.
+
+`fetchLatestStableVersion` by registry type:
+
+* **npm** — `GET {registry}/{package}/latest`, verify the signature over that
+  version's metadata unless verification is disabled, then return a hash-bearing
+  reference from `dist.integrity` (or `dist.shasum` on a legacy registry).
+* **npm, per-host entry** — the same request, returning the **bare version**.
+  `fetchLatestFrom` names the *launcher* package, so everything in its `dist`
+  describes a tarball that is never downloaded; pinning it would compare a
+  launcher's digest against the artifact's bytes. The artifact's own signature is
+  verified at download time instead. The recorded last-known-good is therefore
+  bare for such an entry.
+* **url** — `GET spec.url` and return `data[fields.tags].stable`. No hash.
+
+`JUP_MINIMUM_RELEASE_AGE` applies here as it does to any tag. Failure in the npm
+path is rethrown wrapped in the message naming both escape hatches (§12).
+
+### Transparent-command fallback
+
+When the invocation is transparent (§01.4) and the entry declares
+`transparent.default`, that literal is the fallback and `getDefaultVersion` is not
+consulted at all — no LKG read, no network. It is a **floor**, applied major-wise:
+a recorded default of `4.0.0` meets a `4.2.0` floor, `3.99.99` does not. This
+preserves the user's major without forcing minor upgrades.
+
+## 4.7 CLI version override
+
+`jup yarn@4.1.0 install` replaces the descriptor's range verbatim after
+reconciliation, and relaxes `requireVersion` on the project spec parse. The name
+check still applies, and an override never writes to `jup.lock`: a one-invocation
+override must not change the project's recorded resolution.
+
+## 4.8 Last-known-good auto-bump
+
+After a successful install of a supported (non-URL) tool, and unless
+`JUP_DEFAULT_TO_LATEST=0`:
+
+```
+if an entry exists for this tool
    and major(current) === major(installed)
-   and lt(current, installed):
-       lkg[locator.name] := installed.reference; write
+   and current < installed:
+       record the installed reference
 ```
 
-So installing `yarn@4.9.0` when the global default is `yarn@4.1.0` silently advances
-the default to `4.9.0`, but installing `yarn@5.0.0` does **not** — major bumps are
-never automatic. If there is no existing entry, nothing is written (the entry is only
-created by §4.5 step 3 or by `install -g`).
+So installing `yarn@4.9.0` advances a `4.1.0` default; installing `yarn@5.0.0`
+does not — major bumps are never automatic. With no existing entry nothing is
+written; the entry is created only by §4.6 step 3, by `install -g`, or by `pack`.
+
+Note the blast radius: installing a version in project A moves the default that
+unrelated unpinned project B will use. That is inherited behaviour, and confining
+the write to `install -g` would be a defensible change.

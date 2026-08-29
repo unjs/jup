@@ -1,173 +1,159 @@
 # 06 — Integrity & Trust
 
-Every artifact must pass an authentication check before promotion.
+Every artifact clears an authentication check before promotion. Verified TLS is
+not one: it says the bytes came from the host the URL named, not that the host is
+publishing what it published yesterday.
 
-## 6.1 The decision table
+## 6.1 The tiers
 
-Let `build[1]` be the hex digest from the reference's build suffix (§02.1), if any.
+An artifact is acceptable when it clears one of:
 
-| Reference has a hash? | Registry type | Integrity checks disabled? | What happens |
+1. **A user-pinned hash** — from the reference's build suffix, a URL fragment, or
+   `devEngines.…​.integrity`. An explicit, user-chosen assertion.
+2. **A verified registry signature**, whose signed `integrity` then becomes the
+   expected digest.
+3. **A registry-published digest without a signature** — a soft-fail, warned once
+   per artifact, for registries (commonly Artifactory) that strip signatures.
+
+| Reference has a hash? | Registry | Verification disabled? | Outcome |
 |---|---|---|---|
-| yes | any | any | **Hash check only.** Signature verification is skipped entirely. |
-| no | `npm` | no | **Signature verification**, then the registry's signed `integrity` becomes the expected hash, then hash check. |
-| no | `url` | — | Refuse unless the ambient environment sets `JUP_ALLOW_UNVERIFIED=1`. |
-| no | any | **yes** | Refuse unless the ambient environment sets `JUP_ALLOW_UNVERIFIED=1`. |
+| yes | any | any | Hash check only; no signature request at all |
+| no | npm | no | Signature → `integrity` → hash check, or tier 3, or refusal |
+| no | url | — | Refuse unless `JUP_ALLOW_UNVERIFIED=1` |
+| no | any | yes | Refuse unless `JUP_ALLOW_UNVERIFIED=1` |
 
-Every artifact MUST clear a user-pinned hash, a verified registry signature, or a
-verified detached signature from its distribution channel. Verified TLS alone is not
-a verification tier. When none is available, fail with the exact message:
+Row 1 turns signature verification off deliberately: an explicit hash is stronger
+than the registry's claim about itself, and consulting the registry would add a
+request to a path that already knows what it expects. A registry that returned no
+signatures is still worth one warning when the metadata was fetched anyway.
 
-`Refusing to install <name>@<version>: <source> provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.`
+When nothing clears a tier, the install is refused by name, pointing at both a
+pinned hash and `JUP_ALLOW_UNVERIFIED=1`. That opt-out is ambient-only — a
+project env file cannot set it — applies to the current run, and warns for each
+artifact it permits.
 
-An ambient `JUP_ALLOW_UNVERIFIED=1` or compatibility
-`COREPACK_ALLOW_UNVERIFIED=1` permits that artifact for the current run and MUST
-emit an advisory warning naming the artifact and source. Project env files MUST NOT
-set this opt-out; ignore the attempted setting and warn as required by §11.6.
+What the refusal actually closes: a `type: "url"` source that publishes neither
+signatures nor digests, and a custom `packageManager` URL with no `#<algo>.<hex>`
+fragment (that path is already behind `JUP_ENABLE_UNSAFE_CUSTOM_URLS`, which
+permits the *host*; the fragment is how the user says what should arrive from it).
+It does not fire for the ordinary entries: the table pins a hash on `default` and
+`transparent.default`, and §04.6's `latest` lookup attaches the registry's signed
+digest.
 
-Use `artifactRegistry`, when present, as the source of artifact metadata. Its signed
-integrity must describe the bytes fetched for this host. Never put a host-specific
-digest in a portable locator or manifest pin; host lock and marker data may carry it.
+`JUP_REQUIRE_SIGNATURES=1` turns tier 3 into a hard failure, for organisations
+mandating signed sources. It is deliberately not consulted on tier 1.
 
-A user-supplied hash takes precedence over registry signatures. It is an explicit
-assertion and is checked directly against the downloaded bytes.
+Use `artifactRegistry`, where present, as the source of artifact metadata: its
+signed integrity must describe the bytes fetched **for this host**. A
+host-specific digest never goes into a portable locator or manifest pin; the
+marker and `jup.lock`'s host map are where it belongs.
 
 ## 6.2 Hash verification
 
 ```
-algo   := build[0] ?? "sha512"
-actual := <hex digest of the downloaded bytes, see below>
-if build[1] and actual !== build[1]:
-    → Error `Mismatch hashes. Expected <build[1]>, got <actual>`
+algo   := the pinned algorithm, else sha512
+actual := hex digest of the downloaded bytes
+mismatch → "Mismatch hashes. Expected <expected>, got <actual>"
 ```
 
-**What gets hashed** depends on the download shape:
+What is hashed is the bytes **as received**: the raw compressed tarball stream
+for a `.tgz`, the file bytes for a single `.js`. Hashing happens inline as bytes
+arrive, in the same pass that writes them.
 
-| Download shape | Bytes hashed |
-|---|---|
-| `.tgz` full extraction | the **raw tarball stream** as received (compressed bytes) |
-| `.js` single file | the **file bytes** as received |
+At least SHA-1, SHA-224, SHA-256 and SHA-512 are supported. An unsupported or
+unsafe algorithm is rejected cleanly by name, weak user pins are warned about,
+and digests are compared in constant time over equal-length decoded bytes.
 
-Hash inline as bytes arrive. Support at least SHA-1, SHA-224, SHA-256, and SHA-512.
-Validate the requested algorithm, reject unsupported or unsafe choices cleanly, warn
-for weak user pins, and compare equal-length decoded digests in constant time.
+On mismatch the temp directory is discarded and **nothing is cached**, so
+re-running reproduces the same error rather than silently succeeding.
 
-On mismatch, the temp folder is discarded and **nothing is cached**. Re-running
-reproduces the same error — the bad artifact must never be promoted into the store.
+## 6.3 npm signature verification
 
-## 6.3 npm registry signature verification
+npm signs a statement about each published version with an ECDSA key. jup
+verifies that signature and then trusts the `integrity` it covers.
 
-npm signs a statement about each published version with an ECDSA key. The tool
-verifies that signature and then trusts the `integrity` value it covers.
-
-### The signed payload
-
-```
-<packageName>@<version>:<integrity>
-```
-
-Concatenated with no whitespace, UTF-8 encoded. `integrity` is the full SRI string
-exactly as it appears in `dist.integrity`, including the `sha512-` prefix, e.g.:
+The signed payload is `<packageName>@<version>:<integrity>`, concatenated with no
+whitespace, UTF-8, where `integrity` is the full SRI string exactly as it appears
+in `dist.integrity`, `sha512-` prefix included.
 
 ```
-@yarnpkg/cli-dist@4.14.1:sha512-AbCdEf0123…==
-```
-
-### The algorithm
-
-```
-verifySignature({signatures, integrity, packageName, version}):
-  1. if signatures is not an array, or is empty:
-         → Error `No compatible signature found in package metadata`
-
-  2. trustedKeys := COREPACK_INTEGRITY_KEYS
-                        ? JSON.parse(COREPACK_INTEGRITY_KEYS).npm
-                        : <embedded config>.keys.npm
-
-  3. walk trustedKeys IN ORDER; for each trusted key k,
-     find the first signature s with s.keyid === k.keyid.
-     Stop at the first trusted key that has a matching signature.
-
-  4. if no match, or the matched signature has no .sig:
-         → UsageError `The package was not signed by any trusted keys: ` +
-             JSON.stringify({signatures, trustedKeys}, undefined, 2)
-
-  5. pem := "-----BEGIN PUBLIC KEY-----\n" + k.key + "\n-----END PUBLIC KEY-----"
-     ok  := ECDSA-verify(SHA-256, pem, base64decode(s.sig), payload)
-     if !ok:
-         → Error `Signature does not match`
+1. signatures not a non-empty array → "No compatible signature found in package metadata"
+2. trusted keys := JUP_INTEGRITY_KEYS (parsed as JSON) or the embedded store
+3. walk the trusted keys IN ORDER; take the first that has a matching keyid
+4. no match, or the match has no .sig → "The package was not signed by any trusted keys: …"
+5. ECDSA-verify(SHA-256, key, base64decode(sig), payload)
+   failure → "Signature does not match"
 ```
 
 Notes:
 
-* `k.key` is the **base64 body of a DER SubjectPublicKeyInfo**, with no PEM armour —
-  the armour is added at verification time. A native implementation can skip the PEM
-  round-trip and parse the DER directly.
-* The signature algorithm is generic ECDSA-with-SHA-256 over whatever curve the key
-  material declares. The `keytype`/`scheme` fields (`ecdsa-sha2-nistp256`) are
-  **not consulted** by the reference implementation — the curve comes from the key.
-  A native implementation targeting only P-256 MUST validate that the parsed key's
-  curve is P-256 and reject others rather than silently mis-verifying.
-* Signature encoding is DER-encoded `(r, s)`, base64'd — not raw 64-byte
-  concatenation.
-* The `keyid` format is `"SHA256:" + base64(SHA256(<PEM-encoded SPKI>))`. It is used
-  only as a selector, never as a security check — matching keyids is not evidence of
-  anything; the ECDSA verification is.
+* `key` is the base64 body of a DER SubjectPublicKeyInfo; the PEM armour is added
+  at verification time.
+* The curve comes from the key material — `keytype`/`scheme` are not consulted —
+  so an implementation targeting only P-256 must validate the parsed curve rather
+  than assume it.
+* Signatures are DER `(r, s)`, base64'd, not a raw 64-byte concatenation.
+* `keyid` is `"SHA256:" + base64(SHA256(PEM SPKI))` and is only a **selector**.
+  Matching keyids is not evidence of anything; the ECDSA check is.
 
-### Deriving the expected hash from the verified integrity
+After a successful verification, and only when the reference carried no hash, the
+expected digest is `hex(base64decode(integrity))`, checked against the downloaded
+bytes by §6.2. That is the whole chain: trusted key → signature → `integrity` →
+tarball bytes.
 
-After a successful verification, and only when the reference carried no hash:
+### Two recovery paths
 
-```
-build[1] := hex(base64decode(integrity.slice("sha512-".length)))
-```
-
-which is then checked against the downloaded bytes by §6.2. This gives an
-end-to-end chain: trusted key → signature → `integrity` → tarball bytes.
-
-Parse SRI as `<algo>-<base64>`, use its declared supported algorithm, and reject
-invalid or unsupported algorithms.
+* **Signatures missing from the version document.** Some registries strip
+  `dist.signatures` there while the package root still carries them. One extra
+  request to the package root is made — only on a path already heading for a
+  degraded outcome, and never when there is no `integrity` for a recovered
+  signature to cover.
+* **An unmatched keyid.** npm rotates keys. On an unmatched keyid — and only
+  that failure, never a bad signature or an expired key — jup fetches
+  `https://registry.npmjs.org/-/npm/v1/keys` **anonymously, from npm's own
+  origin regardless of any registry override**, sanitises every field, merges
+  (embedded keys first, a repeated keyid kept at its first position) into
+  `<home>/keys.json`, and retries once. A fruitless refresh suppresses the next
+  for five minutes. The cache is written temp-then-rename, degrades to "nothing
+  cached" on anything malformed, and never fails a run.
 
 ## 6.4 Disabling and overriding
 
-```
-shouldSkipIntegrityCheck() := COREPACK_INTEGRITY_KEYS === "" || COREPACK_INTEGRITY_KEYS === "0"
-```
+`JUP_INTEGRITY_KEYS` set to `""` or `0` — exactly those two values — disables
+the mechanism outright: no verification, no warning, no request. Any other
+non-empty value is parsed as JSON and **replaces** (never merges with) the
+embedded trust store, in the shape of §02.6. Malformed JSON raises at
+verification time, not at startup.
 
-Exactly those two values disable verification. Any other non-empty value is parsed
-as JSON and **replaces** (does not merge with) the embedded trust store. The shape
-must match the embedded `keys` object:
-
-```json
-{"npm": [{"expires": null, "keyid": "SHA256:…", "keytype": "…", "scheme": "…", "key": "<base64 SPKI>"}]}
-```
-
-A malformed JSON value causes a parse error at verification time, not at startup.
-
-Trust overrides and verification opt-outs MUST come from the ambient environment;
-ignore and warn about attempts from project env files.
+Both this and `JUP_ALLOW_UNVERIFIED` are ambient-only; an attempt from a project
+env file is ignored and warned about.
 
 ## 6.5 Key expiry
 
-`expires` is `null` or an ISO-8601 timestamp evaluated against the system clock.
-Try matching unexpired keys first. If none match, verify with a matching expired key:
+`expires` is `null` or an ISO-8601 timestamp, evaluated against the system clock.
+Unexpired keys are tried first. If none match, a matching **expired** key is
+tried:
 
-- if its signature is valid, accept it and emit the exact warning in §12.12;
-- if it is invalid, raise
-  `The package was signed with an expired key (<keyid>, expired <expires>)`.
+* a valid signature is accepted with an advisory naming the key and its expiry;
+* an invalid one raises "The package was signed with an expired key (…)".
 
-Never accept an expired key silently. Refresh embedded npm keys from
-`https://registry.npmjs.org/-/npm/v1/keys` through the reviewed maintenance workflow.
+An expired key is never accepted silently.
 
-## 6.6 Threat model summary
+## 6.6 Threat model
 
-What this design defends against, and what it does not:
-
-| Threat | Defended? |
+| Threat | Covered? |
 |---|---|
-| Registry serves a modified tarball for a hash-pinned version | **Yes** — hash check |
-| Registry serves a modified tarball for an unpinned version, npm registry | **Yes** — signature chain, provided npm's key is not compromised |
-| Compromised mirror serving unpinned versions | **Yes** — the signature covers package, version, and integrity |
-| Man-in-the-middle on the wire | Via verified TLS |
-| Hostile repository changing trust or disabling verification | **Yes** — project env sources cannot set those controls |
-| Hostile repository pointing a known tool at an arbitrary URL | **Yes** — blocked unless ambient `JUP_ENABLE_UNSAFE_CUSTOM_URLS=1` |
-| Tar path traversal, unsafe links, or special files | **Yes** — extraction rules in §07.4 |
+| Registry serves modified bytes for a hash-pinned version | yes — hash check |
+| Registry serves modified bytes for an unpinned version (npm) | yes — signature chain, given npm's key is not compromised |
+| Compromised mirror serving unpinned versions | yes — the signature covers package, version and integrity |
+| Registry that strips signatures but publishes digests | partly — tier 3, warned; `JUP_REQUIRE_SIGNATURES=1` closes it |
+| Man-in-the-middle on the wire | via verified TLS |
+| Hostile repo changing trust, disabling verification, or weakening TLS | yes — project env sources cannot set those |
+| Hostile repo pointing a known tool at an arbitrary URL | yes — blocked without ambient `JUP_ENABLE_UNSAFE_CUSTOM_URLS=1` |
+| Hostile repo exfiltrating credentials to its own registry | yes — auth is origin-scoped and project files cannot set it |
+| Tar path traversal, unsafe links, special files | yes — §07.4 |
+| A freshly published compromised release | partly — `JUP_MINIMUM_RELEASE_AGE` |
+
+One known weak spot: the built-in `default` pins carry **sha1** digests, which
+tier 1 accepts and which §6.2 would warn about coming from a user. Moving the
+table to sha512 pins would close it.

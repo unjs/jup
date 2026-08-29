@@ -1,658 +1,329 @@
-# 02 — Data Model
+# 02 — Data Model & the Built-in Table
+
+The table lives in `src/config/table.ts` and its types in `src/types.ts`. **This
+page describes the shape and the rules; the code holds the values.** Versions,
+digests and host maps are refreshed by `scripts/refresh-table.mjs`, so copying
+them here only guarantees they go stale.
 
 ## 2.1 Core value types
 
-Distinct value types carry the whole pipeline. Keeping them distinct is what makes the
-resolution stages checkable.
-
 ```
-Descriptor  { name: string, range: string }    "what the project asked for"
-Locator     { name: string, reference: string } "the exact thing to install"
-InstallSpec { location, bin, hash }             "where it landed on disk"
+Descriptor  { name, range }              "what the project asked for"
+Locator     { name, reference }          "the exact thing to install"
+InstallSpec { location, bin, hash }      "where it landed on disk"
 ```
 
-* **Descriptor** — `name` is a tool name (`npm` | `pnpm` | `yarn` | `bun` | `deno` |
-  `aube` | `nub` | `node`) or, in unsafe-URL mode, still one of those names. `range` is *any* of: an exact semver
-  version, a semver range, a dist-tag (`latest`, `next`, `canary`, `rc`, `stable`),
-  `*`, or a URL. Descriptors are what §03 produces and §04 consumes.
-* **Locator** — `reference` is an exact semver version, optionally carrying a build
-  suffix (`4.1.0+sha224.abcdef…`), or a URL. Locators are what §04 produces and §07
-  consumes.
-* **LazyLocator** — identical to Locator except `reference` is a *thunk*
-  `() => Promise<string>`. Used for the fallback locator so that the (possibly
-  network-hitting) default-version lookup is only performed if the project turns out
-  to have no spec. **A conforming implementation MUST preserve this laziness**: it is
-  the difference between "offline project with a pinned version works" and "every
-  invocation hits the network".
+* **Descriptor** — `range` is any of: an exact semver version, a semver range, a
+  dist-tag (`latest`, `lts`, …), `*`, or a URL. Produced by §03, consumed by §04.
+* **Locator** — `reference` is an exact version, optionally carrying a build
+  suffix (`4.1.0+sha512.abcdef…`), or a URL. Produced by §04, consumed by §07.
+* **LazyLocator** — a Locator whose `reference` is a thunk. Used for the fallback
+  locator so that the default-version lookup, which may read `lastKnownGood.json`
+  and hit the network, happens only if the project turns out to have no spec.
+  Keeping it lazy is the difference between "an offline project with a pinned
+  version works" and "every invocation hits the network". `main.ts` forces it in
+  exactly one place.
 
 ### Reference grammar
 
 ```
-reference   := version | version "+" build | url
-version     := <semver 2.0.0 version>
-build       := algo [ "." hexdigest ]
-algo        := "sha1" | "sha224" | "sha256" | "sha384" | "sha512" | <any hash name
-                                                       the host crypto supports>
-url         := <absolute URL, optionally with #algo.hexdigest fragment>
+reference := version | version "+" build | url
+build     := algo [ "." hexdigest ]        # algo defaults to sha512
+url       := absolute URL, optionally with #algo.hexdigest
 ```
 
-Note that the build suffix is semver's build-metadata field, so
-`4.1.0+sha224.88b7a7…` is a *valid semver version* that compares equal to `4.1.0`.
-This is deliberate: a hash-pinned spec is still range-comparable.
-
-* `build[0]` = hash algorithm. Absent → `sha512`.
-* `build[1]` = expected hex digest. Absent → no user-supplied hash to check; the
-  registry signature path (§06.3) may synthesise one.
-
-For URL references the fragment carries the same information:
-`https://example.com/yarn.js#sha256.deadbeef` → `algo = sha256`,
-`digest = deadbeef`.
+The build suffix is semver build metadata, so `4.1.0+sha512.…` is a valid semver
+version that compares equal to `4.1.0`. A hash-pinned spec stays range-comparable.
+A URL reference carries the same information in its fragment.
 
 ## 2.2 Registry specs
 
-Supported forms for discovering tool versions:
-
 ```jsonc
-// npm-style: talk the npm registry protocol (§05.2)
 { "type": "npm", "package": "pnpm" }
 
-// `publishedFrom` is optional: the earliest version the package carries, for a
-// band that covers a wider range than the package was published over (§04.1)
+// `publishedFrom`: the earliest version the package carries, for a band that
+// covers a wider range than the package was published over.
 { "type": "npm", "package": "@yarnpkg/cli-dist", "publishedFrom": "2.4.1" }
 
-// url-style: fetch JSON and read the configured tags and versions fields.
-// Supported for a tool published somewhere other than an npm registry.
-{ "type": "url",
-  "url": "https://example.invalid/tags",
+// url-style: fetch JSON and read configured fields. For a tool published
+// somewhere other than an npm registry.
+{ "type": "url", "url": "https://…/tags",
   "fields": { "tags": "aliases", "versions": "tags" } }
 ```
 
-For `type: "url"`:
-* `fields.tags` names the object mapping dist-tag → version.
-* `fields.versions` names either an array of versions or an object whose *keys* are
-  versions. Both MUST be accepted.
-* `fetchLatestStableVersion` reads `data[fields.tags].stable` — note **`stable`**,
-  not `latest`, for URL registries.
+For `type: "url"`, `fields.versions` may name an array of versions or an object
+keyed by version; both are accepted. "Latest stable" reads
+`data[fields.tags].stable` — **`stable`**, not `latest`.
 
-An npm registry spec has no `bin`; §07.4 always extracts the whole archive.
+`publishedFrom` takes no part in resolution. It selects which sentence an
+exact-version 404 prints (§04.1), and nothing else, so a stale value costs a less
+specific message.
 
-`publishedFrom` is read in exactly one place — choosing which sentence an
-exact-version 404 prints (§04.1) — and MUST NOT gate a request, filter a candidate,
-or otherwise take part in resolution. A value that has gone stale therefore costs a
-less specific message and nothing else.
+Every band in the table today points at the npm registry. Nothing reaches a
+vendor's own distribution host, which is what lets §06's verification tier hold
+for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
 
 ## 2.3 Tool definition
 
-Each supported tool has one definition:
-
 ```ts
 {
-  kind?: "package-manager" | "runtime", // absent means "package-manager"
-  default: string,              // built-in fallback version, hash-pinned
-  tags?: Record<string,string>, // dist-tags the table answers itself,
-                                // before the registry is asked and never age-capped
-  fetchLatestFrom: RegistrySpec,// where "what's the newest stable?" is answered
-  transparent: {
-    default?: string,           // fallback version for transparent commands only
-    commands: string[][],       // command prefixes that bypass the project check
-  },
-  ranges: {                     // semver range → how to fetch that version band
-    [range: string]: PackageManagerSpec
-  },
-  shimByDefault?: boolean,      // §10.5; absent means true
-  versionFile?: {               // absent means "this tool has none"
-    path: string,               // file name, looked for in §3.1's walk
-    format: "nvm",              // content grammar
-  },
+  kind?: "package-manager" | "runtime",   // absent means package-manager
+  default: string,                        // built-in fallback version
+  tags?: Record<string, string>,          // dist-tags the table answers itself
+  fetchLatestFrom: RegistrySpec,          // where "newest stable?" is answered
+  transparent: { default?: string, commands: string[][] },
+  ranges: [range, ToolSpec][],            // ORDERED, matched last-to-first
+  shimByDefault?: boolean,                // absent means true
+  versionFile?: { path: string, format: "nvm" },
 }
 ```
 
 ### `kind`
 
-`kind` decides which of §03's project rules apply. An absent value means
-`"package-manager"`.
-
-| | `"package-manager"` | `"runtime"` |
+| | `package-manager` | `runtime` |
 |---|---|---|
-| Project pin is read from | `packageManager`, else `devEngines.packageManager` (§03.3) | `devEngines.runtime` (§03.3) |
-| May be named in `packageManager` | yes | **no** (§03.4, §12.12) |
-| §03.5's name mismatch | enforced | never applies |
-| `transparent.commands` | consulted (§01.4) | unused: nothing needs to bypass an enforcement that never runs |
-| `commands.use` | run by `use` / `up` (§09.5) | absent — a runtime installs nothing |
-| Default shim set | `shimByDefault` decides (§10.5) | same rule, and the answer MUST be `false` |
+| Project pin read from | `packageManager`, else `devEngines.packageManager` | `devEngines.runtime` |
+| May appear in `packageManager` | yes | **no** (§03.4) |
+| §03.5 name mismatch | enforced | never applies |
+| `transparent.commands` | consulted | unused — nothing to bypass |
+| `commands.use` | run by `use`/`up` | absent; a runtime installs nothing |
+| `shimByDefault` | per entry | must be `false` — a runtime's name means something outside any project, so a bare `enable` never claims it |
 
-The split is deliberately narrow. A runtime resolves, downloads, verifies, caches and
-executes through the *same* pipeline (§04–§08); the per-host model in
-particular is the whole of what a runtime needs. What differs is only which field of
-the manifest speaks for it, and whether standing in someone else's project is an
-error.
+The split is deliberately narrow. Resolution, download, verification, caching and
+execution are identical; only which manifest field speaks, and whether standing
+in someone else's project is an error, differ.
 
-The last row is a requirement, not an observation: §10.5's test is whether the name
-means anything outside a project, and a runtime's name means something outside a
-project by definition. An entry with `kind: "runtime"` and no `shimByDefault: false`
-is a malformed table.
+### `default` and `tags`
 
-`default` is hash-pinned, and a conforming table MUST NOT pin a digest that varies
-by host. For a per-host entry (§2.4) whose artifact differs per platform — which is
-every real one — that means `default` is a **bare version**, and what clears the
-verification tier for it is the registry signature over the host's own artifact
-(§06.3) rather than a compiled-in literal. The same rule is why §07.6 step 3 does not
-fold such a digest into the locator's reference.
+`default` is the compiled-in fallback. It is hash-pinned **only where the
+artifact is portable**: for a per-host entry (§2.4) the artifact differs per
+platform, so `default` is a bare version and the verification tier is npm's
+signature over this host's artifact (§06.3) rather than a compiled-in literal.
+Never pin a host-specific digest anywhere portable.
 
-`shimByDefault: false` keeps an entry out of the set a bare `jup enable` installs
-(§10.5). It is for a name users routinely install deliberately and reach for outside
-any project — `bun`, `deno` and `nub` all run a file you hand them — where claiming
-the name on `PATH` would be a takeover nobody asked for. Naming the entry
-(`jup enable bun`) still installs it, and `disable` with no names still removes it.
+`tags` are dist-tags the table answers itself, before any request and with no
+release-age cap. `node`'s `lts` is the only one: the `node` launcher package
+publishes `latest` and `v4-lts` … `v20-lts`, and those series tags stop short of
+the current LTS line, so npm's own tags cannot answer `lts`. It is a compiled-in
+version pointer to an alias that moves every six months, and it is the entry most
+likely to be stale — refresh it with the table, or retire the alias.
+
+### `ranges`
+
+A tool's *download shape* changes across major versions (pnpm's bin moved
+`.js` → `.cjs` → `.mjs` and then went native; Yarn 2+ ships from a different
+package). `ranges` is an **ordered list of `[range, spec]` pairs, matched
+last-to-first**: the last declared range that the version satisfies wins, using
+prerelease-tolerant satisfaction (§04.2), so `12.0.0-rc.1` lands in the `>=12.0.0`
+band. Bands are expected to be contiguous and exhaustive; a version no band
+covers is an internal assertion failure, not a user error, and §07.7 will not let
+such a version take a `bin` from the table.
+
+Dist-tags are a property of the newest distribution channel, so they always
+resolve against the **last** band's registry — `yarn@latest` consults
+`@yarnpkg/cli-dist`, even though `yarn@1.22.22` downloads from the `yarn` package.
 
 ### `versionFile`
 
-`versionFile` names a file the tool's **own ecosystem** already writes the wanted
-version into — `.nvmrc` for node — and is what lets jup answer correctly in a
-repository that has never heard of it. Its data-model rules are:
+Names a file the tool's own ecosystem already writes the wanted version into
+(`.nvmrc` for node), so jup answers correctly in a repository that has never heard
+of it. Rules:
 
-* It is a per-entry **table** fact, so the file name appears in the table and nowhere
-  else. Adding one MUST be a data-only change, so §03's walk
-  therefore must not know what it is looking for.
-* It is **not** a property of `kind`. A runtime whose ecosystem has no such
-  convention declares none, and nothing stops a package manager from declaring one if
-  its ecosystem grows a file worth reading.
-* `format` is the grammar of the contents, not the file name. Two ecosystems spelling
-  the same grammar differently are two formats; two file names carrying one grammar
-  are one.
-* It ranks strictly **below** the manifest and strictly **above** §03.5's fallback,
-  and jup never writes it (§03.7 writes the `devEngines` member and only that).
+* It is per-entry table data. §03's walk does not know what it is looking for, so
+  adding one is a data-only change.
+* It is not a property of `kind`. `format` is the grammar of the contents, not
+  the file name.
+* It ranks strictly below the manifest and strictly above §03.5's fallback, and
+  jup never writes it.
 
-`ranges` exists because a package manager's *download shape* changes across major
-versions (pnpm's bin moved `.js` → `.cjs` → `.mjs`; Yarn 2+ is a single JS file from
-a different host entirely). Lookup rule (`Engine::getPackageManagerSpecFor`):
-
-> Take `Object.keys(ranges)`, **reverse** it, and return the spec for the first key
-> whose range is satisfied by the version (using prerelease-tolerant satisfaction,
-> §04.2). If none matches, it is an internal assertion failure, not a user error.
-
-Because JS object key order is insertion order for non-integer keys, "reverse" means
-**last-declared range wins**. A conforming implementation MUST therefore preserve
-declaration order of the range table and check it in reverse. Implementations in
-languages without ordered maps MUST store `ranges` as an ordered list of
-`(range, spec)` pairs.
-
-The **tag-resolution range** is a separate rule: dist-tags are always resolved
-against `ranges[last key]` — the newest band (`Engine::resolveDescriptor`). So
-`yarn@latest` consults `@yarnpkg/cli-dist`'s dist-tags, never the npm `yarn` package,
-even though `yarn@1.22.22` downloads from that package.
-
-## 2.4 PackageManagerSpec
-
-> `PackageManagerSpec` describes a version band of any tool, of either `kind`.
+## 2.4 ToolSpec — one version band
 
 ```ts
 {
-  url: string,                  // download URL template; "{}" ← version
-  bin: BinSpec,                 // see below
-  registry: RegistrySpec,       // version source: which versions exist — always
-                                // `type: "npm"`
-  commands?: { use?: string[] },// argv to run after `jup use`/`up`
-
-  // A band declaring any of these is a per-host band.
-  targets?: Record<string, string>, // "<platform>-<arch>" → what "{target}" becomes
-  artifactRegistry?: NpmRegistrySpec, // where the BYTES come from, when that is not
-                                      // the package `registry` answers about
-  exec?: "js" | "native",       // absent/"js" is §08.2's in-process handover
-  binArgs?: Record<string, string[]>, // argv prepended for one bin NAME, where the
-                                      // artifact cannot read that name off argv[0]
+  url: string,                        // download template; "{}" ← version
+  bin: BinSpec,                       // { name: relative path }
+  registry: RegistrySpec,             // which versions exist
+  npmRegistry?: NpmRegistrySpec,      // npm-protocol alternative to `registry`
+  artifactRegistry?: NpmRegistrySpec, // where the BYTES come from
+  commands?: { use?: string[] },      // argv run after `use`/`up`
+  targets?: Record<string, string>,   // "<platform>-<arch>" → "{target}"
+  exec?: "js" | "native",             // absent/"js" is §08.2's in-process load
+  binArgs?: Record<string, string[]>, // argv prepended for one bin NAME
 }
 ```
 
 ### Placeholders
 
-`url` always substitutes `{}` with the version. The following named placeholders are opt-in per band:
+`url` always substitutes `{}` with the version. The rest are opt-in per band:
 
 | Placeholder | Expands to | Valid in |
 |---|---|---|
 | `{platform}` | `linux` \| `darwin` \| `win32` | `url`, `artifactRegistry.package` |
 | `{arch}` | `x64` \| `arm64` | `url`, `artifactRegistry.package` |
 | `{target}` | `targets[<host>]` | `url`, `artifactRegistry.package` |
-| `{exe}` | `.exe` on Windows, empty elsewhere | `bin` **paths** (never bin names) |
+| `{exe}` | `.exe` on Windows, empty elsewhere | `bin` **paths**, never bin names |
 
-`<host>` — the key `targets` is indexed by — is `<platform>-<arch>`, and on a musl
-Linux `<platform>-<arch>-musl`. Linux is the one platform where the pair alone does
-not name a binary interface, and publishers that ship both say so in the artifact
-name (`@oven/bun-linux-x64-musl`, `@nubjs/nub-linux-x64-musl`). glibc stays
-unsuffixed, so an existing `targets` map and an existing `jup.lock` key keep meaning
-what they meant; a musl host is the only one that sees a new key, and it is the host
-that was previously being handed a glibc binary that could not start.
+`<host>` is `<platform>-<arch>`, plus a `-musl` suffix on a musl Linux. Linux is
+the one platform where the pair alone does not name a binary interface, and
+publishers that ship both say so in the artifact name. glibc stays unsuffixed, so
+existing `targets` maps and `jup.lock` keys keep their meaning; only a musl host
+sees a new key, and it is the host that was previously handed a glibc binary that
+could not start.
 
-`{target}` exists because published per-host artifact names are not the product of
-two independent axes: bun renames both halves (`windows-aarch64` for what Node calls
-`win32`/`arm64`), while deno keeps Node's spelling and suffixes only its Linux builds
-(`linux-x64-glibc`). A table also makes the host set a band **declares**, so a host it
-does not cover fails with §12's `unsupportedTarget` — naming the host and the versions
-that do ship for it — instead of 404ing on a URL the user never typed.
+### The host model
 
-A host outside the `{platform}`/`{arch}` vocabulary is a different error
-(`unsupportedPlatform` / `unsupportedArch`), because the tool, not the release, is
-what does not cover it. Both are raised **before any request**.
+`{target}` exists because published artifact names are not the product of two
+independent axes: bun renames both halves (`windows-aarch64` for `win32`/`arm64`),
+deno keeps Node's spelling and suffixes only Linux (`linux-x64-glibc`), and node's
+Apple Silicon package is `node-bin-darwin-arm64` rather than `node-darwin-arm64`.
 
-### `registry` vs `artifactRegistry`
+A `targets` map is also a **declaration of the host set**. A host it does not
+cover fails with `unsupportedTarget` — naming the host and what the version does
+ship for — before any request, instead of 404ing on a URL the user never typed. A
+host outside the `{platform}`/`{arch}` vocabulary is a different error
+(`unsupportedPlatform` / `unsupportedArch`), because there the *tool*, not the
+release, is what does not cover it. All three are raised before any request.
 
-For every JavaScript entry these are the same package and `artifactRegistry` is
-absent. They separate when a package manager publishes a small **launcher** on npm
-and its real binaries as per-host packages — which is how both bun and deno ship:
+Two consequences follow, and both are worth weighing before adding an entry:
 
-* `registry` answers §04's questions. Versions and dist-tags live on the launcher.
-* `artifactRegistry` answers §06's and §07's. The bytes, the signed `dist.integrity`,
-  and npm's signature over it live on `@oven/bun-<target>` / `@deno/<target>`, and
-  those are the bytes about to be executed.
+* the table must ship a release for every new platform of every tool, and
+* a **stale** map fails closed on a host that actually works. Fail-closed is
+  right for verification; for platform availability it is a trade against a 404.
+  Bands whose only difference is which hosts existed at that version (bun) are
+  the cost of that choice.
 
-Pointing both at the launcher is the mistake this split exists to prevent: the
-launcher is a `postinstall` stub that downloads the binary itself, and jup runs no
-lifecycle scripts, so installing it would cache something that cannot run.
+An entry with no `targets` claims every host forever, which is why even an
+identity map is written out: the map is where a host leaving the set is said.
 
-Consequences a conforming implementation MUST follow, all of them following from
-"one version is many artifacts":
+### `registry`, `npmRegistry`, `artifactRegistry`
 
-* The digest MUST NOT be folded into the locator's reference (§07.6 step 3), because
-  that reference is what `use`/`up` write into `packageManager`. A per-host digest
-  committed there fails every colleague on another platform with a hash mismatch.
-* `jup.lock` records the digest **per host**, adding the current host key when
-  `use` or `up` runs (§03.7).
-* The store marker still records the hash: the store is host-local, so there it is
+* `registry` answers §04's question — which versions and dist-tags exist.
+* `npmRegistry` is an npm-protocol alternative used in place of `registry` when
+  the user has configured an npm registry that would serve it. No band declares
+  one today; the field exists for a `type: "url"` source with an npm mirror.
+* `artifactRegistry` answers §06's and §07's — the bytes, the signed
+  `dist.integrity`, and npm's signature over it.
+
+`registry` and `artifactRegistry` separate when a tool publishes a small
+**launcher** on npm and its real binaries as per-host packages. bun, deno, aube,
+nub, node, and pnpm from 12 all ship that way: the launcher's `postinstall` (or
+`preinstall`) downloads or hardlinks the host binary. jup runs no lifecycle
+scripts, so installing the launcher would cache something that cannot run —
+pointing both fields at it is the mistake this split prevents.
+
+Because one version is then many artifacts:
+
+* the digest is **not** folded into the locator's reference (§07.6), because that
+  reference is what `use`/`up` write into `packageManager`, and a per-host digest
+  committed there fails every colleague on another platform;
+* `jup.lock` records the digest **per host** (§04.4);
+* the store marker still records it — the store is host-local, so there it is
   exactly the right fact.
 
-**`bin` is always a `BinSpec` map:** `{ [binaryName]: relativePathInPackage }`,
-e.g. `{"pnpm": "./bin/pnpm.mjs", "pnpx": "./bin/pnpx.mjs"}`.
-
-`binArgs` is keyed by the same **names**, and its values are argv words placed in
-front of the user's own. Use it when names share a path but the artifact distinguishes
-them by its own file name rather than
-by `argv[0]`, which a spawn cannot set. Only pnpm's `>=12.0.0` band declares one,
-`{"pnpx": ["dlx"]}`, which is what pnpm's own POSIX `pnpx` script does.
-
-`bin` is never an array. A direct `.js` URL reference (§04.1) still records a
-`BinSpec` that maps its binary name to the downloaded file. A marker containing an
-array where `bin` is expected is invalid and §07.2 treats it as absent.
-
-The table's `BinSpec` is a fallback rather than the authority: §07.7 reads the
-package's own `bin` first, so a band whose paths have gone stale cannot
-break an install.
-
-A per-host artifact package is the third case, and it is why `{exe}` exists:
-`@oven/bun-<target>` and `@deno/<target>` declare **no `bin` of their own**, so §07.7
-finds nothing to read and the table is the authority for a tarball after all.
-
-Two names mapping to one path is already the `BinSpec` spelling for "one file, two
-names" (Yarn Classic's `yarn`/`yarnpkg`). For a **native** band it additionally
-requires §08.3's `argv[0]` rule: the invoked name reaches the artifact as `argv[0]`,
-which is how `bunx` and `bun` — literally the same executable — behave differently.
-
-The union of all `bin` names across all ranges of all package managers is the set of
-binary names the tool answers to (`Engine::getPackageManagerFor`,
-`Engine::getBinariesFor`). It is also the set of shims `enable` creates (§10).
-
-## 2.5 The embedded registry table
-
-A conforming implementation MUST embed an equivalent of this table. It is the only
-"configuration" the tool has, and it is compiled in — there is deliberately no
-mechanism for a user to supply a different one at runtime.
-
-> **Size/perf note.** In a native implementation this SHOULD be a `const` static
-> structure (arrays of string slices), not a JSON blob parsed at startup. Parsing
-> ~5 KB of JSON on every invocation is measurable against a 5 ms budget.
-
-### npm
-
-| Field | Value |
-|---|---|
-| `default` | `11.14.1+sha1.4a6839650da0005f323fec6abd39d77ee24f842f` |
-| `fetchLatestFrom` | `{type: npm, package: npm}` |
-| `transparent.commands` | `[["npm","init"], ["npx"]]` |
-| `transparent.default` | — |
-
-Single range `*`:
-* `url` = `https://registry.npmjs.org/npm/-/npm-{}.tgz`
-* `bin` = `{"npm": "./bin/npm-cli.js", "npx": "./bin/npx-cli.js"}`
-* `registry` = `{type: npm, package: npm}`
-* `commands.use` = `["npm", "install"]`
-
-### pnpm
-
-| Field | Value |
-|---|---|
-| `default` | `11.1.2+sha1.ed39d701687311ce9345771c62376f9fe7286694` |
-| `fetchLatestFrom` | `{type: npm, package: pnpm}` |
-| `transparent.commands` | `[["pnpm","init"], ["pnpx"], ["pnpm","dlx"]]` |
-| `transparent.default` | — |
-
-Ranges, **in declaration order** (remember: matched in reverse):
-
-| Range | `url` | `bin` |
-|---|---|---|
-| `<6.0.0` | `https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz` | `{pnpm: ./bin/pnpm.js, pnpx: ./bin/pnpx.js}` |
-| `6.x \|\| 7.x \|\| 8.x \|\| 9.x \|\| 10.x` | same | `{pnpm: ./bin/pnpm.cjs, pnpx: ./bin/pnpx.cjs}` |
-| `>=11.0.0` | same | `{pnpm: ./bin/pnpm.mjs, pnpx: ./bin/pnpx.mjs}` |
-| `>=12.0.0` | `https://registry.npmjs.org/@pnpm/exe.{target}/-/exe.{target}-{}.tgz` | `{pnpm: ./pnpm{exe}, pnpx: ./pnpm{exe}}` |
-
-Every listed pnpm band uses `registry = {type: npm, package: pnpm}` and
-`commands.use = ["pnpm", "install"]`.
-
-The `>=12.0.0` band additionally declares, by rule:
-
-* `artifactRegistry` = `{type: npm, package: "@pnpm/exe.{target}"}`
-* `targets` = the identity over `darwin-arm64`, `darwin-x64`, `linux-arm64`,
-  `linux-arm64-musl`, `linux-x64`, `linux-x64-musl`, `win32-arm64`, `win32-x64`
-* `exec` = `"native"`
-* `binArgs` = `{pnpx: ["dlx"]}`
-
-> pnpm went native in 12.0.0, so it is the entry where `exec` is per **band**
-> rather than per tool, and the entry that shows why it has to be. The
-> `pnpm` package on npm is a wrapper whose `preinstall` installs the host binary;
-> jup runs no lifecycle scripts, so it fetches `@pnpm/exe.<host>` — a signed npm
-> tarball carrying one executable — exactly as it does for bun, deno, aube, nub
-> and node. The wrapper's `bin/pnpm.mjs`, which downloads that binary itself on
-> first use, would put a network request behind a cache hit (§01) and leave a
-> seeded store unable to run offline.
->
-> `binArgs` is there because pnpm's binary decides between `pnpm` and `pnpx` on
-> its **own file name** rather than on `argv[0]`, so the shared-path `BinSpec` spelling does not reach it. pnpm's own POSIX package answers that with a `pnpx`
-> script that runs `pnpm dlx "$@"`; the band says the same thing.
-
-> The bands are contiguous and exhaustive: reversed, `>=12.0.0` is tested first,
-> then `>=11.0.0`, then `6.x || … || 10.x`, then `<6.0.0`. Prereleases are covered
-> because satisfaction strips the prerelease tag before testing (§04.2), so
-> `10.5.0-rc.1` matches `10.x` and lands in the `.cjs` band — and `12.0.0-rc.11`
-> lands in the native one.
-
-### yarn
-
-| Field | Value |
-|---|---|
-| `default` | `1.22.22+sha1.ac34549e6aa8e7ead463a7407e1c7390f61a6610` |
-| `fetchLatestFrom` | `{type: npm, package: yarn}` |
-| `transparent.commands` | `[["yarn","init"], ["yarn","dlx"]]` |
-| `transparent.default` | `4.14.1+sha224.88b7a7244bbd9040380c417f7eb556d85c67640b651f113cb4c72113` |
-
-Ranges, in declaration order:
-
-**`<2.0.0`** (Yarn Classic — a normal npm tarball)
-* `url` = `https://registry.npmjs.org/yarn/-/yarn-{}.tgz`
-* `bin` = `{"yarn": "./bin/yarn.js", "yarnpkg": "./bin/yarn.js"}`
-* `registry` = `{type: npm, package: yarn}`
-* `commands.use` = `["yarn", "install"]`
-
-**`>=2.0.0`** (Yarn Berry — an ordinary `@yarnpkg/cli-dist` npm tarball)
-* `url` = `https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz`
-* `bin` = `{"yarn": "./bin/yarn.js", "yarnpkg": "./bin/yarn.js"}`
-* `registry` = `{type: npm, package: "@yarnpkg/cli-dist", publishedFrom: "2.4.1"}`
-* `commands.use` = `["yarn", "install"]`
-
-> The band claims `>=2.0.0`, but `@yarnpkg/cli-dist`'s 2.x line begins at **2.4.1**:
-> 2.0.0 through 2.4.0 were only ever published on `repo.yarnpkg.com`, which §15.41
-> stopped reading. `publishedFrom` is what turns the resulting 404 from "does not
-> exist" — false, and unactionable — into the release the user can pin instead. It is
-> the only band that declares one.
-
-
-> **Note.** `default` for yarn is Yarn **1**, but `transparent.default` is Yarn **4**.
-> This asymmetry is intentional and MUST be preserved: it keeps `yarn` in a bare
-> directory behaving like the classic global yarn, while `yarn dlx` — which classic
-> yarn does not have — gets a modern release.
-
-### bun
-
-> Bun is not JavaScript, and on npm it
-> ships as a ~15 kB launcher (`bun`) whose `postinstall` downloads a binary out of
-> `optionalDependencies`. jup runs no lifecycle scripts, so the launcher is the
-> *version source* only; the artifact is the per-host package.
-
-| Field | Value |
-|---|---|
-| `default` | `1.4.0` — bare, per §2.3 |
-| `fetchLatestFrom` | `{type: npm, package: bun}` |
-| `transparent.commands` | `[["bun","init"], ["bun","create"], ["bun","x"], ["bunx"]]` |
-| `transparent.default` | — |
-| `shimByDefault` | `false` |
-
-Every band shares:
-* `url` = `https://registry.npmjs.org/@oven/bun-{target}/-/bun-{target}-{}.tgz`
-* `bin` = `{"bun": "./bin/bun{exe}", "bunx": "./bin/bun{exe}"}` — one file, two names
-* `registry` = `{type: npm, package: bun}`
-* `artifactRegistry` = `{type: npm, package: "@oven/bun-{target}"}`
-* `exec` = `"native"`
-* `commands.use` = `["bun", "install"]`
-
-Ranges are in declaration order, matched in reverse, and differ only in `targets`:
-
-| Range | `targets` adds |
-|---|---|
-| `*` | `darwin-arm64`→`darwin-aarch64`, `darwin-x64`→`darwin-x64`, `linux-arm64`→`linux-aarch64`, `linux-x64`→`linux-x64` |
-| `>=1.1.0` | …and `win32-x64`→`windows-x64` |
-| `>=1.1.39` | …and `linux-arm64-musl`→`linux-aarch64-musl`, `linux-x64-musl`→`linux-x64-musl` |
-| `>=1.3.10` | …and `win32-arm64`→`windows-aarch64` |
-
-> Reverse matching selects the narrowest applicable host set. `bun@1.2.0` on
-> Windows arm64 therefore reports that the version has no build for this host before
-> making a request.
-
-### deno
-
-> The `deno` npm package is a launcher with the same
-> `postinstall` shape; `@deno/<target>` carries a single executable at the package
-> root, not under `bin/`.
-
-| Field | Value |
-|---|---|
-| `default` | `2.9.5` — bare, per §2.3 |
-| `fetchLatestFrom` | `{type: npm, package: deno}` |
-| `transparent.commands` | `[["deno","init"]]` |
-| `transparent.default` | — |
-| `shimByDefault` | `false` |
-
-Single range `*`:
-* `url` = `https://registry.npmjs.org/@deno/{target}/-/{target}-{}.tgz`
-* `bin` = `{"deno": "./deno{exe}"}`
-* `registry` = `{type: npm, package: deno}`
-* `artifactRegistry` = `{type: npm, package: "@deno/{target}"}`
-* `targets` = `darwin-arm64`→`darwin-arm64`, `darwin-x64`→`darwin-x64`,
-  `linux-arm64`→`linux-arm64-glibc`, `linux-x64`→`linux-x64-glibc`,
-  `win32-arm64`→`win32-arm64`, `win32-x64`→`win32-x64`
-* `exec` = `"native"`
-* `commands.use` = `["deno", "install"]`
-
-> Only `deno init` is transparent. `deno run`, `deno task`, and `deno add` act on
-> the current project, so §03.5 applies to them.
-
-> Deno publishes no musl build, and the `-glibc` suffix on its Linux target names says
-> so. A musl host is therefore outside its declared set and gets `unsupportedTarget`,
-> naming `linux-x64-musl` — which is the true answer, and better than the glibc
-> artifact it would otherwise be handed.
-
-> **On `transparent.commands` for both.** `bun x` and `bunx` are the same operation
-> and both are listed, because §01.4 matches an argv *prefix* and a user types either.
-
-### aube
-
-> `@endevco/aube` is a ~12 kB package
-> whose `preinstall` runs `npm install @endevco/aube-<host>` and hardlinks the three
-> binaries out of it; jup asks for that package directly.
-
-| Field | Value |
-|---|---|
-| `default` | `2.2.0` — bare, per §2.3 |
-| `fetchLatestFrom` | `{type: npm, package: "@endevco/aube"}` |
-| `transparent.commands` | `[["aube","init"], ["aube","create"], ["aube","dlx"], ["aubx"]]` |
-| `transparent.default` | — |
-| `shimByDefault` | absent — **yes**, aube is a package manager, not a runtime (§10.5) |
-
-Single range `*`:
-* `url` = `https://registry.npmjs.org/@endevco/aube-{target}/-/aube-{target}-{}.tgz`
-* `bin` = `{"aube": "./bin/aube{exe}", "aubr": "./bin/aubr{exe}", "aubx": "./bin/aubx{exe}"}`
-* `registry` = `{type: npm, package: "@endevco/aube"}`
-* `artifactRegistry` = `{type: npm, package: "@endevco/aube-{target}"}`
-* `targets` = the identity on `darwin-arm64`, `linux-arm64`, `linux-arm64-musl`,
-  `linux-x64`, `linux-x64-musl`, `win32-arm64`, `win32-x64`
-* `exec` = `"native"`
-* `commands.use` = `["aube", "install"]`
-
-> **Why an identity map is still a map.** aube publishes under `<host>` verbatim, musl
-> suffix included, so `{target}` could in principle have been `{platform}-{arch}`. It
-> is a `targets` map because a map is a *declaration of the host set*, and aube's has
-> a hole: **there is no `darwin-x64` build.** An Intel Mac must be told that before any
-> request rather than after a 404 on a package that has never existed.
-
-> Aube uses one band. Prerelease-tolerant satisfaction treats
-> `>=1.0.0-beta.12` and `>=1.0.0` alike, so neither can express a target boundary
-> that excludes `1.0.0-beta.2`.
-
-> **`aubr` and `aubx`** are `aube run` and `aube dlx` — three names over hardlinks of
-> one executable, dispatching on `argv[0]`, the same arrangement as `bun`/`bunx`. Only
-> `aubx` and `aube dlx` are transparent, along with `aube init` and `aube create`,
-> which are how a project comes to exist. `aubr <script>` and `aube exec` act on the
-> project they stand in and stay subject to §03.5.
-
-> Unlike bun's and deno's, aube's per-host packages **do** declare a `bin`, so §07.7
-> reads it and the table's copy is the ordinary fallback. The two agree.
-
-### nub
-
-> `@nubjs/nub` is a ~30 kB Node launcher
-> that resolves an `optionalDependencies` entry named after the host and spawns the
-> binary inside it; jup resolves no dependency graph, so it asks for that package.
-
-| Field | Value |
-|---|---|
-| `default` | `0.7.5` — bare, per §2.3 |
-| `fetchLatestFrom` | `{type: npm, package: "@nubjs/nub"}` |
-| `transparent.commands` | `[["nub","init"], ["nub","dlx"], ["nub","x"], ["nubx"]]` |
-| `transparent.default` | — |
-| `shimByDefault` | `false` — nub is a package manager *and* a runtime (§10.5) |
-
-Single range `*`:
-* `url` = `https://registry.npmjs.org/@nubjs/nub-{target}/-/nub-{target}-{}.tgz`
-* `bin` = `{"nub": "./bin/nub{exe}", "nubx": "./bin/nub{exe}"}` — one file, two names
-* `registry` = `{type: npm, package: "@nubjs/nub"}`
-* `artifactRegistry` = `{type: npm, package: "@nubjs/nub-{target}"}`
-* `targets` = the identity on `darwin-arm64`, `darwin-x64`, `linux-arm64`,
-  `linux-arm64-musl`, `linux-x64`, `linux-x64-musl`, `win32-arm64`, and `win32-x64`
-* `exec` = `"native"`
-* `commands.use` = `["nub", "install"]`
-
-> **The identity, without a hole.** nub's launcher computes
-> `${process.platform}-${process.arch}` and appends `-musl` on a musl Linux — this
-> section's `<host>` rule, written out in someone else's repository — so `{target}`
-> is `<host>` for every host the table can name. The map is still written out, on
-> aube's reasoning minus the hole: a band with no `targets` claims every host
-> forever, and the map is where a host leaving the set would be said.
-
-> The band names `bin/nub{exe}`. Both `nub` and `nubx` point to that file and use
-> §08.3's `argv[0]` rule. Only `nubx`, `nub x`, `nub dlx`, and `nub init` are
-> transparent; `nub run`, `nub install`, and `nub <file>` act on the current project
-> and remain subject to §03.5.
-
-> Like bun's and deno's — and unlike aube's — nub's per-host packages declare **no
-> `bin`**, so §07.7 finds nothing to read and the table is the authority.
-
-### node
-
-> Node is a runtime and uses the same per-host machinery as other native tools.
-> The `node` npm package supplies versions; jup fetches its per-host artifact package
-> directly and runs no lifecycle scripts.
-
-| Field | Value |
-|---|---|
-| `kind` | `runtime` |
-| `default` | `24.20.0` — bare, per §2.3 |
-| `tags` | `{lts: "24.20.0"}` — npm's own tags cannot answer `lts` |
-| `fetchLatestFrom` | `{type: npm, package: node}` |
-| `transparent.commands` | `[]` — a runtime is never enforced against (§2.3) |
-| `transparent.default` | — |
-| `shimByDefault` | `false` — required of a runtime (§2.3, §10.5) |
-| `versionFile` | `{path: ".nvmrc", format: "nvm"}` |
-
-Single range `*`:
-* `url` = `https://registry.npmjs.org/node-{target}/-/node-{target}-{}.tgz`
-* `bin` = `{"node": "./bin/node{exe}"}`
-* `registry` = `{type: npm, package: node}`
-* `artifactRegistry` = `{type: npm, package: "node-{target}"}`
-* `targets` = `darwin-arm64`→`bin-darwin-arm64`, `darwin-x64`→`darwin-x64`,
-  `linux-arm64`→`linux-arm64`, `linux-x64`→`linux-x64`,
-  `win32-arm64`→`win-arm64`, `win32-x64`→`win-x64`
-* `exec` = `"native"`
-* `commands.use` = — (§2.3: a runtime installs nothing)
-
-> `{target}` uses `win` for Windows and `node-bin-darwin-arm64` for Apple Silicon.
-> These substitutions select the artifact packages named by the launcher.
-
-> **These packages declare their own `bin`** — `bin/node`, and `bin/node.exe` on the
-> two Windows targets — so §07.7 reads it and the table's copy is the ordinary
-> fallback, as with aube. The two agree.
-
-> **No musl build.** Node publishes none officially, so an Alpine host is outside the
-> declared set and gets `unsupportedTarget` naming `linux-x64-musl` before any
-> request, exactly as deno's absence does. `linux-armv7l` — which node
-> *does* publish — is outside §02.4's `{arch}` vocabulary altogether and is the
-> other error, `unsupportedArch`.
-
-> **`.nvmrc`.** jup reads this below `devEngines.runtime` and never writes it.
-> Numeric forms are semver ranges, `node` and `stable` mean the newest release, and
-> LTS aliases are refused because the configured registry tags cannot answer them.
-
-
+### `bin` and `binArgs`
+
+`bin` is always a `BinSpec` map, `{ name: relativePathInPackage }` — never an
+array. A marker containing an array where `bin` is expected is invalid and §07.2
+treats it as absent. A direct `.js` URL reference still records a map naming the
+downloaded file.
+
+The table's `bin` is a **fallback**: §07.7 reads the package's own `bin` first, so
+a band whose paths have gone stale cannot break an install. Per-host artifact
+packages that declare no `bin` of their own (bun, deno, nub) are the case where
+the table is the authority — which is also why `{exe}` exists.
+
+Two names mapping to one path is the spelling for "one file, two names"
+(`yarn`/`yarnpkg`, `bun`/`bunx`). For a **native** band it additionally requires
+§08.3's `argv[0]` rule: the invoked name reaches the artifact as `argv[0]`, which
+is how one executable behaves differently under two names.
+
+`binArgs` is keyed by the same names and prepends argv words. Use it where names
+share a path but the artifact distinguishes them by its own file name rather than
+by `argv[0]`, which a spawn cannot set. pnpm's native band is the only user
+(`{pnpx: ["dlx"]}`), matching what pnpm's own POSIX `pnpx` script does. A tidier
+long-term shape would fold it into `BinSpec` (`{pnpx: {path, args}}`).
+
+The union of all `bin` names across all bands of all entries is the set of names
+jup answers to, and the set of shims `enable` creates (§10).
+
+## 2.5 The entries
+
+`src/config/table.ts` is authoritative. As of writing:
+
+| Entry | kind | Binaries | Native | Per-host artifact | Shimmed by default |
+|---|---|---|---|---|---|
+| npm | pm | `npm`, `npx` | no | no | yes |
+| pnpm | pm | `pnpm`, `pnpx` | ≥12 only | ≥12 only | yes |
+| yarn | pm | `yarn`, `yarnpkg` | no | no | yes |
+| bun | pm | `bun`, `bunx` | yes | yes | no |
+| deno | pm | `deno` | yes | yes | no |
+| aube | pm | `aube`, `aubr`, `aubx` | yes | yes | yes |
+| nub | pm | `nub`, `nubx` | yes | yes | no |
+| node | runtime | `node` | yes | yes | no |
+
+Entry-specific rules that are *rules*, not values:
+
+* **pnpm** is the entry where `exec` is per band rather than per tool: the `pnpm`
+  npm package is a wrapper whose `preinstall` installs the host binary, so from
+  12 jup fetches `@pnpm/exe.<host>` instead. The wrapper would put a network
+  request behind a cache hit and leave a seeded store unable to run offline.
+* **yarn** resolves 1.x from the `yarn` package and 2+ from `@yarnpkg/cli-dist`,
+  whose 2.x line begins at 2.4.1 — hence `publishedFrom`. Releases below it
+  existed only on `repo.yarnpkg.com`, which jup does not read.
+* **aube** ships no `darwin-x64` build, which is why its identity-shaped
+  `targets` map is still a map: an Intel Mac must be told before any request.
+* **deno and node** publish no musl build, and say so by omission; an Alpine host
+  gets `unsupportedTarget` rather than a glibc binary that cannot start.
+  `linux-armv7l`, which node does publish, is outside the `{arch}` vocabulary and
+  is the other error.
+* **`shimByDefault: false`** keeps a name out of the set a bare `jup enable`
+  installs. It is for names users install deliberately and reach for outside any
+  project — `bun`, `deno` and `nub` all run a file you hand them — where claiming
+  the name would be a takeover nobody asked for. `jup enable bun` still installs
+  it, and `disable` with no names still removes it.
+* **Transparent prefixes** cover the commands that create or bypass a project
+  (`init`, `create`, `dlx`, `x`, and the `…x` binaries). Commands that act on the
+  project the user is standing in (`deno run`, `nub run`, `aube exec`) stay
+  subject to §03.5.
+
+### Fields with exactly one user
+
+`publishedFrom` (yarn), `binArgs` (pnpm), `tags` (node), `transparent.default`
+(yarn), `versionFile` (node). Each is a permanent code path serving one row. When
+touching any of them, prefer generalising or removing over adding a sixth.
 
 ## 2.6 Trust store
 
+`src/config/keys.ts` holds npm's signing keys:
+
 ```jsonc
-"keys": {
-  "npm": [
-    { "expires": "2025-01-29T00:00:00.000Z",
-      "keyid":   "SHA256:jl3bwswu80PjjokCgh0o2w5c2U4LhQAE57gj9cz1kzA",
-      "keytype": "ecdsa-sha2-nistp256",
-      "scheme":  "ecdsa-sha2-nistp256",
-      "key":     "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE1Olb3zMAFFxXKHiIkQO5cJ3Yhl5i6UPp+IhuteBJbuHcA5UogKo0EWtlWwW6KSaKoTNEYL7JlCQiVnkhBktUgg==" },
-    { "expires": null,
-      "keyid":   "SHA256:DhQ8wR5APBvFHLF/+Tc+AYvPOdTpcIDqOhxsBHRwC7U",
-      "keytype": "ecdsa-sha2-nistp256",
-      "scheme":  "ecdsa-sha2-nistp256",
-      "key":     "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEY6Ya7W++7aUPzvMTrezH6Ycx3c+HOKYCcNGybJZSCJq/fd7Qa8uuAKtdIkUQtQiEKERhAmE5lMMJhP8OkDOa2g==" }
-  ]
-}
+{ "npm": [ { "expires": null | "<ISO-8601>", "keyid": "SHA256:…",
+             "keytype": "…", "scheme": "…", "key": "<base64 SPKI>" } ] }
 ```
 
-`key` is a base64 DER **SubjectPublicKeyInfo** for an ECDSA public key — npm's own
-keys are NIST P-256, but the curve is read from the key material and a store supplied
-for another registry may use any curve. See §06.3 for the verification algorithm and
-§11 for the `COREPACK_INTEGRITY_KEYS` override.
-
-> **Requirement:** store and consult `expires`. Implementations **SHOULD** reject a
-> signature made with an expired key and report which key expired. See §06.5.
+`key` is a base64 DER SubjectPublicKeyInfo. npm's keys are NIST P-256, but the
+curve is read from the key material, so a store supplied for another registry may
+use another. `expires` is stored and consulted (§06.5). Only unexpired keys ship;
+the refresh workflow removes expired ones and a maintainer confirms the
+verification window before merging. §06.3 has the algorithm, §11.2 the override.
 
 ## 2.7 Project-manifest data
 
 ```ts
-// package.json, the only project file that is read
 {
-  packageManager?: string,               // "yarn@4.1.0+sha224.…"; never a runtime
+  packageManager?: string,          // "yarn@4.1.0+sha512.…"; never a runtime
   devEngines?: {
-    packageManager?: {
-      name: string,                      // must not contain "@"
-      version?: string,                  // a semver RANGE
-      onFail?: "ignore" | "warn" | "error"
-    },
-    // the same shape, and the only place a `kind: "runtime"` entry
-    // (§2.3) can be pinned. There is no top-level field for a runtime.
-    runtime?: {
-      name: string,
-      version?: string,
-      onFail?: "ignore" | "warn" | "error"
-    }
+    packageManager?: { name, version?, onFail?, integrity? },
+    runtime?:        { name, version?, onFail? },
   }
 }
 ```
 
-Precedence and validation are specified in §03.3. The two `devEngines` members are
-validated by one rule with the member name substituted into its messages, and they
-are read independently: which one speaks is decided by the `kind` of the tool being
+`version` is a semver **range**; `onFail` is `ignore` | `warn` | `error`;
+`integrity` is §03.7's sidecar digest. The two `devEngines` members are validated
+by one rule with the member name substituted into its messages, and are read
+independently — which one speaks is decided by the `kind` of the tool being
 requested, so a project may pin both and neither constrains the other.
 
-`devEngines` also standardises `os`, `cpu` and `libc`. jup reads neither, and adding
-them would be a scope change (§01.7), not a completion.
+`devEngines` also standardises `os`, `cpu` and `libc`. jup reads none of them;
+adding them would be a scope change (§01.7), not a completion.

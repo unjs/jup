@@ -1,109 +1,110 @@
-# 11 — Environment Variables (Normative)
+# 11 — Environment Variables
 
-Every `COREPACK_` setting below also accepts the canonical `JUP_` spelling with
-the same values, defaults, and env-file eligibility. `JUP_` wins by presence when
-both exist (§11.6). Suggested remedies name `JUP_`; source diagnostics name the
-spelling the user set. Standard ambient variables such as `PATH` and `CI` have no
-prefixed aliases.
+Environment variables are jup's only configuration input. The inventory of names
+lives in one file, `src/config/env-vars.ts`, so that eligibility sets, `info`'s
+masking list, and the read sites are all built from the same constants — which is
+what stops a new variable being readable but unclassified.
 
-Legend for **Env file** column: whether the variable may be supplied by
-`.jup.env` (§03.2), under either spelling. A real environment variable
-always wins over the file.
+Every setting has **two spellings**: the canonical `JUP_<NAME>` and the
+compatibility `COREPACK_<NAME>`. They are one setting. `JUP_` wins by presence.
+Ambient variables such as `PATH` and `CI` have no prefixed alias.
+
+The **Env file** column says whether `.jup.env` may supply the variable (§03.2).
+A real environment variable always beats the file.
 
 ## 11.1 Behaviour
 
-| Variable | Accepted values | Effect | Env file |
+| Variable | Values | Effect | Env file |
 |---|---|---|---|
-| `COREPACK_ENABLE_PROJECT_SPEC` | `0` | Ignore the project's `packageManager` / `devEngines`, and its version file, entirely; always use the fallback (last-known-good or built-in default) version. | yes |
-| `COREPACK_ENABLE_STRICT` | `0` | Don't error when the invoked package manager differs from the project's. Behaves as if every command were transparent (§01.4): the project's own package manager still honours the pin; a different one falls back to its global default. | yes |
-| `COREPACK_ENABLE_AUTO_PIN` | `1` | When the project has a `package.json` but no spec, resolve and write a `packageManager` pin before running. | yes |
-| `COREPACK_DEFAULT_TO_LATEST` | `0` | Never query the registry for "latest", and never auto-bump last-known-good on install. Use the compiled-in default version. | yes |
-| `COREPACK_ENABLE_NETWORK` | `0` | Refuse every network request: `Network access disabled by the environment; can't reach <url>`. | yes |
-| `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* package manager name. Without it, `yarn@https://…` is refused. Unknown names may always use URLs. | **no** |
-| `COREPACK_ENABLE_DOWNLOAD_PROMPT` | `0` / `1` | `1` prints `! jup is about to download <url>` before each artifact download and, on a TTY outside CI, asks for confirmation. Default is `0` when invoked as the tool itself, `1` when invoked through a package-manager shim. | **no** |
-| `COREPACK_ENV_FILE` | `0` or a path | `0` disables env-file loading. Otherwise names the file to look for instead of `.jup.env` (§03.2 also reads `.corepack.env` when this is unset). | **no** |
-| `COREPACK_HOME` | path | Root of the store and `lastKnownGood.json`. Default `$XDG_CACHE_HOME/jup`, else `%LOCALAPPDATA%\jup` on Windows, else `~/.cache/jup` (`~/AppData/Local/jup` on Windows). | **no** |
+| `JUP_ENABLE_PROJECT_SPEC` | `0` | Ignore the project's pin fields and version file entirely; always use the fallback version | yes |
+| `JUP_ENABLE_STRICT` | `0` | Do not error when the invoked tool differs from the project's; behave as if every command were transparent | yes |
+| `JUP_ENABLE_AUTO_PIN` | `1` | On `NoSpec`, resolve and write a pin before running (§03.6) | yes |
+| `JUP_DEFAULT_TO_LATEST` | `0` | Never query "latest", never auto-bump the last-known-good; use the compiled-in default | yes |
+| `JUP_ENABLE_NETWORK` | `0` | Refuse every network request | yes |
+| `JUP_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* tool. Unknown names may always use URLs | **no** |
+| `JUP_ENABLE_DOWNLOAD_PROMPT` | `0`/`1` | Announce and confirm artifact downloads. Default `0` invoked as jup, `1` through a shim | **no** |
+| `JUP_ENABLE_PRERELEASES` | `1` | Allow prereleases in implicit resolution | yes |
+| `JUP_MINIMUM_RELEASE_AGE` | hours | Filter younger releases from implicit resolution; exact pins exempt (§04.1) | yes |
+| `JUP_FROZEN_LOCKFILE` | `1` | Refuse lockfile creation, refresh, and deletion (§04.4) | yes |
+| `JUP_SPEC_FILE` | path | External file supplying the project's pin fields (§03.1) | **no** |
+| `JUP_ENV_FILE` | `0` or a path | `0` disables env files; otherwise the file to look for instead of `.jup.env` | **no** |
+| `JUP_HOME` | path | Root of the store and the global state (§07.1) | **no** |
 
-## 11.2 Registry and auth
+## 11.2 Registry, auth and trust
 
-| Variable | Accepted values | Effect | Env file |
+| Variable | Values | Effect | Env file |
 |---|---|---|---|
-| `COREPACK_NPM_REGISTRY` | URL | Base registry URL for the whole table. Trailing slashes are stripped. Default `https://registry.npmjs.org`. | yes |
-| `COREPACK_NPM_TOKEN` | string | Origin-scoped `Authorization: Bearer <token>`; presence counts. | **no** |
-| `COREPACK_NPM_USERNAME` | string | With a present password, origin-scoped Basic auth. Username alone sends nothing. | **no** |
-| `COREPACK_NPM_PASSWORD` | string | See above. Set it explicitly to the empty string to send an empty password. | **no** |
-| `COREPACK_INTEGRITY_KEYS` | `""` / `0` / JSON | `""` or `0` disables signature verification. Any other value replaces the built-in trust store. | **no** |
-| `COREPACK_REGISTRY_<NAME>` | URL | Per-tool registry/download origin. | yes |
-| `COREPACK_CAFILE` | path | PEM bundle added to TLS trust. | **no** |
-| `COREPACK_STRICT_SSL` | `0` | Disable TLS verification with a warning. | **no** |
-| `COREPACK_NETWORK_TIMEOUT` | ms | Connect and idle timeout; default `30000`. | yes |
-| `COREPACK_NETWORK_RETRIES` | integer | GET retry attempts; default `3`, `0` disables. | yes |
-| `COREPACK_REQUIRE_SIGNATURES` | `1` | Missing signatures are fatal. | yes |
-| `COREPACK_ALLOW_UNVERIFIED` | `1` | Ambient-only per-run opt-out from §06.1's fail-closed verification tier; warn for each permitted artifact. | **no** |
+| `JUP_NPM_REGISTRY` | URL | Base registry for the whole table; trailing slashes stripped | yes |
+| `JUP_REGISTRY_<NAME>` | URL | Per-tool registry/download origin; `<NAME>` is the upper-cased tool name with non-alphanumerics folded to `_` | yes |
+| `JUP_NPM_TOKEN` | string | Origin-scoped Bearer auth; presence counts | **no** |
+| `JUP_NPM_USERNAME` / `JUP_NPM_PASSWORD` | string | Origin-scoped Basic auth; a username alone sends nothing, and an explicitly empty password is meaningful | **no** |
+| `JUP_INTEGRITY_KEYS` | `""`/`0`/JSON | `""` or `0` disables signature verification; anything else replaces the trust store (§06.4) | **no** |
+| `JUP_REQUIRE_SIGNATURES` | `1` | Turn §06.1's unsigned soft-fail into a hard failure | yes |
+| `JUP_ALLOW_UNVERIFIED` | `1` | Per-run opt-out from §06.1's fail-closed tier, warning per artifact | **no** |
+| `JUP_CAFILE` | path | PEM bundle added to TLS trust | **no** |
+| `JUP_STRICT_SSL` | `0` | Disable TLS verification, with a warning naming the source | **no** |
+| `JUP_NETWORK_TIMEOUT` | ms | Connect and idle timeout; default 30000 | yes |
+| `JUP_NETWORK_RETRIES` | integer | GET retry attempts; default 3, `0` disables, capped at 10 | yes |
 
-## 11.3 Set *by* the tool, read by others
+## 11.3 Execution and shims
+
+| Variable | Values | Effect | Env file |
+|---|---|---|---|
+| `JUP_NODE_EXECPATH` | path | JavaScript runtime used to execute a spawned JS entry point (§08.3) | **no** |
+| `JUP_SHIM_DIRECTORY` | path | Default shim directory (§10.5) | **no** |
+| `JUP_HOST_RUNTIME` | path | A validated absolute runtime outside the install folder, forwarded through native child chains and read by `enable` (§10.2) | **no** |
+| `JUP_QUIET_ADVISORIES` | `1` | Silence added advisory `!` lines. Never silences errors, the download prompt, auto-pin, validation warnings, or Yarn Switch notices | **no** |
+
+## 11.4 Set by jup, read by others
 
 | Variable | Value |
 |---|---|
-| `COREPACK_ROOT` | Directory containing the tool's own installation root. Exported into the package manager's environment so it can detect it is running under a version manager. Has no effect on the tool itself. |
-| `COREPACK_MIGRATE_FROM` | Set only during `use` / `up`, before running the package manager's `use` command. Contains the previous `packageManager` value, or the `devEngines` spec, or the literal string `unknown`. |
+| `COREPACK_ROOT` / `JUP_ROOT` | The directory containing jup's own installation root, exported so a tool can detect it runs under a version manager. No effect on jup itself |
+| `COREPACK_MIGRATE_FROM` / `JUP_MIGRATE_FROM` | Set only during `use`/`up`: the previous pin, or the literal `unknown` |
 
-## 11.4 Consumed from the ambient environment
+Both are written under **both** spellings, so a tool that has learnt the new name
+finds it too.
+
+## 11.5 Consumed from the ambient environment
 
 | Variable | Effect |
 |---|---|
-| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` (and lowercase forms) | Direct proxy configuration using §05.1 semantics. |
-| `CI` | When set, the download prompt prints its notice but does not wait for confirmation. |
-| `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location fallback chain (§07.1). |
-| `PATH` | Shim install-directory lookup (§10.4); locating a JavaScript runtime in a native implementation (§08.3). |
-| `ProgramData` | Windows only: `--system`'s shim directory, `%ProgramData%\jup\bin`. |
-| `DEBUG` | Containing `jup` — or `corepack`, which the reference implementation documents — enables verbose diagnostic logging to stderr. |
-| `NO_COLOR` | Set to any value: our own output is never coloured (§09.11). Contract text is unaffected either way. |
-| `FORCE_COLOR` | Colour our own output even when the stream is not a terminal. Takes precedence over `NO_COLOR` and over agent detection; `0` disables. |
-| `AI_AGENT`, `CLAUDECODE`, `CLAUDE_CODE`, `REPL_ID`, `GEMINI_CLI`, `CODEX_SANDBOX`, `CODEX_THREAD_ID`, `OPENCODE`, `AUGMENT_AGENT`, `GOOSE_PROVIDER`, `JUNIE_DATA`, `JUNIE_SHIM_PATH`, `CURSOR_AGENT` | Set by an AI coding agent: our own output is not coloured (§09.11). Presence alone is the signal. The list is `unjs/std-env`'s agent table. |
-| `PATH` containing `.pi/agent`, `EDITOR` matching `devin`, `TERM_PROGRAM` matching `kiro` | The same table's three agents that announce themselves by value rather than by a variable of their own. |
-
-## 11.5 Additional settings
-
-| Variable | Accepted values | Effect | Env file |
-|---|---|---|---|
-| `COREPACK_NODE_EXECPATH` | path | Path to the JavaScript runtime used to execute package managers. Only meaningful for a native implementation (§08.3.1). Falls back to a sibling runtime, then `PATH`. | **no** |
-| `COREPACK_QUIET_ADVISORIES` | `1` | Silence added advisory `!` lines. It never silences errors, download/prompt, auto-pin, validation, or Yarn Switch notices. | **no** |
-| `COREPACK_HOST_RUNTIME` | path | Validated absolute runtime outside `<home>`, passed through native child chains and used by `enable`. | **no** |
-| `COREPACK_SHIM_DIRECTORY` | path | Default shim directory. | **no** |
-| `COREPACK_FROZEN_LOCKFILE` | `1` | Refuse lock creation, refresh, or deletion. | yes |
-| `COREPACK_ENABLE_PRERELEASES` | `1` | Allow prereleases in implicit resolution. | yes |
-| `COREPACK_SPEC_FILE` | path | External file supplying project package-manager fields. | **no** |
-| `COREPACK_MINIMUM_RELEASE_AGE` | hours | Filter younger releases from implicit resolution; exact pins are exempt. | yes |
+| `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase forms | Proxy configuration (§05.1); lowercase is consulted first |
+| `CI` | Any non-empty value: the download prompt announces but does not wait |
+| `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location chain (§07.1) |
+| `XDG_BIN_HOME`, `ProgramData` | Shim directory candidates (§10.5) |
+| `PATH`, `PATHEXT` | Shim directory choice, executable lookup |
+| `npm_config_prefix`, `PREFIX` | Locating the global `.npmrc` (§05.3) |
+| `SHELL`, `PSModulePath` | Shell detection for `enable`'s `PATH` hint |
+| `DEBUG` | Containing `jup` (or `corepack`) enables diagnostic logging to stderr |
+| `NO_COLOR`, `FORCE_COLOR`, `TERM` | Colour decisions (§09.14). `FORCE_COLOR` wins over both `NO_COLOR` and agent detection |
+| The agent variables | An AI coding agent announces itself; jup's own output is not coloured (§09.14). The list is vendored from `unjs/std-env`'s agent table and includes three agents detected by value rather than by a variable of their own |
 
 ## 11.6 Precedence
 
-Each prefixed pair is one setting. Canonicalize the name before checking env-file
-eligibility, so the compatibility spelling cannot bypass the deny list. Settings in
-§11.3 are written under both names.
-
-For any variable:
+Each prefixed pair is one setting, and a name is canonicalised before its
+env-file eligibility is checked, so the compatibility spelling cannot bypass the
+deny list.
 
 ```
-1. real process environment, JUP_<NAME>            (highest)
-2. real process environment, COREPACK_<NAME>
-3. .jup.env, either spelling, if the variable is env-file-eligible
-4. the tool's built-in default                     (lowest)
+1. real environment, JUP_<NAME>                       (highest)
+2. real environment, COREPACK_<NAME>
+3. .jup.env, either spelling, if eligible
+4. the built-in default                               (lowest)
 ```
 
-Presence decides, not truthiness: `JUP_NPM_PASSWORD=` shadows a
-`COREPACK_NPM_PASSWORD` that is set, because §11.2 makes the empty string a
-meaningful value. A diagnostic that names the variable that supplied a value MUST name the spelling the
-user actually set. This is the one place `COREPACK_` may appear in output; a
-message that merely *suggests* a variable names the `JUP_` spelling.
+**Presence decides, not truthiness**: `JUP_NPM_PASSWORD=` shadows a set
+`COREPACK_NPM_PASSWORD`, because the empty string is meaningful for several of
+these. A diagnostic that names the variable which supplied a value names **the
+spelling the user actually set** — this is the one place `COREPACK_` may appear
+in output. A message that merely *suggests* a variable names the `JUP_` spelling.
 
-Only the **closest** env file to `cwd` is consulted, and only directories at or below
-the project root are searched (the walk stops once a manifest with a `packageManager`
-field is found). Directories inside `node_modules` are skipped entirely.
+Resolve each pair once at startup so downstream code cannot observe different
+values for one setting.
 
-## 11.7 Configuration boundary
+## 11.7 The configuration boundary
 
-These settings, constrained `.npmrc` (§05.3), project manifests, version files, and
-the explicit lock/memo formats are the complete configuration surface. Do not add a
-plugin or general configuration system. Resolve each `JUP_`/`COREPACK_` pair once at
-startup so downstream code cannot observe different values.
+These variables, the constrained `.npmrc` (§05.3), the project manifest, version
+files, and `jup.lock` are the complete configuration surface. There is no config
+file format of jup's own, and no plugin system. Adding one would be a scope
+change (§01.7).
