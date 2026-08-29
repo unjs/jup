@@ -397,7 +397,13 @@ describe(`should handle invalid devEngines values`, () => {
   });
 });
 
-it(`should use hash from "packageManager" even when "devEngines" defines a different one`, async () => {
+// SKIP (jup §03.3): the row's subject is the divergence. A `devEngines`
+// member that names a version outranks `packageManager`, so the digest jup
+// enforces is the member's — `Mismatch hashes. Expected 22222, got …`, not
+// `11111`. The two disagreeing digests are still cross-checked and still
+// reported through `onFail`; they no longer decide which field wins. Asserted
+// verbatim by `test/conformance/13-04-dev-engines.test.ts`.
+it.skip(`should use hash from "packageManager" even when "devEngines" defines a different one`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
       packageManager: `yarn@3.0.0-rc.2+sha1.11111`,
@@ -547,7 +553,12 @@ describe(`when devEngines.packageManager.name does not match packageManager`, ()
 });
 
 describe(`should reject if range in devEngines does not match version provided`,  () => {
-  it(`unless onFail is set to "ignore"`, async () => {
+  // SKIP (jup §03.3, §04.4): the member names a version, so it outranks
+  // `packageManager` and jup resolves its `10.x` rather than falling back to
+  // `pnpm@6.6.2` — the row asserts `6.6.2\n`, jup prints the highest 10.x.
+  // `onFail: ignore` still silences the cross-check, which is the half of the
+  // row that survives; `test/conformance/13-10-use-up.test.ts` (113) covers it.
+  it.skip(`unless onFail is set to "ignore"`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
         devEngines: {
@@ -732,7 +743,12 @@ describe(`when called on a project without any defined packageManager`, () => {
     });
   });
 
-  it(`should modify package.json if enabled by env`, async () => {
+  // SKIP (jup §03.7): the pin goes to `devEngines.packageManager` — a
+  // `{name, version, integrity}` member — and no top-level `packageManager` is
+  // ever created, so the row's `packageManager: /^yarn@/` cannot hold. That the
+  // variable enables auto-pin at all, and the notice it prints, are asserted by
+  // `test/conformance/13-05-environment.test.ts` (43).
+  it.skip(`should modify package.json if enabled by env`, async () => {
     process.env.COREPACK_ENABLE_AUTO_PIN = `1`;
 
     await xfs.mktempPromise(async cwd => {
@@ -750,7 +766,11 @@ describe(`when called on a project without any defined packageManager`, () => {
     });
   });
 
-  it(`should modify package.json if enabled by .corepack.env`, async () => {
+  // SKIP (jup §03.7): same write target as the row above. The `.corepack.env`
+  // half still holds — §03.2 reads the legacy name — and is covered by
+  // `test/conformance/13-06-env-files.test.ts`; only the field the pin lands in
+  // differs.
+  it.skip(`should modify package.json if enabled by .corepack.env`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
         // empty package.json file

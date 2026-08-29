@@ -123,7 +123,12 @@ describe(`UseCommand`, () => {
     });
   });
 
-  it(`should create a package.json if absent`, async () => {
+  // SKIP (jup §03.7): `use` writes the pin to `devEngines.packageManager`, so
+  // the created manifest carries no top-level `packageManager` for the row to
+  // read. Everything else it asserts — the manifest is created, the pin is a
+  // sha512 reference, and a later `use` from a subfolder updates the ancestor —
+  // is covered by `test/conformance/13-10-use-up.test.ts` (105, 106, 107).
+  it.skip(`should create a package.json if absent`, async () => {
     await xfs.mktempPromise(async cwd => {
       await expect(runCli(cwd, [`use`, `yarn@1.22.4`])).resolves.toMatchObject({
         exitCode: 0,

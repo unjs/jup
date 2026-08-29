@@ -62,7 +62,7 @@ pnpm test:corepack                          # compat mode, live network — gree
 NOCK_ENV=record pnpm test:corepack          # write test/corepack/nocks.db
 NOCK_ENV=replay pnpm test:corepack          # offline, from that recording
 
-# jup's real defaults, no compat hatches: 41 rows fail, all of them deliberate
+# jup's real defaults, no compat hatches: 39 rows fail, all of them deliberate
 vitest run --config test/corepack/vitest.config.ts
 ```
 
@@ -70,10 +70,12 @@ It is **not** part of `pnpm test`: it talks to the real npm registry, and
 several rows install multi-megabyte package managers.
 
 Every upstream row that writes a `.corepack.env` is left exactly as it is, and
-passes: §03.2 still reads that name when the directory has no `.jup.env`, which
-is what §03.2 asks for. The suite is therefore also the regression test for the
-legacy spelling — the fallback going away would show up here as ten-odd red rows
-rather than as a quiet behaviour change in somebody's repository.
+all but one pass: §03.2 still reads that name when the directory has no
+`.jup.env`, which is what §03.2 asks for. (The exception reads the pin back out
+of the wrong field — §03.7, in the table below — not out of the wrong file.) The
+suite is therefore also the regression test for the legacy spelling — the
+fallback going away would show up here as ten-odd red rows rather than as a
+quiet behaviour change in somebody's repository.
 
 Upstream's own `nocks.db` cannot be reused. The recording is keyed on a hash of
 the request *including its headers*, and jup sends its own `user-agent` and
@@ -82,12 +84,12 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-**146 rows: 96 pass, 49 skipped, 1 expected fail, 0 failing.**
+**146 rows: 91 pass, 54 skipped, 1 expected fail, 0 failing.**
 
-> Measured 2026-08-29. The per-cause table below accounts for all 49.
+> Measured 2026-08-29. The per-cause table below accounts for all 54.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
-which green means green. Without it, 41 rows fail — see *Compat mode* below.
+which green means green. Without it, 39 rows fail — see *Compat mode* below.
 
 Every skip is a deliberate divergence, carries a `// SKIP (jup …)` comment
 naming what makes it deliberate — a section where one governs, the reason in
@@ -95,7 +97,7 @@ words where none does — and points at the jup test covering the behaviour
 instead. Nothing is skipped for being merely inconvenient: a new red row is a
 regression, which is the whole point of keeping the port.
 
-Forty-four of the 49 are literal `it.skip` / `describe.skip` sites; the
+Forty-nine of the 54 are literal `it.skip` / `describe.skip` sites; the
 remaining five are the `UNREACHABLE_BERRY` rows, which `testedPackageManagers`
 skips by computing `it.skip` from the version, so they carry one comment above
 the set rather than one apiece.
@@ -107,6 +109,7 @@ the set rather than one apiece.
 | 6 | **§06.1** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
 | 5 | **§10.6 / §10.5** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
 | 5 | **§02.5** — Yarn Berry comes from `@yarnpkg/cli-dist` on the npm registry, whose 2.x line starts at 2.4.1. `yarn@2.0.0-rc.30` is unreachable, and upstream's two `3.0.0-rc.2` digests were taken over `repo.yarnpkg.com`'s single-file `yarn.js`, so they name bytes jup never downloads. `3.0.0-rc.2` without a digest still runs. |
+| 5 | **§03.3 / §03.7** — a `devEngines.packageManager` that names a version outranks the top-level `packageManager`, and it is also the field a pin is written to. Three rows read the top-level field where jup obeys the member; two read it back after an auto-pin or a `use` that wrote the member. `test/conformance/13-04-dev-engines.test.ts`, `13-05-environment.test.ts` and `13-10-use-up.test.ts` assert the jup behaviour. |
 | 4 | **§04.4** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
 | 4 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
 | 3 | **§12.6 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two of the three use that string to probe env-file discovery. |
@@ -126,8 +129,9 @@ broad to skip row by row:
 | `COREPACK_QUIET_ADVISORIES=1` | 22 | §11.3 — the advisory `!` lines jup adds. |
 
 The per-variable splits were measured before §02.5; the total they add up to has
-since fallen from 52 to 41, because Berry now arrives signed from npm like every
-other entry and no longer needs the second hatch.
+since fallen from 52 to 39: Berry now arrives signed from npm like every other
+entry and no longer needs the second hatch, and two of the rows the hatches used
+to carry are now skipped for §03.3 / §03.7.
 
 The first two are **not** applied to rows that run against the mock registry
 (`runCli(..., true)`): `_registryServer.mjs` mints its own keypair, so those rows
@@ -136,7 +140,7 @@ it off. The advisory mute is applied everywhere, because it changes no outcome �
 only how much jup says about it.
 
 Run without it — `vitest run --config test/corepack/vitest.config.ts` — to see
-those 41 rows fail, which is what a user with jup's real defaults would hit.
+those 39 rows fail, which is what a user with jup's real defaults would hit.
 
 ### What was fixed rather than skipped
 
