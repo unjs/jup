@@ -12,15 +12,30 @@ rows covering a deliberate divergence were turned into `it.skip` /
 makes them deliberate, and seven path literals renamed by §14.24 were respelled
 in place. Every skip is listed under *What it reports*.
 
-The third kind is new and deliberately narrow — `corepack.tgz` → `jup.tgz` in
-the three hydration rows, and `.corepack` → `.jup` in the four that hand-write a
-store marker. Those rows are about `pack`/`install -g` round-tripping and about
-exit codes and ESM handover; the spelling of a path is incidental to every one
-of them, and skipping seven rows to preserve it would discard the coverage that
-caught **both** of the bugs described under *The two that were not divergences*.
-A skip is for a row that asserts something jup deliberately does differently.
-This is not that: jup does the same thing, at a different path. It stays a
+The third kind is new and deliberately narrow, and every instance of it names a
+fixture rather than a behaviour:
+
+| Edit | Sites | Why |
+| --- | --- | --- |
+| `corepack.tgz` → `jup.tgz` | 3 | the hydration rows are about `pack` / `install -g` round-tripping |
+| `.corepack` → `.jup` | 4 | jup's store marker (§07.1) |
+| `{}` → `{hash: MARKER_HASH}` | 4 | §07.2 — a marker without a digest reads as *no* marker, and the row would fall through to a download |
+| `yarn.js` → `bin/yarn.js` | 4 | §15.41 — Berry is an npm tarball now, not a single file at the root |
+| `yarn@2.2.2` → `yarn@2.4.1` | 12 | §15.41 — `@yarnpkg/cli-dist`'s 2.x line starts at 2.4.1 |
+
+Those rows are about `pack`/`install -g` round-tripping, about exit codes and
+ESM handover, about parallel installs and `use`; which Berry release stands in,
+and where its entry script sits, is incidental to every one of them, and
+skipping them to preserve the literal would discard the coverage that caught
+**both** of the bugs described under *The two that were not divergences*. A skip
+is for a row that asserts something jup deliberately does differently. This is
+not that: jup does the same thing, to a different fixture. Each stays a
 one-token edit per site so the upstream diff still reads as one.
+
+Where the literal *is* the assertion, the row is skipped instead: the five
+`testedPackageManagers` entries in `UNREACHABLE_BERRY` pin a Berry version or a
+`repo.yarnpkg.com` digest that §15.41 put out of jup's reach, and substituting
+either would be rewriting what the row tests.
 
 | Upstream | Here |
 | --- | --- |
@@ -47,7 +62,7 @@ pnpm test:corepack                          # compat mode, live network — gree
 NOCK_ENV=record pnpm test:corepack          # write test/corepack/nocks.db
 NOCK_ENV=replay pnpm test:corepack          # offline, from that recording
 
-# jup's real defaults, no compat hatches: 52 rows fail, all of them deliberate
+# jup's real defaults, no compat hatches: 41 rows fail, all of them deliberate
 vitest run --config test/corepack/vitest.config.ts
 ```
 
@@ -67,13 +82,13 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 ## What it reports
 
-**141 rows: 95 pass, 45 skipped, 1 expected fail, 0 failing.**
+**146 rows: 96 pass, 49 skipped, 1 expected fail, 0 failing.**
 
-> Measured 2026-08-27. The per-cause table below still adds up to 41 of those
+> Measured 2026-08-29. The per-cause table below still adds up to 45 of those
 > skips and wants a recount; the headline is what a run reports.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
-which green means green. Without it, 52 rows fail — see *Compat mode* below.
+which green means green. Without it, 41 rows fail — see *Compat mode* below.
 
 Every skip is a deliberate divergence, carries a `// SKIP (jup §…)` comment
 naming the section that makes it deliberate, and points at the jup test covering
@@ -86,6 +101,7 @@ red row is a regression, which is the whole point of keeping the port.
 | 8 | **§15.11** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
 | 6 | **§14.16 / §15.13** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
 | 5 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
+| 5 | **§15.41** — Yarn Berry comes from `@yarnpkg/cli-dist` on the npm registry, whose 2.x line starts at 2.4.1. `yarn@2.0.0-rc.30` is unreachable, and upstream's two `3.0.0-rc.2` digests were taken over `repo.yarnpkg.com`'s single-file `yarn.js`, so they name bytes jup never downloads. `3.0.0-rc.2` without a digest still runs. |
 | 4 | **§15.23** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
 | 2 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two rows use that string to probe env-file discovery. |
 | 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
@@ -100,8 +116,12 @@ broad to skip row by row:
 | Variable | Rows | Divergence |
 | --- | --- | --- |
 | `COREPACK_INTEGRITY_KEYS=0` | 20 | §14.4 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
-| `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §15.11 — a source with no signature and no pinned hash is refused: every Berry release from `repo.yarnpkg.com`, and every URL reference. |
+| `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §15.11 — a source with no signature and no pinned hash is refused: every URL reference, and (before §15.41 moved Berry onto npm) every Berry release from `repo.yarnpkg.com`. |
 | `COREPACK_QUIET_ADVISORIES=1` | 22 | §14.23 — the advisory `!` lines jup adds. |
+
+The per-variable splits were measured before §15.41; the total they add up to has
+since fallen from 52 to 41, because Berry now arrives signed from npm like every
+other entry and no longer needs the second hatch.
 
 The first two are **not** applied to rows that run against the mock registry
 (`runCli(..., true)`): `_registryServer.mjs` mints its own keypair, so those rows
@@ -110,7 +130,7 @@ it off. The advisory mute is applied everywhere, because it changes no outcome �
 only how much jup says about it.
 
 Run without it — `vitest run --config test/corepack/vitest.config.ts` — to see
-those 52 rows fail, which is what a user with jup's real defaults would hit.
+those 41 rows fail, which is what a user with jup's real defaults would hit.
 
 ### What was fixed rather than skipped
 

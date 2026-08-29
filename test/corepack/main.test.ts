@@ -162,8 +162,23 @@ const testedPackageManagers: Array<[string, string] | [string, string, string]> 
   [`npm`, `6.14.2+sha224.50512c1eb404900ee78586faa6d756b8d867ff46a328e6fb4cdf3a87`],
 ];
 
+// SKIP (jup §15.41): jup fetches Yarn Berry from `@yarnpkg/cli-dist` on the npm
+// registry, and that package's 2.x line starts at 2.4.1 — `2.0.0-rc.30` is not
+// published there at all. The two digests below name the bytes of
+// `repo.yarnpkg.com`'s single-file `yarn.js`, which jup no longer downloads, so
+// they mismatch the npm tarball rather than the artifact they were taken over.
+// `3.0.0-rc.2` without a digest is reachable and stays. Berry is covered at a
+// version npm carries by the rows that follow, and by test/unit/resolve.test.ts.
+const UNREACHABLE_BERRY = new Set([
+  `2.0.0-rc.30`,
+  `2.0.0-rc.30+sha1.4f0423b01bcb57f8e390b4e0f1990831f92dd1da`,
+  `2.0.0-rc.30+sha224.0e7a64468c358596db21c401ffeb11b6534fce7367afd3ae640eadf1`,
+  `3.0.0-rc.2+sha1.694bdad81703169e203febd57f9dc97d3be867bd`,
+  `3.0.0-rc.2+sha224.f83f6d1cbfac10ba6b516a62ccd2a72ccd857aa6c514d1cd7185ec60`,
+]);
+
 for (const [name, version, expectedVersion = version.split(`+`, 1)[0]] of testedPackageManagers) {
-  it(`should use the right package manager version for a given project (${name}@${version})`, async () => {
+  (UNREACHABLE_BERRY.has(version) ? it.skip : it)(`should use the right package manager version for a given project (${name}@${version})`, async () => {
     process.env.COREPACK_ENABLE_UNSAFE_CUSTOM_URLS = `1`;
     await xfs.mktempPromise(async cwd => {
       await expect(runCli(cwd, [`${name}@${version}`, `--version`])).resolves.toMatchObject({
@@ -226,13 +241,13 @@ it(`should update the Known Good Release only when the major matches`, async () 
     });
 
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
-      stdout: `2.2.2\n`,
+      stdout: `2.4.1\n`,
     });
 
     await xfs.removePromise(ppath.join(cwd, `package.json` as Filename));
@@ -911,7 +926,7 @@ it.skip(`should support disabling the network accesses from the environment`, as
 
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
@@ -936,12 +951,12 @@ describe(`read-only and offline environment`, () => {
 
       // Prepare fake project
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-        packageManager: `yarn@2.2.2`,
+        packageManager: `yarn@2.4.1`,
       });
 
       // $ corepack install
       await expect(runCli(cwd, [`install`])).resolves.toMatchObject({
-        stdout: `Adding yarn@2.2.2 to the cache...\n`,
+        stdout: `Adding yarn@2.4.1 to the cache...\n`,
         stderr: ``,
         exitCode: 0,
       });
@@ -959,7 +974,7 @@ describe(`read-only and offline environment`, () => {
 
       // $ corepack yarn --version
       await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
-        stdout: `2.2.2\n`,
+        stdout: `2.4.1\n`,
         stderr: ``,
         exitCode: 0,
       });
@@ -977,8 +992,8 @@ describe(`read-only and offline environment`, () => {
         exitCode: 0,
       });
 
-      await expect(runCli(installDir, [`install`, `--global`, `yarn@2.2.2`])).resolves.toMatchObject({
-        stdout: `Installing yarn@2.2.2...\n`,
+      await expect(runCli(installDir, [`install`, `--global`, `yarn@2.4.1`])).resolves.toMatchObject({
+        stdout: `Installing yarn@2.4.1...\n`,
         stderr: ``,
         exitCode: 0,
       });
@@ -993,7 +1008,7 @@ describe(`read-only and offline environment`, () => {
       process.env.HTTPS_PROXY = `0.0.0.0`;
 
       await expect(runCli(installDir, [`yarn`, `--version`])).resolves.toMatchObject({
-        stdout: `2.2.2\n`,
+        stdout: `2.4.1\n`,
         stderr: ``,
         exitCode: 0,
       });
@@ -1003,7 +1018,7 @@ describe(`read-only and offline environment`, () => {
 
 it(`should support hydrating package managers from cached archives`, async () => {
   await xfs.mktempPromise(async cwd => {
-    await expect(runCli(cwd, [`pack`, `yarn@2.2.2`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`pack`, `yarn@2.4.1`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });
@@ -1020,11 +1035,11 @@ it(`should support hydrating package managers from cached archives`, async () =>
     });
 
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
-      stdout: `2.2.2\n`,
+      stdout: `2.4.1\n`,
       stderr: ``,
       exitCode: 0,
     });
@@ -1033,7 +1048,7 @@ it(`should support hydrating package managers from cached archives`, async () =>
 
 it(`should support hydrating package managers if cache folder was removed`, async () => {
   await xfs.mktempPromise(async cwd => {
-    await expect(runCli(cwd, [`pack`, `yarn@2.2.2`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`pack`, `yarn@2.4.1`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
     });
@@ -1053,11 +1068,11 @@ it(`should support hydrating package managers if cache folder was removed`, asyn
     });
 
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
-      stdout: `2.2.2\n`,
+      stdout: `2.4.1\n`,
       stderr: ``,
       exitCode: 0,
     });
@@ -1069,7 +1084,7 @@ it(`should support hydrating multiple package managers from cached archives`, as
   if (process.platform === `win32`) t.skip();
 
   await xfs.mktempPromise(async cwd => {
-    await expect(runCli(cwd, [`pack`, `yarn@2.2.2`, `pnpm@5.8.0`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`pack`, `yarn@2.4.1`, `pnpm@5.8.0`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
     });
@@ -1086,11 +1101,11 @@ it(`should support hydrating multiple package managers from cached archives`, as
     });
 
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
-      stdout: `2.2.2\n`,
+      stdout: `2.4.1\n`,
       stderr: ``,
       exitCode: 0,
     });
@@ -1110,17 +1125,17 @@ it(`should support hydrating multiple package managers from cached archives`, as
 it(`should support running package managers with bin array`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(runCli(cwd, [`yarnpkg`, `--version`])).resolves.toMatchObject({
-      stdout: `2.2.2\n`,
+      stdout: `2.4.1\n`,
       stderr: ``,
       exitCode: 0,
     });
 
     await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
-      stdout: `2.2.2\n`,
+      stdout: `2.4.1\n`,
       stderr: ``,
       exitCode: 0,
     });
@@ -1130,7 +1145,7 @@ it(`should support running package managers with bin array`, async () => {
 it(`should handle parallel installs`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
     await expect(Promise.all([
@@ -1139,17 +1154,17 @@ it(`should handle parallel installs`, async () => {
       runCli(cwd, [`yarn`, `--version`]),
     ])).resolves.toMatchObject([
       {
-        stdout: `2.2.2\n`,
+        stdout: `2.4.1\n`,
         stderr: ``,
         exitCode: 0,
       },
       {
-        stdout: `2.2.2\n`,
+        stdout: `2.4.1\n`,
         stderr: ``,
         exitCode: 0,
       },
       {
-        stdout: `2.2.2\n`,
+        stdout: `2.4.1\n`,
         stderr: ``,
         exitCode: 0,
       },
@@ -1157,17 +1172,23 @@ it(`should handle parallel installs`, async () => {
   });
 });
 
+// §07.2 — a `.jup` marker records the digest the install was verified against,
+// and a marker without one reads as no marker at all, so the four rows below
+// that hand-write a store entry would fall through to a download. Upstream
+// writes `{}`; the value is never compared for a spec that carries no digest.
+const MARKER_HASH = `sha1.${`0`.repeat(40)}`;
+
 it(`should not override the package manager exit code`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
-    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
-    await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
+    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.4.1`);
+    await xfs.mkdirPromise(ppath.join(yarnFolder, `bin`), {recursive: true});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {hash: MARKER_HASH});
 
-    await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
+    await xfs.writeFilePromise(ppath.join(yarnFolder, `bin/yarn.js`), `
       process.exitCode = 42;
     `);
 
@@ -1185,14 +1206,14 @@ it(`should not preserve the process.exitCode when a package manager throws`, asy
 
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
-    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
-    await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
+    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.4.1`);
+    await xfs.mkdirPromise(ppath.join(yarnFolder, `bin`), {recursive: true});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {hash: MARKER_HASH});
 
-    await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
+    await xfs.writeFilePromise(ppath.join(yarnFolder, `bin/yarn.js`), `
       process.exitCode = 42;
       throw new Error('foo');
     `);
@@ -1208,14 +1229,14 @@ it(`should not preserve the process.exitCode when a package manager throws`, asy
 it(`should not set the exit code after successfully launching the package manager`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
-    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
-    await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
+    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.4.1`);
+    await xfs.mkdirPromise(ppath.join(yarnFolder, `bin`), {recursive: true});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {hash: MARKER_HASH});
 
-    await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
+    await xfs.writeFilePromise(ppath.join(yarnFolder, `bin/yarn.js`), `
       process.once('beforeExit', () => {
         if (process.exitCode === undefined) {
           process.exitCode = 42;
@@ -1234,14 +1255,14 @@ it(`should not set the exit code after successfully launching the package manage
 it(`should support package managers in ESM format`, async () => {
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
-      packageManager: `yarn@2.2.2`,
+      packageManager: `yarn@2.4.1`,
     });
 
-    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.2.2`);
-    await xfs.mkdirPromise(yarnFolder, {recursive: true});
-    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {});
+    const yarnFolder = ppath.join(npath.toPortablePath(folderUtils.getInstallFolder()), `yarn/2.4.1`);
+    await xfs.mkdirPromise(ppath.join(yarnFolder, `bin`), {recursive: true});
+    await xfs.writeJsonPromise(ppath.join(yarnFolder, `.jup`), {hash: MARKER_HASH});
 
-    await xfs.writeFilePromise(ppath.join(yarnFolder, `yarn.js`), `
+    await xfs.writeFilePromise(ppath.join(yarnFolder, `bin/yarn.js`), `
       import 'fs';
       console.log(42);
     `);
@@ -1892,7 +1913,7 @@ describe(`handle integrity checks`, () => {
 describe(`allow range versions in devEngines.packageManager.version when user specifies exact version`, () => {
   for (const {name, versionRange, userProvidedVersion} of [
     {name: `npm`, versionRange: `^10.7.0`, userProvidedVersion: `6.14.2`},
-    {name: `yarn`, versionRange: `^2.2.0`, userProvidedVersion: `2.2.2`},
+    {name: `yarn`, versionRange: `^2.2.0`, userProvidedVersion: `2.4.1`},
     {name: `pnpm`, versionRange: `^5.8.0`, userProvidedVersion: `5.8.0`},
   ]) {
     it(`should work with ${name}`, async () => {

@@ -144,13 +144,13 @@ describe(`UseCommand`, () => {
       const subfolder = ppath.join(cwd, `subfolder`);
       await xfs.mkdirPromise(subfolder);
 
-      await expect(runCli(subfolder, [`use`, `yarn@2.2.2`])).resolves.toMatchObject({
+      await expect(runCli(subfolder, [`use`, `yarn@2.4.1`])).resolves.toMatchObject({
         exitCode: 0,
         stderr: ``,
       });
       await expect(runCli(cwd, [`yarn`, `--version`])).resolves.toMatchObject({
         exitCode: 0,
-        stdout: `2.2.2\n`,
+        stdout: `2.4.1\n`,
         stderr: ``,
       });
     });
