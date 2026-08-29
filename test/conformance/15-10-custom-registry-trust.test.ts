@@ -1,12 +1,12 @@
 /**
- * §15.38 rows 165–166 — custom-registry trust, without circular trust (§15.10).
+ * rows 165–166 — custom-registry trust, without circular trust (§06.3).
  *
  * Driven by corepack #884 and its open PR #885: verification always used npm's
  * keys, whoever served the package, so every re-signing private registry
  * (Cloudsmith and the like) failed with "not signed by any trusted keys" and no
  * way to say otherwise. #741 is the compounding half — `.jup.env` was not
  * loaded for `install`/`prepare`, so even the per-project workaround did not
- * work — and §14.5 answers it by making the variable environment-only, which
+ * work — and §03.2 answers it by making the variable environment-only, which
  * row 166 pins.
  *
  * The trap these rows are shaped around: a trust store with **one** origin in it
@@ -32,7 +32,7 @@ const registry = new MockRegistry();
 
 const TARBALL = packageManagerTarball("pnpm", "6.6.2");
 
-/** A trust store in §15.10's origin-keyed shape. */
+/** A trust store in §06.3's origin-keyed shape. */
 function keysFor(...origins: string[]): string {
   return JSON.stringify(
     Object.fromEntries(origins.map((origin) => [origin, [registry.keyEntry()]])),
@@ -51,7 +51,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.10 — trust keyed by registry origin", () => {
+describe("§06.3 — trust keyed by registry origin", () => {
   it("165: a store keyed by the serving origin verifies", async () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -70,7 +70,7 @@ describe("§15.10 — trust keyed by registry origin", () => {
 
   it("165: the same key under a different origin does not vouch for this one", async () => {
     // The discriminating half. A flattened store — the shape this had while
-    // §15.10 was outstanding — passes this row, which is exactly why it is here.
+    // §06.3 was outstanding — passes this row, which is exactly why it is here.
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
     const result = await run(["pnpm", "--version"], {
@@ -125,7 +125,7 @@ describe("§15.10 — trust keyed by registry origin", () => {
     expect(result.stdout).toBe("6.6.2\n");
   });
 
-  it("165: §15.9's refresh is asked of npm, never of the registry that served the package", async () => {
+  it("165: §06.3's refresh is asked of npm, never of the registry that served the package", async () => {
     // The circularity objection on #884, answered concretely. The mock stands in
     // for *both* hosts here, so the assertion is on the URL the tool asked for,
     // not on which server answered: a refresh aimed at the mirror would let a

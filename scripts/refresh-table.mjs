@@ -1,18 +1,19 @@
 /**
- * §16.9 — keep the embedded table (§02.5) and trust store (§02.6) from rotting.
+ * §16, Built-in table and trust keys — keep the embedded table (§02.5) and
+ * trust store (§02.6) from rotting.
  *
  * The table goes stale in three ways, and only two of them can be automated:
  * package managers publish new versions, npm rotates its signing keys, and bin
  * paths move between majors. This script does the first two and prints a notice
  * for the third, because a new `ranges` entry needs human review.
  *
- * §15.33 is why this exists rather than being someone's calendar reminder: a
+ * This is why it exists rather than being someone's calendar reminder: a
  * compiled-in `default` pointing at a release unsupported for six years —
  * corepack shipped Yarn Classic 1.22.22 as yarn's default until #812 — is "a
  * maintenance failure, not a compatibility guarantee".
  *
  * **Every `default` this writes is hash-pinned, and the digest is taken from the
- * artifact this script actually downloaded.** §02.5 requires the pin and §15.11
+ * artifact this script actually downloaded.** §02.5 requires the pin and §06.1
  * enforces it at install time, so a `default` written from a version number
  * alone would be refused on every machine with no `lastKnownGood.json` — that
  * is, every fresh install. Nothing here trusts a digest it was merely told.
@@ -71,7 +72,7 @@ function digest(bytes, algo) {
  *    `default` takes.
  *
  * Writing a `default` any other way would put an unverified digest in the one
- * place §15.11 has no second opinion about: a machine with no
+ * place §06.1 has no second opinion about: a machine with no
  * `lastKnownGood.json` has nothing but this literal to check its first download
  * against.
  */
@@ -100,15 +101,14 @@ async function npmDefault(packageName) {
 }
 
 /**
- * §15.28 — a per-host package manager, whose `default` is a **bare version**.
+ * §02.3 — a per-host package manager, whose `default` is a **bare version**.
  *
  * There is no one digest to pin: `bun@1.4.0` is six different artifacts, and a
  * literal here would be whichever machine ran this script. So the chain above
  * does not apply, and what replaces it is a different question — not "are these
  * bytes the ones npm signed?" but "does this version actually have a build for
  * every host the table claims?" A `default` naming a version some host cannot
- * install is the same maintenance failure §15.33 is about, arriving one platform
- * at a time.
+ * install is the same maintenance failure, arriving one platform at a time.
  *
  * Metadata only, deliberately: the artifacts are 60–100 MB each and nothing is
  * compiled in from them, so downloading six of them would buy a digest this
@@ -218,7 +218,7 @@ function rewriteDefault(source, name, field, reference) {
 }
 
 /**
- * §14.4 — npm's published signing keys, expired ones dropped.
+ * §02.6 — npm's published signing keys, expired ones dropped.
  *
  * Shipping a key that has expired is dead weight at best: §06.5 refuses it at
  * verification time anyway, so the only thing it can do is make a rotation look
@@ -264,10 +264,11 @@ let table = readFileSync(TABLE, "utf8");
 const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
   npmDefault("npm"),
   npmDefault("pnpm"),
-  // §15.41 — Berry is an npm package now, so it takes the same verified path as
+  // §02.5 — Berry is an npm package now, so it takes the same verified path as
   // npm and pnpm. It used to need a branch of its own: `repo.yarnpkg.com` published
   // no signature and no digest, so the pin written here rested on TLS alone, and
-  // §16.9's "do not auto-merge" existed largely for that one line.
+  // §16, Built-in table and trust keys' "do not auto-merge" existed largely
+  // for that one line.
   npmDefault("@yarnpkg/cli-dist"),
   nativeDefault("bun", NATIVE_TARGETS.bun),
   nativeDefault("deno", NATIVE_TARGETS.deno),
@@ -277,8 +278,8 @@ const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
 
 table = rewriteDefault(table, "npm", "default", npm);
 table = rewriteDefault(table, "pnpm", "default", pnpm);
-// §15.33 bullet 2: both of yarn's defaults track the supported major. They are
-// separate fields because bullet 1 floors the transparent one against the user's
+// §04.6: both of yarn's defaults track the supported major. They are
+// separate fields because the transparent one is floored against the user's
 // recorded default, not because they may name different releases.
 table = rewriteDefault(table, "yarn", "default", yarn);
 table = rewriteDefault(table, "yarn", "transparent.default", yarn);
@@ -290,23 +291,21 @@ table = rewriteDefault(table, "nub", "default", nub);
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 
 /**
- * §15.42 — `node`'s `lts` is the one table value this script cannot compute.
+ * §02.3 — `node`'s `lts` is the one table value this script cannot compute.
  *
  * npm's `node` dist-tags stop at `v20-lts` (20.11.1) while the same package
  * publishes 22.x and 24.x, so no query over them yields the line actually in
- * maintenance, and §15.21 rules out reaching for `nodejs.org/dist/index.json` to
+ * maintenance, and §02.2 rules out reaching for `nodejs.org/dist/index.json` to
  * get it. So it is flagged, never rewritten: a human checks it against Node's
- * release schedule, exactly as §16.9 says a human checks a `ranges` change.
+ * release schedule, exactly as §16 says a human checks a `ranges` change.
  */
 function reviewNodeLts(source) {
   const current = /tags:\s*\{\s*lts:\s*"([^"]+)"/.exec(source)?.[1];
   if (current === undefined) {
-    console.warn("! node has no `tags.lts`; §15.42 requires one.");
+    console.warn("! node has no `tags.lts`; §02.3 requires one.");
     return;
   }
-  console.log(
-    `review: node tags.lts is ${current} — confirm against Node's LTS schedule (§15.42).`,
-  );
+  console.log(`review: node tags.lts is ${current} — confirm against Node's LTS schedule (§02.3).`);
 }
 
 reviewNodeLts(table);
@@ -326,5 +325,5 @@ if (check) {
 writeFileSync(TABLE, table);
 writeFileSync(KEYS, keys);
 console.log(
-  "\nRewritten. A bin-path change still needs a new `ranges` entry and human review (§16.9).",
+  "\nRewritten. A bin-path change still needs a new `ranges` entry and human review (§16, Built-in table and trust keys).",
 );

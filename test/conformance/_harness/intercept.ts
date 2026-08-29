@@ -6,7 +6,7 @@
  *
  * This is the spawned-process equivalent of the `fetch` spy the unit tests
  * install, and it is what lets the conformance rows exercise the **default**
- * registry paths — including §14.9's host check, which compares `dist.tarball`
+ * registry paths — including §05.2's host check, which compares `dist.tarball`
  * against `https://registry.npmjs.org` — without touching the network or
  * `src/`.
  */

@@ -9,7 +9,7 @@
  * what makes `--version` meaningful; see {@link publishedSources}.
  *
  * Its `bin/` entries are published **without** the execute bit on purpose. npm
- * has been observed to deliver them that way (§15.45), a symlink to a stub the
+ * has been observed to deliver them that way (§07.4), a symlink to a stub the
  * kernel will not execute is passed over in silence by a `PATH` lookup, and the
  * rows that run the installed shim below would be the ones to catch it.
  */
@@ -85,7 +85,7 @@ function publishedTool(version: string, entry: string): Uint8Array {
       content: `export * from ${JSON.stringify(sources)};\n`,
       mode: 0o644,
     },
-    // §15.45 — published unreadable to the kernel as programs; the command has
+    // §07.4 — published unreadable to the kernel as programs; the command has
     // to grant the bit itself.
     { path: `package/bin/${CLI_ENTRY_NAME}`, content: cliEntrySource(), mode: 0o644 },
     {
@@ -96,7 +96,7 @@ function publishedTool(version: string, entry: string): Uint8Array {
   ]);
 }
 
-/** A fixture whose shim directory is inside it and on `PATH` (§15.13, redirected). */
+/** A fixture whose shim directory is inside it and on `PATH` (§10.5, redirected). */
 function upgradeFixture(mock: MockRegistry = registry) {
   const fixture = createFixture();
   const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
@@ -204,15 +204,15 @@ describe("§09.13 self-upgrade", () => {
   });
 
   it.skipIf(IS_WINDOWS)(
-    "§15.45 — grants the execute bit the archive did not carry, so the shims run",
+    "§07.4 — grants the execute bit the archive did not carry, so the shims run",
     async () => {
       const { shimDir, selfDir, options } = upgradeFixture();
 
       await run(["self-upgrade"], options);
 
-      // §10.8 points both of our names at the CLI entry, so it is the one file
+      // §10.9 points both of our names at the CLI entry, so it is the one file
       // the command has to make executable; the per-name stubs beside it are a
-      // later `enable`'s business (§15.45).
+      // later `enable`'s business (§07.4).
       expect(statSync(join(selfDir, "bin", CLI_ENTRY_NAME)).mode & 0o111).not.toBe(0);
 
       // Both names, through the shims the command just wrote, answering out of
@@ -227,18 +227,18 @@ describe("§09.13 self-upgrade", () => {
     },
   );
 
-  it("§10.8 — links the downloaded CLI entry rather than rewriting it", async () => {
+  it("§10.9 — links the downloaded CLI entry rather than rewriting it", async () => {
     const { selfDir, options } = upgradeFixture();
 
     await run(["self-upgrade"], options);
 
-    // Byte for byte what the tarball carried. This is the file §10.8 points both
+    // Byte for byte what the tarball carried. This is the file §10.9 points both
     // of our names at, and an upgrade that regenerated it from the *running*
     // version's source would put an old entry in front of a new bundle.
     expect(readFileSync(join(selfDir, "bin", CLI_ENTRY_NAME), "utf8")).toBe(cliEntrySource());
 
     // The per-name stubs travel untouched too: nothing links them until a later
-    // `enable`, which is where §10.2 writes or repairs one.
+    // `enable`, which is where §10.3 writes or repairs one.
     expect(readFileSync(join(selfDir, "bin", stubNameFor("pnpm")), "utf8")).toBe(
       shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"),
     );

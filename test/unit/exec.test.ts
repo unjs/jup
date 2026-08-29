@@ -272,7 +272,7 @@ describe("execPackageManager — §08.7 environment", () => {
   });
 });
 
-describe("resolveBinPath — §14.13 confinement", () => {
+describe("resolveBinPath — §08.1 confinement", () => {
   it("test 141 — a bin value escaping the install directory is refused", () => {
     const spec = {
       location: join(root, "evil", "yarn", "1.0.0"),
@@ -317,9 +317,9 @@ describe("resolveBinPath — §14.13 confinement", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.43 — the forwarded host runtime
+ * §10.2 — the forwarded host runtime
  *
- * `node` is a table entry (§15.39), so a native handover can be *the
+ * `node` is a table entry (§02.3), so a native handover can be *the
  * runtime itself*: our `node` shim resolves the project's version and
  * spawns it, and everything below that point — a nested `jup enable`
  * most of all — has a `process.execPath` inside the store. `enable`
@@ -330,7 +330,7 @@ describe("resolveBinPath — §14.13 confinement", () => {
  * file rather than to a pipe.
  * ------------------------------------------------------------------ */
 
-describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME", () => {
+describe.skipIf(process.platform === "win32")("§10.2 — COREPACK_HOST_RUNTIME", () => {
   /** Both spellings (§11.6), one per line, into the file named as `$1`. */
   function probe(): string {
     const file = join(root, "probe.sh");
@@ -359,7 +359,7 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
   it("writes into the child's environment and never into our own", async () => {
     // `env` defaults to `process.env`, so a forward that wrote *into* the object
     // it was handed would set `COREPACK_HOST_RUNTIME` on this process for the
-    // rest of its life — §14.5 refuses that same value from an env file, and a
+    // rest of its life — §03.2 refuses that same value from an env file, and a
     // mutating default is the only other way into it. Called the way the
     // signature permits, with no environment of the caller's own.
     const out = join(root, "host-runtime-default-env");
@@ -376,7 +376,7 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
   it("passes an inherited value through when our own runtime is in the store", async () => {
     // The position a store runtime is in, without a 126 MB copy of one: a
     // `<home>` whose `v1` *is* the installation holding the runtime this test
-    // runs under. §15.43's boundary test resolves the install folder through
+    // runs under. §10.2's boundary test resolves the install folder through
     // `realpath`, so the link makes `process.execPath` answer exactly as
     // `<home>/v1/node/22.14.0/bin/node` would.
     //
@@ -405,7 +405,7 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
 });
 
 /* ------------------------------------------------------------------ *
- * §15.32 — the resolved package manager on `PATH`
+ * §08.3 — the resolved package manager on `PATH`
  *
  * #412: a script that shells out to `pnpm` under `corepack pnpm exec`
  * gets a *different* pnpm, or none. Every case below therefore plants a
@@ -414,7 +414,7 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
  * the entry the tool added.
  * ------------------------------------------------------------------ */
 
-describe("§15.32 — PATH", () => {
+describe("§08.3 — PATH", () => {
   describe("pathWith", () => {
     it("prepends, with the platform's separator", () => {
       expect(pathWith("/a", "/b")).toBe(`/a${delimiter}/b`);
@@ -431,7 +431,7 @@ describe("§15.32 — PATH", () => {
       expect(pathWith("/a", "/a")).toBeUndefined();
       // A *prefix* of an entry is not that entry.
       expect(pathWith("/a", `/ab${delimiter}/b`)).toBe(`/a${delimiter}/ab${delimiter}/b`);
-      // Present but not first: §15.32 says prepend, so it moves to the front.
+      // Present but not first: §08.3 says prepend, so it moves to the front.
       expect(pathWith("/a", `/b${delimiter}/a`)).toBe(`/a${delimiter}/b${delimiter}/a`);
     });
 
@@ -445,7 +445,7 @@ describe("§15.32 — PATH", () => {
    * A shim directory holding a stub named `binName`, plus a decoy directory.
    *
    * The stubs carry {@link SHIM_MARKER}, because that banner — not the name — is
-   * what §15.32's promotion recognises: the decoy's `yarn` is a file of exactly
+   * what §08.3's promotion recognises: the decoy's `yarn` is a file of exactly
    * the right name written by somebody else, and must not move its directory.
    */
   function pathFixture(name: string, binNames: string[]): { shims: string; decoy: string } {
@@ -464,7 +464,7 @@ describe("§15.32 — PATH", () => {
 
   /**
    * The environment is built from nothing rather than from `process.env`: the
-   * developer's own `~/.local/bin` is §15.13's default shim directory, so a run
+   * developer's own `~/.local/bin` is §10.5's default shim directory, so a run
    * that inherited `HOME` could pass on *their* shims.
    */
   function runWithEnv(
@@ -502,9 +502,9 @@ describe("§15.32 — PATH", () => {
   });
 
   /**
-   * §16.3 — the zero-syscall branch, and the guard that keeps it honest.
+   * §16 — the zero-syscall branch, and the guard that keeps it honest.
    *
-   * A copy of the driver *at* `<dir>/yarn` is §14.15's shape as Node sees it:
+   * A copy of the driver *at* `<dir>/yarn` is §10.1's shape as Node sees it:
    * `argv[1]` is the shim's own path, not the stub's, because Node does not
    * `realpath` it. The pair below asserts both halves of the test that reads —
    * the name has to match, **and** the directory has to be one we would have
@@ -519,7 +519,7 @@ describe("§15.32 — PATH", () => {
     return entry;
   }
 
-  it("needs no read when the run came through the shim itself (§16.3)", () => {
+  it("needs no read when the run came through the shim itself (§16)", () => {
     const location = fixture("path-self", { "bin/yarn.js": REPORT });
     const { shims, decoy } = pathFixture("path-self", []);
     // No marker stub is written into `shims` at all: the file that runs *is* the
@@ -609,9 +609,9 @@ describe("§15.32 — PATH", () => {
     expect(result.stdout.trim()).toBe(`${shims}${delimiter}${decoy}`);
   });
 
-  // §15.13's per-user default is platform-specific; XDG is the Linux/BSD half.
+  // §10.5's per-user default is platform-specific; XDG is the Linux/BSD half.
   it.skipIf(process.platform === "darwin" || process.platform === "win32")(
-    "falls back to §15.13's per-user default when nothing is configured",
+    "falls back to §10.5's per-user default when nothing is configured",
     () => {
       const location = fixture("path-peruser", { "bin/yarn.js": REPORT });
       const { shims, decoy } = pathFixture("path-peruser", ["yarn"]);
@@ -631,7 +631,7 @@ describe("§15.32 — PATH", () => {
     },
   );
 
-  /* The native branch (§15.28) spawns, so it is the one place where "must not
+  /* The native branch (§08.3) spawns, so it is the one place where "must not
    * leak into the tool's own process" has a literal meaning to check. */
   describe.skipIf(process.platform === "win32")("the native branch", () => {
     /** Reports the child's PATH, then the tool's own once the child is gone. */
@@ -681,7 +681,7 @@ describe("§15.32 — PATH", () => {
     });
 
     /**
-     * §15.28 — the invoked **name** reaches the child as `argv[0]`.
+     * §08.3 — the invoked **name** reaches the child as `argv[0]`.
      *
      * This is what lets one artifact answer to two names, which is how bun
      * ships: `bun` and `bunx` are the same file, and the second behaves like
@@ -696,7 +696,7 @@ describe("§15.32 — PATH", () => {
      * `#!/bin/sh` artifact never sees it — the kernel execs the interpreter,
      * and `$0` is then the script's path.
      */
-    it("hands the child the invoked name as argv[0] (§15.28)", () => {
+    it("hands the child the invoked name as argv[0] (§08.3)", () => {
       const location = fixture("argv0-native", {});
       mkdirSync(join(location, "bin"), { recursive: true });
       symlinkSync(process.execPath, join(location, "bin", "bunny"));

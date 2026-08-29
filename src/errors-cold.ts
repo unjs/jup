@@ -11,7 +11,7 @@ import { lt } from "./version/semver.ts";
 
 export * from "./errors.ts";
 
-/** §15.23's memo, as the advisories naming it have to spell it. */
+/** §04.4's memo, as the advisories naming it have to spell it. */
 const MEMO_FILE = join(CACHE_DIRECTORY, LOCKFILE_NAME);
 
 /**
@@ -55,7 +55,7 @@ const url_ = redactUserinfo;
 /**
  * A network failure whose message is already the best thing to say.
  *
- * §15.4's three TLS sentences replace §12.6's transport-failure message rather
+ * §05.1's three TLS sentences replace §12.6's transport-failure message rather
  * than hiding underneath it — "MUST NOT surface a bare transport error" — and a
  * failure classified deep in the transport (an `https://` proxy's own
  * certificate, say) must not be re-classified against the wrong host on the way
@@ -68,7 +68,7 @@ export class NetworkError extends Error {
 /**
  * One line per link of an error's `cause` chain, redacted.
  *
- * §15.5 — "the final error MUST include the underlying cause, the errno or TLS
+ * §05.1 — "the final error MUST include the underlying cause, the errno or TLS
  * reason, not just the wrapper message". §12.6's wrapper is a fixed string that
  * real scripts match on, so the cause is carried alongside it rather than
  * spliced into it.
@@ -147,7 +147,7 @@ export const messages = {
     `${name}@${version} matches no declared range band; reading "bin" from the verified package. Add a range band for it.`,
 
   /**
-   * §15.17 point 3 — the band still covers this version, but its entry points
+   * §07.7 — the band still covers this version, but its entry points
    * are not the ones the package ships. The package won, so the run succeeds;
    * this note is the only thing that will ever say the band has rotted.
    */
@@ -212,13 +212,13 @@ export const messages = {
   /**
    * Both env var names here are load-bearing: the conformance suite asserts they
    * are exactly `JUP_INTEGRITY_KEYS` and `JUP_DEFAULT_TO_LATEST` — the canonical
-   * spelling of §11's pair (§14.22) — and asserts the never-existing
+   * spelling of §11's pair — and asserts the never-existing
    * `INTEGRITY_CHECK` / `USE_LATEST` names do **not** appear.
    */
   cannotDownloadLatest: (packageName: string) =>
     `jup cannot download the latest stable version of ${packageName}; you can disable signature verification by setting JUP_INTEGRITY_KEYS to 0 in your env, or instruct jup to use the latest stable release known by this version of jup by setting JUP_DEFAULT_TO_LATEST to 0`,
   /**
-   * The three sentences §15.4 requires in place of a bare transport error, each
+   * The three sentences §05.1 requires in place of a bare transport error, each
    * verbatim (the spec wraps them across lines; they are one logical string).
    *
    * `<host>` is the authority whose certificate was rejected — the target's, or
@@ -241,7 +241,7 @@ export const messages = {
    * `<source>` names where the bundle came from, exactly as
    * {@link strictSslDisabled} does: the variable under the spelling the user
    * actually set, or `cafile (/home/u/.npmrc)` when a file supplied it. Saying
-   * `JUP_CAFILE` unconditionally is a lie in the `.npmrc` case, and §15.4's
+   * `JUP_CAFILE` unconditionally is a lie in the `.npmrc` case, and §05.1's
    * whole point is that a TLS failure names what to go and fix.
    */
   cafileUnreadable: (path: string, source: string = jupSpelling(ENV.CAFILE)) =>
@@ -251,10 +251,10 @@ export const messages = {
     `The TLS certificate bundle at ${path} contains no PEM certificate`,
 
   /**
-   * §15.4 — the configuration was applied and did not stick. Naming the source
+   * §05.1 — the configuration was applied and did not stick. Naming the source
    * is the whole point: without it the run fails later with a bare
    * `UNABLE_TO_GET_ISSUER_CERT`, which is the unexplained certificate error
-   * §15.4 exists to abolish — reached by someone who already fixed it.
+   * §05.1 exists to abolish — reached by someone who already fixed it.
    */
   cafileNotApplied: (source: string) =>
     `The TLS certificates from ${source} were installed, but this runtime's trust store does not reflect them; requests would fail with an unexplained certificate error`,
@@ -264,7 +264,7 @@ export const messages = {
   /**
    * Attached as the cause of §12.6's transport-failure message, never in place
    * of it: §05.1 requires a timeout to "surface as the transport-failure
-   * message", and §15.5 requires the underlying reason to survive alongside it.
+   * message", and §05.1 requires the underlying reason to survive alongside it.
    */
   networkTimeout: (milliseconds: number, url: string) =>
     `Timed out after ${milliseconds}ms waiting for ${url_(url)} (set JUP_NETWORK_TIMEOUT to allow longer)`,
@@ -315,23 +315,23 @@ export const messages = {
   /** Trailing space, no newline. */
   downloadPrompt: () => `? Do you want to continue? [Y/n] `,
 
-  /** §15.35l — `cache clean` must distinguish a successful clean from a no-op. */
+  /** §07.9 — `cache clean` must distinguish a successful clean from a no-op. */
   removedFromCache: (count: number, path: string) =>
     `Removed ${count} cached version(s) from ${path}`,
 
-  /** §15.18 — the `--all` form, which also retires the recorded defaults. */
+  /** §07.9 — the `--all` form, which also retires the recorded defaults. */
   removedFromCacheAll: (versions: number, defaults: number, path: string) =>
     `Removed ${versions} cached version(s) and ${defaults} recorded default(s) from ${path}`,
 
   nothingToRemove: () => `Nothing to remove`,
 
   /**
-   * §15.44 — one line saying why the count is lower than the user expected.
+   * §07.9 — one line saying why the count is lower than the user expected.
    *
    * It has to carry three things or it is not worth printing: *what* survived,
    * *why* (the shims run through it, and `bad interpreter` is what removing it
    * would produce), and the way out — a re-`enable` under a runtime that will
-   * outlive the cache, which §15.43 then pins outside `<home>` for good.
+   * outlive the cache, which §10.2 then pins outside `<home>` for good.
    */
   interpreterKept: (name: string, version: string, interpreter: string, home: string) =>
     `! Kept ${name}@${version}: jup's shims name ${interpreter} as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside ${home} to repin them, then clean again.`,
@@ -349,7 +349,7 @@ export const messages = {
     `! Could not remove ${path}; it is still in the cache. Remove it by hand, or re-run with permission to delete it.`,
 
   /**
-   * §15.23 — the memo stood in because the registry could not be reached.
+   * §04.4 — the memo stood in because the registry could not be reached.
    *
    * A fallback that printed nothing was indistinguishable from a normal run, and
    * stayed so: the memo's stamp is deliberately not extended, so it recurs on
@@ -367,7 +367,7 @@ export const messages = {
     `! The registry lists no release matching ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until a matching release is published.`,
 
   /**
-   * §15.44 — the `--all` counterpart. Present tense, because it is printed
+   * §07.9 — the `--all` counterpart. Present tense, because it is printed
    * *before* the removal: afterwards there is no working `jup` left to print it.
    */
   interpreterRemoved: (name: string, version: string, interpreter: string, home: string) =>
@@ -379,7 +379,7 @@ export const messages = {
   expiredKey: (keyid: string, expires: string) =>
     `The package was signed with an expired key (${keyid}, expired ${expires})`,
 
-  /** §06.5/§14.4 — report acceptance of a verified signature whose key expired. */
+  /** §06.5 — report acceptance of a verified signature whose key expired. */
   expiredKeyAccepted: (name: string, version: string, keyid: string, expires: string) =>
     `! jup integrity warning: ${name}@${version} carries a valid signature from ${keyid}, a key that expired ${expires}; accepting it`,
 
@@ -406,13 +406,13 @@ export const messages = {
   /**
    * Tier 2's refusal half: the registry signed nothing *and* published no digest
    * of any kind, so there is nothing for the downloaded bytes to be checked
-   * against. §15.7 says refuse rather than install unverified bytes.
+   * against. §06.1 says refuse rather than install unverified bytes.
    */
   noRegistryDigest: (packageName: string, version: string, registry: string) =>
     `${packageName}@${version} metadata from ${url_(registry)} has neither "dist.integrity" nor "dist.shasum"`,
 
   /**
-   * Tier 2's soft-fail half, verbatim from §15.7.
+   * Tier 2's soft-fail half, verbatim from §06.1.
    *
    * Emitted once per package/version. The bytes remain checked against the
    * registry's digest, but no signature covers that digest.
@@ -420,7 +420,7 @@ export const messages = {
   unsignedRegistry: (registry: string, packageName: string, version: string) =>
     `! ${url_(registry)} does not publish signatures for ${packageName}@${version}; falling back to integrity-only verification`,
   /**
-   * §15.28 — a native `bin` target that could not be executed at all.
+   * A native `bin` target that could not be executed at all.
    *
    * Distinct from a package manager that ran and failed: this is `spawn`
    * refusing, which on POSIX is almost always `EACCES` (the executable bit did
@@ -429,7 +429,7 @@ export const messages = {
    */
   cannotExecute: (binPath: string, reason: string) => `Unable to execute ${binPath}: ${reason}`,
   /**
-   * §15.11's refusal, byte-exact.
+   * §06.1's refusal, byte-exact.
    *
    * `<source>` is the origin the artifact would have come from, because that is
    * the thing that failed to vouch for it: `repo.yarnpkg.com` publishes no
@@ -440,7 +440,7 @@ export const messages = {
     `Refusing to install ${name}@${version}: ${source} provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.`,
 
   /**
-   * The opt-out's warning half. §15.11 requires the escape hatch to be loud:
+   * The opt-out's warning half. §06.1 requires the escape hatch to be loud:
    * a per-run downgrade that printed nothing would be indistinguishable from
    * the verified path it replaces.
    */
@@ -451,7 +451,7 @@ export const messages = {
 /**
  * The inverse of {@link messages.badStatus} — `{status, url}`, or `null`.
  *
- * §15.35j needs to recognise "the artifact was not there" and re-report it as
+ * §04.1 needs to recognise "the artifact was not there" and re-report it as
  * "that version does not exist", and the only carrier the transport gives us is
  * the rendered sentence: `http.ts` throws a plain `Error` and the proxy path
  * must not import it to find out otherwise. Reading it back here keeps the
@@ -472,11 +472,11 @@ export function parseBadStatus(error: unknown): { status: number; url: string } 
   return { status: Number(match[1]), url: match[2]! };
 }
 
-/** §12.6's two network-disabled sentences share this prefix; §15.19 keys off it. */
+/** §12.6's two network-disabled sentences share this prefix. */
 const NETWORK_DISABLED_PREFIX = "Network access disabled by the environment;";
 
 /**
- * §15.19, §15.35j — re-report a fetch failure as a sentence about what was asked
+ * §12.6, §04.1 — re-report a fetch failure as a sentence about what was asked
  * for, or `null` to leave the original error alone.
  *
  * Network-disabled failures name the cache-seeding action; exact-version

@@ -76,7 +76,7 @@ export interface RunOptions {
    */
   detachedGroup?: boolean;
   /**
-   * Leave §15.13 point 8's `/usr/local/bin` on the child's `PATH`.
+   * Leave §10.5 point 8's `/usr/local/bin` on the child's `PATH`.
    *
    * Only the rows that mean to exercise point 8 set this — see `childPath` for
    * why every other row has it removed.
@@ -85,13 +85,13 @@ export interface RunOptions {
   timeout?: number;
 }
 
-/** §15.13 point 8's directory, spelled out rather than imported. */
+/** §10.5 point 8's directory, spelled out rather than imported. */
 const SYSTEM_SHIM_DIR = "/usr/local/bin";
 
 let runtimeDirectory: string | undefined;
 
 /**
- * The child's `PATH`, with §15.13 point 8's directory removed — exported so that
+ * The child's `PATH`, with §10.5 point 8's directory removed — exported so that
  * a row asserting on the `PATH` its child saw compares against what `run` sent.
  *
  * Point 8 makes `/usr/local/bin` a live candidate for `enable` **when the suite
@@ -102,7 +102,7 @@ let runtimeDirectory: string | undefined;
  * reports something else entirely. Removing the entry keeps every row that
  * predates point 8 running exactly as written, as any other user.
  *
- * `node` has to survive the removal: §14.15's stub is entered through
+ * `node` has to survive the removal: §10.1's stub is entered through
  * `#!/usr/bin/env node`, and in exactly the environment this matters for the
  * directory being removed is where `node` lives. When that is the case the
  * runtime is offered under a directory of the suite's own containing one
@@ -144,10 +144,10 @@ export function cleanEnv(): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     if (key.startsWith("COREPACK_") || key === "DEBUG" || key === "FORCE_COLOR") continue;
-    // `CI` gates the interactive half of the download prompt (§05.5), and
+    // `CI` gates the interactive half of the download prompt (§05.4), and
     // `NODE_OPTIONS` could smuggle a loader into the child.
     if (key === "CI" || key === "NODE_OPTIONS" || key === "JUP_MOCK_ORIGIN") continue;
-    // §14.8 makes the proxy variables live with no second opt-in, so a developer
+    // §05.1 makes the proxy variables live with no second opt-in, so a developer
     // who has one configured would otherwise route every fixture request through
     // it. The rows that want a proxy set these themselves.
     if (PROXY_VARIABLES.has(key)) continue;
@@ -182,14 +182,14 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
   const env = cleanEnv();
   setVar(env, "COREPACK_HOME", options.home);
   setVar(env, "COREPACK_DEFAULT_TO_LATEST", "0");
-  // §15.1 makes `$HOME/.npmrc` a real input, so the developer's own — with the
+  // §05.3 makes `$HOME/.npmrc` a real input, so the developer's own — with the
   // registry and token their day job needs — would otherwise leak into every
   // row. Point `HOME` at the fresh, empty store directory instead. Rows that
   // care about the home directory (the shim ones) set it themselves in
   // `options.env`, which is applied below and wins.
   setVar(env, "HOME", options.home);
   setVar(env, "USERPROFILE", options.home);
-  // Same reasoning for §15.1's global tier, `<prefix>/etc/npmrc`: `PREFIX` is
+  // Same reasoning for §05.3's global tier, `<prefix>/etc/npmrc`: `PREFIX` is
   // npm's own override for it, and pointing it at the fixture keeps a machine
   // with a system-wide npm configuration from changing what the rows observe.
   setVar(env, "PREFIX", options.home);

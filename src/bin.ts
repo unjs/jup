@@ -7,10 +7,10 @@
  * imports the bundle rather than these sources. This file is what `node
  * src/bin.ts` runs: the test harness, `pnpm dev`, and nothing a user's `PATH`
  * ever reaches. Two entries, so the four lines below are duplicated there and
- * the two must not drift; §15.20's rows cover the one that can be observed from
+ * the two must not drift; §05.4's rows cover the one that can be observed from
  * outside, which is the download-prompt default.
  *
- * §05.5/§10.1 — the download-prompt default is set by the *entry point*, not by
+ * §05.4/§10.1 — the download-prompt default is set by the *entry point*, not by
  * the core: `0` here because the user explicitly asked for us, `1` in a
  * package-manager shim because they did not ask to download anything. Both are
  * `??=` so a real environment variable still wins.

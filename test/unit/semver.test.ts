@@ -355,7 +355,7 @@ describe("satisfiesWithPrereleases (lenient — strips prereleases from both sid
   });
 });
 
-describe("rangeNamesPrerelease / isPrerelease (§15.24)", () => {
+describe("rangeNamesPrerelease / isPrerelease (§04.1)", () => {
   it("answers true only when a comparator carries a prerelease tag", () => {
     expect(rangeNamesPrerelease(">=4.0.0-rc.1")).toBe(true);
     expect(rangeNamesPrerelease("^11.0.0-0")).toBe(true);
@@ -382,7 +382,7 @@ describe("rangeNamesPrerelease / isPrerelease (§15.24)", () => {
 
   it("is not fooled by the `matches nothing` comparator", () => {
     // `>*` and `<*` expand to `<0.0.0-0`, which is structurally a comparator
-    // naming a prerelease. Reading it as one would re-open the gate §15.24 shuts.
+    // naming a prerelease. Reading it as one would re-open the gate §04.1 shuts.
     expect(rangeNamesPrerelease(">*")).toBe(false);
     expect(rangeNamesPrerelease("<*")).toBe(false);
   });

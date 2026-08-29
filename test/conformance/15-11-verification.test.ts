@@ -1,21 +1,21 @@
 /**
- * §15.38 rows 167–168 — one verification tier for every source (§15.11).
+ * rows 167–168 — one verification tier for every source (§06.1).
  *
  * Corepack's trust model is two-tiered and §06.6 records the holes: npm-hosted
  * packages get a signature chain, Yarn Berry from `repo.yarnpkg.com` gets TLS
  * and nothing else, and Yarn Berry through a custom npm registry gets nothing at
- * all (§14.10). Open PR #548 would have closed the first; it has sat unmerged
+ * all (§06.2). Open PR #548 would have closed the first; it has sat unmerged
  * since, and #495 is a Node.js TSC member arguing in twenty-two comments that
  * the asymmetry is a supply-chain risk.
  *
  * **Row 167 is gone.** It asserted the refusal itself — Berry from
  * `repo.yarnpkg.com`, unsigned and unpinned, turned away byte for byte — and
- * §15.41 removed the source it was written against. Every entry in the table is
+ * §02.5 removed the source it was written against. Every entry in the table is
  * an npm package with a signature now, so no fixture built from the table can
  * reach the unverified path, and the row could only have been kept by inventing
  * a band that does not exist.
  *
- * What that costs is worth stating plainly: §15.11's central rule — TLS alone is
+ * What that costs is worth stating plainly: §06.1's central rule — TLS alone is
  * not a verification tier — no longer has a row of its own. The guard that
  * replaces it is upstream, in `test/unit/config.test.ts`, which sweeps the table
  * and fails if any band names an origin other than the npm registry. A future
@@ -23,7 +23,7 @@
  *
  * Row 168 stays: it is the other half, and the half that still has an artifact —
  * `@yarnpkg/cli-dist` checked against the digest the registry signed, rather
- * than skipped because a single file was extracted (§14.10).
+ * than skipped because a single file was extracted (§06.2).
  */
 
 import { existsSync } from "node:fs";
@@ -45,7 +45,7 @@ const registry = new MockRegistry();
 /** The entry point the fake Berry runs, shared by the tarball and its digest. */
 const BERRY = pmScript("yarn", "4.0.0");
 
-/** Berry as npm publishes it, which since §15.41 is the only way the table asks. */
+/** Berry as npm publishes it, which since §02.5 is the only way the table asks. */
 const CLI_DIST = packageManagerTarball("yarn", "4.0.0", {
   packageName: "@yarnpkg/cli-dist",
   binPaths: ["bin/yarn.js"],
@@ -62,7 +62,7 @@ beforeAll(async () => {
   await registry.start();
   registry.publish("@yarnpkg/cli-dist", "4.0.0", CLI_DIST, { distTags: { latest: "4.0.0" } });
   // §04.1 step 6 unions both of yarn's bands, so the Classic packument has to
-  // answer as well or a range fails before §15.11 has anything to say.
+  // answer as well or a range fails before §06.1 has anything to say.
   registry.publish("yarn", "1.22.4", packageManagerTarball("yarn", "1.22.4"), {
     distTags: { latest: "1.22.4" },
   });
@@ -75,7 +75,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.11 — every artifact clears a verification tier", () => {
+describe("§06.1 — every artifact clears a verification tier", () => {
   it("168: Berry via a custom npm registry is checked against the signed integrity", async () => {
     const fixture = createFixture({ packageManager: "yarn@4.0.0" });
 
@@ -101,7 +101,7 @@ describe("§15.11 — every artifact clears a verification tier", () => {
   });
 
   it("168: a validly signed integrity describing other bytes fails the digest check", async () => {
-    // §14.10's actual content: corepack's guard is `!registry.bin`, so this
+    // §06.2's actual content: corepack's guard is `!registry.bin`, so this
     // whole comparison was skipped whenever a single file was extracted, and a
     // compromised mirror could serve anything. `invalid_integrity` signs
     // metadata correctly but describes bytes other than the ones served, which
@@ -124,11 +124,11 @@ describe("§15.11 — every artifact clears a verification tier", () => {
   });
 
   it("a pinned hash the cache does not prove is not adopted from another pin", async () => {
-    // Recorded against §15.11 in `.agents/S15-AUDIT.md`, traced on the built binary:
+    // Recorded against §06.1 in `.agents/S15-AUDIT.md`, traced on the built binary:
     // §07.2 makes the store directory the plain version, so two references that
     // differ only in their digest share one directory and the second silently
     // runs whatever the first installed. A pin that is never checked is not a
-    // verification tier (§15.11).
+    // verification tier (§06.1).
     const first = createFixture({ packageManager: `yarn@4.0.0+sha512.${BERRY_HASH}` });
 
     const warm = await run(["yarn", "--version"], { ...first, registry });

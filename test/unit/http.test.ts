@@ -97,7 +97,7 @@ async function deadOrigin(): Promise<string> {
 }
 
 const ENV_KEYS = [
-  // §14.8 — the proxy variables are live with no second opt-in, so a developer
+  // §05.1 — the proxy variables are live with no second opt-in, so a developer
   // who has one configured must not have it applied to these fixtures.
   "HTTP_PROXY",
   "http_proxy",
@@ -112,7 +112,7 @@ const ENV_KEYS = [
   "COREPACK_NPM_PASSWORD",
   "COREPACK_ENABLE_NETWORK",
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
-  // §15.4 / §15.5 — a developer's own TLS or retry settings must not reach the
+  // §05.1 — a developer's own TLS or retry settings must not reach the
   // fixtures, and the retry default must not turn every failure assertion below
   // into three round trips plus backoff.
   "COREPACK_CAFILE",
@@ -124,7 +124,7 @@ const ENV_KEYS = [
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
-  // §15.1 — the credential rule now has a filesystem tier, memoised per cwd.
+  // §05.3 — the credential rule now has a filesystem tier, memoised per cwd.
   resetNpmrcCache();
   saved = {};
   for (const key of ENV_KEYS) {
@@ -132,7 +132,7 @@ beforeEach(() => {
     delete process.env[key];
   }
   // The retry-specific block below opts back in; everything else in this file
-  // predates §15.5 and asserts the shape of a *single* attempt.
+  // predates §05.1 and asserts the shape of a *single* attempt.
   process.env.COREPACK_NETWORK_RETRIES = "0";
 });
 
@@ -151,10 +151,10 @@ afterEach(async () => {
 const base64 = (value: string) => Buffer.from(value).toString("base64");
 
 /* ------------------------------------------------------------------ *
- * §14.6 — the one credential rule
+ * §05.1 — the one credential rule
  * ------------------------------------------------------------------ */
 
-describe("credentials (§14.6)", () => {
+describe("credentials (§05.1)", () => {
   it("sends Bearer for COREPACK_NPM_TOKEN (test 65)", async () => {
     const server = await ok();
     process.env.COREPACK_NPM_TOKEN = "foo";
@@ -517,10 +517,10 @@ describe("request shape", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §14.9 — artifact URL validation (test 83)
+ * §05.2 — artifact URL validation (test 83)
  * ------------------------------------------------------------------ */
 
-describe("assertSafeArtifactUrl (§14.9)", () => {
+describe("assertSafeArtifactUrl (§05.2)", () => {
   const registry = "https://registry.npmjs.org";
 
   it("accepts an https URL on the registry's host", () => {
@@ -618,7 +618,7 @@ describe("assertSafeArtifactUrl (§14.9)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.5 — timeouts and retries
+ * §05.1 — timeouts and retries
  *
  * Corepack has no timeout, no retry and no backoff: one hiccup is
  * fatal, which is the exact shape of the undiagnosable CI failure in
@@ -658,7 +658,7 @@ function flaky(
   });
 }
 
-describe("retries (§15.5, row 154)", () => {
+describe("retries (§05.1, row 154)", () => {
   it("retries a 503 and succeeds — three attempts by default", async () => {
     // The variable left unset: this is the *default* the spec states.
     delete process.env.COREPACK_NETWORK_RETRIES;
@@ -748,7 +748,7 @@ describe("retries (§15.5, row 154)", () => {
 
     expect((error as Error).message).toBe(messages.requestFailed(`${origin}/pkg`));
     expect(delays).toHaveLength(2);
-    // §15.5 — the underlying reason survives, and says how many tries it took.
+    // §05.1 — the underlying reason survives, and says how many tries it took.
     expect((error as Error).stack).toContain("Caused by: Giving up after 3 attempts");
     expect((error as Error).stack).toMatch(/ECONNREFUSED/);
   });
@@ -829,7 +829,7 @@ describe("retryAfterMs", () => {
   });
 });
 
-describe("timeouts (§15.5, row 155)", () => {
+describe("timeouts (§05.1, row 155)", () => {
   it("names the timeout, the URL and the variable in the cause", async () => {
     const server = await startServer(() => {
       // Never answers.
@@ -874,7 +874,7 @@ describe("timeouts (§15.5, row 155)", () => {
 
   it("applies the timeout to the *body* too, not only the headers", async () => {
     // Headers and a first chunk arrive at once; the rest never does. Corepack's
-    // model — and ours before §15.5 — would hang here until CI killed the job.
+    // model — and ours before §05.1 — would hang here until CI killed the job.
     const server = await startServer((_request, response) => {
       response.writeHead(200, { "content-type": "application/octet-stream" });
       response.write("first");
@@ -957,7 +957,7 @@ describe("credentials never reach the cause chain", () => {
  * `networkError` — the mechanism the two blocks above rely on
  * ------------------------------------------------------------------ */
 
-describe("networkError (§15.5)", () => {
+describe("networkError (§05.1)", () => {
   it("leaves the §12.6 message alone and appends the chain to the stack", () => {
     const inner = Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:1"), {
       code: "ECONNREFUSED",
@@ -1015,10 +1015,10 @@ describe("networkError (§15.5)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.1 — the `.npmrc` credential tier
+ * §05.3 — the `.npmrc` credential tier
  * ------------------------------------------------------------------ */
 
-describe("credentialsFor — the .npmrc tier (§15.1)", () => {
+describe("credentialsFor — the .npmrc tier (§05.3)", () => {
   const roots: string[] = [];
   let home: string;
   let project: string;
@@ -1035,7 +1035,7 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
     mkdirSync(home, { recursive: true });
     mkdirSync(project, { recursive: true });
     writeFileSync(join(project, "package.json"), `{"packageManager":"pnpm@11.1.2"}\n`);
-    // §15.1's home directory is `$HOME`, or `%USERPROFILE%` on Windows. Both
+    // §05.3's home directory is `$HOME`, or `%USERPROFILE%` on Windows. Both
     // spellings are redirected, so the row reads the fixture's `.npmrc` on
     // every platform rather than the developer's own.
     process.env.HOME = home;
@@ -1076,7 +1076,7 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
     expect(credentials("https://cdn.example.org/pnpm.tgz")).toBeUndefined();
   });
 
-  it("ranks below COREPACK_NPM_TOKEN on the registry's own origin (§15.1 precedence)", () => {
+  it("ranks below COREPACK_NPM_TOKEN on the registry's own origin (§05.3 precedence)", () => {
     userNpmrc("//registry.example.org/:_authToken=from-npmrc\n");
     process.env.COREPACK_NPM_TOKEN = "from-env";
 
@@ -1086,7 +1086,7 @@ describe("credentialsFor — the .npmrc tier (§15.1)", () => {
   });
 
   it("still applies off the configured registry's origin, because it carries its own scope", () => {
-    // §14.6 scopes the *environment* credentials to one origin. A `.npmrc`
+    // §05.1 scopes the *environment* credentials to one origin. A `.npmrc`
     // entry names its own scope, which is narrower, so the tarball CDN a
     // registry redirects to can be authenticated without widening anything.
     userNpmrc("//cdn.example.org/:_authToken=cdn-token\n");

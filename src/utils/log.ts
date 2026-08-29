@@ -1,5 +1,5 @@
 /**
- * The writers — §09.11's stream discipline in one place, plus the colour that
+ * The writers — §09.14's stream discipline in one place, plus the colour that
  * rides on top of it.
  *
  * Four rules shape this file:
@@ -12,7 +12,7 @@
  *    line lands on is asserted by the suite — a proxy-mode `UsageError` on
  *    stderr, its management-mode form on **stdout** — and a helper that guessed
  *    would make that flip silently.
- * 3. **A package manager's own output never comes through here.** §09.11: it is
+ * 3. **A package manager's own output never comes through here.** §09.14: it is
  *    passthrough, unmodified — `run/exec.ts` inherits stdio, and this module is
  *    not on that path.
  * 4. **Nothing is touched until something is printed** — see {@link streamOf}.
@@ -35,11 +35,12 @@ type Format = Parameters<typeof styleText>[0];
 export type Target = "stdout" | "stderr";
 
 /**
- * §16.3 — the *first* read of `process.stdout`/`process.stderr` constructs the
- * stream, and that pulls in 20 native modules (`stream`, `string_decoder`, the
- * `internal/streams/*` set). A warm run prints nothing, so nothing here may
- * reach for a stream at module load: every path to one goes through this call,
- * taken only once a caller is already committed to writing.
+ * §16, Build shape — the *first* read of `process.stdout`/`process.stderr`
+ * constructs the stream, and that pulls in 20 native modules (`stream`,
+ * `string_decoder`, the `internal/streams/*` set). A warm run prints nothing,
+ * so nothing here may reach for a stream at module load: every path to one
+ * goes through this call, taken only once a caller is already committed to
+ * writing.
  */
 function streamOf(target: Target): NodeJS.WriteStream {
   return target === "stdout" ? process.stdout : process.stderr;
@@ -74,7 +75,7 @@ const AGENT_VARIABLES = [
  * Agents capture our streams through a pty often enough that the TTY test says
  * "terminal" — and then every escape sequence lands verbatim in a transcript
  * that has no use for them. So colour is suppressed here even where the stream
- * would take it, `FORCE_COLOR` excepted (§11.4): an explicit ask on the command
+ * would take it, `FORCE_COLOR` excepted (§11.5): an explicit ask on the command
  * line still wins over a heuristic read of the ambient environment.
  *
  * Env only, evaluated once. `std-env` also matches `TERM_PROGRAM=kiro` against a
@@ -89,7 +90,7 @@ export const isAgent: boolean =
   /devin/.test(process.env["EDITOR"] ?? "") ||
   /kiro/.test(process.env["TERM_PROGRAM"] ?? "");
 
-/** §11.4 — the one way to ask for colour over every heuristic above. */
+/** §11.5 — the one way to ask for colour over every heuristic above. */
 function forcedOn(): boolean {
   const forced = process.env["FORCE_COLOR"];
   return forced !== undefined && forced !== "0";
@@ -157,12 +158,12 @@ function markers(text: string, colors: Palette): string {
     .join("\n");
 }
 
-/** §09.11 — informational output is stdout, unbuffered, unprefixed. */
+/** §09.14 — informational output is stdout, unbuffered, unprefixed. */
 export function out(text: string): void {
   process.stdout.write(markers(text, outColors));
 }
 
-/** The same, on stderr: notices that must not corrupt a piped stdout (§09.11). */
+/** The same, on stderr: notices that must not corrupt a piped stdout (§09.14). */
 export function err(text: string): void {
   process.stderr.write(markers(text, errColors));
 }

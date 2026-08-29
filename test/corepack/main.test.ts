@@ -98,7 +98,7 @@ it.fails(`should refuse to download a known package manager from a URL in packag
   });
 });
 
-// SKIP (jup §15.23): `yarn@stable` is a tag and `yarn@*` a range, and jup
+// SKIP (jup §04.4): `yarn@stable` is a tag and `yarn@*` a range, and jup
 // resolves both against the registry. Corepack requires an exact semver here
 // and errors `expected a semver version`. The first half of this row — a bare
 // `yarn` with no version at all — still errors in jup and is covered by
@@ -162,7 +162,7 @@ const testedPackageManagers: Array<[string, string] | [string, string, string]> 
   [`npm`, `6.14.2+sha224.50512c1eb404900ee78586faa6d756b8d867ff46a328e6fb4cdf3a87`],
 ];
 
-// SKIP (jup §15.41): jup fetches Yarn Berry from `@yarnpkg/cli-dist` on the npm
+// SKIP (jup §02.5): jup fetches Yarn Berry from `@yarnpkg/cli-dist` on the npm
 // registry, and that package's 2.x line starts at 2.4.1 — `2.0.0-rc.30` is not
 // published there at all. The two digests below name the bytes of
 // `repo.yarnpkg.com`'s single-file `yarn.js`, which jup no longer downloads, so
@@ -292,7 +292,7 @@ it(`should ignore the packageManager field when found within a node_modules vend
 });
 
 describe(`should handle invalid devEngines values`, () => {
-  // SKIP (jup §15.23): `yarn@*` is a range, and jup resolves ranges in
+  // SKIP (jup §04.4): `yarn@*` is a range, and jup resolves ranges in
   // devEngines rather than rejecting them as non-semver.
   it.skip(`throw on missing version`, async () => {
     await xfs.mktempPromise(async cwd => {
@@ -418,7 +418,7 @@ it(`should use hash from "packageManager" even when "devEngines" defines a diffe
 });
 
 describe(`should accept range in devEngines only if a specific version is provided`, () => {
-  // SKIP (jup §15.23): `pnpm@6.x` is a range, and jup resolves it.
+  // SKIP (jup §04.4): `pnpm@6.x` is a range, and jup resolves it.
   it.skip(`either in package.json#packageManager field`, async () => {
     await xfs.mktempPromise(async cwd => {
       await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as PortablePath), {
@@ -916,7 +916,7 @@ it(`should always use fallback version when project spec env is disabled`, async
   });
 });
 
-// SKIP (jup §15, errors.ts:270): with COREPACK_ENABLE_NETWORK=0 and nothing
+// SKIP (jup §12.6, errors.ts:270): with COREPACK_ENABLE_NETWORK=0 and nothing
 // cached, jup replaces Corepack's bare `Network access disabled by the
 // environment` with an actionable message naming the seeding commands. The
 // terse form is still emitted when a request is actually refused (§11.1), and
@@ -1334,7 +1334,7 @@ it(`should be able to show the latest version`, async () => {
   });
 });
 
-// SKIP (jup §14): `yarn`'s built-in default is Berry, not Classic 1.22 — an
+// SKIP (jup §02.5): `yarn`'s built-in default is Berry, not Classic 1.22 — an
 // embedded default MUST track the current supported major, and Classic has
 // been unsupported since 2020 (#812). With no `packageManager` field this row
 // gets 4.x, and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3),
@@ -1409,7 +1409,7 @@ it(`should download latest pnpm from custom registry`, async () => {
   });
 });
 
-// SKIP (jup §15, errors.ts:270): the row probes `.corepack.env` discovery by
+// SKIP (jup §12.6, errors.ts:270): the row probes `.corepack.env` discovery by
 // disabling the network and looking for the registry host in the error. jup's
 // cache-miss message names the seeding commands instead of the URL, so the
 // probe fails even though the env file is read. Discovery itself is covered by
@@ -1433,7 +1433,7 @@ it.skip(`should use COREPACK_NPM_REGISTRY from .corepack.env for "corepack use" 
   });
 });
 
-// SKIP (jup §15, errors.ts:270): same probe, same reason — the nearest-file
+// SKIP (jup §12.6, errors.ts:270): same probe, same reason — the nearest-file
 // rule it tests is covered by test/conformance/13-06-env-files.test.ts.
 it.skip(`should use closest .corepack.env`, async () => {
   process.env.COREPACK_ENABLE_NETWORK = `0`;
@@ -1505,12 +1505,12 @@ it(`should ignore .corepack.env inside a node_modules folder`, async () => {
   });
 });
 
-// SKIP (jup §15.11): every row here asserts that a registry publishing no
+// SKIP (jup §06.1): every row here asserts that a registry publishing no
 // signature is a hard failure (`No compatible signature found in package
 // metadata`). jup instead warns and falls back to integrity-only
 // verification, so the first half of each row cannot hold. The second half —
 // `COREPACK_INTEGRITY_KEYS=0` disabling verification, and being honoured from
-// the environment but never from `.corepack.env` (§14.5) — is covered by
+// the environment but never from `.corepack.env` (§03.2) — is covered by
 // test/conformance/13-05-environment.test.ts and 15-01/15-11.
 describe.skip(`should pick up COREPACK_INTEGRITY_KEYS from env`, () => {
   beforeEach(() => {
@@ -1937,7 +1937,7 @@ describe(`allow range versions in devEngines.packageManager.version when user sp
   }
 });
 
-// SKIP (jup §15.23): `npm@^6.14.2` in devEngines is a range, and jup resolves
+// SKIP (jup §04.4): `npm@^6.14.2` in devEngines is a range, and jup resolves
 // ranges rather than rejecting them.
 it.skip(`should still validate devEngines.packageManager.version format when no user version specified`, async () => {
   await xfs.mktempPromise(async cwd => {

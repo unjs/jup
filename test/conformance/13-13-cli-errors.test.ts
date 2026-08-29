@@ -30,7 +30,7 @@ beforeAll(async () => {
   registry.publish("yarn", "1.22.4", packageManagerTarball("yarn", "1.22.4"), {
     distTags: { latest: "1.22.4" },
   });
-  // §15.41 — the tag and version list Berry answers from is a packument now,
+  // §02.5 — the tag and version list Berry answers from is a packument now,
   // not `repo.yarnpkg.com`'s `aliases`/`tags` document.
   registry.publish(
     "@yarnpkg/cli-dist",

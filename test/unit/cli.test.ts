@@ -8,7 +8,7 @@ import { gzipSync } from "node:zlib";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
 /**
- * §15.44 — `cache clean` asks `shims.ts` what interpreter the installed shims
+ * §07.9 — `cache clean` asks `shims.ts` what interpreter the installed shims
  * run under. Reproducing that for real would mean a shim directory and a
  * rewritten stub in this process's own package (rows 252 and 253 do exactly
  * that, out of process); here the answer is injected, so the assertions are
@@ -57,7 +57,7 @@ vi.mock("../../src/commands/shims.ts", async (importOriginal) => ({
 vi.mock("../../src/run/exec.ts", () => ({
   // `0` mirrors the real JavaScript path (§08.4): the package manager sets the
   // exit code from its own module body afterwards, so handover itself answers 0.
-  // §15.28's native path is the one that returns a promise of a real code.
+  // §08.3's native path is the one that returns a promise of a real code.
   execPackageManager: vi.fn(() => 0),
   resolveBinPath: vi.fn(),
 }));
@@ -123,7 +123,7 @@ let cwdSpy: MockInstance<() => string>;
 
 /**
  * A throwaway directory, realpathed: macOS puts `$TMPDIR` behind a symlink
- * (`/var` -> `/private/var`) and §15.43's boundary test resolves `<home>` before
+ * (`/var` -> `/private/var`) and §10.2's boundary test resolves `<home>` before
  * comparing, so a literal `/var/...` spelling would read as outside the very
  * store it names.
  */
@@ -182,7 +182,7 @@ beforeEach(async () => {
         }),
       );
     }
-    // §15.41 put every artifact on the npm registry, so a download is a real
+    // §02.5 put every artifact on the npm registry, so a download is a real
     // tarball now rather than the single `.js` a JSON body could stand in for.
     if (body instanceof Uint8Array) {
       return Promise.resolve(
@@ -203,7 +203,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
-  // §15.44's injected answer is per-test; anything else would leak a spared
+  // §07.9's injected answer is per-test; anything else would leak a spared
   // version into the next `cache clean`.
   shimState.interpreter = undefined;
   rmState.refuse.clear();
@@ -247,7 +247,7 @@ function readManifest(dir = project): Record<string, unknown> {
   return JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as Record<string, unknown>;
 }
 
-/** §15.23 — the resolutions the project's committed `jup.lock` holds. */
+/** §04.4 — the resolutions the project's committed `jup.lock` holds. */
 function lockfile(dir = project): Record<string, unknown> {
   const file = join(dir, "jup.lock");
   if (!existsSync(file)) return {};
@@ -255,7 +255,7 @@ function lockfile(dir = project): Record<string, unknown> {
     .resolutions;
 }
 
-/** §15.23 — the memo an ordinary run leaves in `node_modules/.jup`. */
+/** §04.4 — the memo an ordinary run leaves in `node_modules/.jup`. */
 async function memo(resolutions: Record<string, unknown>, dir = project): Promise<void> {
   await mkdir(join(dir, "node_modules", ".jup"), { recursive: true });
   await writeFile(
@@ -276,7 +276,7 @@ async function writeLastKnownGood(value: Record<string, string>): Promise<void> 
 }
 
 /**
- * The two packuments the yarn table entry reads (§05.2, §15.41).
+ * The two packuments the yarn table entry reads (§05.2, §02.5).
  *
  * Both are npm documents now. Berry's used to be `repo.yarnpkg.com/tags`, a
  * url-type registry with `tags`/`aliases` fields; `/tags` is still registered so
@@ -368,7 +368,7 @@ describe("resolvePatternsToDescriptors (§09.1)", () => {
     );
   });
 
-  it("keeps the deprecated prepare wording free of devEngines (§09.10)", async () => {
+  it("keeps the deprecated prepare wording free of devEngines (§09.11)", async () => {
     await manifest({ name: "no-spec" });
 
     const error = await rejection(cmdPrepare([]));
@@ -406,14 +406,14 @@ describe("install (§09.2, test 86)", () => {
   });
 
   /*
-   * The case above installs from the store, where §04.7's bump is never reached
-   * at all. This one downloads, which is where the two rules collide: §04.7
+   * The case above installs from the store, where §04.8's bump is never reached
+   * at all. This one downloads, which is where the two rules collide: §04.8
    * bumps after any successful install, §09.2 says this command leaves the file
    * alone. §09.2 is the specific statement and wins — warming a Docker layer
    * must not silently repoint the machine's default.
    */
   it("does not bump last-known-good on a cold install either", async () => {
-    // §15.41 — Berry is an `@yarnpkg/cli-dist` tarball on the npm registry, so
+    // §02.5 — Berry is an `@yarnpkg/cli-dist` tarball on the npm registry, so
     // §06 has a packument to consult for a signature where the old url-type
     // registry offered none. The fixture therefore serves the metadata too.
     mockYarnRegistry();
@@ -429,7 +429,7 @@ describe("install (§09.2, test 86)", () => {
       },
     };
     routes["/@yarnpkg/cli-dist/-/cli-dist-2.2.2.tgz"] = archive;
-    // §15.11: this fixture publishes no signature and pins no hash, so the
+    // §06.1: this fixture publishes no signature and pins no hash, so the
     // artifact clears no verification tier. The opt-out keeps the row about what
     // it is about — §09.2 not touching `lastKnownGood.json` on a cold install.
     process.env.COREPACK_ALLOW_UNVERIFIED = "1";
@@ -440,7 +440,7 @@ describe("install (§09.2, test 86)", () => {
 
     // It really did download: the store was empty before this ran.
     expect(existsSync(join(home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
-    // Same major and strictly upward, so §04.7 alone would have advanced it.
+    // Same major and strictly upward, so §04.8 alone would have advanced it.
     expect(lastKnownGood()).toEqual({ yarn: "2.1.0" });
   });
 
@@ -449,7 +449,7 @@ describe("install (§09.2, test 86)", () => {
     await expect(cmdInstall(["yarn@2.2.2"])).rejects.toBeInstanceOf(UsageError);
   });
 
-  /* §15.23 — what the project's two files already say ------------------- */
+  /* §04.4 — what the project's two files already say ------------------- */
 
   it("warms the cache with the memo's version, not the newest match", async () => {
     mockYarnRegistry();
@@ -764,7 +764,7 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     await expect(runManagementCommand(["cache", "clear"])).resolves.toBe(0);
     expect(existsSync(join(home, "v1"))).toBe(false);
     expect(lastKnownGood()).toEqual({ yarn: "2.2.2" });
-    // §15.35l redirected this assertion. It used to require `stdout === ""`,
+    // §12.11 redirected this assertion. It used to require `stdout === ""`,
     // which is precisely #679's complaint: a command whose entire job is
     // deletion left the user unable to tell a clean from a no-op. The two lines
     // below are the first run (one version removed) and the second (nothing).
@@ -778,7 +778,7 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     await expect(cmdCache(["nuke"])).rejects.toBeInstanceOf(UsageError);
   });
 
-  /* §15.44 — the backstop for §15.43 ------------------------------------- */
+  /* §07.9 — the backstop for §10.2 -------------------------------------- */
 
   it("spares the version holding the shims' interpreter, and says so", async () => {
     const interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
@@ -860,7 +860,7 @@ describe("cache clean / clear (§09.7, test 95)", () => {
   it("spares the interpreter even when the store carries no markers", async () => {
     // §07.2's marker is what `listInstalled` counts, and an interrupted install,
     // a disk cleaner or a hand-edited store loses it — the "shimmed by an older
-    // build" case §15.44 exists for most of all. The store then *lists* as empty
+    // build" case §07.9 exists for most of all. The store then *lists* as empty
     // while still holding the file every shim's shebang names.
     const interpreter = join(home, "v1", "node", "22.14.0", "bin", "node");
     shimState.interpreter = interpreter;
@@ -892,7 +892,7 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     await expect(cmdCache(["clean"])).resolves.toBe(0);
 
     // One rejection out of `Promise.all` used to abort the command here: no
-    // §15.44 line, no count, and a raw error in place of both.
+    // §07.9 line, no count, and a raw error in place of both.
     expect(existsSync(join(home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
     expect(existsSync(join(home, "v1", "pnpm"))).toBe(false);
     expect(existsSync(interpreter.replace(join("bin", "node"), ".jup"))).toBe(true);
@@ -902,8 +902,8 @@ describe("cache clean / clear (§09.7, test 95)", () => {
     expect(stderr).toContain(messages.cacheEntryNotRemoved(join(home, "v1", "yarn")));
   });
 
-  it("routes both §15.44 lines through COREPACK_QUIET_ADVISORIES", async () => {
-    // §11.5 — every `!` line this spec adds is silenced by the flag, and these
+  it("routes both §07.9 lines through COREPACK_QUIET_ADVISORIES", async () => {
+    // §11.3 — every `!` line this spec adds is silenced by the flag, and these
     // two were written straight to the stream. The *count* is command output and
     // is unaffected.
     process.env.COREPACK_QUIET_ADVISORIES = "1";
@@ -922,7 +922,7 @@ describe("cache clean / clear (§09.7, test 95)", () => {
   });
 
   it("an interpreter outside the store changes nothing at all", async () => {
-    // The only state §15.43 now produces, and §15.35l's row 206 fixes its
+    // The only state §10.2 now produces, and §12.11's row 206 fixes its
     // output byte for byte: one line on stdout, an empty stderr, `v1` gone.
     shimState.interpreter = process.execPath;
     await seed("yarn", "2.2.2");
@@ -946,7 +946,7 @@ describe("use (§09.5, tests 105-110)", () => {
 
     await expect(cmdUse(["yarn@1.22.4"])).resolves.toBe(0);
 
-    // §15.35l — the banner, then the path that was modified, then the blank
+    // §12.11 — the banner, then the path that was modified, then the blank
     // line that separates our output from the package manager's (§09.5).
     expect(stdout).toBe(
       `Installing yarn@1.22.4 in the project...\n` +
@@ -1043,7 +1043,7 @@ describe("use (§09.5, tests 105-110)", () => {
     await expect(cmdUse(["yarn@1", "pnpm@9"])).rejects.toBeInstanceOf(UsageError);
   });
 
-  /* §15.23 — the memo, and what the frozen flag actually governs -------- */
+  /* §04.4 — the memo, and what the frozen flag actually governs -------- */
 
   it("retires the memo for the range it just recorded", async () => {
     mockYarnRegistry();
@@ -1147,14 +1147,14 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
-  // §15.26 redirected test 114. It used to assert that `up` on a devEngines-only
+  // §03.7 redirected test 114. It used to assert that `up` on a devEngines-only
   // project *creates* a `packageManager` field — which is #874 exactly: the new
   // field then conflicts with the declaration beside it and the next read fails.
   // The pin now goes where the declaration already is.
   //
   // The declaration is an exact version, because that is the half of the row
   // that is still about *where* the pin lands: a devEngines-declared **range**
-  // is a §15.23 pin like any other and is now preserved rather than collapsed —
+  // is a §04.4 pin like any other and is now preserved rather than collapsed —
   // the test below this one.
   it("updates devEngines in place for a devEngines-only project (test 114)", async () => {
     mockYarnRegistry();
@@ -1176,13 +1176,13 @@ describe("up (§09.4, tests 111-115)", () => {
     });
   });
 
-  /* §15.23 — the range `use` writes is the range `up` refreshes -------- */
+  /* §04.4 — the range `use` writes is the range `up` refreshes -------- */
 
   it("keeps a devEngines-only range and refreshes jup.lock instead", async () => {
     mockYarnRegistry();
     await seed("yarn", "2.4.3");
     // Exactly what `jup use yarn@2.x` leaves behind on a project with no
-    // top-level field (§15.26): the range in `devEngines`, and nothing else.
+    // top-level field (§03.7): the range in `devEngines`, and nothing else.
     await manifest({
       name: "demo",
       devEngines: { packageManager: { name: "yarn", version: "2.x" } },
@@ -1293,10 +1293,10 @@ describe("up (§09.4, tests 111-115)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §09.10 — deprecated commands
+ * §09.11 — deprecated commands
  * ------------------------------------------------------------------ */
 
-describe("hydrate and prepare (§09.10)", () => {
+describe("hydrate and prepare (§09.11)", () => {
   it("hydrate names 'corepack prepare' in its format error", async () => {
     const source = await tempDir("jup-cli-hyd-");
     await mkdir(join(source, "stuff"), { recursive: true });
@@ -1320,7 +1320,7 @@ describe("hydrate and prepare (§09.10)", () => {
     process.env.COREPACK_ENABLE_NETWORK = "0";
 
     // No `--activate`: cached, but not the default. Note there is no `.tgz`
-    // extension check on the argument either (§09.10).
+    // extension check on the argument either (§09.11).
     stdout = "";
     await expect(cmdHydrate([archive])).resolves.toBe(0);
     expect(stdout).toBe(`Adding yarn@2.2.2 to the cache...\nAll done!\n`);
@@ -1365,10 +1365,10 @@ describe("hydrate and prepare (§09.10)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §09.9 and dispatch
+ * §09.10 and dispatch
  * ------------------------------------------------------------------ */
 
-describe("--version, --help and dispatch (§09.9, test 146)", () => {
+describe("--version, --help and dispatch (§09.10, test 146)", () => {
   it("prints the tool's own version", async () => {
     const own = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),

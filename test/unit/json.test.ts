@@ -180,7 +180,7 @@ describe("setTopLevelString", () => {
     expect(after).toBe(`{\r\n  "packageManager": "yarn@1.22.4",\r\n  "name": "x"\r\n}\r\n`);
   });
 
-  it("keeps the BOM after a rewrite (test 13, §14.7)", () => {
+  it("keeps the BOM after a rewrite (test 13, §03.7)", () => {
     const replaced = setTopLevelString(
       `${BOM}{\n  "packageManager": "yarn@1.0.0"\n}\n`,
       "packageManager",
@@ -248,7 +248,7 @@ describe("setTopLevelString", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §16.3 — the DOM-free warm-path scan
+ * §16, Build shape — the DOM-free warm-path scan
  * ------------------------------------------------------------------ */
 
 const FIELDS = ["packageManager", "devEngines"];
@@ -345,7 +345,7 @@ describe("scanTopLevelFields", () => {
   });
 });
 
-describe("setNestedString — §15.26", () => {
+describe("setNestedString — §03.7", () => {
   const manifest = [
     "{",
     `  "name": "project",`,

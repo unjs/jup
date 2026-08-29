@@ -30,7 +30,7 @@ export const USAGE_LINES: Record<string, string> = {
 export const GENERIC_USAGE_LINE = "$ jup <command>";
 
 /**
- * §09.11 — {@link HELP_TEXT}, with the structure it already has picked out in
+ * §09.14 — {@link HELP_TEXT}, with the structure it already has picked out in
  * colour: the `Usage:`/`Deprecated…:` headings, the program name on each
  * synopsis line, the command word after it, and a trailing description.
  *

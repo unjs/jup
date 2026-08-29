@@ -71,7 +71,7 @@ stdio: inherit all three, unmodified
   job control and break Ctrl-C.
 * `JUP_HOST_RUNTIME` carries the realpath of the runtime hosting a chain that has
   since entered the store, so a later `enable` can find a durable interpreter
-  (§10.1). It is written into the child's environment block, never into jup's own.
+  (§10.2). It is written into the child's environment block, never into jup's own.
 
 ### Choosing an interpreter (JavaScript entry points only)
 

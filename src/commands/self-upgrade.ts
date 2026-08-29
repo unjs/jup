@@ -15,16 +15,16 @@
  * upgrade command trustworthy:
  *
  * * **The download is verified like any other artifact.** The version comes back
- *   from §04.5's `latest` lookup carrying the registry's *signed* digest, the
- *   stream is hashed as it is written (§16.5), and a mismatch discards the temp
- *   directory so nothing is ever cached (§06.2). §15.11's rule holds here too:
+ *   from §04.6's `latest` lookup carrying the registry's *signed* digest, the
+ *   stream is hashed as it is written (§06.2), and a mismatch discards the temp
+ *   directory so nothing is ever cached (§06.2). §06.1's rule holds here too:
  *   an artifact that clears no verification tier is refused, and upgrading
  *   ourselves is the last place to make an exception.
  * * **Nothing downloaded is rewritten.** The new version's CLI entry is *its*
  *   entry; regenerating it from the running version's source (which is what
  *   `enable` does, correctly, for an installation it belongs to) would put an
- *   old entry in front of a new bundle. §10.8 links the file as it arrived, and
- *   the only byte that may change is §15.46's shebang.
+ *   old entry in front of a new bundle. §10.9 links the file as it arrived, and
+ *   the only byte that may change is §10.2's shebang.
  */
 
 const { chmodSync, existsSync, rmSync } = process.getBuiltinModule("node:fs");
@@ -77,9 +77,9 @@ const SELF_PACKAGE: NpmRegistrySpec = { type: "npm", package: TOOL_NAME };
  * The dist-tag an upgrade follows.
  *
  * `latest` is what the publisher points at the release they want installed, and
- * §04.5 already knows how to read it: one request, resolved server-side, coming
+ * §04.6 already knows how to read it: one request, resolved server-side, coming
  * back with the digest the registry signed. `COREPACK_MINIMUM_RELEASE_AGE`
- * applies to it exactly as it does everywhere else (§15.35e), so an organisation
+ * applies to it exactly as it does everywhere else (§04.1), so an organisation
  * that quarantines fresh releases quarantines ours too.
  */
 const UPGRADE_TAG = "latest";
@@ -93,7 +93,7 @@ const UPGRADE_TAG = "latest";
  *
  * Two different things end up here, and the message names both because the
  * archive alone cannot tell them apart. One is a release whose layout predates
- * the one §10.8 links — the entry point has not always lived in `bin/` — and the
+ * the one §10.9 links — the entry point has not always lived in `bin/` — and the
  * other is a mirror publishing an unrelated package under our name. Neither is a
  * trust failure: the digest was checked above, so these are the bytes the
  * publisher signed.
@@ -119,7 +119,7 @@ export const implausiblePublishedVersion = (reference: string) =>
 /* The download                                                                */
 /* -------------------------------------------------------------------------- */
 
-/** Everything §04.5's lookup settles before an artifact byte is asked for. */
+/** Everything §04.6's lookup settles before an artifact byte is asked for. */
 interface Release {
   version: string;
   /** §06.1 — the digest the registry signed, and the algorithm to hash with. */
@@ -130,9 +130,9 @@ interface Release {
 /**
  * Resolve `latest` into a version and the digest that must arrive with it.
  *
- * §04.5's own lookup, unchanged and unwrapped: it verifies the registry's
- * signature over `<name>@<version>:<integrity>` (§06.3), honours §15.7's tiers,
- * §15.8's fallback and §15.35e's release-age gate, and hands back
+ * §04.6's own lookup, unchanged and unwrapped: it verifies the registry's
+ * signature over `<name>@<version>:<integrity>` (§06.3), honours §06.1's tiers,
+ * §06.3's fallback and §04.1's release-age gate, and hands back
  * `<version>+<algo>.<hex>`. Reusing it rather than reading the packument here is
  * the point — an upgrade path with its own idea of what a trustworthy version
  * looks like is an upgrade path that can be weaker than the install path.
@@ -154,28 +154,28 @@ async function resolveRelease(): Promise<Release> {
  * Download `release` into a temp directory and promote it to `dest`.
  *
  * §07.3–§07.6 for an artifact the table does not describe: metadata first so the
- * digest is known before the stream opens (§14.12), one pass over the body
- * (§16.5), and a temp directory that is discarded on any failure so a re-run
+ * digest is known before the stream opens (§06.2), one pass over the body
+ * (§06.2), and a temp directory that is discarded on any failure so a re-run
  * fails identically (§06.2) and a bad artifact never reaches the store.
  */
 async function download(release: Release, dest: string): Promise<void> {
   const { version, pin, registryUrl } = release;
 
   // §07.3 — `dist.tarball` verbatim, rewritten onto the configured registry and
-  // validated by §14.9. The signatures it carries were checked by the lookup
+  // validated by §05.2. The signatures it carries were checked by the lookup
   // above, over this same document.
   const metadata = await fetchTarballURLAndSignature(SELF_PACKAGE, version);
   const url = metadata.tarball;
 
-  // §15.11 — one verification tier or nothing moves. Reaching here without a
+  // §06.1 — one verification tier or nothing moves. Reaching here without a
   // digest means the registry published neither `integrity` nor `shasum`, which
-  // §04.5 would already have refused; the check is repeated because this is the
+  // §04.6 would already have refused; the check is repeated because this is the
   // one download whose payload becomes the program doing the checking.
   if (pin.digest === undefined && !shouldSkipIntegrityCheck()) {
     throw new UsageError(messages.refusingUnverified(TOOL_NAME, version, new URL(url).origin));
   }
 
-  // §05.5 — artifacts only, and after the metadata, exactly as §07.3 orders it.
+  // §05.4 — artifacts only, and after the metadata, exactly as §07.3 orders it.
   await confirmDownload(url);
 
   const tmp = createTempDir();
@@ -196,7 +196,7 @@ async function download(release: Release, dest: string): Promise<void> {
     writeMarker(tmp, {
       locator: { name: TOOL_NAME, reference: version },
       // §09.12's shape. Both of our names run the CLI entry: on POSIX by a
-      // symlink straight at it, on Windows through §10.3's wrappers.
+      // symlink straight at it, on Windows through §10.4's wrappers.
       bin: Object.fromEntries(
         OWN_BIN_NAMES.map((binName) => [binName, `./${STUB_FOLDER_NAME}/${CLI_ENTRY_NAME}`]),
       ),
@@ -213,16 +213,16 @@ async function download(release: Release, dest: string): Promise<void> {
 }
 
 /**
- * The files §10.8 is going to point a name at, before anything is promoted.
+ * The files §10.9 is going to point a name at, before anything is promoted.
  *
  * A shape check and not a trust check — the digest above is the trust check.
  * What it buys is that a registry serving an unrelated package under our name
  * fails here, with the store untouched, rather than after the promotion with two
  * dead entries on the user's `PATH`.
  *
- * The bundle and the CLI entry, and nothing else — §10.8 points both of our
+ * The bundle and the CLI entry, and nothing else — §10.9 points both of our
  * names at {@link CLI_ENTRY_NAME} on every platform, and those are the two files
- * a name is about to be pointed at. §10.2's per-name stubs are not checked: this
+ * a name is about to be pointed at. §10.3's per-name stubs are not checked: this
  * command installs no shim for a table binary, and a later `enable` reports its
  * own missing stub far better than a shape check here could.
  */
@@ -235,16 +235,16 @@ function assertInstallation(directory: string, version: string, url: string): vo
 }
 
 /**
- * §15.45 — the file this command's own shims run, made executable.
+ * §10.3 — the file this command's own shims run, made executable.
  *
  * §07.4 rule 6 lets an archive contribute only its execute bit, and npm has been
  * observed to publish `bin` targets without one. A symlink to a file the kernel
  * will not execute is passed over in silence by a `PATH` lookup, so the bit is
  * set here rather than discovered later.
  *
- * One name, because §10.8 points both of ours at it. The per-name stubs in the
+ * One name, because §10.9 points both of ours at it. The per-name stubs in the
  * same folder arrive `0o644` too and are not touched here: nothing links them
- * until a `jup enable`, and that is where §15.45 already chmods the stub it is
+ * until a `jup enable`, and that is where §10.3 already chmods the stub it is
  * about to link. Everything else in the archive stays exactly as §07.4 wrote it.
  */
 function makeStubsExecutable(directory: string): void {
@@ -261,7 +261,7 @@ function makeStubsExecutable(directory: string): void {
  *
  * Idempotent in both halves like §09.12, and by the same marker: a version
  * already complete in `<home>/self` is not downloaded again, and a shim that is
- * already correct is left alone (§10.2 property 4). The version already being
+ * already correct is left alone (§10.3 property 4). The version already being
  * installed is the ordinary outcome of running this twice, and it is also what
  * makes the command a repair — a store copy whose shims were removed, or whose
  * marker cannot be read, is put back without touching the network more than the
@@ -288,7 +288,7 @@ export async function cmdSelfUpgrade(args: string[], command: string): Promise<n
     await download(release, dest);
   }
 
-  // §10.8 links the copy as it arrived: it belongs to the version that
+  // §10.9 links the copy as it arrived: it belongs to the version that
   // published it, not to the version installing it.
   await linkSelf(release.version, dest, options);
 

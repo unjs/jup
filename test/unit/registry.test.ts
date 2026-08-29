@@ -107,7 +107,7 @@ const ENV_KEYS = [
 let saved: Record<string, string | undefined>;
 
 beforeEach(() => {
-  // §15.1 is a filesystem input now; a stale parse would outlive the variables.
+  // §05.3 is a filesystem input now; a stale parse would outlive the variables.
   resetNpmrcCache();
   saved = {};
   for (const key of ENV_KEYS) {
@@ -202,7 +202,7 @@ describe("npm metadata requests (§05.2)", () => {
     expect(server.requests.map((request) => request.url)).not.toContain("//pnpm");
   });
 
-  it("passes the registry origin, so credentials are actually sent (§14.6)", async () => {
+  it("passes the registry origin, so credentials are actually sent (§05.1)", async () => {
     const server = await startServer({ "/pnpm": { versions: {} } });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
     process.env.COREPACK_NPM_TOKEN = "sekret";
@@ -311,7 +311,7 @@ describe("url registries (§05.3)", () => {
     });
   });
 
-  it("reads `stable`, not `latest`, for the latest stable version (§04.5)", async () => {
+  it("reads `stable`, not `latest`, for the latest stable version (§04.6)", async () => {
     const server = await startServer({
       "/tags": { aliases: { latest: "5.0.0-rc.1", stable: "4.14.1" }, tags: ["4.14.1"] },
     });
@@ -339,7 +339,7 @@ describe("url registries (§05.3)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §04.5 — latest stable, npm
+ * §04.6 — latest stable, npm
  * ------------------------------------------------------------------ */
 
 interface Keypair {
@@ -372,7 +372,7 @@ function sriFor(payload: string, algo: "sha512" | "sha256"): { sri: string; hex:
   return { sri: `${algo}-${digest.toString("base64")}`, hex: digest.toString("hex") };
 }
 
-describe("fetchLatestStableVersion, npm (§04.5)", () => {
+describe("fetchLatestStableVersion, npm (§04.6)", () => {
   it("returns `<version>+sha512.<hex>` from dist.integrity", async () => {
     const { sri, hex } = sriFor("tarball bytes", "sha512");
     const server = await startServer({
@@ -385,7 +385,7 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     expect(server.last().url).toBe("/pnpm/latest");
   });
 
-  it("parses the SRI algorithm rather than slicing seven characters (§14.12)", async () => {
+  it("parses the SRI algorithm rather than slicing seven characters (§06.2)", async () => {
     const { sri, hex } = sriFor("tarball bytes", "sha256");
     const server = await startServer({
       "/pnpm/latest": { name: "pnpm", version: "9.1.0", dist: { integrity: sri } },
@@ -464,7 +464,7 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     expect(cause.message).toContain(`"sig": "AAAA"`);
   });
 
-  it("wraps a verification failure in the §04.5 message, keeping the cause", async () => {
+  it("wraps a verification failure in the §04.6 message, keeping the cause", async () => {
     const pair = keypair();
     const { sri } = sriFor("tarball bytes", "sha512");
     const server = await startServer({
@@ -472,7 +472,7 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
-    // §15.7 soft-fails an unsigned document onto its `integrity`, so mandating
+    // §06.1 soft-fails an unsigned document onto its `integrity`, so mandating
     // signatures is what makes this one a failure to wrap at all.
     process.env.COREPACK_REQUIRE_SIGNATURES = "1";
 
@@ -485,7 +485,7 @@ describe("fetchLatestStableVersion, npm (§04.5)", () => {
     expect(error.message).not.toContain("USE_LATEST");
     // No signatures at all in that document.
     expect((error.cause as Error).message).toBe(messages.noCompatibleSignature());
-    // §15.5 — and the reason has to survive to the *stack*, because `main.ts`
+    // §05.1 — and the reason has to survive to the *stack*, because `main.ts`
     // presents an unexpected error as its stack and a stack says nothing about
     // `cause`. Without this the sentence above names two remedies and no cause,
     // which reads like a network fault: that is exactly how npm signing
@@ -554,7 +554,7 @@ describe("COREPACK_ENABLE_NETWORK=0 (§05.2, §12.6)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §07.3 / §14.9 — tarball metadata
+ * §07.3 / §05.2 — tarball metadata
  * ------------------------------------------------------------------ */
 
 describe("fetchTarballURLAndSignature (§07.3)", () => {
@@ -636,7 +636,7 @@ describe("fetchTarballURLAndSignature (§07.3)", () => {
     ]);
   });
 
-  it("returns undefined signatures instead of crashing when they are stripped (§15.7)", async () => {
+  it("returns undefined signatures instead of crashing when they are stripped (§06.1)", async () => {
     const routes: Record<string, Route> = {};
     const server = await startServer(routes);
     process.env.COREPACK_NPM_REGISTRY = server.origin;
@@ -656,10 +656,10 @@ describe("fetchTarballURLAndSignature (§07.3)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.7 — metadata without a `dist` section
+ * §06.1 — metadata without a `dist` section
  * ------------------------------------------------------------------ */
 
-describe("metadata with no dist section (§15.7)", () => {
+describe("metadata with no dist section (§06.1)", () => {
   it("reports it clearly from the tarball path, never as a TypeError", async () => {
     const server = await startServer({
       "/pnpm/9.1.0": { name: "pnpm", version: "9.1.0" },
@@ -675,7 +675,7 @@ describe("metadata with no dist section (§15.7)", () => {
     );
   });
 
-  it("reports it as the cause of the §04.5 wrapper on the latest path", async () => {
+  it("reports it as the cause of the §04.6 wrapper on the latest path", async () => {
     const server = await startServer({ "/pnpm/latest": { name: "pnpm", version: "9.1.0" } });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
 
@@ -689,10 +689,10 @@ describe("metadata with no dist section (§15.7)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §05.2 rewrite 2 / §15.3 — origins, not substrings
+ * §05.2 rewrite 2 — origins, not substrings
  * ------------------------------------------------------------------ */
 
-describe("applyRegistryOverride (§15.3)", () => {
+describe("applyRegistryOverride (§05.2)", () => {
   const tarball = "https://registry.npmjs.org/yarn/-/yarn-1.22.22.tgz";
 
   it("is a no-op when no override is configured", () => {
@@ -763,7 +763,7 @@ describe("applyRegistryOverride (§15.3)", () => {
     expect(applyRegistryOverride("not a url")).toBe("not a url");
   });
 
-  it("rewrites a proxied registry's npmjs.org tarball so §14.9 accepts it", async () => {
+  it("rewrites a proxied registry's npmjs.org tarball so §05.2 accepts it", async () => {
     const server = await startServer({
       "/pnpm/9.1.0": {
         version: "9.1.0",
@@ -779,12 +779,12 @@ describe("applyRegistryOverride (§15.3)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.7 / §15.8 — the metadata tiering, in isolation
+ * §06.1 / §06.3 — the metadata tiering, in isolation
  * ------------------------------------------------------------------ */
 
-describe("verifyRegistryTrust (§15.7, §15.8)", () => {
+describe("verifyRegistryTrust (§06.1, §06.3)", () => {
   /**
-   * A fresh package name per call: §15.7's warning is emitted once per package
+   * A fresh package name per call: §06.1's warning is emitted once per package
    * and version for the life of the process, so reusing one across tests would
    * silence all but the first.
    */
@@ -802,7 +802,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     };
   }
 
-  it("tier 1: an absent `dist` is reported, not destructured (§15.7)", async () => {
+  it("tier 1: an absent `dist` is reported, not destructured (§06.1)", async () => {
     const packageName = freshPackage();
     const server = await startServer({
       [`/${packageName}/latest`]: { name: packageName, version: "9.1.0" },
@@ -907,7 +907,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     warn.mockRestore();
   });
 
-  it("§15.8: reads `versions[<version>].dist.signatures` from the package root", async () => {
+  it("§06.3: reads `versions[<version>].dist.signatures` from the package root", async () => {
     const packageName = freshPackage();
     const pair = keypair();
     const { sri } = sriFor("tarball bytes", "sha512");
@@ -941,7 +941,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     warn.mockRestore();
   });
 
-  it("§15.8: a signature recovered from the root still hard-fails when invalid", async () => {
+  it("§06.3: a signature recovered from the root still hard-fails when invalid", async () => {
     const packageName = freshPackage();
     const pair = keypair();
     const rogue = keypair("SHA256:rogue");
@@ -953,7 +953,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
           "9.1.0": {
             dist: {
               integrity: sri,
-              // The trusted keyid over someone else's signature: §15.7 tier 3.
+              // The trusted keyid over someone else's signature: §06.1 tier 3.
               signatures: [
                 { ...(signed(packageName, "9.1.0", sri, rogue) as object), keyid: pair.keyid },
               ],
@@ -979,7 +979,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     expect(error.message).toBe(messages.signatureMismatch());
   });
 
-  it("§15.8: makes no request at all when COREPACK_ENABLE_NETWORK=0", async () => {
+  it("§06.3: makes no request at all when COREPACK_ENABLE_NETWORK=0", async () => {
     const packageName = freshPackage();
     const pair = keypair();
     const { sri } = sriFor("tarball bytes", "sha512");
@@ -1012,7 +1012,7 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
     warn.mockRestore();
   });
 
-  it("§15.8: never fires when the version endpoint is already signed", async () => {
+  it("§06.3: never fires when the version endpoint is already signed", async () => {
     const packageName = freshPackage();
     const pair = keypair();
     const { sri } = sriFor("tarball bytes", "sha512");
@@ -1034,10 +1034,10 @@ describe("verifyRegistryTrust (§15.7, §15.8)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.2 / §15.3 — per-source registries and origin rewriting
+ * §05.2 — per-source registries and origin rewriting
  * ------------------------------------------------------------------ */
 
-describe("per-source registries (§15.2)", () => {
+describe("per-source registries (§05.2)", () => {
   it("gives each package manager its own base URL", () => {
     process.env.COREPACK_NPM_REGISTRY = "https://shared.example.org";
     process.env.COREPACK_REGISTRY_YARN = "https://yarn.example.org";
@@ -1075,7 +1075,7 @@ describe("per-source registries (§15.2)", () => {
 
     const once = applySourceOverride("https://repo.yarnpkg.com/tags", "yarn");
     expect(once).toBe("https://mirror.example.org/artifactory/yarn/tags");
-    // §15.38 row 152 — idempotent, so a second pass cannot double the prefix.
+    // row 152 — idempotent, so a second pass cannot double the prefix.
     expect(applySourceOverride(once, "yarn")).toBe(once);
   });
 
@@ -1086,8 +1086,8 @@ describe("per-source registries (§15.2)", () => {
   });
 });
 
-describe("applyRegistryOverride — origins, not substrings (§15.3)", () => {
-  it("normalises a differing host case and trailing slash (§15.38 row 152)", () => {
+describe("applyRegistryOverride — origins, not substrings (§05.2)", () => {
+  it("normalises a differing host case and trailing slash (row 152)", () => {
     // `new URL` lower-cases the host and normalises the path, so both spellings
     // of the same origin rewrite identically and neither doubles a slash.
     expect(
@@ -1134,9 +1134,9 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
     expect(resolveRegistrySpec(table)).toBe(table);
   });
 
-  it("no longer has a switch to make: Berry is already @yarnpkg/cli-dist (§15.41)", () => {
+  it("no longer has a switch to make: Berry is already @yarnpkg/cli-dist (§02.5)", () => {
     // This row used to assert the rewrite — a configured npm registry moving
-    // Berry off `repo.yarnpkg.com`. §15.41 made that the band, so there is
+    // Berry off `repo.yarnpkg.com`. §02.5 made that the band, so there is
     // nothing conditional left: the spec is npm-typed before anything is
     // configured, and `resolveRegistrySpec` returns it by identity either way.
     const table = DEFINITIONS.yarn!.ranges.at(-1)![1].registry;
@@ -1164,7 +1164,7 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
   it("is applied by the fetchers, so a tag lookup follows the same switch", async () => {
     // `resolve.ts` performs this substitution for `COREPACK_NPM_REGISTRY` before
     // it calls in here, but nothing there knows about `.npmrc`. Doing it inside
-    // the fetchers as well is what makes §15.38 row 150's configuration —
+    // the fetchers as well is what makes row 150's configuration —
     // `@yarnpkg:registry` and nothing else — move the *tag document* too, not
     // only the download.
     const root = mkdtempSync(join(tmpdir(), "jup-registry-npmrc-"));
@@ -1179,7 +1179,7 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
         "/@yarnpkg/cli-dist": { "dist-tags": { stable: "4.9.0" }, versions: { "4.9.0": {} } },
       });
       writeFileSync(join(home, ".npmrc"), `@yarnpkg:registry=${server.origin}\n`);
-      // §15.1's home is `$HOME`, or `%USERPROFILE%` on Windows. Redirect both,
+      // §05.3's home is `$HOME`, or `%USERPROFILE%` on Windows. Redirect both,
       // or the row reads the developer's own `.npmrc` — and, having found no
       // mirror, goes to the real registry over the network.
       process.env.HOME = home;
@@ -1205,7 +1205,7 @@ describe("resolveRegistrySpec — §05.2 rewrite 1", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.35e — COREPACK_MINIMUM_RELEASE_AGE
+ * §04.1 — COREPACK_MINIMUM_RELEASE_AGE
  * ------------------------------------------------------------------ */
 
 const HOUR = 60 * 60 * 1000;
@@ -1223,7 +1223,7 @@ function datedPackument(entries: Record<string, number>, options?: { time?: bool
   return document;
 }
 
-describe("minimumReleaseAge (§15.35e)", () => {
+describe("minimumReleaseAge (§04.1)", () => {
   it("is off when unset, empty, blank or explicitly zero", () => {
     expect(minimumReleaseAge()).toBeUndefined();
     for (const value of ["", "   ", "0", "0.0"]) {
@@ -1244,7 +1244,7 @@ describe("minimumReleaseAge (§15.35e)", () => {
     // The whole point: `COREPACK_NETWORK_TIMEOUT=abc` costing a user the default
     // timeout is a preference gone wrong, while this silently turning a
     // supply-chain control off on the machine of someone who believes they
-    // turned it on is the fail-open shape §15.35e exists to close.
+    // turned it on is the fail-open shape §04.1 exists to close.
     for (const value of ["24h", "-1", "abc", "NaN", "Infinity"]) {
       process.env.COREPACK_MINIMUM_RELEASE_AGE = value;
       expect(() => minimumReleaseAge(), value).toThrow(UsageError);
@@ -1255,7 +1255,7 @@ describe("minimumReleaseAge (§15.35e)", () => {
   });
 });
 
-describe("fetchResolvableVersions (§15.35e, §04.1 step 6)", () => {
+describe("fetchResolvableVersions (§04.1 step 6)", () => {
   it("is fetchAvailableVersions, header and all, while the gate is off", async () => {
     const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 1, "9.1.0": 1 }) });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
@@ -1332,7 +1332,7 @@ describe("fetchResolvableVersions (§15.35e, §04.1 step 6)", () => {
   });
 });
 
-describe("capToReleaseAge (§15.35e, §04.1 step 3)", () => {
+describe("capToReleaseAge (§04.1 step 3)", () => {
   it("returns its argument and makes no request while the gate is off", async () => {
     const server = await startServer({ "/pnpm": datedPackument({ "9.0.0": 100 }) });
     process.env.COREPACK_NPM_REGISTRY = server.origin;
@@ -1363,7 +1363,7 @@ describe("capToReleaseAge (§15.35e, §04.1 step 3)", () => {
     expect(await capToReleaseAge(npm("pnpm"), "9.0.0")).toBe("9.0.0");
   });
 
-  it("§15.24 — skips a prerelease unless the tag itself names one", async () => {
+  it("§04.1 — skips a prerelease unless the tag itself names one", async () => {
     const server = await startServer({
       "/pnpm": datedPackument({ "9.0.0": 500, "9.1.0-rc.1": 100, "9.2.0": 1 }),
     });
@@ -1405,7 +1405,7 @@ describe("capToReleaseAge (§15.35e, §04.1 step 3)", () => {
   });
 });
 
-describe("fetchLatestStableVersion under the gate (§15.35e, §04.5)", () => {
+describe("fetchLatestStableVersion under the gate (§04.1, §04.6)", () => {
   it("selects the newest eligible stable release instead of asking for `latest`", async () => {
     const { sri, hex } = sriFor("tarball bytes", "sha512");
     const server = await startServer({

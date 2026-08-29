@@ -97,8 +97,8 @@ const ENV_KEYS = [
   "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_INTEGRITY_KEYS",
-  // §15.24's opt-in. Leaking it between rows would let one test silently decide
-  // what the next one resolves to — precisely the hazard §15.24 is about.
+  // §04.1's opt-in. Leaking it between rows would let one test silently decide
+  // what the next one resolves to — precisely the hazard §04.1 is about.
   "COREPACK_ENABLE_PRERELEASES",
   "XDG_CACHE_HOME",
   "LOCALAPPDATA",
@@ -194,7 +194,7 @@ async function startYarnServersWithoutMirror(): Promise<{ npm: TestServer; berry
 /**
  * A cached install: the directory, plus the `.jup` marker §07.2 stats.
  *
- * §15.11 — `hash` matters now: the probe checks a hash-bearing reference against
+ * §06.1 — `hash` matters now: the probe checks a hash-bearing reference against
  * the marker before answering, so an install standing for a *pinned* reference
  * has to record that pin's digest or it is a miss.
  */
@@ -305,7 +305,7 @@ describe("resolveDescriptor step 3 — tags", () => {
 
     // `yarn@latest` must be Berry's 4.9.0, from `@yarnpkg/cli-dist`'s dist-tags
     // — not the `yarn` package's, which is Classic's 1.22.9. Both bands are npm
-    // registries since §15.41, so this is now a question of *which package* the
+    // registries since §02.5, so this is now a question of *which package* the
     // tag is read from rather than which protocol.
     await expect(
       resolveDescriptor({ name: "yarn", range: "latest" }, { allowTags: true }),
@@ -335,7 +335,7 @@ describe("resolveDescriptor step 3 — tags", () => {
 
   it("names the last band's registry URL even when the network is off", async () => {
     // The table's real registry, so the assertion is about the *table*, not the
-    // mock. Two things changed with §15.41: the tag lookup is now the
+    // mock. Two things changed with §02.5: the tag lookup is now the
     // `@yarnpkg/cli-dist` packument rather than `https://repo.yarnpkg.com/tags`,
     // and because it goes through the npm layer the refusal names the
     // *repository* rather than the document — `networkDisabledRegistry`, which
@@ -401,7 +401,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
     expect(berry.requests).toEqual([]);
   });
 
-  it("answers an exact pin from the cache with ZERO network requests (§14.1)", async () => {
+  it("answers an exact pin from the cache with ZERO network requests (§04.3)", async () => {
     const { npm, berry } = await startYarnServers();
     seedInstalled("yarn", "1.22.4");
 
@@ -426,7 +426,7 @@ describe("resolveDescriptor step 4 — cache probe", () => {
 
   it("runs BEFORE the exact-version passthrough (step 4 precedes step 5)", async () => {
     await startYarnServers();
-    // §15.11 redirected this row's fixture: the marker has to prove the pin the
+    // §06.1 redirected this row's fixture: the marker has to prove the pin the
     // reference carries, or the probe answers "miss" and step 5 supplies the
     // hash-bearing reference — which is what this row exists to rule out.
     seedInstalled("yarn", "1.22.4", "sha224.0123456789ab");
@@ -471,7 +471,7 @@ describe("resolveDescriptor step 5 — exact versions", () => {
     expect([...npm.requests, ...berry.requests]).toEqual([]);
   });
 
-  it("returns a version that does not exist, unverified (§15.35j, phase 2)", async () => {
+  it("returns a version that does not exist, unverified (§04.1, phase 2)", async () => {
     const { npm, berry } = await startYarnServers();
 
     // 1.99.99 is not in the packument; the 404 surfaces at download time.
@@ -585,11 +585,11 @@ describe("resolveDescriptor step 6 — range query", () => {
     );
   });
 
-  // §15.24 redirected this row. It used to assert that `>=4` resolves to
+  // §04.1 redirected this row. It used to assert that `>=4` resolves to
   // `4.10.0-rc.1` — corepack's behaviour, and the defect behind #473/#774. The
   // *lenient satisfaction* it was really testing is still exercised, by the last
   // case below: a range naming a prerelease still matches one.
-  describe("§15.24 — prereleases are excluded from implicit resolution", () => {
+  describe("§04.1 — prereleases are excluded from implicit resolution", () => {
     async function serveYarn(): Promise<void> {
       const npm = await startServer({
         "/yarn": { versions: {}, "dist-tags": {} },
@@ -644,7 +644,7 @@ describe("resolveDescriptor step 6 — range query", () => {
       process.env.COREPACK_NPM_REGISTRY = npm.origin;
       BERRY_REGISTRY.url = `${berry.origin}/tags`;
 
-      // §15.24 says "discard", with no fallback: `Failed to successfully resolve`
+      // §04.1 says "discard", with no fallback: `Failed to successfully resolve`
       // names a real problem, where installing a dev build silently does not.
       await expect(resolveDescriptor({ name: "yarn", range: ">=5" })).resolves.toBeNull();
     });
@@ -652,10 +652,10 @@ describe("resolveDescriptor step 6 — range query", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §04.5 — getDefaultVersion (tests 97–103)
+ * §04.6 — getDefaultVersion (tests 97–103)
  * ------------------------------------------------------------------ */
 
-describe("getDefaultVersion (§04.5)", () => {
+describe("getDefaultVersion (§04.6)", () => {
   it("returns the last-known-good entry with NO network (test 101)", async () => {
     const { npm, berry } = await startYarnServers();
     seedLastKnownGood({ yarn: "1.0.0" });
@@ -707,18 +707,18 @@ describe("getDefaultVersion (§04.5)", () => {
   });
 
   /**
-   * §15.28 — a recorded per-host reference must not carry a digest, and step 1
+   * §02.4 — a recorded per-host reference must not carry a digest, and step 1
    * is the one place a bad one can arrive from outside the current build.
    *
    * `lastKnownGood.json` is derived state that outlives a release. A version of
    * the tool that pinned the *launcher* package's digest here left an entry that
    * step 1 returns with no network, ahead of every guard downstream — so the
-   * repair has to happen on read or the machine stays broken forever. §04.4
+   * repair has to happen on read or the machine stays broken forever. §04.5
    * already says a damaged file degrades rather than fails; this is the same
    * rule with a more specific idea of damaged. The version is still a good
    * recorded default, so the suffix goes and the entry stays.
    */
-  it("heals a per-host entry that carries a digest, and rewrites the file (§15.28)", async () => {
+  it("heals a per-host entry that carries a digest, and rewrites the file (§02.4)", async () => {
     const { npm, berry } = await startYarnServers();
     seedLastKnownGood({
       deno: "2.9.5+sha512.26dfc0709884aed516f64ac6c25c140ec9b572836d99fb61890e09b52085f8936",
@@ -767,7 +767,7 @@ describe("getDefaultVersion (§04.5)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §02.1, §04.5 — the fallback locator's laziness
+ * §02.1, §04.6 — the fallback locator's laziness
  * ------------------------------------------------------------------ */
 
 describe("getFallbackLocator (§02.1)", () => {
@@ -816,7 +816,7 @@ describe("getFallbackLocator (§02.1)", () => {
     expect(npm.requests).toEqual(["/yarn/latest"]);
   });
 
-  // §15.33 redirected this row: `transparent.default` used to be an
+  // §04.6 redirected this row: `transparent.default` used to be an
   // unconditional override, and the row asserted that the recorded default was
   // not even read. It is a **floor** now, so it is read — but still never over
   // the network, which is the half of the original assertion that still holds.
@@ -828,7 +828,7 @@ describe("getFallbackLocator (§02.1)", () => {
     expect([...npm.requests, ...berry.requests]).toEqual([]);
   });
 
-  it("prefers a recorded default from the same major line or newer (§15.33)", async () => {
+  it("prefers a recorded default from the same major line or newer (§04.6)", async () => {
     const { npm, berry } = await startYarnServers();
     // Row 199: `corepack install -g yarn@4.9.0` then `yarn dlx`. 4.9.0 is
     // *older* than the table's 4.14.1, and the user still gets 4.9.0 — a
@@ -840,7 +840,7 @@ describe("getFallbackLocator (§02.1)", () => {
     expect([...npm.requests, ...berry.requests]).toEqual([]);
   });
 
-  it("keeps the floor when the recorded default is from an older major (§15.33)", async () => {
+  it("keeps the floor when the recorded default is from an older major (§04.6)", async () => {
     await startYarnServers();
     // #812 exactly: `yarn create` reaching for Yarn Classic, unsupported since
     // 2020, because `install -g yarn@1.22.22` recorded it as the default.
@@ -850,7 +850,7 @@ describe("getFallbackLocator (§02.1)", () => {
     await expect(locator.reference()).resolves.toBe(DEFINITIONS.yarn!.transparent.default);
   });
 
-  it("keeps the floor when the recorded default cannot be parsed (§15.33)", async () => {
+  it("keeps the floor when the recorded default cannot be parsed (§04.6)", async () => {
     await startYarnServers();
     seedLastKnownGood({ yarn: "https://example.test/yarn.js" });
 

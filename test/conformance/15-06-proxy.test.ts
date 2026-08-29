@@ -1,5 +1,5 @@
 /**
- * §15.38 rows 156–157 — proxying, implemented rather than delegated (§15.6, §14.8).
+ * rows 156–157 — proxying, implemented rather than delegated (§05.1).
  *
  * Corepack carried an HTTP-client dependency *solely* for proxy support, dropped
  * it in 0.35.0, and now relies on a host feature gated behind
@@ -40,7 +40,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.38 proxying (§15.6)", () => {
+describe("§05.1 proxying", () => {
   it("156: HTTPS_PROXY alone proxies the request — no second opt-in flag", async () => {
     const proxy = await startProxy(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });

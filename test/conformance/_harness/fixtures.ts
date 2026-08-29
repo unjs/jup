@@ -41,13 +41,13 @@ export interface Fixture {
 }
 
 /**
- * §15.13's per-user shim directory for a fixture whose home is `root`, and the
+ * §10.5's per-user shim directory for a fixture whose home is `root`, and the
  * environment that redirects it there.
  *
  * Both halves are platform-specific, and a row that hardcodes either one tests
  * nothing on the other two platforms. Linux and the BSDs honour
  * `XDG_BIN_HOME`; **macOS has no XDG convention** and always lands on
- * `~/.local/bin`; Windows uses `%LOCALAPPDATA%\jup\bin` (§15.13 point 1, and
+ * `~/.local/bin`; Windows uses `%LOCALAPPDATA%\jup\bin` (§10.5 point 1, and
  * point 5 for why `LOCALAPPDATA` is cleared everywhere else).
  *
  * A row that set only `XDG_BIN_HOME` therefore redirected nothing on macOS and
@@ -76,7 +76,7 @@ export function perUserShims(root: string): {
 }
 
 /**
- * §15.13 point 6's `<home>/bin` alternate, for a fixture whose home is `root`.
+ * §10.5 point 6's `<home>/bin` alternate, for a fixture whose home is `root`.
  *
  * There is no Windows counterpart — the candidate list has one entry there, so a
  * row that exercises the preference skips that platform rather than spelling the
@@ -91,7 +91,7 @@ export function alternateShims(root: string): string {
  *
  * `realpath`, because macOS puts `$TMPDIR` behind a symlink (`/var` ->
  * `/private/var`) and the tool resolves the paths it reports and compares:
- * §10.4 realpaths the install directory, §03.1 realpaths the manifest it
+ * §10.5 realpaths the install directory, §03.1 realpaths the manifest it
  * names. Without this every assertion that quotes a path back compares
  * `/var/folders/...` against `/private/var/folders/...` and fails on macOS
  * alone. `test/unit/shims.test.ts` has done this since it was written; the
@@ -210,7 +210,7 @@ export function versionOf(reference: string): string {
 
 /** The entry-point paths the table declares for this version, tarball-relative. */
 export function binPathsFor(name: string, version: string): string[] {
-  // §15.41 — every band is a tarball with a `BinSpec` of paths; the single-file
+  // §02.5 — every band is a tarball with a `BinSpec` of paths; the single-file
   // branch that used to stand here was Yarn Berry's alone.
   const spec = getSpecFor(name, version);
   return [...new Set(Object.values(spec.bin))].map((path) => path.replace(/^\.\//, ""));
@@ -241,10 +241,10 @@ export function seedPackageManager(
     }
   }
 
-  // §15.11 — the marker's hash is what a cache hit is now checked against, so a
+  // §06.1 — the marker's hash is what a cache hit is now checked against, so a
   // seeded entry has to record the digest the reference it stands for pins.
   // Writing a constant here would make every seeded fixture that pins a hash
-  // look like the collision §15.11 refuses to adopt.
+  // look like the collision §06.1 refuses to adopt.
   const pinned = parse(reference)?.build ?? [];
   const hash = pinned.length > 0 ? pinned.join(".") : "sha512.seeded";
 
@@ -292,13 +292,13 @@ export function packageManagerTarball(
 }
 
 /**
- * §15.41 — Yarn Berry, published the way the table now fetches it.
+ * §02.5 — Yarn Berry, published the way the table now fetches it.
  *
  * Berry used to be a lone `yarn.js` on `repo.yarnpkg.com`, seeded with
  * `publishFile` at a path built out of the band's URL template. It is an
  * ordinary npm package now, so the rows that need it publish
  * `@yarnpkg/cli-dist` like any other tarball — and get npm's signature with it,
- * which is what lets them stop opting out of §15.11.
+ * which is what lets them stop opting out of §06.1.
  *
  * Returns the hash-pinned reference for the published bytes, since that is what
  * most callers then write into a `packageManager` field.

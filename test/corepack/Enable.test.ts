@@ -19,7 +19,7 @@ beforeEach(async () => {
 });
 
 describe(`EnableCommand`, () => {
-  // SKIP (jup §15.13): jup does not derive the install directory from a `PATH`
+  // SKIP (jup §10.5): jup does not derive the install directory from a `PATH`
   // lookup of its own name. It uses `--install-directory`, else
   // COREPACK_SHIM_DIRECTORY, else $XDG_BIN_HOME/~/.local/bin — so the shims
   // land there rather than in the directory this row puts on PATH.
@@ -47,7 +47,7 @@ describe(`EnableCommand`, () => {
     });
   });
 
-  // SKIP (jup §15, #138): jup's default target set includes npm, so `npm` and
+  // SKIP (jup §10.7, #138): jup's default target set includes npm, so `npm` and
   // `npx` shims appear where Corepack writes none. Corepack excludes npm
   // deliberately; #138 records why that is the wrong call. Conformance row 117
   // pins the inclusion.
@@ -96,7 +96,7 @@ describe(`EnableCommand`, () => {
     });
   });
 
-  // SKIP (jup §14.16): silently clobbering a regular file jup did not install
+  // SKIP (jup §10.6): silently clobbering a regular file jup did not install
   // is hostile, so it refuses and prints `… was not installed by this tool -
   // skipping (use --force to overwrite)`. This row writes `hello` to `yarn`
   // and asserts it is replaced; under jup it survives unless --force is given.
@@ -161,7 +161,7 @@ describe(`EnableCommand`, () => {
     });
   });
 
-  // §10.2 gives every name its own stub, so the corrected link reads `yarn.mjs`,
+  // §10.3 gives every name its own stub, so the corrected link reads `yarn.mjs`,
   // which is what this row's last assertion wants. (Was `test.skipIf(win32)`.)
   test.skipIf(process.platform === `win32`)(`should overwrite existing symlinks if they are incorrect`, async () => {
     await xfs.mktempPromise(async cwd => {

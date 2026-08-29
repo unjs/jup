@@ -46,13 +46,13 @@ function fromEnv(name: string): string | undefined {
 }
 
 /**
- * `NO_PROXY` matching (§15.6): `*` disables proxying entirely, entries are
+ * `NO_PROXY` matching (§05.1): `*` disables proxying entirely, entries are
  * comma- (or whitespace-) separated host suffixes, a leading `.` or `*.` marks a
  * suffix explicitly, a bare entry matches the host *and* its subdomains, and a
  * `:port` qualifier restricts the entry to that port.
  *
  * The bare-suffix case is where `proxy-from-env` itself is stricter than the
- * spec: it requires an exact match unless the entry starts with `.` or `*`. §15.6
+ * spec: it requires an exact match unless the entry starts with `.` or `*`. §05.1
  * requires "bare hostnames" *and* subdomain matching, and `NO_PROXY=internal`
  * failing to cover `registry.internal` is a surprise nobody wants behind a
  * corporate proxy.
@@ -165,8 +165,8 @@ function sniFor(hostname: string): string | undefined {
 /**
  * A `fetch`-shaped transport built on `node:http` / `node:https`.
  *
- * `http.ts` selects it only for a matched proxy (§14.8) or
- * `COREPACK_STRICT_SSL=0` (§15.4); other requests use native `fetch`.
+ * `http.ts` selects it only for a matched proxy (§05.1) or
+ * `COREPACK_STRICT_SSL=0` (§05.1); other requests use native `fetch`.
  */
 export const nodeFetch: typeof globalThis.fetch = async (input, init) => {
   const href =
@@ -223,7 +223,7 @@ async function follow(start: URL, init: RequestInit): Promise<Response> {
       throw new Error(`Refusing to follow a redirect to ${next.protocol}//${next.host}`);
     }
 
-    // §14.6 — credentials do not survive a cross-origin hop, tunnel or no tunnel.
+    // §05.1 — credentials do not survive a cross-origin hop, tunnel or no tunnel.
     if (next.origin !== target.origin) delete headers.authorization;
 
     target = next;
@@ -319,7 +319,7 @@ async function tunnelledRequest(
     // No agent: the socket is ours, and `createConnection` is only consulted
     // when the request has none (see `_http_client`), so `agent: false` — which
     // *creates* an agent — would quietly ignore the tunnel.
-    // §15.4 — the certificate checked here is the *target's*; a corporate CA
+    // §05.1 — the certificate checked here is the *target's*; a corporate CA
     // bundle (or a disabled check) has to reach inside the tunnel, which is
     // exactly where a TLS-inspecting proxy puts its own certificate.
     createConnection: () =>
@@ -334,7 +334,7 @@ async function tunnelledRequest(
 }
 
 /**
- * No proxy, but §15.4 has something to say about TLS: the same `node:https`
+ * No proxy, but §05.1 has something to say about TLS: the same `node:https`
  * request `fetch` would have made, with the certificate policy attached.
  *
  * Only reachable when {@link tlsTransportRequired} is true; everything else goes
@@ -482,7 +482,7 @@ async function connectToProxy(proxy: URL, signal: AbortSignal | undefined): Prom
     try {
       await connected(socket, "secureConnect", signal);
     } catch (error) {
-      // §15.4 — name the *proxy* here. Classifying this failure against the
+      // §05.1 — name the *proxy* here. Classifying this failure against the
       // target's host, which is what an outer classifier would do, would send
       // the user looking at the wrong certificate.
       const classified = classifyTlsFailure(error, proxy.host);
@@ -536,7 +536,7 @@ function abortError(signal: AbortSignal | undefined): Error {
 }
 /**
  * The seam back to the web API the rest of the tool speaks: `install.ts` tees
- * `response.body` to hash and extract in one pass (§16.5), so the body has to be
+ * `response.body` to hash and extract in one pass (§06.2), so the body has to be
  * a real streaming `ReadableStream`, not a buffered one.
  */
 function toResponse(message: IncomingMessage): Response {

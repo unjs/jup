@@ -1,5 +1,5 @@
 /**
- * §15.24 — a prerelease never wins implicit resolution (rows 184–186).
+ * §04.1 — a prerelease never wins implicit resolution (rows 184–186).
  *
  * The defect recurs on every package-manager prerelease cycle (#473, and its
  * duplicate #774, both open with no maintainer response in roughly two years):
@@ -7,7 +7,7 @@
  * `11.0.0-dev.1005` satisfies `*`, `rcompare` sorts it above every stable
  * release, and `corepack use pnpm` installs a dev build.
  *
- * The hazard §15.24 warns about is a test that cannot tell the bug from the fix,
+ * The hazard §04.1 warns about is a test that cannot tell the bug from the fix,
  * so every row here publishes **both** a stable release and a higher prerelease
  * and asserts which one came back. A fixture with only stable versions would
  * pass whether or not the filter exists.
@@ -33,7 +33,7 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
 }
 
 /**
- * §15.23 — what `use <name>@<range>` recorded, since a typed range stays in the
+ * §04.4 — what `use <name>@<range>` recorded, since a typed range stays in the
  * field and the version it resolved to goes here instead.
  */
 function resolvedOf(fixture: { json(relative: string): unknown }, key: string): string | undefined {
@@ -63,7 +63,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.24 prereleases in implicit resolution", () => {
+describe("§04.1 prereleases in implicit resolution", () => {
   it("184: `use pnpm` resolves to the stable release, not the higher prerelease", async () => {
     const fixture = createFixture({ name: "project" });
 
@@ -79,20 +79,20 @@ describe("§15.24 prereleases in implicit resolution", () => {
     const result = await run(["use", "pnpm@>=11"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    // §15.23 — the range is what the user typed, so it is what the field keeps;
+    // §04.4 — the range is what the user typed, so it is what the field keeps;
     // which version it picked out of the band is `jup.lock`'s business.
     expect(pinOf(fixture)).toBe("pnpm@>=11");
     expect(resolvedOf(fixture, "pnpm@>=11")).toBe("11.1.2");
   });
 
-  it("184: takes the semver maximum, not `latest` — §15.24's SHOULD is not implemented", async () => {
-    // The §15 audit's finding about this row, made explicit rather than left as
+  it("184: takes the semver maximum, not `latest` — §04.1's SHOULD is not implemented", async () => {
+    // A finding about this row, made explicit rather than left as
     // a blind spot: rows 184 above cannot tell "resolved via the `latest`
     // dist-tag" from "took the stable semver maximum", because the fixture's
     // `latest` *is* its stable maximum. This row separates them by publishing a
     // `latest` that points at an older release than the stable maximum.
     //
-    // §15.24 says a bare name SHOULD resolve via `latest`. It deliberately does
+    // §04.1 says a bare name SHOULD resolve via `latest`. It deliberately does
     // not here: §04.1 step 6 unions candidates across *every* range band, while
     // a dist-tag is resolved against the last band's registry only — so honouring
     // the SHOULD for `yarn` would silently drop every Yarn Classic candidate.
@@ -136,7 +136,7 @@ describe("§15.24 prereleases in implicit resolution", () => {
   });
 
   it("185: and it is env-file eligible, so a project can opt in for itself", async () => {
-    // §15.37 marks it eligible, and eligibility is a deny-list, so nothing had to
+    // §11.1 marks it eligible, and eligibility is a deny-list, so nothing had to
     // be registered for this to work. Asserted through the proxy path because
     // that is where §03.2's walk loads the file (`corepack use` takes its spec
     // from the command line and never walks — see the note in the report).
@@ -184,7 +184,7 @@ describe("§15.24 prereleases in implicit resolution", () => {
       (await run(["use", "pnpm@11.2.0-dev.1005"], { ...fixture, registry, env: env() })).exitCode,
     ).toBe(0);
 
-    // §14.2's cache probe keeps the lenient rule too, so the second run answers
+    // §04.3's cache probe keeps the lenient rule too, so the second run answers
     // from the store rather than going back to the registry.
     registry.reset();
     const again = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });

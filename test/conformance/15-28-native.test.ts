@@ -1,19 +1,19 @@
 /**
- * §15.28 — package managers that are not portable JavaScript (rows 193–194).
+ * §02.4 / §08.3 — package managers that are not portable JavaScript (rows 193–194).
  *
  * #295 is the single most-upvoted issue in corepack's tracker (146👍, open since
  * 2023) and it is closed by architecture, not by code: *"Corepack was written
  * with assumption that package managers would be implemented in JS"*. Three
  * places carry that assumption — one URL template per version (§02.4), a `bin`
- * map of `.js` paths (§07.7), and in-process module loading (§08.2) — and §15.28
- * requires all three to admit a native artifact.
+ * map of `.js` paths (§07.7), and in-process module loading (§08.2) — and native
+ * support requires all three to admit a native artifact.
  *
- * **This suite adds no package manager.** §15.21 and §15.28 both require a
+ * **This suite adds no package manager.** §03.1 and §16 both require a
  * maintainer's agreement before an entry reaches the built-in table, and Bun's
  * maintainers reportedly asked not to be added; what is being proven here is
  * that the *architecture* no longer forecloses it. The fixture manager therefore
  * lives in a throwaway **copy** of the tool whose `table.ts` gains one entry —
- * which is also the strongest available evidence for §15.21's other requirement,
+ * which is also the strongest available evidence for §03.1's other requirement,
  * that adding a package manager is a **data-only** change: this file adds data
  * and nothing else, and everything below then works.
  *
@@ -66,7 +66,7 @@ const ENTRIES = {
  * The native artifact: a real executable with a shebang, not a JavaScript file.
  *
  * It is deliberately **not valid JavaScript** — `case "$1" in` is a syntax error
- * in any JS parser — so a run that reached §08.2's `import()` instead of §15.28's
+ * in any JS parser — so a run that reached §08.2's `import()` instead of §08.3's
  * direct execution could not possibly pass. That is half of row 193's "no JS
  * runtime consulted"; the other half is `--probe`, which reports `$0`.
  */
@@ -132,7 +132,7 @@ const ARTIFACT_PATH = `/native/${NAME}-${VERSION}-${process.platform}-${process.
 /**
  * The host is `registry.npmjs.org` because the harness's `--import` shim rewrites
  * exactly that host onto the mock (and only that host), which keeps the fixture
- * on `https:` and clear of §14.9's and §05.2's rewriting rules.
+ * on `https:` and clear of §05.2's host-check and rewriting rules.
  *
  * A `url`-typed registry, like Yarn Berry's: it publishes no signatures, so §06.1
  * row 1's explicit hash pin is the whole verification story — which is also the
@@ -160,7 +160,7 @@ function band(bin: Record<string, string>): unknown {
 /**
  * One table entry, and nothing else: `{platform}`/`{arch}` in the `url`,
  * `exec: "native"` on the band, and a `bin` map naming a file with no extension
- * at all. No code accompanies it, which is §15.21's data-only requirement.
+ * at all. No code accompanies it, which is §03.1's data-only requirement.
  */
 const DEFINITION = {
   default: REFERENCE,
@@ -181,7 +181,7 @@ const DEFINITION = {
  * A third entry: a per-host band whose `targets` map covers everything **except**
  * this host.
  *
- * §15.28's `{target}` exists to make "this version has no build for you" a table
+ * §02.4's `{target}` exists to make "this version has no build for you" a table
  * lookup rather than a 404, and this is the entry that exercises the miss. The
  * map is deliberately non-empty — a band with no targets at all could fail for
  * the trivial reason, and the message names what the band *does* ship for.
@@ -274,7 +274,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.28 native package managers", () => {
+describe.skipIf(!POSIX)("§08.3 native package managers", () => {
   function project(): ReturnType<typeof createFixture> {
     return createFixture({ name: "app", packageManager: `${NAME}@${REFERENCE}` });
   }
@@ -336,11 +336,11 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     // it. What this reads is `$0`, and for a `#!/bin/sh` artifact that is the
     // script path the kernel handed the interpreter — which is exactly the fact
     // this row wants, and is *not* `argv[0]`, which a shell script never sees.
-    // §15.28's `argv[0]` rule (the invoked name, so `bunx` and `bun` can be one
+    // §08.3's `argv[0]` rule (the invoked name, so `bunx` and `bun` can be one
     // file) needs a real executable to observe and is asserted in
     // `test/unit/exec.test.ts`.
     expect(lines.argv0).toBe(stored(fixture.home, ENTRIES.executable.path));
-    // §08.7 is unchanged by §15.28: the child still sees COREPACK_ROOT, and a
+    // §08.7 is unchanged by §08.3: the child still sees COREPACK_ROOT, and a
     // spawned child sees it because it inherits the ambient environment.
     expect(lines.root).toBe(dirname(dirname(toolBin)));
     // The arguments reach the package manager untouched, separators and all.
@@ -495,7 +495,7 @@ describe.skipIf(!POSIX)("§15.28 native package managers", () => {
     // fails — so "it happened to be executable already" cannot pass this test.
     expect(modeOf(ENTRIES.data.path) & 0o111).toBe(0);
 
-    // §07.4 rule 6's prohibition, which §15.28 explicitly must not widen: the
+    // §07.4 rule 6's prohibition, which native execution must not widen: the
     // executable bit is taken, setuid and setgid never are.
     const setuid = modeOf(ENTRIES.setuid.path);
     expect(setuid & 0o111).not.toBe(0);
@@ -587,7 +587,7 @@ function headerModes(tarball: Uint8Array): Record<string, number> {
   return modes;
 }
 
-describe.skipIf(!POSIX)("§15.28 fixture integrity", () => {
+describe.skipIf(!POSIX)("§07.4 fixture integrity", () => {
   it("the fixture tarball really declares the modes row 194 reads back", () => {
     const modes = headerModes(TARBALL);
     expect(modes[`package/${ENTRIES.executable.path}`]).toBe(0o755);

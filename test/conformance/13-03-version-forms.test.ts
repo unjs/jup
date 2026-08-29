@@ -23,14 +23,14 @@ import {
 const registry = new MockRegistry();
 
 /**
- * §15.11 — `repo.yarnpkg.com` is a url-type registry: no signatures, no
+ * §06.1 — `repo.yarnpkg.com` is a url-type registry: no signatures, no
  * `dist.integrity`, nothing but TLS. A Berry artifact therefore clears a
  * verification tier only through a pinned hash, so the rows that install one
  * pin the digest of the bytes the mock serves. What they are about — which band
  * a prerelease lands in — is unchanged.
  */
 function berryPin(version: string): string {
-  // §15.41 — the pinned artifact is the `@yarnpkg/cli-dist` tarball. It was the
+  // §02.5 — the pinned artifact is the `@yarnpkg/cli-dist` tarball. It was the
   // single `yarn.js` while Berry came from `repo.yarnpkg.com`.
   return `${version}+sha512.${hashOf(
     packageManagerTarball("yarn", version, { packageName: "@yarnpkg/cli-dist" }),
@@ -59,7 +59,7 @@ beforeAll(async () => {
     packageManagerTarball("mypm", "1.0.0", { binPaths: ["bin/mypm.js"] }),
   );
 
-  // §15.41 — Berry is `@yarnpkg/cli-dist` on npm; these used to be single-file
+  // §02.5 — Berry is `@yarnpkg/cli-dist` on npm; these used to be single-file
   // artifacts on repo.yarnpkg.com.
   for (const version of ["2.0.0-rc.30", "3.0.0-rc.2"]) {
     publishBerry(registry, version);
@@ -149,7 +149,7 @@ describe("§13.3 version forms", () => {
     const result = await run([`yarn@${url}`, "--version"], {
       ...fixture,
       registry,
-      // §15.11 redirected this row: `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`
+      // §06.1 redirected this row: `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`
       // permits the *host*, and §02.1's `#<algo>.<hex>` fragment (row 20) is
       // how the user says what should arrive from it. With neither a fragment
       // nor a signature the artifact clears no tier, so the URL form now needs
@@ -164,7 +164,7 @@ describe("§13.3 version forms", () => {
     expect(result.stdout).toBe("1.22.21\n");
   });
 
-  it("18: without a fragment and without the opt-out, the URL form is refused (§15.11)", async () => {
+  it("18: without a fragment and without the opt-out, the URL form is refused (§06.1)", async () => {
     const fixture = createFixture({});
     const url = `${registry.origin}/yarn/-/yarn-1.22.21.tgz`;
 
@@ -189,7 +189,7 @@ describe("§13.3 version forms", () => {
     const result = await run([`mypm@${url}`, "--version"], {
       ...fixture,
       registry,
-      // §15.11 redirected this row too, and for the same reason as row 18: an
+      // §06.1 redirected this row too, and for the same reason as row 18: an
       // unknown package manager fetched from a bare URL has no signature and no
       // pinned hash. Row 20 is the same row with a `#sha1.…` fragment instead.
       env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", COREPACK_ALLOW_UNVERIFIED: "1" }),

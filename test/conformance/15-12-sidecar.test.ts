@@ -1,10 +1,10 @@
 /**
- * §15.38 row 169 — the sidecar integrity (§15.12).
+ * row 169 — the sidecar integrity (§03.7).
  *
  * `<version>+<algo>.<hex>` is valid semver build metadata, and corepack's
  * maintainers defend it as a deliberate tradeoff (#316) — but it means
  * `packageManager` no longer round-trips through tooling that reads the field as
- * a version, which is what #726 and #620 keep asking about. §15.12's answer is
+ * a version, which is what #726 and #620 keep asking about. §03.7's answer is
  * to keep writing the suffixed form (it is the interoperable one, and §13
  * asserts it) while *reading* an explicit sidecar as the same thing, and to add
  * `--pin-style=sidecar` for projects that would rather hold a clean version.
@@ -31,7 +31,7 @@ import {
 const registry = new MockRegistry();
 
 const TARBALL = packageManagerTarball("pnpm", "6.6.2");
-/** What §15.12's `integrity` field holds: the SRI of the published tarball. */
+/** What §03.7's `integrity` field holds: the SRI of the published tarball. */
 const INTEGRITY = sriOf(TARBALL);
 /** A validly shaped SRI describing something else entirely. */
 const WRONG = `sha512-${Buffer.alloc(64).toString("base64")}`;
@@ -68,7 +68,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.12 — devEngines.packageManager.integrity", () => {
+describe("§03.7 — devEngines.packageManager.integrity", () => {
   it("169: a correct sidecar beside a clean `packageManager` installs", async () => {
     const fixture = createFixture(manifest(INTEGRITY));
 
@@ -159,7 +159,7 @@ describe("§15.12 — devEngines.packageManager.integrity", () => {
       integrity: INTEGRITY,
     });
 
-    // §15.26's "the result re-reads cleanly", and §15.12's "both forms MUST be
+    // §03.7's "the result re-reads cleanly" and "both forms MUST be
     // accepted on read" — from a cold store, so the pin is actually checked.
     const cold = createFixture();
     const reread = await run(["pnpm", "--version"], {
@@ -184,7 +184,7 @@ describe("§15.12 — devEngines.packageManager.integrity", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    // §15.26 bullet 2: a devEngines-only project gets no top-level
+    // §03.7 bullet 2: a devEngines-only project gets no top-level
     // `packageManager` invented for it.
     expect(pinOf(fixture)).toBeUndefined();
     expect(sidecarOf(fixture)).toEqual({

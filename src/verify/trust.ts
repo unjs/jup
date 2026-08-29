@@ -13,7 +13,7 @@ import { getTrustedKeys, UntrustedKeyidError, verifySignature } from "./integrit
 import { getHomeFolder } from "../cache/store.ts";
 import type { RegistrySignature, TrustedKey } from "../types.ts";
 
-/** §15.9 — `<home>/keys.json`, a sibling of `lastKnownGood.json` and outside `v1`. */
+/** §06.3 — `<home>/keys.json`, a sibling of `lastKnownGood.json` and outside `v1`. */
 export const KEYS_CACHE_NAME = "keys.json";
 
 /** The only shape this build understands; anything else reads as "no cached keys". */
@@ -34,7 +34,7 @@ export const KEYS_ENDPOINT = `${DEFAULT_REGISTRY}/-/npm/v1/keys`;
 /**
  * How long a *fruitless* refresh suppresses the next one.
  *
- * §15.9 requires the fetch timestamp to be recorded and says nothing about what
+ * §06.3 requires the fetch timestamp to be recorded and says nothing about what
  * to do with it, so: it is a rate limit on failure, not a time-to-live. A cached
  * set that **already carries the keyid the registry signed with** is used at any
  * age — it is exactly the answer a refresh would fetch, and re-fetching it would
@@ -75,7 +75,7 @@ export async function verifySignatureWithRefresh(input: {
     if (!(error instanceof UntrustedKeyidError) || !refreshable()) throw error;
   }
 
-  // §15.9: merged with, never substituted for. The embedded set is the base and
+  // §06.3: merged with, never substituted for. The embedded set is the base and
   // keeps its walk position; the refresh may only add keyids to the end.
   const base = getTrustedKeys(input.registryOrigin);
 
@@ -99,7 +99,7 @@ export async function verifySignatureWithRefresh(input: {
 }
 
 /**
- * §15.9's two hard stops.
+ * §06.3's two hard stops.
  *
  * `COREPACK_INTEGRITY_KEYS` set to anything at all — including the `""` and `"0"`
  * that disable verification outright, which never reach here — means the user
@@ -118,7 +118,7 @@ function refreshable(): boolean {
  *
  * Exported for the tests, and not only for convenience: `httpGet` refuses under
  * `COREPACK_ENABLE_NETWORK=0` on its own, so a test that counts sockets cannot
- * see the difference between §15.9's rule and no rule at all. The decision is
+ * see the difference between §06.3's rule and no rule at all. The decision is
  * the observable thing, so the decision is what gets asserted.
  */
 export function shouldRefresh(
@@ -165,7 +165,7 @@ export function keysCachePath(): string {
  * not know, an entry for another origin: all of them are the same answer, and
  * the caller carries on with the embedded set. Individual keys are validated
  * one by one, so a single malformed entry cannot poison the rest — the rule
- * §04.4 sets for a non-string last-known-good value.
+ * §04.5 sets for a non-string last-known-good value.
  */
 export function readKeysCache(): CachedKeys {
   let text: string;
@@ -189,7 +189,7 @@ export function readKeysCache(): CachedKeys {
 
   // Only npm's origin is ever written here (see {@link KEYS_ENDPOINT}), so only
   // npm's origin is ever read back: a hand-edited file cannot introduce trust
-  // for a registry §15.10 says may not auto-fetch keys at all.
+  // for a registry §06.3 says may not auto-fetch keys at all.
   const entry = (registries as Record<string, unknown>)[DEFAULT_REGISTRY];
   if (!entry || typeof entry !== "object" || Array.isArray(entry)) return EMPTY;
 
@@ -208,7 +208,7 @@ export function readKeysCache(): CachedKeys {
 /**
  * Replace `<home>/keys.json` atomically, and never fail a run over it.
  *
- * Write-temp-then-rename (§14.3), so a concurrent reader sees the old file or
+ * Write-temp-then-rename (§06.3), so a concurrent reader sees the old file or
  * the new one and never a truncated interleaving; every filesystem error is
  * swallowed, per §07.8 — a read-only `COREPACK_HOME` costs one request next
  * time, not a broken install.

@@ -3,7 +3,7 @@
  *
  * The tool owns exactly one directory. Its concurrency story is a single
  * primitive: **rename is atomic within a filesystem, and losing that race is a
- * success**. There is no lockfile and must never be one (§07.5, §16.6).
+ * success**. There is no lockfile and must never be one (§07.5).
  */
 
 const {
@@ -37,7 +37,7 @@ import type { CorepackMarker, InstallSpec, Locator } from "../types.ts";
 /** §07.2 — the file whose presence means "this install is complete and valid". */
 export const MARKER_NAME = ".jup";
 
-/** §04.4 — the global default map. Lives outside `v1`, so `cache clean` spares it. */
+/** §04.5 — the global default map. Lives outside `v1`, so `cache clean` spares it. */
 export const LAST_KNOWN_GOOD_NAME = "lastKnownGood.json";
 
 /** §07.2 — the layout-version segment; bumping it abandons old caches wholesale. */
@@ -50,7 +50,7 @@ export const LAYOUT_VERSION = "v1";
  * is: `cache clean` empties the cache, and the copy of jup that the shims on the
  * user's `PATH` point at is not a cache entry. Under `v1` a `jup cache clean`
  * would delete the very executable that ran it and leave every shim dying with
- * `bad interpreter` — §15.43's failure, one directory over, and this time with
+ * `bad interpreter` — §07.11's failure, one directory over, and this time with
  * no `enable` left to repair it.
  */
 export const SELF_FOLDER_NAME = "self";
@@ -64,7 +64,7 @@ function errorCode(error: unknown): string | undefined {
  *
  * `node:crypto` is reached through `process.getBuiltinModule` rather than an
  * `import`: importing it pulls in two dozen native modules and neither caller —
- * `createTempDir`, `writeLastKnownGood` — is on the warm path (§01.3, §16.3).
+ * `createTempDir`, `writeLastKnownGood` — is on the warm path (§01.3, §16, Build shape).
  */
 function randomSuffix(): string {
   return process.getBuiltinModule("node:crypto").randomBytes(4).toString("hex");
@@ -97,7 +97,7 @@ export function getSelfFolder(): string {
 }
 
 /**
- * §15.43 — would `cache clean` delete `file`?
+ * §10.2 — would `cache clean` delete `file`?
  *
  * That is the question every caller is actually asking, and the answer is the
  * *install folder* rather than the whole of `<home>`. {@link cacheClean} removes
@@ -106,7 +106,7 @@ export function getSelfFolder(): string {
  * `<home>/node`, which an install script downloads when the machine has none —
  * is as durable as one the user installed by hand. Refusing to name those is
  * what leaves a machine with no host `node` holding shims that resolve to
- * nothing, which is the opposite of what §15.43 is for.
+ * nothing, which is the opposite of what §10.2 is for.
  *
  * A path-boundary test rather than a `startsWith` on the two strings: an install
  * folder of `~/.cache/jup/v1` would otherwise swallow `~/.cache/jup/v10`.
@@ -209,7 +209,7 @@ export function readMarker(dir: string): CorepackMarker | null {
  * It lives here rather than in `install` so the proxy path can answer "is this
  * already installed?" without loading the download-and-verify stack — `http`,
  * `tar`, `integrity` and `registry` are ~36 KB of code and 70-odd native modules
- * that a warm run never executes (§16.3).
+ * that a warm run never executes (§16, Build shape).
  */
 export function readInstalledSpec(locator: Locator): InstallSpec | null {
   return resolveInstallTarget(locator).installed;
@@ -279,7 +279,7 @@ function serializePin(pin: HashPin): string {
  * algorithm name, which is in the reference the attacker is trying to match —
  * so an early return on a length difference leaks nothing, and `node:crypto`'s
  * `timingSafeEqual` stays unimported: it would put twenty-odd native modules on
- * a path the warm run exists to keep empty (§16.3).
+ * a path the warm run exists to keep empty (§16, Build shape).
  */
 function markerProvesPin(marker: CorepackMarker, pin: HashPin): boolean {
   const expected = serializePin(pin);
@@ -305,7 +305,7 @@ const DEFAULT_HASH_ALGO = "sha512";
 /**
  * §06.2 — `algo` from `build[0]`/the URL fragment, `digest` from `build[1]`.
  *
- * Lives beside the store rather than in `install` because §15.11's cache-hit
+ * Lives beside the store rather than in `install` because §06.1's cache-hit
  * check needs exactly the same reading of a reference, and a second copy of it
  * would be a second chance to disagree about what counts as a pin.
  */
@@ -352,7 +352,7 @@ export function referenceWithHash(name: string, reference: string, hash: string)
   // A URL reference keeps its own `#algo.digest` notation and is never rewritten.
   if (parsed === null) return reference;
 
-  // §15.28 — a per-host artifact's digest is a fact about *this machine*, and a
+  // §02.4 — a per-host artifact's digest is a fact about *this machine*, and a
   // reference is the wrong place to keep it: references travel. They go into
   // `packageManager`, which is committed, and into `lastKnownGood.json`, which
   // is copied into container images and warmed caches. Either way the digest
@@ -430,7 +430,7 @@ export function promote(tmp: string, dest: string): boolean {
 
   // The rename publishes the staging tree, so `0o700` widens to the ceiling the
   // extractor gave the directories inside it: a store seeded by one user for
-  // another to run (§15.19) has to be traversable. Best-effort, and a
+  // another to run (§07.4) has to be traversable. Best-effort, and a
   // filesystem without modes simply keeps the stricter one.
   try {
     chmodSync(tmp, 0o755 & ~process.umask());
@@ -478,7 +478,7 @@ export function promote(tmp: string, dest: string): boolean {
 }
 
 /**
- * §04.3 + §14.1 + §14.2 — the cache probe.
+ * §04.2 + §04.3 — the cache probe.
  *
  * For an **exact** version this must `stat` the marker directly and skip the
  * directory scan entirely; the scan is for genuine ranges only. Dot-entries are
@@ -488,7 +488,7 @@ export function promote(tmp: string, dest: string): boolean {
 export function findInstalledVersion(name: string, range: string): string | null {
   const installFolder = getInstallFolder();
 
-  // §14.1 — the hottest path in the tool: an exactly-pinned `packageManager`
+  // §04.3 — the hottest path in the tool: an exactly-pinned `packageManager`
   // field. The answer is trivially the version itself, so one `stat` replaces an
   // `opendir` plus a semver parse per installed version. The build suffix is
   // dropped because the directory name never carries one (§07.2), and the marker
@@ -498,8 +498,8 @@ export function findInstalledVersion(name: string, range: string): string | null
     const version = parsed.version;
     const pin = readHashPin(range, parsed.build);
 
-    // §15.11 — a reference with no digest has nothing to prove, so this stays
-    // the single `stat` §14.1 budgets.
+    // §06.1 — a reference with no digest has nothing to prove, so this stays
+    // the single `stat` §04.3 budgets.
     if (pin.digest === undefined) {
       try {
         statSync(join(installFolder, name, version, MARKER_NAME));
@@ -511,7 +511,7 @@ export function findInstalledVersion(name: string, range: string): string | null
       }
     }
 
-    // §15.11 — a hash-bearing reference is a cache *hit* only if the stored
+    // §06.1 — a hash-bearing reference is a cache *hit* only if the stored
     // marker proves that hash. It has to happen here as well as in
     // {@link resolveInstallTarget}, because §04.1 step 4 answers with the bare
     // version and the pin is gone from the locator by the time anything reads
@@ -542,7 +542,7 @@ export function findInstalledVersion(name: string, range: string): string | null
     // macOS drops `.DS_Store` into every directory it displays.
     if (entry.startsWith(".")) continue;
 
-    // §14.2 — prerelease-tolerant, matching every other range test in the
+    // §04.2 — prerelease-tolerant, matching every other range test in the
     // pipeline. Strict `range.test` here makes a prerelease install re-hit the
     // network on every single run.
     if (!satisfiesWithPrereleases(entry, range)) continue;
@@ -555,7 +555,7 @@ export function findInstalledVersion(name: string, range: string): string | null
 }
 
 /**
- * §04.4 — maximally forgiving. Every failure mode returns `{}` rather than
+ * §04.5 — maximally forgiving. Every failure mode returns `{}` rather than
  * erroring, and entries whose value is not a string are dropped.
  */
 export function readLastKnownGood(): Record<string, string> {
@@ -585,7 +585,7 @@ export function readLastKnownGood(): Record<string, string> {
   return lkg;
 }
 
-/** §14.3 — write to a temp file in the same directory and rename over. `EROFS` is swallowed. */
+/** §04.5 — write to a temp file in the same directory and rename over. `EROFS` is swallowed. */
 export function writeLastKnownGood(lkg: Record<string, string>): void {
   const home = getHomeFolder();
   const target = join(home, LAST_KNOWN_GOOD_NAME);
@@ -596,14 +596,14 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
     mkdirSync(home, { recursive: true, mode: 0o755 });
 
     // Same directory, so the rename is atomic: a concurrent reader sees either
-    // the old file or the new one, never a truncated interleaving (§14.3).
+    // the old file or the new one, never a truncated interleaving (§04.5).
     tmp = `${target}.${process.pid}-${randomSuffix()}`;
     writeFileSync(tmp, content, "utf8");
     renameSync(tmp, target);
   } catch (error) {
     if (tmp !== undefined) rmSync(tmp, { force: true });
 
-    // §07.8 / §16.7 — a read-only or unwritable store (`EROFS`, `EACCES`, a
+    // §07.8 — a read-only or unwritable store (`EROFS`, `EACCES`, a
     // deleted home) must never fail a run or print anything. Anything without an
     // errno is a bug in this module and still propagates.
     if (errorCode(error) !== undefined) return;
@@ -612,12 +612,13 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
 }
 
 /**
- * §04.7 — advance the recorded default after a successful install, but only
+ * §04.8 — advance the recorded default after a successful install, but only
  * within the same major and only strictly upward. If there is no existing entry,
  * nothing is written.
  *
  * It lives next to the two accessors it is built from: both callers (§04's
- * pipeline, §07.6's promotion) sit *above* `store` in §16.10's layering.
+ * pipeline, §07.6's promotion) sit *above* `store` in the layering described in
+ * §16, Source map.
  */
 export function bumpLastKnownGood(locator: Locator): void {
   if (envDisabled(ENV.DEFAULT_TO_LATEST)) {
@@ -633,7 +634,7 @@ export function bumpLastKnownGood(locator: Locator): void {
   const lkg = readLastKnownGood();
   const current = lkg[locator.name];
 
-  // The entry is only ever *created* by §04.5 step 3 or by `install -g`. A
+  // The entry is only ever *created* by §04.6 step 3 or by `install -g`. A
   // one-off `jup yarn@4.9.0 …` must not silently become the global default.
   if (current === undefined || !isValidVersion(current)) {
     return;
@@ -656,8 +657,8 @@ export function bumpLastKnownGood(locator: Locator): void {
  * "Complete" means §07.2's definition and nothing looser: a directory carrying a
  * `.jup` marker. A half-extracted temp folder (`jup-<pid>-<rand>`) and
  * a `.DS_Store` are both directory entries, and neither is a cached version —
- * counting them would make `cache list` (§15.19) report an image as seeded when
- * it is not. §15.19's "did my image get seeded?" and §15.30's "the cached
+ * counting them would make `cache list` (§09.7) report an image as seeded when
+ * it is not. §09.7's "did my image get seeded?" and §09.9's "the cached
  * versions present" are the same listing, so there is one of it.
  */
 export function listInstalled(): Array<{ name: string; version: string }> {
@@ -696,7 +697,7 @@ function readdirSafe(dir: string): string[] {
 /**
  * §07.9 — `rm -rf <home>/v1`, forced. `lastKnownGood.json` is **not** removed.
  *
- * §15.18: the survival is deliberate — a recorded default is a preference, not a
+ * The survival is deliberate — a recorded default is a preference, not a
  * cache entry — but the documentation said otherwise, so `all` is the explicit
  * way to ask for both. Nothing else may remove that file implicitly.
  *

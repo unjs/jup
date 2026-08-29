@@ -1,5 +1,5 @@
 /**
- * §15.33 — no stale or shadowed defaults (rows 199–200).
+ * §04.6 — no stale or shadowed defaults (rows 199–200).
  *
  * `Engine.executePackageManagerRequest` reads
  * `definition.transparent.default ?? defaultVersion`, so a compile-time constant
@@ -7,7 +7,7 @@
  * `corepack install -g yarn@4.9.0`, `yarn dlx` still runs the table's pin, with
  * no way to override it (#202, acknowledged by two maintainers, no fix landed).
  *
- * **On "at least as new".** §15.33's prose says to prefer the recorded default
+ * **On "at least as new".** §04.6's prose says to prefer the recorded default
  * when it is at least as new as the floor, but row 199 pairs a recorded `4.9.0`
  * with a table floor of `4.14.1` and requires `4.9.0` to win — a version-wise
  * floor answers `4.14.1` and fails the row. The reading that satisfies both is a
@@ -37,7 +37,7 @@ function recordDefault(home: string, entries: Record<string, string>): void {
   writeFileSync(join(home, "lastKnownGood.json"), `${JSON.stringify(entries, undefined, 2)}\n`);
 }
 
-describe("§15.33 transparent.default is a floor, not an override", () => {
+describe("§04.6 transparent.default is a floor, not an override", () => {
   it("199: a recorded default in the same major line wins over the table's pin", async () => {
     const fixture = createFixture();
     recordDefault(fixture.home, { yarn: "4.9.0" });
@@ -95,7 +95,7 @@ describe("§15.33 transparent.default is a floor, not an override", () => {
 
   it("199: a non-transparent command still uses the recorded default outright", async () => {
     // The floor applies to transparent commands only; `yarn --version` has
-    // always taken the last-known-good and still does (§04.5 step 1).
+    // always taken the last-known-good and still does (§04.6 step 1).
     const fixture = createFixture();
     recordDefault(fixture.home, { yarn: "1.22.22" });
     seedPackageManager(fixture.home, "yarn", "1.22.22");
@@ -111,8 +111,8 @@ describe("§15.33 transparent.default is a floor, not an override", () => {
     seedPackageManager(fixture.home, "yarn", YARN_TRANSPARENT);
 
     // `COREPACK_ENABLE_NETWORK=0` turns any request into a hard failure, so exit
-    // 0 is the assertion that this path makes none — which is what §04.5 has
-    // always promised for transparent commands and what §15.33 must not cost.
+    // 0 is the assertion that this path makes none — which is what §04.6 has
+    // always promised for transparent commands and what §04.6 must not cost.
     const result = await run(["yarn", "dlx", "--help"], {
       ...fixture,
       env: { COREPACK_ENABLE_NETWORK: "0" },
@@ -124,20 +124,19 @@ describe("§15.33 transparent.default is a floor, not an override", () => {
 });
 
 /**
- * §15.33 bullet 2 — the embedded `default` tracks the current supported major.
+ * §02.5 — the embedded `default` tracks the current supported major.
  *
  * #812: `yarn create` on a fresh machine downloaded Yarn Classic 1.22.22,
  * unsupported since 2020, because that was corepack's compiled-in `default`.
- * §14.21 records the 1.x/4.x asymmetry as deliberate; §15.33 overrules it by
- * name — "a maintenance failure, not a compatibility guarantee" — and §15
- * refines §14 where the two meet.
+ * §06.1 records the 1.x/4.x asymmetry as deliberate; §02.5 overrules it by
+ * name — "a maintenance failure, not a compatibility guarantee".
  *
  * These rows are about the *observable* default rather than the literal, which
  * `test/unit/config.test.ts` pins separately. A test asserting only
  * `yarn.default === yarn.transparent.default` would pass against a table that
  * had drifted back to Classic in both fields.
  */
-describe("§15.33 the compiled-in default tracks the supported major", () => {
+describe("§02.5 the compiled-in default tracks the supported major", () => {
   it("a bare `yarn` in an unpinned project runs the modern line, not Classic", async () => {
     const fixture = createFixture({});
     seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
@@ -164,7 +163,7 @@ describe("§15.33 the compiled-in default tracks the supported major", () => {
     });
     expect(installed.exitCode).toBe(0);
 
-    // And the recorded default is now on the same line, so §15.33 bullet 1's
+    // And the recorded default is now on the same line, so §04.6's
     // floor is satisfied rather than overridden — the two bullets agree.
     const result = await run(["yarn", "dlx", "--help"], {
       ...fixture,

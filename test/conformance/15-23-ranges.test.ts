@@ -1,5 +1,5 @@
 /**
- * §15.23 — ranges in the pin, `jup.lock`, and the memo beside it (rows 181–183,
+ * §04.4 — ranges in the pin, `jup.lock`, and the memo beside it (rows 181–183,
  * 256–258).
  *
  * The reconciliation the corepack tracker circled for four years: a range is
@@ -67,7 +67,7 @@ const MEMO = "node_modules/.jup/jup.lock";
 /**
  * A project that already has a `node_modules`, which is the only condition under
  * which jup memoes anything: the directory belongs to the package manager and
- * jup never conjures it into existence (§15.23).
+ * jup never conjures it into existence (§04.4).
  */
 function withModules(manifest: unknown): ReturnType<typeof createFixture> {
   const fixture = createFixture(manifest);
@@ -113,7 +113,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.23 ranges and jup.lock", () => {
+describe("§04.4 ranges and jup.lock", () => {
   it("181: `use` with a range keeps the range and records what it resolved to", async () => {
     const fixture = createFixture({ name: "demo" });
 
@@ -299,7 +299,7 @@ describe("§15.23 ranges and jup.lock", () => {
 
     // The packument 5xxs; version documents and tarballs are fine. The TTL
     // exists so a range keeps moving, not so an install stops working during
-    // somebody else's incident (§15.23).
+    // somebody else's incident (§04.4).
     registry.mode = "packument_error";
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
@@ -351,7 +351,7 @@ describe("§15.23 ranges and jup.lock", () => {
     const result = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
 
     // Recording a digest that is never checked would buy reproducibility and no
-    // integrity at all; §15.23 asks for both.
+    // integrity at all; §04.4 asks for both.
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Mismatch hashes. Expected");
   });
@@ -428,7 +428,7 @@ describe("§15.23 ranges and jup.lock", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("10.5.0\n");
-    // `pnpm@^10.0.0 …` is one invocation (§04.6), not a statement about the
+    // `pnpm@^10.0.0 …` is one invocation (§04.7), not a statement about the
     // project, and the project's own range is not what it resolved either.
     expect(fixture.exists("jup.lock")).toBe(false);
   });
@@ -436,7 +436,7 @@ describe("§15.23 ranges and jup.lock", () => {
   it("does not record a fallback version in the project that fell back", async () => {
     // A name mismatch under `COREPACK_ENABLE_STRICT=0` runs the *machine's*
     // yarn, not the project's pnpm. Nothing about that answer belongs in this
-    // project's lockfile — the recorded default supplies it, and §04.4 tolerates
+    // project's lockfile — the recorded default supplies it, and §04.5 tolerates
     // whatever that file happens to say.
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
     seedPackageManager(fixture.home, "yarn", "1.22.4");
@@ -455,7 +455,7 @@ describe("§15.23 ranges and jup.lock", () => {
 
   it("leaves a recorded resolution exactly as the project wrote it", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
-    // Hand-written: compact, and carrying no digest. §15.23 refreshes a
+    // Hand-written: compact, and carrying no digest. §04.4 refreshes a
     // resolution only on `corepack up`, so a run that merely *uses* one must not
     // rewrite the file — not to reformat it, and not to add what it now knows.
     const planted = `{"version":1,"resolutions":{"pnpm@^11.0.0":{"resolved":"11.1.2"}}}\n`;
@@ -558,7 +558,7 @@ describe("§15.23 ranges and jup.lock", () => {
   });
 
   it("up keeps the range `use` wrote into devEngines, wherever it lives", async () => {
-    // §15.26 — `use` writes the pin into every field that encodes it, and on a
+    // §03.7 — `use` writes the pin into every field that encodes it, and on a
     // devEngines-only project that is `devEngines.packageManager.version` alone.
     // `up` must then read the pin from the same place: gated on a *top-level*
     // string it saw no range at all, overwrote this one with an exact version,

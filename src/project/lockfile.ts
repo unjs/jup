@@ -28,7 +28,7 @@ const MODULES_DIRECTORY = "node_modules";
 export const CACHE_DIRECTORY = join(MODULES_DIRECTORY, ".jup");
 
 /**
- * §15.23 — how long a cached resolution stands before it is resolved again.
+ * §04.4 — how long a cached resolution stands before it is resolved again.
  *
  * The cache keeps a range off the network; it does not freeze it there, which is
  * the committed file's job. A day is short enough that `pnpm@latest` still means
@@ -39,13 +39,13 @@ export const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 /** The only `version` this build understands; anything else reads as "no resolutions". */
 export const LOCKFILE_VERSION = 1;
 
-/** §15.23 — one recorded resolution: the concrete version, and the hash of its artifact. */
+/** §04.4 — one recorded resolution: the concrete version, and the hash of its artifact. */
 export interface Resolution {
   resolved: string;
   /**
    * SRI, as npm spells it (`sha512-<base64>`); absent in a hand-written file.
    *
-   * §15.28 — for a package manager whose artifact is per-host (bun, deno) there
+   * §04.4 — for a package manager whose artifact is per-host (bun, deno) there
    * is no single answer, so the field holds a **map** keyed by the normalised
    * `<platform>-<arch>` instead:
    *
@@ -67,7 +67,7 @@ export interface Resolution {
    */
   integrity?: string | Record<string, string>;
   /**
-   * Cache entries only (§15.23): epoch milliseconds after which the range is
+   * Cache entries only (§04.4): epoch milliseconds after which the range is
    * resolved again. The recorded file never carries one — a committed decision
    * does not rot.
    *
@@ -90,7 +90,7 @@ interface LockfileData {
  * Whether this descriptor resolves through the lockfile at all.
  *
  * An **exact version** is already its own record — the pin names the version and
- * may carry the hash — so §15.23's "an exact-version spec continues to work with
+ * may carry the hash — so §04.4's "an exact-version spec continues to work with
  * no lockfile involvement whatsoever" is exactly this early `false`. A **URL**
  * reference is likewise self-describing (§02.1 puts its digest in the fragment).
  * Everything else — a range, or a dist-tag — needs recording.
@@ -101,7 +101,7 @@ export function usesLockfile(descriptor: Descriptor): boolean {
   return !URL.canParse(range);
 }
 
-/** §15.23 — `<name>@<the range as written>`, the key the file is indexed by. */
+/** §04.4 — `<name>@<the range as written>`, the key the file is indexed by. */
 export function resolutionKey(descriptor: Descriptor): string {
   return `${descriptor.name}@${descriptor.range}`;
 }
@@ -135,7 +135,7 @@ export function readLockfile(dir: string): LockfileData | null {
   if (!resolutions || typeof resolutions !== "object" || Array.isArray(resolutions)) return null;
 
   // Entry-level validation, so one malformed entry cannot poison the others —
-  // the same rule §04.4 applies to a non-string last-known-good value.
+  // the same rule §04.5 applies to a non-string last-known-good value.
   const kept: Record<string, Resolution> = {};
   for (const [key, value] of Object.entries(resolutions as Record<string, unknown>)) {
     if (!value || typeof value !== "object" || Array.isArray(value)) continue;
@@ -162,7 +162,7 @@ export function readLockfile(dir: string): LockfileData | null {
  * (§04.2), matching every other range test on the resolution path: the recorded
  * version was itself chosen by that rule, so testing it with the strict one
  * would make a recorded prerelease fail its own range and send every single run
- * back to the registry — the one thing §15.23 exists to prevent. (The strict
+ * back to the registry — the one thing §04.4 exists to prevent. (The strict
  * rule stays where §03.3 puts it, on the `devEngines` cross-check.)
  *
  * A **dist-tag** key has no range to violate, so an entry for one always stands.
@@ -182,14 +182,14 @@ export interface CachedResolution {
   /**
    * `true` when the entry has aged out. It is returned anyway: the caller
    * resolves afresh and falls back to it only if that fails, because an expired
-   * memo beats no answer when the registry is unreachable (§15.23) — §04.4's
+   * memo beats no answer when the registry is unreachable (§04.4) — §04.5's
    * "degrade, never block" rule, applied to a project's own file.
    */
   expired: boolean;
 }
 
 /**
- * §15.23 — the cached resolution in `<dir>/node_modules/.jup`, or `null`.
+ * §04.4 — the cached resolution in `<dir>/node_modules/.jup`, or `null`.
  *
  * Consulted only after the recorded file has said nothing: a committed decision
  * outranks a memo about what the registry answered yesterday, always.
@@ -205,19 +205,19 @@ export function readCachedResolution(
   return { locator: locatorFor(descriptor, hit.entry), expired: hit.expired };
 }
 
-/** What a project's two files already know, without a request (§15.23). */
+/** What a project's two files already know, without a request (§04.4). */
 export interface KnownResolution {
   /** The recorded resolution, else an unexpired memo; `null` when neither answers. */
   locator: Locator | null;
   /**
-   * The memo as read, expired or not: an aged-out one is still §15.23's answer
+   * The memo as read, expired or not: an aged-out one is still §04.4's answer
    * of last resort. `null` when the recorded file answered, which outranks it.
    */
   cached: CachedResolution | null;
 }
 
 /**
- * §15.23's read order — the recorded resolution, then an unexpired memo — in the
+ * §04.4's read order — the recorded resolution, then an unexpired memo — in the
  * one place both callers reach for it. The proxy path and `install` (§09.2) must
  * agree to the version, or a Docker layer caches one and runs another, offline.
  */
@@ -240,7 +240,7 @@ export interface CachedEntry {
 }
 
 /**
- * {@link readCachedResolution}, stopping at the entry: `info` prints §15.28's
+ * {@link readCachedResolution}, stopping at the entry: `info` prints §04.4's
  * whole host map rather than this host's one digest, so it cannot take the
  * flattened locator. Reading through here rather than indexing the parsed file
  * is what keeps that command honest — the range gate and the expiry rule are
@@ -256,7 +256,7 @@ export function readCachedEntry(
 }
 
 /**
- * Whether a memo has aged out — bounded at both ends (§15.23).
+ * Whether a memo has aged out — bounded at both ends (§04.4).
  *
  * A stamp beyond one full {@link CACHE_TTL_MS} window is one this build cannot
  * have written, so it is treated as expired rather than believed. Clamping
@@ -280,14 +280,14 @@ function hasExpired(entry: Resolution, now: number): boolean {
  * `hash` is the `<algo>.<hex>` the store already computed for these bytes
  * (§07.2); it is written as SRI, the spelling npm's own lockfiles use.
  *
- * `perHost` is §15.28's answer for this locator, and it is passed in rather than
+ * `perHost` is §04.4's answer for this locator, and it is passed in rather than
  * asked for: the callers hold the table already, and importing it here to answer
  * a question only the *write* path asks would put `resolveArtifactRegistry` and
- * its caches into the chunk a warm read is measured on (§16.3).
+ * its caches into the chunk a warm read is measured on (§16, Build shape).
  *
  * A write failure is swallowed, per §07.8's rule for derived state: a read-only
  * checkout must still be able to *run*, and the cost of not recording is one
- * extra resolution next time. Frozen mode (§15.23) is the deliberate refusal and
+ * extra resolution next time. Frozen mode (§04.4) is the deliberate refusal and
  * is decided by the caller, before any of this.
  */
 export function writeResolution(
@@ -301,7 +301,7 @@ export function writeResolution(
 }
 
 /**
- * §15.23 — memo the resolution in `<dir>/node_modules/.jup`, with an expiry stamp.
+ * §04.4 — memo the resolution in `<dir>/node_modules/.jup`, with an expiry stamp.
  *
  * Does nothing when `node_modules` is not already a directory: creating it would
  * be jup conjuring the package manager's own directory into existence — possibly
@@ -359,7 +359,7 @@ function writeEntry(
 
   if (integrity !== undefined) {
     if (perHost) {
-      // §15.28 — one key per host, and the other hosts' keys are carried over,
+      // §04.4 — one key per host, and the other hosts' keys are carried over,
       // but only while the *version* is unchanged: a resolution that moved to a
       // new version has nothing to say about what the old one hashed to on a
       // machine that is not this one.
@@ -393,7 +393,7 @@ export function removeResolution(dir: string, key: string): void {
 }
 
 /**
- * Drop one key from the **memo** alone (§15.23).
+ * Drop one key from the **memo** alone (§04.4).
  *
  * What `use` and `up` record supersedes the memo beside it, and a memo left
  * there answers alone wherever the recorded file is not visible — an uncommitted
@@ -448,7 +448,7 @@ export function readEntry(dir: string, descriptor: Descriptor): Resolution | nul
  * which is what makes it *used* rather than merely stored: §06.1 row 1 treats a
  * reference-borne hash as an explicit pin and checks the bytes against it.
  *
- * §15.28 — a **bare** digest recorded for a tool whose artifact is per-host is
+ * §04.4 — a **bare** digest recorded for a tool whose artifact is per-host is
  * not this host's fact and is not treated as one. Nothing writes such an entry:
  * {@link writeEntry} takes that branch on `perHost` and records a map keyed by
  * host. Such a digest may describe a portable artifact while the active band is
@@ -473,7 +473,7 @@ function serialise(data: LockfileData): string {
   const resolutions: Record<string, Resolution> = {};
   for (const key of Object.keys(data.resolutions).sort()) {
     const entry = data.resolutions[key]!;
-    // §15.28's map is sorted for the same reason the keys above are: a host that
+    // §04.4's map is sorted for the same reason the keys above are: a host that
     // records its own digest must produce a one-line diff, not a reordering of
     // everybody else's.
     resolutions[key] =
@@ -531,7 +531,7 @@ function sorted(map: Record<string, string>): Record<string, string> {
 }
 
 /**
- * Validate the `integrity` field of one entry: a string, or §15.28's host map
+ * Validate the `integrity` field of one entry: a string, or §04.4's host map
  * with every value a string. Anything else is dropped, per the entry-level rule
  * above — a damaged field costs one extra resolution, never a broken checkout.
  */
@@ -552,7 +552,7 @@ function readIntegrityField(value: unknown): string | Record<string, string> | u
  * A host map with no entry for *this* host answers `undefined`, which is the
  * whole point of the shape: the version stands, and the bytes are verified
  * through npm's signature rather than against a digest taken on somebody else's
- * machine (§15.28).
+ * machine (§04.4).
  */
 export function integrityForHost(entry: Resolution): string | undefined {
   const { integrity } = entry;
@@ -569,7 +569,7 @@ export function integrityForHost(entry: Resolution): string | undefined {
  * `undefined`.
  *
  * `integrity` itself is a different matter, and is not reached for here: it
- * pulls `node:crypto` (§16.3). An algorithm this implementation does not support
+ * pulls `node:crypto` (§16, Build shape). An algorithm this implementation does not support
  * is rejected by `install` with §12's own message, and rejecting it twice would
  * give one input two errors.
  */

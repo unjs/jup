@@ -37,7 +37,7 @@ beforeEach(() => registry.reset());
 /**
  * A project pinned to {@link PIN} with `pnpm@6.6.2` already in its store.
  *
- * §15.11 — the seeded install has to stand for the reference the manifest pins,
+ * §06.1 — the seeded install has to stand for the reference the manifest pins,
  * digest included: a cache hit is now checked against the pin, so a marker
  * recording some other hash is a *miss* and these rows would go to the network
  * for a version that is sitting in the store. Nothing about what they assert
@@ -53,14 +53,14 @@ function pinnedProject(devEngines: unknown, pin: unknown = PIN) {
   return fixture;
 }
 
-/** §15.23 — the resolutions an ordinary run memoed in `node_modules/.jup`. */
+/** §04.4 — the resolutions an ordinary run memoed in `node_modules/.jup`. */
 function memoOf(fixture: { json(relative: string): unknown }): Record<string, unknown> {
   return (fixture.json("node_modules/.jup/jup.lock") as { resolutions: Record<string, unknown> })
     .resolutions;
 }
 
 describe("§13.4 devEngines", () => {
-  // Rows 22 and 23 are superseded by §15.23, whose first requirement is that
+  // Rows 22 and 23 are superseded by §04.4, whose first requirement is that
   // `devEngines.packageManager.version` accept a range: the derived `yarn@*` and
   // `pnpm@6.x` specs are now usable rather than rejected. This is the shape pnpm
   // 11.21 generates, and rejecting it is why pnpm dropped corepack from its docs.
@@ -74,7 +74,7 @@ describe("§13.4 devEngines", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
     expect(result.stderr).toBe("");
-    // §15.23 — memoed, not recorded: a proxy run never writes the project's own
+    // §04.4 — memoed, not recorded: a proxy run never writes the project's own
     // `jup.lock`.
     expect(fixture.exists("jup.lock")).toBe(false);
     expect(memoOf(fixture)["yarn@*"]).toMatchObject({

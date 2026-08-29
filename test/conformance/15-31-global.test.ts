@@ -1,12 +1,12 @@
 /**
- * §15.38 row 197 — §15.31, global invocations bypass the project pin.
+ * row 197 — §01.4, global invocations bypass the project pin.
  *
  * #690: `npm install -g corepack@latest` inside a yarn- or pnpm-pinned project
  * dies on §03.5's name mismatch, which blocks the tool's own documented upgrade
- * path. A global command operates outside the project by definition, so §15.31
+ * path. A global command operates outside the project by definition, so §01.4
  * makes it transparent (§01.4).
  *
- * **This is worse here than in corepack, and that is our doing**: §15.16 shims
+ * **This is worse here than in corepack, and that is our doing**: §10.7 shims
  * `npm` by default, which corepack never did, so the failure reaches users
  * corepack's version could not.
  *
@@ -44,7 +44,7 @@ const MISMATCH = "This project is configured to use yarn because";
 
 afterAll(cleanupFixtures);
 
-describe("§15.31 — a global invocation is transparent (row 197)", () => {
+describe("§01.4 — a global invocation is transparent (row 197)", () => {
   it("197: `npm install -g <pkg>` is permitted in a yarn-pinned project", async () => {
     const { options } = yarnProject();
 
@@ -53,7 +53,7 @@ describe("§15.31 — a global invocation is transparent (row 197)", () => {
 
     expect(result.stderr).toBe("");
     expect(result.exitCode).toBe(0);
-    // §15.31's second half: the version used is the **global default**, not the
+    // §01.4's second half: the version used is the **global default**, not the
     // project's pin — which is also proof the fallback path was taken.
     expect(result.stdout).toBe(`npm@${versionOf(NPM_DEFAULT)} install -g corepack@latest\n`);
   });
@@ -95,7 +95,7 @@ describe("§15.31 — a global invocation is transparent (row 197)", () => {
   });
 });
 
-describe("§15.31 — where the scan stops (row 197)", () => {
+describe("§01.4 — where the scan stops (row 197)", () => {
   /*
    * Each of these carries a `-g` that belongs to whatever the package manager is
    * about to run, not to the package manager. Recognising one would let a

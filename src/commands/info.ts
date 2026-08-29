@@ -71,7 +71,7 @@ const SECRET_VARIABLES = new Set<string>([ENV.NPM_TOKEN, ENV.NPM_PASSWORD, ENV.N
 
 /** Long values (a trust store, a proxy list) are elided rather than dumped. */
 const MAX_VALUE_LENGTH = 120;
-/** What kind of thing the version half of a spec is (§04.1, §15.23). */
+/** What kind of thing the version half of a spec is (§02.1, §04.1). */
 export type SpecKind = "exact" | "range" | "tag" | "url";
 
 export interface ProjectInfo {
@@ -98,7 +98,7 @@ export interface ResolutionInfo {
   /**
    * `pinned` — the field names the version outright; `locked` — the recorded
    * `jup.lock` answers it; `cached` — the memo in `node_modules/.jup` answers it
-   * and has not expired (§15.23); `cache` — nothing is recorded or memoed, but an
+   * and has not expired (§04.4); `cache` — nothing is recorded or memoed, but an
    * installed version satisfies the range; `network` — resolving needs a
    * request, which `info` does not make; `fallback` — no project spec, so the
    * global default decides; `unknown` — the spec is unusable.
@@ -122,10 +122,10 @@ export interface LockfileInfo {
   /** `<name>@<range as written>` — the key this project's spec would use. */
   key: string | null;
   resolution: Resolution | null;
-  /** §15.23 / §15.37 — whether `use` and `up` may write the recorded file. */
+  /** §04.4 — whether `use` and `up` may write the recorded file. */
   frozen: boolean;
   frozenSource: typeof ENV.FROZEN_LOCKFILE | JupSpelling<typeof ENV.FROZEN_LOCKFILE> | "default";
-  /** §15.23 — the resolution cache in `node_modules/.jup`, which ordinary runs write. */
+  /** §04.4 — the resolution cache in `node_modules/.jup`, which ordinary runs write. */
   cache: {
     path: string;
     present: boolean;
@@ -141,7 +141,7 @@ export interface EnvFileInfo {
   applied: string[];
   /** Eligible, but the real environment already set them (§11.6). */
   overridden: string[];
-  /** `COREPACK_`-prefixed but refused from a file (§03.2, §14.5). */
+  /** `COREPACK_`-prefixed but refused from a file (§03.2). */
   refused: string[];
   /** Not `COREPACK_`-prefixed, so dropped before the merge. */
   ignored: string[];
@@ -154,8 +154,8 @@ export interface PackageManagerInfo {
   registry: string;
   /**
    * The setting that decided it: `COREPACK_REGISTRY_<NAME>`,
-   * `COREPACK_NPM_REGISTRY`, `.npmrc <key> (<path>)`, or `built-in` (§15.1,
-   * §15.2). Naming the *actual* source is the whole point of the field — "a
+   * `COREPACK_NPM_REGISTRY`, `.npmrc <key> (<path>)`, or `built-in` (§05.2,
+   * §05.3). Naming the *actual* source is the whole point of the field — "a
    * mirror is not being honoured" is the report people run this command for.
    */
   registrySource: string;
@@ -163,7 +163,7 @@ export interface PackageManagerInfo {
   notes: string[];
   /** The compiled-in, hash-pinned fallback (§02.5). */
   builtinDefault: string;
-  /** `lastKnownGood.json`'s entry, if any (§04.4). */
+  /** `lastKnownGood.json`'s entry, if any (§04.5). */
   recordedDefault: string | null;
   /** Versions present in the store. */
   cached: string[];
@@ -178,11 +178,11 @@ export interface ShimInfo {
   path: string | null;
   /** Whether that `PATH` entry is one of ours. */
   ours: boolean;
-  /** A shim is installed, but something else on `PATH` wins (§15.29). */
+  /** A shim is installed, but something else on `PATH` wins (§10.5). */
   shadowed: boolean;
 }
 
-/** One `.npmrc`, and what §15.1 took from it. */
+/** One `.npmrc`, and what §05.3 took from it. */
 export interface NpmrcFileInfo {
   path: string;
   level: NpmrcLevel;
@@ -190,7 +190,7 @@ export interface NpmrcFileInfo {
   keys: string[];
   /**
    * Keys refused because a project-level `.npmrc` may only set `registry` and
-   * `@scope:registry` (§15.1). This is the line that explains a token which
+   * `@scope:registry` (§05.3). This is the line that explains a token which
    * "should" have been picked up and was not.
    */
   refused: string[];
@@ -211,7 +211,7 @@ export interface NpmrcInfo {
   auth: Array<{ prefix: string; type: "token" | "basic"; source: string }>;
 }
 
-/** §15.4 — what verification the next request would do, and who decided. */
+/** §05.1 — what verification the next request would do, and who decided. */
 export interface TlsInfo {
   /** A PEM bundle replacing the platform trust store, if one is configured. */
   cafile: string | null;
@@ -233,9 +233,9 @@ export interface InfoReport {
   /** `COREPACK_*` as it stood in the *real* environment, credentials masked. */
   environment: Record<string, string>;
   packageManagers: PackageManagerInfo[];
-  /** §15.1 — which files were read, what each contributed, what was refused. */
+  /** §05.3 — which files were read, what each contributed, what was refused. */
   npmrc: NpmrcInfo;
-  /** §15.4 — the trust store in force, and where it was configured. */
+  /** §05.1 — the trust store in force, and where it was configured. */
   tls: TlsInfo;
   store: {
     home: string;
@@ -252,7 +252,7 @@ export interface InfoReport {
  * Order matters once: the `COREPACK_*` snapshot is taken **before** the env file
  * is discovered, because `applyEnvFile` merges the file into `process.env` and
  * afterwards there is no way to tell a variable the user exported from one the
- * project supplied — which is exactly the distinction §15.30 asks for.
+ * project supplied — which is exactly the distinction §09.9 asks for.
  */
 export function buildReport(cwd: string = process.cwd()): InfoReport {
   const realEnvironment = snapshotEnvironment();
@@ -353,7 +353,7 @@ function describeProject(cwd: string): ProjectInfo {
 
   // `requireVersion: true` is what the proxy path passes for a manifest read
   // with no CLI override (§03.5), so a bare `packageManager: "yarn"` is reported
-  // as the error a `yarn` invocation would actually hit. §15.23 widened what the
+  // as the error a `yarn` invocation would actually hit. §04.4 widened what the
   // version may *be* — a range, a dist-tag — not whether a pin has to carry one.
   try {
     const descriptor = parseSpec(declared.raw, "package.json", {
@@ -372,7 +372,7 @@ function describeProject(cwd: string): ProjectInfo {
   }
 }
 
-/** §04.1 / §15.23 — an exact version, a range, a dist-tag, or a URL. */
+/** §02.1 / §04.1 — an exact version, a range, a dist-tag, or a URL. */
 export function classifySpec(descriptor: Descriptor): SpecKind {
   const { range } = descriptor;
   if (URL.canParse(range)) return "url";
@@ -393,7 +393,7 @@ function describeDeclaration(manifest: Manifest | undefined): {
   field: string | null;
   spec: string | null;
   raw: unknown;
-  /** §15.39's refusal is about the *field*, so it travels with the declaration. */
+  /** §02.3's refusal is about the *field*, so it travels with the declaration. */
   packageManagerField: boolean;
   devEngines: ProjectInfo["devEngines"];
 } {
@@ -432,7 +432,7 @@ function describeDeclaration(manifest: Manifest | undefined): {
       field: "devEngines.packageManager",
       spec,
       raw: spec ?? undefined,
-      // Synthesised out of `devEngines`, so §15.39 does not apply: a runtime
+      // Synthesised out of `devEngines`, so §02.3 does not apply: a runtime
       // named there is exactly where a runtime belongs.
       packageManagerField: false,
       devEngines,
@@ -510,7 +510,7 @@ function locateManifest(cwd: string): string | undefined {
 
   return selected;
 }
-/** §15.23 — the recorded resolution for this project's spec, and whether it may move. */
+/** §04.4 — the recorded resolution for this project's spec, and whether it may move. */
 function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
   const frozen = envEntry(ENV.FROZEN_LOCKFILE);
 
@@ -524,7 +524,7 @@ function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
 
   // Both entries come back through the lockfile readers rather than out of the
   // parsed file by key, because `info`'s whole contract is to report what the
-  // next run would use. Indexing directly skipped §15.23's satisfaction gate, so
+  // next run would use. Indexing directly skipped §04.4's satisfaction gate, so
   // a `10.0.0` recorded under `^11.0.0` — a hand edit, a bad merge, a restored
   // `node_modules` — was reported as the locked version while the run resolved
   // straight past it. `readEntry` and `readCachedEntry` apply that gate, and the
@@ -590,7 +590,7 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
   const descriptor = descriptorOf(project);
   const from = `${project.field} in ${project.manifest}`;
 
-  // An exact version (or a URL) is its own record: §15.23 keeps the lockfile out
+  // An exact version (or a URL) is its own record: §04.4 keeps the lockfile out
   // of that path entirely.
   if (!usesLockfile(descriptor)) {
     const parsed = parse(project.range);
@@ -610,7 +610,7 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
 
   if (lockfile.resolution !== null) {
     const { resolved } = lockfile.resolution;
-    // §15.28 — this host's key out of the recorded map, when the entry holds
+    // §04.4 — this host's key out of the recorded map, when the entry holds
     // one. A map with nothing for this host is still a *locked* version; it just
     // has no digest here yet, which `hash: null` says correctly.
     const integrity = integrityForHost(lockfile.resolution);
@@ -624,7 +624,7 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
     };
   }
 
-  // §15.23 — nothing is recorded, so the memo in `node_modules/.jup` answers, while
+  // §04.4 — nothing is recorded, so the memo in `node_modules/.jup` answers, while
   // it is still inside its window. An expired one is not reported here: the next
   // run would go and ask, and this command reports what that run would do, not
   // what it would fall back to if the registry were unreachable.
@@ -703,7 +703,7 @@ function displayValue(name: string, value: string): string {
  *
  * The four buckets are the four things that can happen to a line in that file,
  * and the difference between them is the whole answer to "why is my
- * `.jup.env` not doing anything": it was refused for security (§14.5), it
+ * `.jup.env` not doing anything": it was refused for security (§03.2), it
  * was shadowed by a real environment variable (§11.6), or it was never
  * `COREPACK_`-prefixed in the first place.
  */
@@ -744,12 +744,12 @@ function describeEnvFile(path: string, realEnvironment: Record<string, string>):
  * The effective npm registry for one package manager, and the setting that
  * decided it.
  *
- * `npmrc.resolveRegistry` is the single implementation of §15.1's and §15.2's
+ * `npmrc.resolveRegistry` is the single implementation of §05.2's and §05.3's
  * precedence. `npmrc.ts` reaches for nothing heavier than `node:fs`, so `info`
  * loads no HTTP or signature stack when diagnosing download failures.
  *
- * @param name Omitted, the answer ignores §15.2's per-package-manager tier.
- * @param packageName The npm package, when §15.1's `@scope:registry` applies.
+ * @param name Omitted, the answer ignores §05.2's per-package-manager tier.
+ * @param packageName The npm package, when §05.3's `@scope:registry` applies.
  */
 export function effectiveRegistry(
   name?: string,
@@ -775,7 +775,7 @@ function describePackageManagers(
       // §05.3 — a band that is not an npm registry cannot be mirrored through
       // the npm protocol, so its fetch path follows a configured npm registry
       // only when the table gives it an npm fallback (§02.5's
-      // `@yarnpkg/cli-dist`) — or §15.2's per-source override, which mirrors the
+      // `@yarnpkg/cli-dist`) — or §05.2's per-source override, which mirrors the
       // band's own origin and needs no fallback at all.
       if (spec.registry.type === "npm") continue;
 
@@ -855,7 +855,7 @@ function describeNpmrc(cwd: string): NpmrcInfo {
   };
 }
 
-/** §15.4 — the trust store in force, and who configured it. */
+/** §05.1 — the trust store in force, and who configured it. */
 function describeTls(): TlsInfo {
   const settings = tlsSettings();
   return {
@@ -888,7 +888,7 @@ function isWritable(path: string): boolean {
   }
 }
 /**
- * §10, §15.29 — for every binary name: is a shim installed, and what does that
+ * §10.5 — for every binary name: is a shim installed, and what does that
  * name resolve to on `PATH` right now?
  *
  * Report both the installed shim and the executable selected by `PATH`; another
@@ -900,12 +900,12 @@ function describeShims(): InfoReport["shims"] {
 
   try {
     // The resolver `disable` uses, so a report and a removal never disagree
-    // about where the shims are — and, per §15.13 point 7, one that reads no
+    // about where the shims are — and, per §10.5, one that reads no
     // `PATH`, so the answer does not depend on the shell this ran from.
     // `forEnable: false` — no realpath.
     directory = resolveInstallDirectory({}, false);
   } catch (error) {
-    // §12.9's "unable to determine where to install the shims" is a fine answer
+    // §12.10's "unable to determine where to install the shims" is a fine answer
     // to a *question*; it must not be the end of the whole report.
     problem = messageOf(error);
   }
@@ -957,7 +957,7 @@ function samePath(left: string, right: string): boolean {
  * generated stub. Such a shim is missing its target, not foreign.
  */
 
-/** §10.4 — `which(name)`, returning the file rather than its directory. */
+/** §10.5 — `which(name)`, returning the file rather than its directory. */
 function lookupOnPath(name: string): string | null {
   const extensions =
     process.platform === "win32"
@@ -1044,7 +1044,7 @@ export function formatReport(report: InfoReport): string {
   if (report.lockfile.key !== null) out.push(line(`key`, report.lockfile.key));
   if (report.lockfile.resolution !== null) {
     out.push(line(`resolved`, report.lockfile.resolution.resolved));
-    // §15.28 — a per-host entry prints this host's digest and says how many
+    // §04.4 — a per-host entry prints this host's digest and says how many
     // other hosts the file records, which is the fact a reader wants: whether
     // the colleague whose machine is failing has ever been recorded at all.
     const recorded = report.lockfile.resolution.integrity;
@@ -1187,9 +1187,9 @@ function formatVersions(report: InfoReport): string {
 }
 
 /**
- * §15.19 — `cache list` is the store half of the same report.
+ * §09.7 — `cache list` is the store half of the same report.
  *
- * §15.30 permits it as an alias, and this is that alias narrowed to the two
+ * §09.9 permits it as an alias, and this is that alias narrowed to the two
  * questions it exists to answer: what is in the image, and what does the machine
  * default to?
  */
@@ -1234,7 +1234,7 @@ function wantsJson(args: string[], command: string): boolean {
   return json;
 }
 
-/** §15.30 — `jup info [--json]`. Always exits 0 unless the CLI was misused. */
+/** §09.9 — `jup info [--json]`. Always exits 0 unless the CLI was misused. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function cmdInfo(args: string[]): Promise<number> {
   const json = wantsJson(args, `jup info`);
@@ -1243,7 +1243,7 @@ export async function cmdInfo(args: string[]): Promise<number> {
   return 0;
 }
 
-/** §15.19 / §15.30 — `jup cache list [--json]`, the aliased subset. */
+/** §09.7 / §09.9 — `jup cache list [--json]`, the aliased subset. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function cmdCacheList(args: string[]): Promise<number> {
   const json = wantsJson(args, `jup cache list`);

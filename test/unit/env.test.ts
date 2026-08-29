@@ -375,7 +375,7 @@ describe("loadEnvFileFrom", () => {
     });
   });
 
-  // Test 62c. The reported `path` matters beyond bookkeeping: §14.5's
+  // Test 62c. The reported `path` matters beyond bookkeeping: §03.2's
   // "Ignoring <NAME> from <path>" warning and `info`'s env-file report both
   // name it, so a fallback that read one file and reported the other would
   // point the user at a file that had nothing to do with the outcome.
@@ -441,7 +441,7 @@ describe("applyEnvFile", () => {
     expect(process.env.COREPACK_NPM_REGISTRY).toBe("https://real.test");
     // The second key is an *eligible* one, so the file still supplies it — the
     // example is `COREPACK_NETWORK_TIMEOUT` rather than `COREPACK_HOME` because
-    // §14.5 now denies the store root outright (see `isEnvFileEligible` below).
+    // §03.2 now denies the store root outright (see `isEnvFileEligible` below).
     expect(process.env.COREPACK_NETWORK_TIMEOUT).toBe("5000");
   });
 
@@ -453,7 +453,7 @@ describe("applyEnvFile", () => {
     expect(process.env.COREPACK_NETWORK_TIMEOUT).toBe("");
   });
 
-  // Tests 60, 61, 62 — §14.5's and §15.37's additions, each announced.
+  // Tests 60, 61, 62 — §03.2's newly denied additions, each announced.
   describe.each([...SECURITY_ONLY_FROM_ENVIRONMENT])("%s", (name) => {
     it("is ignored when it comes from a file, with a warning on stderr", () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -514,15 +514,15 @@ describe("applyEnvFile", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.37 — the TLS pair is INELIGIBLE
+ * §11.2 — the TLS pair is INELIGIBLE
  *
  * A cloned repository must not be able to nominate the certificate
  * authority its own downloads are verified against, nor to switch that
- * verification off. Both are trust decisions, and §15.37's table marks
+ * verification off. Both are trust decisions, and §11.2's table marks
  * them "Env file: no" for the same reason the token is.
  * ------------------------------------------------------------------ */
 
-describe("§15.37 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§15.4)", () => {
+describe("§11.2 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§05.1)", () => {
   it.for([["COREPACK_CAFILE"], ["COREPACK_STRICT_SSL"]])(
     "%s is ineligible, security-relevant, and announced",
     ([name]) => {
@@ -552,7 +552,7 @@ describe("§15.37 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§15.4)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §14.5 — the three location variables are INELIGIBLE
+ * §03.2 — the three location variables are INELIGIBLE
  *
  * `COREPACK_HOME`, `COREPACK_SHIM_DIRECTORY` and `COREPACK_NODE_EXECPATH`
  * each name a *place code is loaded or run from*, which makes all three
@@ -569,12 +569,12 @@ describe("§15.37 — COREPACK_CAFILE and COREPACK_STRICT_SSL (§15.4)", () => {
  *   * `COREPACK_NODE_EXECPATH` is §08.3.1's interpreter selector. No code
  *     in this host reads it yet; it is denied before the hazard exists.
  *
- * All three are announced (§14.5's one warning per offending variable)
+ * All three are announced (§03.2's one warning per offending variable)
  * rather than dropped in silence, because a repository trying to relocate
  * any of them is worth telling the user about.
  * ------------------------------------------------------------------ */
 
-describe("§14.5 — COREPACK_HOME, COREPACK_SHIM_DIRECTORY and COREPACK_NODE_EXECPATH", () => {
+describe("§03.2 — COREPACK_HOME, COREPACK_SHIM_DIRECTORY and COREPACK_NODE_EXECPATH", () => {
   it.for([
     ["COREPACK_HOME", "./.store"],
     ["COREPACK_SHIM_DIRECTORY", "./tools"],
@@ -666,22 +666,22 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_DEFAULT_TO_LATEST")).toBe(true);
     expect(isEnvFileEligible("COREPACK_ENABLE_NETWORK")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NPM_REGISTRY")).toBe(true);
-    // §15.37 marks the per-source overrides eligible, on the same footing as
+    // §11.2 marks the per-source overrides eligible, on the same footing as
     // `COREPACK_NPM_REGISTRY`: they redirect a download, which a project may
     // do, rather than deciding who is trusted, which it may not.
     expect(isEnvFileEligible("COREPACK_REGISTRY_YARN")).toBe(true);
     expect(isEnvFileEligible("COREPACK_REGISTRY_PNPM")).toBe(true);
-    // §15.37 — mandating signed sources is a policy a project may state, unlike
-    // the trust store itself (§14.5), which a cloned repo must never supply.
+    // §11.2 — mandating signed sources is a policy a project may state, unlike
+    // the trust store itself (§03.2), which a cloned repo must never supply.
     expect(isEnvFileEligible("COREPACK_REQUIRE_SIGNATURES")).toBe(true);
-    // §15.5's two knobs are preferences — how long to wait, how often to try
-    // again — and §15.37's table marks them eligible.
+    // §05.1's two knobs are preferences — how long to wait, how often to try
+    // again — and §11.2's table marks them eligible.
     expect(isEnvFileEligible("COREPACK_NETWORK_TIMEOUT")).toBe(true);
     expect(isEnvFileEligible("COREPACK_NETWORK_RETRIES")).toBe(true);
-    // §15.24's opt-in: choosing to accept prereleases is a project's call, and
+    // §04.1's opt-in: choosing to accept prereleases is a project's call, and
     // it widens a candidate set rather than deciding who is trusted.
     expect(isEnvFileEligible("COREPACK_ENABLE_PRERELEASES")).toBe(true);
-    // §15.35e / §15.37 — the minimum release age is eligible: a project raising
+    // §04.1 / §11.1 — the minimum release age is eligible: a project raising
     // the bar on what it will resolve implicitly is stating a policy, not
     // deciding who is trusted, and the direction it can move things in is
     // *older*. Eligibility is a deny-list, so it needs no entry in `env.ts` to
@@ -690,7 +690,7 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_MINIMUM_RELEASE_AGE")).toBe(true);
     expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_MINIMUM_RELEASE_AGE")).toBe(false);
 
-    // §15.11 / §15.37 — the one opt-out from "every artifact clears a
+    // §06.1 / §11.2 — the one opt-out from "every artifact clears a
     // verification tier". Eligibility is a deny-list, so a new COREPACK_*
     // variable is env-file eligible with no edit to `env.ts` at all; these two
     // assertions are what make the omission fail a test rather than silently
@@ -699,7 +699,7 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_ALLOW_UNVERIFIED")).toBe(false);
     expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_ALLOW_UNVERIFIED")).toBe(true);
 
-    // §15.35d / §15.37 — the same trap, and the same two assertions. The file
+    // §03.1 / §11.1 — the same trap, and the same two assertions. The file
     // named here supplies `packageManager` for the whole project, so a
     // `.jup.env` able to set it could run a package manager the manifest
     // never names — a repository silently choosing its own tooling, which is
@@ -707,7 +707,7 @@ describe("isEnvFileEligible", () => {
     expect(isEnvFileEligible("COREPACK_SPEC_FILE")).toBe(false);
     expect(SECURITY_ONLY_FROM_ENVIRONMENT.has("COREPACK_SPEC_FILE")).toBe(true);
 
-    // §14.5 — the three *locations* code is loaded and run from. Each was
+    // §03.2 — the three *locations* code is loaded and run from. Each was
     // eligible until this entry, and each is a trust decision rather than a
     // preference: `COREPACK_HOME` is the store whose `.jup` marker short-circuits
     // digest verification for an unpinned spec (and the trusted-key cache
@@ -753,7 +753,7 @@ describe("envFlag / envDisabled", () => {
   });
 });
 
-describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
+describe("isCI / isFrozenLockfile — §04.4, §11.1", () => {
   beforeEach(() => {
     delete process.env.CI;
   });
@@ -769,7 +769,7 @@ describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
   it("is thawed by default, in CI as anywhere else", () => {
     expect(isFrozenLockfile()).toBe(false);
 
-    // §15.23 — no CI default: nothing writes the recorded file implicitly any
+    // §04.4 — no CI default: nothing writes the recorded file implicitly any
     // more, so there is no implicit write for CI to guard against.
     process.env.CI = "1";
     expect(isFrozenLockfile()).toBe(false);
@@ -788,7 +788,7 @@ describe("isCI / isFrozenLockfile — §15.23, §15.37", () => {
     expect(isFrozenLockfile()).toBe(false);
   });
 
-  // §15.37 marks it env-file eligible: it is a behavioural preference, not a
+  // §11.1 marks it env-file eligible: it is a behavioural preference, not a
   // security decision, so a project may ship it in `.jup.env`.
   it("is settable from an env file", () => {
     expect(isEnvFileEligible("COREPACK_FROZEN_LOCKFILE")).toBe(true);
@@ -814,7 +814,7 @@ describe("the JUP_ spelling of every COREPACK_ variable", () => {
       expect(isToolEnvName(jupSpelling(name))).toBe(true);
     }
 
-    // §15.2's names are generated rather than tabulated, and get the same pair.
+    // §11.2's names are generated rather than tabulated, and get the same pair.
     expect(jupSpelling(registryVariableFor("yarn"))).toBe("JUP_REGISTRY_YARN");
 
     // A name belonging to neither prefix passes through both ways, which is what
@@ -899,7 +899,7 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
     const path = join(dir, DEFAULT_ENV_FILE_NAME);
 
     // The deny-lists are keyed by the COREPACK_ spelling; renaming the key must
-    // not be a way past them, or §14.5's whole list is one rename from useless.
+    // not be a way past them, or §03.2's whole list is one rename from useless.
     applyEnvFile({ JUP_INTEGRITY_KEYS: "0", JUP_SPEC_FILE: "./evil.json" }, path);
 
     expect(process.env.JUP_INTEGRITY_KEYS).toBeUndefined();

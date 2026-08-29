@@ -28,7 +28,7 @@ export interface ResolveOptions {
  * any of the three call sites below. Importing `registry` statically would still
  * drag `http` and `integrity` — and through them `node:crypto` and `node:zlib` —
  * into every single invocation, which is precisely what §01.3's budget and
- * §16.3's syscall shape rule out.
+ * §16, Build shape's syscall shape rule out.
  */
 function loadRegistry(): Promise<typeof import("../net/registry.ts")> {
   return import("../net/registry.ts");
@@ -85,7 +85,7 @@ export async function resolveDescriptor(
     // A tag the **table** answers is settled here, before any request is made.
     // `node@lts` is the only one, and `ToolDefinition.tags` records why npm's own
     // tags cannot answer it. Two consequences worth naming: the value skips
-    // §15.35e's age gate, because a compiled-in literal is this table choosing —
+    // §04.1's age gate, because a compiled-in literal is this table choosing —
     // the same act as `default`, which is likewise never gated — rather than the
     // registry choosing on the user's behalf; and `node@lts` resolves with zero
     // requests, so it works offline and inside §01.3's cold budget.
@@ -106,7 +106,7 @@ export async function resolveDescriptor(
       if (!Object.hasOwn(tags, range)) {
         throw new UsageError(messages.tagNotFound(range));
       }
-      // §15.35e — a tag is the registry choosing on the user's behalf, so the
+      // §04.1 — a tag is the registry choosing on the user's behalf, so the
       // minimum-release-age gate applies to it just as it does to step 6's range
       // query; only step 5's exact version is exempt. `capToReleaseAge` returns
       // its argument, and makes no request at all, when the gate is off.
@@ -115,7 +115,7 @@ export async function resolveDescriptor(
   }
 
   // 4 — the cache probe, and it comes **before** step 5. For an exact version
-  // both steps return the same reference, so §14.1 makes this a single `stat`
+  // both steps return the same reference, so §04.3 makes this a single `stat`
   // rather than a directory scan; for a range this is the whole fast path, and
   // the budget in §01.3 requires it to complete with zero network requests.
   if (useCache) {
@@ -127,7 +127,7 @@ export async function resolveDescriptor(
 
   // 5 — an exact version is returned **without** verifying that it exists. A
   // typo therefore surfaces much later as a bare HTTP 404 naming a tarball URL
-  // the user never typed; §15.35j maps that 404 onto a "version does not exist"
+  // the user never typed; §04.1 maps that 404 onto a "version does not exist"
   // message in phase 2.
   if (isValidVersion(range)) {
     return { name, reference: range };
@@ -142,7 +142,7 @@ export async function resolveDescriptor(
   // not select a prerelease unless the range names one or the user opts in.
   const wantsPrereleases = envFlag(ENV.ENABLE_PRERELEASES) || rangeNamesPrerelease(range);
 
-  // §15.35e — `fetchResolvableVersions` is `fetchAvailableVersions` with the
+  // §04.1 — `fetchResolvableVersions` is `fetchAvailableVersions` with the
   // minimum-release-age gate applied: same request, same `Accept` header, same
   // answer while `COREPACK_MINIMUM_RELEASE_AGE` is unset. When it *is* set and a
   // band's source publishes no release dates (§05.3's tags document), the band
@@ -171,7 +171,7 @@ export async function resolveDescriptor(
 }
 
 /**
- * §04.5 — the global default, consulted only when the project has no usable spec.
+ * §04.6 — the global default, consulted only when the project has no usable spec.
  *
  * Step 1 (a last-known-good hit) returns with **no network**, which is why a
  * machine that has ever run online keeps working offline. `COREPACK_DEFAULT_TO_LATEST=0`
@@ -188,7 +188,7 @@ export async function getDefaultVersion(name: string): Promise<string> {
   const lkg = readLastKnownGood();
   const recorded = lkg[name];
   if (recorded !== undefined) {
-    // §15.28 — recorded per-host references cannot carry digests. Treat such an
+    // §02.4 — recorded per-host references cannot carry digests. Treat such an
     // LKG entry as damaged derived state: retain the version and drop the suffix.
     const parsed = parse(recorded);
     if (parsed !== null && parsed.build.length > 0 && isPerHost({ name, reference: recorded })) {
@@ -229,7 +229,7 @@ export async function getDefaultVersion(name: string): Promise<string> {
 }
 
 /**
- * §02.1, §04.5 — the fallback locator, whose reference is a **thunk**.
+ * §02.1, §04.6 — the fallback locator, whose reference is a **thunk**.
  *
  * Preserving the laziness is the difference between "an offline project with a
  * pinned version works" and "every invocation hits the network". Transparent

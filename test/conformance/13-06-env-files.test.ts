@@ -156,7 +156,7 @@ describe("§13.6 env files", () => {
     expect(result.stdout).toBe("LEAK=undefined OPTIONS=undefined\n");
   });
 
-  it("60: .jup.env cannot disable signature verification (§14.5)", async () => {
+  it("60: .jup.env cannot disable signature verification (§03.2)", async () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
     fixture.write(".jup.env", "COREPACK_INTEGRITY_KEYS=0\n");
 
@@ -170,7 +170,7 @@ describe("§13.6 env files", () => {
     );
   });
 
-  it("61: .jup.env cannot allow a custom URL (§14.5)", async () => {
+  it("61: .jup.env cannot allow a custom URL (§03.2)", async () => {
     const url = `${registry.origin}/yarn/-/yarn-1.22.21.tgz`;
     const fixture = createFixture({ packageManager: `yarn@${url}` });
     fixture.write(".jup.env", "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS=1\n");
@@ -184,7 +184,7 @@ describe("§13.6 env files", () => {
     );
   });
 
-  it("62: .jup.env cannot supply COREPACK_NPM_TOKEN (§14.5)", async () => {
+  it("62: .jup.env cannot supply COREPACK_NPM_TOKEN (§03.2)", async () => {
     registry.requiredAuthorization = "Bearer s3cret";
 
     const fromFile = createFixture({ packageManager: "pnpm@6.6.2" });
@@ -217,7 +217,7 @@ describe("§13.6 env files", () => {
   /* ---------------------------------------------------------------- *
    * Rows 62b–62f — the legacy name.
    *
-   * §14.24 renamed the file, and `.corepack.env` is the one name in that
+   * §03.2 renamed the file, and `.corepack.env` is the one name in that
    * rename with copies on real disks, so §03.2 keeps reading it. These rows
    * pin the four things that make the fallback safe rather than surprising.
    * ---------------------------------------------------------------- */

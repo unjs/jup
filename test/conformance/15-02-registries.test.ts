@@ -1,5 +1,5 @@
 /**
- * §15.38 rows 151–152 — per-source registries (§15.2) and origin rewriting (§15.3).
+ * rows 151–152 — per-source registries and origin rewriting (§05.2).
  *
  * #753 (15👍, no maintainer response) is "corepack ignores `COREPACK_NPM_REGISTRY`
  * for the Yarn registry", and #872 is a Renovate deployment whose IP gets banned
@@ -9,9 +9,9 @@
  * — had no mirror path of its own at all, and the only workaround redirected npm
  * and pnpm as collateral.
  *
- * **Four rows are gone**, and Berry's fixtures with them. They asserted §15.2
+ * **Four rows are gone**, and Berry's fixtures with them. They asserted §05.2
  * against Yarn's *own* distribution origin — that `COREPACK_REGISTRY_YARN` could
- * move `repo.yarnpkg.com` where `COREPACK_NPM_REGISTRY` could not. §15.41 put
+ * move `repo.yarnpkg.com` where `COREPACK_NPM_REGISTRY` could not. §02.5 put
  * every band on the npm registry, so that origin is not in the table any more
  * and the distinction those rows drew cannot be set up. The variable itself is
  * unchanged and still asserted below, on Classic; what it lost is the case that
@@ -20,7 +20,7 @@
  * Every row here runs **three** servers: the default registry, a Yarn-only
  * mirror, and a shared npm mirror. A harness that collapsed them into one could
  * not tell "Yarn was mirrored" from "everything was", which is precisely the
- * distinction §15.2 exists to make.
+ * distinction §05.2 exists to make.
  */
 
 import { writeFileSync } from "node:fs";
@@ -71,7 +71,7 @@ beforeEach(() => {
   for (const registry of [fallback, yarnMirror, npmMirror]) registry.reset();
 });
 
-describe("§15.2 — one mirror mechanism for every source", () => {
+describe("§05.2 — one mirror mechanism for every source", () => {
   it("151: npm and pnpm keep using the default registry", async () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -93,8 +93,8 @@ describe("§15.2 — one mirror mechanism for every source", () => {
   });
 
   it("151: credentials follow the per-source registry, not the default one", async () => {
-    // §14.6 scopes credentials to "the configured registry's origin". With
-    // §15.2 there is one such origin *per package manager*, and the token has to
+    // §05.1 scopes credentials to "the configured registry's origin". With
+    // §05.2 there is one such origin *per package manager*, and the token has to
     // follow the one actually in force — otherwise mirroring Yarn onto an
     // authenticated internal host produces a 401 nobody can explain.
     const fixture = createFixture({ packageManager: "yarn@1.22.4" });
@@ -112,7 +112,7 @@ describe("§15.2 — one mirror mechanism for every source", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
-    // Yarn Classic's band is an npm registry, so §15.2 moves both the packument
+    // Yarn Classic's band is an npm registry, so §05.2 moves both the packument
     // and the tarball off `registry.yarnpkg.com`.
     expect(paths(yarnMirror)).toEqual(["/yarn/1.22.4", "/yarn/-/yarn-1.22.4.tgz"]);
     expect(yarnMirror.requests.map((request) => request.authorization)).toEqual([
@@ -150,7 +150,7 @@ describe("§15.2 — one mirror mechanism for every source", () => {
   });
 });
 
-describe("§15.3 — rewrite origins, not substrings", () => {
+describe("§05.2 — rewrite origins, not substrings", () => {
   it("152: an override differing only by host case and trailing slash rewrites cleanly", async () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -202,7 +202,7 @@ describe("§15.3 — rewrite origins, not substrings", () => {
 
   it("152: a URL that merely contains the default registry is left alone", async () => {
     // Corepack's substring `replace` rewrites the middle of this one, turning a
-    // refusal into a request to the mirror. §14.9 must refuse it instead.
+    // refusal into a request to the mirror. §05.2 must refuse it instead.
     const fixture = createFixture({});
     writeFileSync(
       join(fixture.cwd, "package.json"),

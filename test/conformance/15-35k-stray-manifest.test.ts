@@ -1,10 +1,10 @@
 /**
- * §15.38 row 205 — a stray `packageManager` in `$HOME` (§15.35k).
+ * row 205 — a stray `packageManager` in `$HOME` (§12.5).
  *
  * #424 is the single most-repeated confusion in its thread: a `package.json` in
  * the home directory — or any ancestor of it — silently governs *every*
  * directory on the machine that has no manifest of its own, and §12.5's error
- * names a file the user has no memory of creating. §15.35k appends a clause
+ * names a file the user has no memory of creating. §12.5 appends a clause
  * saying so.
  *
  * The discriminating half is the **control**: the same error, from a manifest
@@ -53,7 +53,7 @@ function strayHome(): { fixture: Fixture; options: RunOptions } {
   };
 }
 
-describe("§15.35k — a manifest outside any project says so (row 205)", () => {
+describe("§12.5 — a manifest outside any project says so (row 205)", () => {
   it("205: a $HOME pin governing an unrelated directory is flagged", async () => {
     const { fixture, options } = strayHome();
     // The stray file itself, one directory above the project the user is in.
@@ -69,7 +69,7 @@ describe("§15.35k — a manifest outside any project says so (row 205)", () => 
   });
 
   it("205: a manifest *above* the home directory is flagged too", async () => {
-    // §15.35k says "the home directory or above": a `packageManager` field in
+    // §12.5 says "the home directory or above": a `packageManager` field in
     // `/` or in `$HOME`'s parent governs strictly more directories, not fewer.
     const { fixture, options } = strayHome();
     fixture.write("../package.json", `{"packageManager":"yarn@1.0.0"}\n`);

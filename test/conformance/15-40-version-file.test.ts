@@ -1,7 +1,7 @@
 /**
- * §15.40 — the version file a tool's ecosystem already writes (rows 237–243).
+ * §03.1 — the version file a tool's ecosystem already writes (rows 237–243).
  *
- * §15.39 gave a runtime a field of its own, and almost no repository has written
+ * §02.3 gave a runtime a field of its own, and almost no repository has written
  * one. `.nvmrc` is in a large share of them today, says the same thing, and is
  * already obeyed by a program most of those repositories have installed. These
  * rows are the whole of what reading it may do: fill a silence (237, 238, 242),
@@ -10,7 +10,7 @@
  *
  * What is deliberately not tested here is anything past §03: a range that came
  * from `.nvmrc` is a range, and §04–§08 never learn where it was written down.
- * Row 237 asserts that once — the install is an ordinary §15.28 per-host install
+ * Row 237 asserts that once — the install is an ordinary §02.4 per-host install
  * — and the rest of the file stays in the walk.
  *
  * POSIX only, for `15-39`'s reason: the artifact has to be a real executable.
@@ -85,7 +85,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.40 version files", () => {
+describe.skipIf(!POSIX)("§03.1 version files", () => {
   function options(fixture: Fixture, env?: Record<string, string | undefined>) {
     return {
       cwd: fixture.cwd,
@@ -115,7 +115,7 @@ describe.skipIf(!POSIX)("§15.40 version files", () => {
     expect(installed(fixture, NEWEST)).toBe(false);
 
     // Past §03 nothing knows where the range came from: this is an ordinary
-    // §15.28 install, launcher for the version line and per-host package for the
+    // §02.4 install, launcher for the version line and per-host package for the
     // bytes. Asserted once, here, and not again.
     const fetched = registry.requests.map((request) => request.path);
     expect(fetched.some((path) => path.includes(`${NODE_PACKAGE}/-/`))).toBe(true);
@@ -157,7 +157,7 @@ describe.skipIf(!POSIX)("§15.40 version files", () => {
     expect(installed(fixture, PINNED)).toBe(true);
     expect(installed(fixture, NEWEST)).toBe(false);
 
-    // §15.23 — a range resolves through `jup.lock`, and the version file is the
+    // §04.4 — a range resolves through `jup.lock`, and the version file is the
     // spec result's target, so the memo lands beside the file that declared the
     // range rather than at the repository root. Neither project file is written:
     // running `node` is not a decision about what the repository builds on.
@@ -265,7 +265,7 @@ describe.skipIf(!POSIX)("§15.40 version files", () => {
     expect(disabled.exitCode).toBe(0);
     expect(disabled.stderr).toBe("");
 
-    // §15.27's mutating walk never looks for one: the file a write targets is
+    // §03.1's mutating walk never looks for one: the file a write targets is
     // always the manifest, so an unreadable `.nvmrc` cannot block the command
     // that would replace it.
     const used = await run(["use", `node@${PINNED}`], options(fixture));
@@ -279,7 +279,7 @@ describe.skipIf(!POSIX)("§15.40 version files", () => {
 
   it("the table is where the file name lives", () => {
     const source = readFileSync(new URL("../../src/project/manifest.ts", import.meta.url), "utf8");
-    // §15.21 — adding a second version file must be a data-only change, which it
+    // §02.3 — adding a second version file must be a data-only change, which it
     // is only while §03's walk does not know what it is looking for.
     expect(source).not.toContain(".nvmrc");
   });

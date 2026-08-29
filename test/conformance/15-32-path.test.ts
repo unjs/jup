@@ -1,5 +1,5 @@
 /**
- * §15.38 row 198 — §15.32, the resolved package manager on `PATH`.
+ * row 198 — §08.3, the resolved package manager on `PATH`.
  *
  * #412: `corepack pnpm exec …` does not put the resolved pnpm on `PATH`, so a
  * script that shells out to `pnpm` gets a *different* one, or nothing. Yarn only
@@ -70,7 +70,7 @@ interface Scene {
  * A pnpm-pinned project, a shim directory that is **not on `PATH`**, and a decoy
  * `pnpm` that is.
  *
- * Leaving the shim directory off `PATH` is what makes the row about §15.32 and
+ * Leaving the shim directory off `PATH` is what makes the row about §08.3 and
  * not about the user's shell profile: if the tool prepends nothing, the only
  * `pnpm` a nested process can reach is the decoy.
  */
@@ -78,7 +78,7 @@ function scene(): Scene {
   const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM}` });
   seedPackageManager(fixture.home, "pnpm", PNPM, { script: SCRIPT, esm: true });
 
-  // §15.13's per-user default, spelled for this platform — see `perUserShims`.
+  // §10.5's per-user default, spelled for this platform — see `perUserShims`.
   const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   const decoy = join(fixture.root, "decoy");
   mkdirSync(shimDir, { recursive: true });
@@ -116,11 +116,11 @@ function field(stdout: string, key: string): string {
 
 afterAll(cleanupFixtures);
 
-describe.skipIf(!POSIX)("§15.32 — the resolved package manager on PATH (row 198)", () => {
+describe.skipIf(!POSIX)("§08.3 — the resolved package manager on PATH (row 198)", () => {
   it("198: a nested script invoking `pnpm` resolves to the same pnpm", async () => {
     const { shimDir, options } = scene();
 
-    // §14.15's shims are what makes the shim directory a directory of package
+    // §10.1's shims are what makes the shim directory a directory of package
     // manager binaries, so `enable` is a precondition of the fix, not a
     // separate feature.
     const enabled = await run(["enable", "pnpm"], options);
@@ -148,7 +148,7 @@ describe.skipIf(!POSIX)("§15.32 — the resolved package manager on PATH (row 1
     expect(result.exitCode).toBe(0);
     expect(JSON.parse(field(result.stdout, "nested")) as string).toBe("DECOY\n");
     // Untouched, entry for entry — against what `run` actually sent, which is
-    // the caller's `PATH` minus §15.13 point 8's directory (see `childPath`).
+    // the caller's `PATH` minus §10.5 point 8's directory (see `childPath`).
     expect(field(result.stdout, "path")).toBe(childPath(options.env!.PATH));
     expect(field(result.stdout, "path").split(delimiter)[0]).toBe(decoy);
   });

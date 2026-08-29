@@ -1,28 +1,27 @@
 /**
- * Shims and PATH integration — §10, §15.13, §15.14, §15.15, §15.16, §15.29.
+ * Shims and PATH integration — §10, §10.3, §10.5, §10.6, §10.7.
  *
  * `enable` puts our names on PATH; `disable` takes them off.
  *
  * Node preserves the invoked path in `process.argv[1]`, so POSIX shims link to
  * one name-agnostic stub that reads its name from that path.
  *
- * Windows keeps §10.3's three script variants per name, because a `.cmd` or
+ * Windows keeps §10.4's three script variants per name, because a `.cmd` or
  * `.ps1` wrapper invokes `node <stub>` and the invocation name is genuinely gone
  * by then. That is the whole of the platform split, and the per-name stub
  * machinery below exists for it alone.
  *
- * Four §15 items reshape the command around that core:
+ * Four things reshape the command around that core:
  *
- * * **§15.13** — shims go to a per-user directory by default, never somewhere
+ * * **§10.5** — shims go to a per-user directory by default, never somewhere
  *   that needs elevation. When that directory is not on `PATH`, `enable` prefers
- *   another entry from a **closed list** of per-user directories that is (point
- *   6), and says so; if none is, it says what line to add (point 3). `disable`
- *   and `info` find the result by looking for the shims, never by reading `PATH`
- *   (point 7).
- * * **§15.15** — anything `enable` displaces is recorded in `<home>/shims.json`
+ *   another entry from a **closed list** of per-user directories, and says so;
+ *   if none is, it says what line to add. `disable` and `info` find the result
+ *   by looking for the shims, never by reading `PATH`.
+ * * **§10.6** — anything `enable` displaces is recorded in `<home>/shims.json`
  *   and put back by `disable`, which now removes only entries it created.
- * * **§15.16** — npm is shimmed by default; `--exclude npm` opts out.
- * * **§15.29** — after writing, `enable` checks that the shims actually won on
+ * * **§10.7** — npm is shimmed by default; `--exclude npm` opts out.
+ * * **§10.5** — after writing, `enable` checks that the shims actually won on
  *   `PATH` and names whatever beat them.
  */
 
@@ -95,32 +94,32 @@ import {
 } from "../utils/self.ts";
 import { getHomeFolder, isInsideInstallFolder } from "../cache/store.ts";
 
-/** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
+/** Our own binary name — what §10.5's `PATH` verification and lookup search for. */
 const TOOL_NAME = "jup";
 
 /**
- * §14.16 — how we recognise a stub we wrote. A regular file that does not carry
+ * §10.6 — how we recognise a stub we wrote. A regular file that does not carry
  * this marker is somebody else's binary and is never replaced without `--force`.
  *
- * Declared in `exec.ts` because §15.32's `PATH` promotion reads it on every
+ * Declared in `exec.ts` because §08.7's `PATH` promotion reads it on every
  * invocation and this module imports that one, not the other way round;
  * re-exported here because this is where the concept belongs.
  */
 export { SHIM_MARKER, stubNameFor, WIN32_WRAPPER_HEADS } from "../run/exec.ts";
 
 /**
- * §10.1 — the interpreter the generic shebang names.
+ * §10.2 — the interpreter the generic shebang names.
  *
- * It is also a binary name in the table (§15.39), and that coincidence is a
+ * It is also a binary name in the table (§02.3), and that coincidence is a
  * hazard rather than a curiosity: a shim called `node` whose stub starts
- * `#!/usr/bin/env node` re-searches the very `PATH` §15.32 told the user to
+ * `#!/usr/bin/env node` re-searches the very `PATH` §10.5 told the user to
  * prepend the shim directory to, finds *itself*, and execs forever. See
  * {@link interpreterPath}.
  */
 const INTERPRETER_NAME = "node";
 
 /**
- * §10.1's **relocatable** spelling — what a shebang says when no absolute path
+ * §10.2's **relocatable** spelling — what a shebang says when no absolute path
  * has been baked into it, and what the shipped stubs keep.
  *
  * A constant because it is written by {@link shimSource} and
@@ -133,17 +132,17 @@ const INTERPRETER_NAME = "node";
 const RELOCATABLE_INTERPRETER = `/usr/bin/env ${INTERPRETER_NAME}`;
 
 /**
- * §10.1 — the absolute path of the runtime to bake into a shebang or a Windows
+ * §10.2 — the absolute path of the runtime to bake into a shebang or a Windows
  * wrapper, so that no `PATH` lookup happens at invocation time. `undefined` when
- * there is no such runtime, which §15.43 makes a refusal rather than a fallback.
+ * there is no such runtime, which §10.2 makes a refusal rather than a fallback.
  *
  * `realpath` throughout, because `process.execPath` is frequently a symlink
  * (`/usr/bin/node` into a version manager's store) and the point of baking a
  * path in is that it names one file rather than whatever a lookup would answer
  * later.
  *
- * **The runtime running `enable` is not always usable.** §15.39 makes `node` a
- * table entry, so `enable node` puts a shim of ours on that name and §15.32 asks
+ * **The runtime running `enable` is not always usable.** §02.3 makes `node` a
+ * table entry, so `enable node` puts a shim of ours on that name and §10.5 asks
  * for the shim directory to go *first* on `PATH`; from then on anything that
  * starts `#!/usr/bin/env node` — our own `bin/jup.mjs` included — resolves through
  * that shim, which downloads the project's runtime and spawns it. `enable` run
@@ -151,7 +150,7 @@ const RELOCATABLE_INTERPRETER = `/usr/bin/env ${INTERPRETER_NAME}`;
  * and baking it in would tie every shim on the machine to a file `jup cache
  * clean` exists to delete: the next clean leaves every shim dying with `bad
  * interpreter` (exit 126), and `enable` cannot repair them because `env node`
- * now finds only the broken `node` shim (exit 127). §15.43 has the three tiers
+ * now finds only the broken `node` shim (exit 127). §10.2 has the three tiers
  * below instead.
  *
  * The test is `isInsideInstallFolder` and not "inside `<home>`", because the two
@@ -176,14 +175,14 @@ export function interpreterPath(): string | undefined {
   if (!isInsideInstallFolder(own)) return own;
 
   // Tier 1 — the forwarded host runtime. Whichever process in this chain was
-  // last running outside the store recorded itself there (§15.43,
+  // last running outside the store recorded itself there (§10.2,
   // `forwardHostRuntime`), so this is the runtime that would have been baked in
   // had the user typed `enable` one level up.
   const forwarded = readEnv(ENV.HOST_RUNTIME);
   if (forwarded !== undefined && forwarded !== "" && isAbsolute(forwarded)) {
-    // Validated rather than trusted: it survives an env-file refusal (§14.5) but
+    // Validated rather than trusted: it survives an env-file refusal (§03.2) but
     // it is still a string, and a value naming one of our own shims would
-    // reintroduce §14.26's exec loop.
+    // reintroduce §10.2's exec loop.
     if (isExecutableFile(forwarded) && !isOurShim(forwarded, INTERPRETER_NAME)) {
       const resolved = realpathOr(forwarded);
       if (!isInsideInstallFolder(resolved)) return resolved;
@@ -198,11 +197,11 @@ export function interpreterPath(): string | undefined {
 }
 
 /**
- * §15.43 tier 2 — the first `node` on `PATH` that `enable` may name.
+ * §10.2 tier 2 — the first `node` on `PATH` that `enable` may name.
  *
  * Both exclusions are load-bearing and neither is redundant. A shim of ours is
- * refused because naming it is §14.26's exec loop written by hand; a runtime
- * inside the install folder is refused because that is the whole of §15.43. The
+ * refused because naming it is §10.2's exec loop written by hand; a runtime
+ * inside the install folder is refused because that is the whole of §10.2. The
  * ownership test is the same one `enable` uses to decide what it may overwrite,
  * so a directory holding *someone else's* `node` still answers.
  *
@@ -221,16 +220,16 @@ function hostRuntimeOnPath(): string | undefined {
 }
 
 /**
- * §10.1 — does this run bake an absolute interpreter into the POSIX stub, and
+ * §10.2 — does this run bake an absolute interpreter into the POSIX stub, and
  * with it into our own CLI entry?
  *
- * One function because §10.1 states one condition, and the stub and the entry
+ * One function because §10.2 states one condition, and the stub and the entry
  * must not disagree about it: they carry the same shebang and are read by the
  * same `execve`.
  *
  * The first clause is the original rule. An `enable node` — this run's, or an
  * earlier one's — puts a shim of ours on the name `#!/usr/bin/env node` looks
- * up, so leaving the shebang generic is §14.26's exec loop.
+ * up, so leaving the shebang generic is §10.2's exec loop.
  *
  * The second is the case the first never covered: `env` finds no `node` **at
  * all**. A generic shebang is then not a recursion but a dead file — exit 127 —
@@ -242,15 +241,15 @@ function hostRuntimeOnPath(): string | undefined {
  * The test is {@link envFindsInterpreter} and deliberately **not**
  * {@link hostRuntimeOnPath}: that one answers "is there a runtime `enable` may
  * *name*", which is false for a `node` living in the store, and pinning one of
- * those is precisely what §15.43 forbids. This asks the narrower question the
+ * those is precisely what §10.2 forbids. This asks the narrower question the
  * shebang actually poses — will `env` reach anything at all — so an `enable`
  * under a store runtime that is itself on `PATH` keeps its relocatable shebang
- * and its §15.44 backstop, exactly as before.
+ * and its §07.9 backstop, exactly as before.
  *
  * POSIX-only, because Windows reads no shebang. Its wrappers name the runtime
  * unconditionally, and pinning the entry there would buy nothing while risking
  * {@link cliEntryNotWritable} against a read-only package directory — the trade
- * §15.46 already refused for that platform.
+ * §10.2 already refused for that platform.
  */
 function pinsInterpreter(claimsName: boolean): boolean {
   return claimsName || (process.platform !== "win32" && !envFindsInterpreter());
@@ -261,9 +260,9 @@ function pinsInterpreter(claimsName: boolean): boolean {
  *
  * Our own shims are the one exclusion, and it is the same one
  * {@link hostRuntimeOnPath} makes for the same reason: `env` finding a shim of
- * ours on that name is §14.26's exec loop, which is a dead shebang by another
+ * ours on that name is §10.2's exec loop, which is a dead shebang by another
  * route. Everything else counts, the store included — a runtime `cache clean`
- * can take away still runs today, and §15.44 is what covers the day it cannot.
+ * can take away still runs today, and §07.9 is what covers the day it cannot.
  */
 function envFindsInterpreter(): boolean {
   for (const candidate of whichAll(INTERPRETER_NAME)) {
@@ -273,7 +272,7 @@ function envFindsInterpreter(): boolean {
 }
 
 /**
- * {@link interpreterPath}, with §15.43's tier 3 — the refusal — applied.
+ * {@link interpreterPath}, with §10.2's tier 3 — the refusal — applied.
  *
  * Every caller that is about to *write* a baked-in interpreter goes through
  * this, so the "no usable runtime" case cannot reach a shebang as `undefined`
@@ -288,22 +287,22 @@ function requireInterpreterPath(): string {
 }
 
 /**
- * §15.44 — the interpreter an *installed* set of shims actually runs under, or
+ * §07.9 — the interpreter an *installed* set of shims actually runs under, or
  * `undefined` when there is none to read.
  *
  * This is {@link interpreterPath} asked backwards. That one answers "what should
  * `enable` bake in?"; this one answers "what did some earlier `enable` already
  * bake in?", which is the only question `cache clean` can act on. The two are
- * deliberately not the same call: §15.43 makes the *new* answer safe, and the
+ * deliberately not the same call: §10.2 makes the *new* answer safe, and the
  * whole point of the backstop is the installs whose answer was written before
  * that rule existed, or by some route that never went through it.
  *
- * The shims themselves are the record, exactly as §15.13 point 7 has it — a
+ * The shims themselves are the record, exactly as §10.5 has it — a
  * sidecar naming the interpreter could disagree with the file the kernel will
  * actually exec. On POSIX the answer is the shebang of the stub each installed
  * shim links to, read *through* the shim so that a shim written by another copy
  * of the tool still answers; on Windows it is the wrappers, which name the
- * interpreter each (§10.3) because the stub's own shebang is dead weight there.
+ * interpreter each (§10.4) because the stub's own shebang is dead weight there.
  * Neither lookup consults `PATH`, and both answer "none" rather than failing
  * when there is no shim directory to read.
  *
@@ -317,13 +316,13 @@ export async function bakedInterpreter(options?: {
   if (process.platform === "win32") return win32BakedInterpreter(options?.installDirectory);
 
   // The installed shims first, and only then our own copy of the stub. A shim is
-  // a symlink (§10.2), so opening it reads the stub it actually points at —
+  // a symlink (§10.3), so opening it reads the stub it actually points at —
   // which is the stub of whichever copy of the tool wrote it. That copy is
   // frequently not this one (an `npx jup enable`, a global that has since been
   // reinstalled), and reading only our own `dist/` would then miss the store
   // path the running shims are dying on and let `cache clean` delete it. Falling
   // back to our own stub covers the install that has no shim directory to read —
-  // §15.44 answers "none" rather than failing there, and our stub is the same
+  // §07.9 answers "none" rather than failing there, and our stub is the same
   // record one directory over.
   return (
     (await posixShimInterpreter(options?.installDirectory)) ??
@@ -336,10 +335,10 @@ export async function bakedInterpreter(options?: {
  *
  * `resolveInstallDirectory` rather than `chooseInstallDirectory`, and for the
  * reason {@link win32BakedInterpreter} gives: this is a read of where the shims
- * already are, and §15.13 point 7 forbids that read from consulting `PATH`.
+ * already are, and §10.5 forbids that read from consulting `PATH`.
  *
  * Only an entry carrying {@link SHIM_MARKER} answers. The per-user shim
- * directory is full of other programs (§15.32 says so), and a foreign `node`
+ * directory is full of other programs (§10.5 says so), and a foreign `node`
  * sitting there would otherwise contribute its own first line to a decision
  * about what `cache clean` may delete.
  */
@@ -363,10 +362,10 @@ async function posixShimInterpreter(installDirectory?: string): Promise<string |
 }
 
 /**
- * §15.44's fallback — the shebang of a stub in *our own* folder, for the install
+ * §07.9's fallback — the shebang of a stub in *our own* folder, for the install
  * that has no shim directory to read.
  *
- * §10.2 gives every name its own stub, so the folder is asked rather than one
+ * §10.3 gives every name its own stub, so the folder is asked rather than one
  * file: `enable` pins the whole of it in one pass ({@link pinStubFolder}), which
  * means any stub carrying an absolute shebang answers for the set.
  */
@@ -377,7 +376,7 @@ async function ownStubInterpreter(distFolder: string): Promise<string | undefine
   // A *pinned* stub wins over a relocatable one, and the folder is read to the
   // end rather than stopped at the first answer to make that so: a partial
   // `enable` — one interrupted, or run against a folder some of whose stubs
-  // could not be written — leaves a mix, and the pin is the one thing §15.44
+  // could not be written — leaves a mix, and the pin is the one thing §07.9
   // exists to find.
   //
   // Sorted, so two runs against one folder cannot disagree about which of
@@ -409,7 +408,7 @@ function shebangOf(head: string): string | undefined {
 }
 
 /**
- * The §10.3 `.cmd` wrapper's **fallback** branch: `"<interpreter>"  "%~dp0\<rel>" %*`.
+ * The §10.4 `.cmd` wrapper's **fallback** branch: `"<interpreter>"  "%~dp0\<rel>" %*`.
  *
  * The lookahead is what separates it from the branch above it, which has the
  * same shape with `"%~dp0\node.exe"` in the interpreter's place — the relocatable
@@ -424,11 +423,11 @@ const WIN32_CMD_INTERPRETER_RE = /^\s*"((?!%~dp0)[^"\n]+)"\s\s"%~dp0[\\/]/m;
  *
  * `resolveInstallDirectory` rather than `chooseInstallDirectory`: this is not
  * `enable` choosing where to write, it is a read of where the shims already are,
- * and §15.13 point 7 forbids that read from consulting `PATH`. It throws when
- * there is no home directory to default to (§14.17), and a `cache clean` has no
+ * and §10.5 forbids that read from consulting `PATH`. It throws when
+ * there is no home directory to default to (§10.5), and a `cache clean` has no
  * business failing over that — there are then no shims to protect either.
  *
- * Every name is tried rather than just `node`, because §10.3 bakes the
+ * Every name is tried rather than just `node`, because §10.4 bakes the
  * interpreter into all three wrappers of every name unconditionally; the first
  * one that answers answers for the set.
  */
@@ -448,45 +447,45 @@ async function win32BakedInterpreter(installDirectory?: string): Promise<string 
   return undefined;
 }
 
-/** §10.2 — a Yarn Switch install lives under `…/switch/bin/…`. */
+/** §10.3 — a Yarn Switch install lives under `…/switch/bin/…`. */
 const YARN_SWITCH_RE = /[/\\]switch[/\\]bin[/\\]/;
 
-/** Windows writes three files per binary name (§10.3); `disable` removes all three. */
+/** Windows writes three files per binary name (§10.4); `disable` removes all three. */
 const WIN32_EXTENSIONS = ["", ".ps1", ".cmd"];
 
 /** `0` where the platform has no `O_NOFOLLOW` (Windows), exactly as `tar.ts` does it. */
 const O_NOFOLLOW = fsConstants.O_NOFOLLOW ?? 0;
 
-/** §15.15 — where the record of displaced entries lives, under `<home>`. */
+/** §10.6 — where the record of displaced entries lives, under `<home>`. */
 const DISPLACED_RECORD_NAME = "shims.json";
 
-/** §15.15 — where the *content* of a displaced regular file is parked. */
+/** §10.6 — where the *content* of a displaced regular file is parked. */
 const DISPLACED_BACKUP_DIR = "displaced";
 
 export interface ShimOptions {
   installDirectory?: string;
-  /** §15.13 point 8 — install to the system-wide directory instead of a per-user one. */
+  /** §10.5 — install to the system-wide directory instead of a per-user one. */
   system?: boolean;
-  /** §14.16 — required to replace an entry we did not create. */
+  /** §10.6 — required to replace an entry we did not create. */
   force?: boolean;
 }
 /**
  * These live here rather than in `errors.ts` for the same reason `info.ts` keeps
  * its own: they are this command's vocabulary and nothing else refers to them.
  *
- * The two `!` lines quoted verbatim by §15.13 and §15.29 are byte-exact
+ * The two `!` lines quoted verbatim by §10.5 are byte-exact
  * contract; the rest are ours to word.
  */
 
 /**
- * §14.18 — `EROFS`/`EACCES` on the shim directory is the container and
+ * §10.8 — `EROFS`/`EACCES` on the shim directory is the container and
  * OS-package case, and a raw errno tells the user nothing. Name the ways out.
  */
 export const shimDirectoryNotWritable = (directory: string) =>
   `Unable to write shims to ${directory}: the directory is not writable. Either re-run with --install-directory <a writable directory on your PATH>, set JUP_SHIM_DIRECTORY, or define shell aliases instead (e.g. alias yarn="${TOOL_NAME} yarn")`;
 
 /**
- * §15.13 point 8 — `--system` and `--install-directory` name the same thing.
+ * §10.5 — `--system` and `--install-directory` name the same thing.
  *
  * A refusal rather than a precedence rule: the two spellings are equally
  * explicit, so there is no reading of `--system --install-directory /opt/bin`
@@ -497,40 +496,40 @@ export const systemAndInstallDirectory = () =>
   `Options --system and --install-directory both name an install directory; pass one or the other`;
 
 /**
- * §15.13 point 8 — `--system` on a Windows without `%ProgramData%`.
+ * §10.5 — `--system` on a Windows without `%ProgramData%`.
  *
  * The variable is set on every supported Windows, so this is the stripped
  * environment (a service, a locked-down CI runner) rather than a version
  * difference. Guessing `C:\ProgramData` from a drive letter that may not be the
- * system one is exactly the kind of invention point 6 refuses, so `--system`
+ * system one is exactly the kind of invention §10.5 refuses, so `--system`
  * says it has no directory and points at the one flag that always does.
  */
 export const noSystemShimDirectory = () =>
   `--system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead`;
 
 /**
- * §10.7 + §15.43 — the *other* read-only directory, and a different failure.
+ * §10.8 + §10.2 — the *other* read-only directory, and a different failure.
  *
  * `guardWrites` covers the shim directory and the package directory alike, and
  * the message above names neither: it says "shims", and its two remedies
  * (`--install-directory`, `JUP_SHIM_DIRECTORY`) both move where the shims land,
  * which is not what failed. What failed is a stub inside jup's own
- * installation, which §10.1 rewrites to pin the interpreter — so the shim
+ * installation, which §10.2 rewrites to pin the interpreter — so the shim
  * directory is irrelevant and saying so is most of the value here. `enable`
  * without ${INTERPRETER_NAME} never reaches this: `ensureStub` compares before it
- * writes, so a stub that is already correct is left alone (§10.7).
+ * writes, so a stub that is already correct is left alone (§10.8).
  */
 export const stubNotWritable = (stub: string) =>
   `Unable to update ${stub}: the shim stub has to be rewritten — shimming ${INTERPRETER_NAME} pins the interpreter into it — and the directory holding ${TOOL_NAME}'s own files is not writable. --install-directory and JUP_SHIM_DIRECTORY move the shims, not this file, so neither helps: install ${TOOL_NAME} somewhere writable, or run \`${TOOL_NAME} enable\` without ${INTERPRETER_NAME}, which leaves the stub untouched.`;
 
 /**
- * §15.45 — the stub is byte-correct but not executable, and cannot be fixed.
+ * §10.3 — the stub is byte-correct but not executable, and cannot be fixed.
  *
- * A POSIX shim is a symlink (§10.2), so the execute bit the kernel checks lives
+ * A POSIX shim is a symlink (§10.3), so the execute bit the kernel checks lives
  * on the stub, not on the name. Without it `execve` skips the shim and the
  * `PATH` lookup falls through in silence — no error, the shim simply never
  * runs — which is why this is a failure rather than an advisory even though
- * §14.18 lets a read-only installation through elsewhere: there, nothing needed
+ * §10.8 lets a read-only installation through elsewhere: there, nothing needed
  * writing; here, every shim `enable` is about to write is dead on arrival.
  *
  * The remedies are the two that reach the file itself. {@link stubNotWritable}'s
@@ -541,12 +540,12 @@ export const stubNotExecutable = (stub: string) =>
   `Unable to make ${stub} executable: the shims are symlinks to that file, so it is the one that has to carry the execute bit, and the mode could not be changed — ${TOOL_NAME}'s own files are read-only or owned by another user. Shims installed against it would be passed over in silence. Run \`chmod +x ${stub}\` as the owner of that file, or install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`.`;
 
 /**
- * §15.46 — the pin could not be written into ${TOOL_NAME}'s own CLI entry.
+ * §10.2 — the pin could not be written into ${TOOL_NAME}'s own CLI entry.
  *
  * A third read-only failure, and a third diagnosis. {@link stubNotWritable} is
  * about the file the *shims* run; this one is about the file `${TOOL_NAME}`
  * itself runs, and the harm it prevents is not a broken shim but a recursion —
- * with our ${INTERPRETER_NAME} shim first on `PATH` (§15.32), an entry point that
+ * with our ${INTERPRETER_NAME} shim first on `PATH` (§10.5), an entry point that
  * opens `#!/usr/bin/env ${INTERPRETER_NAME}` finds *us*, so every `${TOOL_NAME}`
  * command resolves the project's runtime and downloads it to print its own
  * version.
@@ -556,16 +555,16 @@ export const stubNotExecutable = (stub: string) =>
  * what does reach it is installing ${TOOL_NAME} somewhere writable, or not
  * claiming the name at all — which here means `disable` as well as `enable`,
  * because an earlier run's ${INTERPRETER_NAME} shim is enough to require the pin
- * (§10.1, `claimsInterpreter`).
+ * (§10.2, `claimsInterpreter`).
  */
 export const cliEntryNotWritable = (entry: string) =>
   `Unable to update ${entry}: shimming ${INTERPRETER_NAME} puts ${TOOL_NAME}'s own ${INTERPRETER_NAME} shim ahead of the runtime on your PATH, so ${TOOL_NAME}'s entry point has to name its interpreter by absolute path — otherwise every ${TOOL_NAME} command re-enters that shim and downloads a runtime to run ${TOOL_NAME} itself. That file could not be rewritten: ${TOOL_NAME}'s own files are read-only or owned by another user. Install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`, or run \`${TOOL_NAME} disable ${INTERPRETER_NAME}\` and keep ${INTERPRETER_NAME} out of \`${TOOL_NAME} enable\`, which leaves this file untouched. The same pin is required when \`PATH\` holds no ${INTERPRETER_NAME} at all, since a generic shebang then resolves to nothing — there the remedy is to install one.`;
 
 /**
- * §15.43 — every runtime `enable` can see lives in the store, so there is
+ * §10.2 — every runtime `enable` can see lives in the store, so there is
  * nothing safe to bake in.
  *
- * Refusing is the only correct answer. `#!/usr/bin/env node` is §14.26's exec
+ * Refusing is the only correct answer. `#!/usr/bin/env node` is §10.2's exec
  * loop once the shim directory is first on `PATH`, and the store path is the
  * bug this whole section exists to close, so neither is a fallback — the user
  * has to name a runtime that will outlive `${TOOL_NAME} cache clean`.
@@ -573,22 +572,22 @@ export const cliEntryNotWritable = (entry: string) =>
 export const interpreterOnlyInStore = (interpreter: string, home: string) =>
   `Unable to bake an interpreter into the shims: the only ${INTERPRETER_NAME} available (${interpreter}) is inside ${home}, ${TOOL_NAME}'s own cache. Baking it into the shims would break every one of them the next time \`${TOOL_NAME} cache clean\` runs. Re-run \`${TOOL_NAME} enable\` under a ${INTERPRETER_NAME} installed outside ${home}.`;
 
-/** §15.13 point 2 — verbatim. */
+/** §10.5 — verbatim. */
 export const shimDirectoryFallback = (directory: string, fallback: string) =>
   `! ${directory} is not writable; installing shims to ${fallback} instead`;
 
-/** §15.13 point 6 — verbatim. Deliberately shaped like the fallback line above. */
+/** §10.5 — verbatim. Deliberately shaped like the fallback line above. */
 export const shimDirectoryPreferred = (fallback: string, chosen: string) =>
   `! ${fallback} is not on your PATH; installing shims to ${chosen} instead`;
 
-/** §15.29 point 2 — verbatim. */
+/** §10.5 — verbatim. */
 export const shimShadowed = (name: string, path: string, shim: string) =>
   `! ${name} on PATH resolves to ${path}, not the shim just installed at ${shim}. Another version manager may be shadowing it.`;
 
 const REHASH_ADVICE =
   "A shell that is already open may need `hash -r` before the change is visible.";
 
-/** §15.13 point 3 / §15.29 point 3 — the exact line to add, for the detected shell. */
+/** §10.5 — the exact line to add, for the detected shell. */
 export const shimDirectoryNotOnPath = (directory: string) =>
   [
     `! ${directory} is not on your PATH, so the shims installed there will not be found.`,
@@ -597,10 +596,10 @@ export const shimDirectoryNotOnPath = (directory: string) =>
     `! ${REHASH_ADVICE}`,
   ].join(`\n`);
 
-/** §15.29 point 4. */
+/** §10.5. */
 export const rehashNotice = () => `! ${REHASH_ADVICE}`;
 
-/** §15.15 — "if a recorded entry can no longer be restored, say so and continue". */
+/** §10.6 — "if a recorded entry can no longer be restored, say so and continue". */
 export const restoreFailed = (path: string, reason: string) =>
   `! Unable to restore ${path}: ${reason}`;
 interface ParsedArgs {
@@ -610,8 +609,8 @@ interface ParsedArgs {
 }
 
 /**
- * §09.8 — `[--install-directory <path>] [...name]`, plus §14.16's `--force` and
- * §15.16's `--exclude <name>`.
+ * §09.8 — `[--install-directory <path>] [...name]`, plus §10.6's `--force` and
+ * §10.7's `--exclude <name>`.
  *
  * `--exclude` is repeatable and accepts a comma-separated list, because that is
  * what a user who has just read "`--exclude npm`" will try next.
@@ -650,7 +649,7 @@ function parseShimArgs(args: string[]): ParsedArgs {
       options.force = true;
     } else {
       // Anything else is a package manager name and is validated as one, which
-      // is also how a typo'd flag reports itself (§12.9).
+      // is also how a typo'd flag reports itself (§12.10).
       names.push(arg);
     }
   }
@@ -669,14 +668,14 @@ function assertKnownName(name: string): void {
 }
 
 /**
- * §10.5 as amended by §15.16 — with no names, every supported package manager
+ * §10.7 — with no names, every supported package manager
  * that opts into the default set, npm included; each name then expands to its
  * full binary set, so `disable yarn` takes `yarnpkg` with it.
  *
  * npm is included for consistent project-pin enforcement; `--exclude npm`
  * explicitly opts out.
  *
- * §15.28's native entries are the opposite case and opt *out*
+ * §02.5's native entries are the opposite case and opt *out*
  * (`shimByDefault: false`). `bun` and `deno` name runtimes that users install
  * deliberately and reach for outside any project; a bare `jup enable` claiming
  * those names on `PATH` would be a takeover nobody asked for, and — unlike the
@@ -738,8 +737,8 @@ function isExecutableFile(file: string): boolean {
 /**
  * `which -a name` — every executable of that name on `PATH`, in lookup order.
  *
- * A generator rather than an array because both callers stop early: §15.29's
- * verification wants the first hit, and §15.43's tier 2 wants the first hit that
+ * A generator rather than an array because both callers stop early: §10.5's
+ * verification wants the first hit, and §10.2's tier 2 wants the first hit that
  * passes two further tests. Neither should stat the tail of `PATH` to get it.
  */
 function* whichAll(name: string): Generator<string> {
@@ -775,12 +774,12 @@ function samePath(left: string, right: string): boolean {
 }
 
 /**
- * §15.13 point 1 — the per-user default, the one place a shim can always be
+ * §10.5 — the per-user default, the one place a shim can always be
  * written without elevation.
  *
- * The chain itself lives in `exec.ts`, because §15.32 prepends this directory to
+ * The chain itself lives in `exec.ts`, because §08.7 prepends this directory to
  * `PATH` on every proxy invocation and the two must name the same place. All
- * this adds is §14.17's error: without a home directory there is no per-user
+ * this adds is §10.5's error: without a home directory there is no per-user
  * default to fall back to, and the user has to name a directory.
  */
 export function perUserShimDirectory(): string {
@@ -790,7 +789,7 @@ export function perUserShimDirectory(): string {
 }
 
 /**
- * §15.13 point 7 — the first candidate that already holds a shim of ours, or
+ * §10.5 — the first candidate that already holds a shim of ours, or
  * `undefined` when none does.
  *
  * This is the whole of the "record" of where `enable` put things. A sidecar file
@@ -812,7 +811,7 @@ function installedShimDirectory(): string | undefined {
 }
 
 /**
- * §15.13 point 6 — is this alternate one we may install into?
+ * §10.5 — is this alternate one we may install into?
  *
  * The default is never put through this: it is what jup would have used anyway,
  * and refusing it would leave `enable` nowhere to go. The gate is here to stop
@@ -834,7 +833,7 @@ function eligibleAlternate(directory: string): boolean {
 }
 
 /**
- * §15.13 points 1 and 8 — the directory the *user* named, or `undefined` when
+ * §10.5 — the directory the *user* named, or `undefined` when
  * they named none and the selection below has to choose one.
  *
  * `--system` is sugar for a directory, not a mode: it resolves to one name and
@@ -855,12 +854,12 @@ function namedDirectory(options: ShimOptions): string | undefined {
 }
 
 /**
- * §15.13 point 6 — where `enable` installs, and what it displaced to get there.
+ * §10.5 — where `enable` installs, and what it displaced to get there.
  *
  * `--system`, `--install-directory` and `COREPACK_SHIM_DIRECTORY` are answered
  * first and never second-guessed. After that the order is: the default when it
  * is already on `PATH` (nothing to improve on), then continuity, then the first
- * eligible alternate that is on `PATH`, then the default with §15.13 point 3's
+ * eligible alternate that is on `PATH`, then the default with §10.5's
  * advisory.
  *
  * `PATH` chooses among {@link shimDirectoryCandidates} and never supplies a
@@ -899,18 +898,18 @@ export function chooseInstallDirectory(options: ShimOptions): {
 }
 
 /**
- * §15.13 points 1, 7 and 8 — `--system` or `--install-directory`, else
+ * §10.5 — `--system` or `--install-directory`, else
  * `COREPACK_SHIM_DIRECTORY`, else the candidate holding our shims, else the
  * per-user default.
  *
  * `--system` matters most here, on the removal side: `/usr/local/bin` is a
- * candidate only for `root` (point 8), so a non-root `enable --system` — a user
+ * candidate only for `root` (§10.5), so a non-root `enable --system` — a user
  * who is in a group that owns the directory, or one who chowned it — leaves
  * shims the scan cannot find, and `disable --system` is how they come back out.
  * Under `root` the scan finds them and a bare `disable` is enough.
  *
  * This is the resolver for everything that is **not** `enable`: `disable` (§10.6)
- * and `info` (§15.30). It MUST NOT read `PATH` — a removal that depended on the
+ * and `info` (§09.9). It MUST NOT read `PATH` — a removal that depended on the
  * `PATH` of the moment would strand shims installed from a shell with a different
  * one, and a report that did would name a directory the shims are not in.
  * `enable`'s own chain is {@link chooseInstallDirectory}.
@@ -919,14 +918,14 @@ export function chooseInstallDirectory(options: ShimOptions): {
  * system installation. An explicit `--install-directory` remains available.
  *
  * `enable` realpaths the result so relative link targets are correct; `disable`
- * deliberately does not (§10.4).
+ * deliberately does not (§10.5).
  */
 export function resolveInstallDirectory(options: ShimOptions, forEnable: boolean): string {
   const directory = namedDirectory(options) ?? installedShimDirectory() ?? perUserShimDirectory();
 
   if (!forEnable) return directory;
 
-  // §10.2 property 2: a relative link target computed from a symlinked directory
+  // §10.3 property 2: a relative link target computed from a symlinked directory
   // would be wrong, so `enable` — and only `enable` — resolves it first.
   try {
     return realpathSync(directory);
@@ -940,7 +939,7 @@ export function resolveInstallDirectory(options: ShimOptions, forEnable: boolean
  *
  * `node:crypto` is reached through `process.getBuiltinModule` for the reason
  * `store.ts` gives: importing it pulls in two dozen native modules, and nothing
- * here is on the warm path (§16.3). The lookup loads nothing until it is called.
+ * here is on the warm path (§16, Build shape). The lookup loads nothing until it is called.
  */
 function randomSuffix(): string {
   return process.getBuiltinModule("node:crypto").randomBytes(8).toString("hex");
@@ -988,16 +987,16 @@ function probeWritable(directory: string): NodeJS.ErrnoException | undefined {
 const NOT_WRITABLE = new Set(["EROFS", "EACCES", "EPERM"]);
 
 /**
- * §15.13 point 2 — probe *before* writing anything, and fall back to the
+ * §10.5 — probe *before* writing anything, and fall back to the
  * per-user default rather than failing, saying so on the way.
  *
- * `fallback` is what point 6 would have chosen with no directory named, so a
+ * `fallback` is what §10.5 would have chosen with no directory named, so a
  * `--install-directory` that turns out to be read-only lands where a bare
  * `enable` would have. Its own announcement is not repeated: the line below
  * already names the directory the shims went to.
  *
  * It is a **thunk**, and required rather than defaulted, because computing it can
- * run the whole of point 6's selection — `probeWritable` included, which creates
+ * run the whole of §10.5's selection — `probeWritable` included, which creates
  * and unlinks a file in a directory this call may never touch. On the happy path
  * it is never called at all, so a writable `--install-directory` leaves every
  * candidate exactly as it found it. A side effect has no business hiding in a
@@ -1033,12 +1032,12 @@ function realpathOr(directory: string): string {
  * `realpath`s the executed module, so a shim cannot ask how it was called.
  *
  * `COREPACK_ENABLE_DOWNLOAD_PROMPT` defaults to `1` here and to `0` in the CLI entry
- * (§05.5): the user asked for `yarn`, not for a download. `??=` in both, so a
+ * (§05.4): the user asked for `yarn`, not for a download. `??=` in both, so a
  * real environment variable still wins.
  *
  * **The entry is resolved against the stub's own realpath, not by a relative
  * specifier.** `./index.mjs` would be the obvious spelling and it is wrong: the
- * shim on `PATH` is a *symlink* to this file (§10.2), so a relative specifier is
+ * shim on `PATH` is a *symlink* to this file (§10.3), so a relative specifier is
  * resolved against whichever path the runtime considers the main module's. That
  * happens to be the realpath under stock Node, which is why the relative form
  * worked — but it is a default, not a guarantee. `node
@@ -1047,7 +1046,7 @@ function realpathOr(directory: string): string {
  * `ERR_MODULE_NOT_FOUND`; bun and deno resolve from the link too. Doing the
  * `realpath` ourselves makes the pair relocatable under every one of them, and
  * costs a single `stat` on a path the loader is about to stat anyway — measured
- * at no change against §16.3's budget, because `node:fs` and `node:url` are
+ * at no change against §16, Build shape's budget, because `node:fs` and `node:url` are
  * already loaded by the warm chunk this stub is about to import.
  *
  * The two builtin imports are static, since neither reads our environment; the
@@ -1063,7 +1062,7 @@ function realpathOr(directory: string): string {
  * the stub every `yarn`, `npm` and `pnpm` on the machine runs through, so the
  * reasoning lives here rather than in the handful of lines it emits.
  *
- * §14.15 — **the name is a literal in the emitted stub**, one stub per name, and
+ * §10.1 — **the name is a literal in the emitted stub**, one stub per name, and
  * the stub never asks what it was invoked as.
  *
  * The tempting alternative is one file for every name reading
@@ -1075,15 +1074,15 @@ function realpathOr(directory: string): string {
  * the stub's filename and run *that* as a package manager — and nothing in the
  * stub could recover the truth, because the kernel passes the invoked path but
  * bun has overwritten the only place it appears before JavaScript runs. A name
- * written into the file is a name no runtime gets a vote on. §10.3's Windows
+ * written into the file is a name no runtime gets a vote on. §10.4's Windows
  * wrappers need the same thing for a plainer reason: their `.cmd` / `.ps1`
  * bodies invoke `node <stub>`, with the invocation name already gone.
  *
- * §10.1 — **{@link OWN_BIN_NAMES} are the exception**, and they are handled by
+ * §10.9 — **{@link OWN_BIN_NAMES} are the exception**, and they are handled by
  * not being stubs at all: §09.12's `self-install` links `jup` and `corepack`
- * straight at {@link cliEntrySource}'s file on every platform (§10.8). Those two
+ * straight at {@link cliEntrySource}'s file on every platform (§10.9). Those two
  * are the management CLI rather than a package manager to run, so both of
- * §05.5's answers differ — the download prompt defaults to `0`, the user having
+ * §05.4's answers differ — the download prompt defaults to `0`, the user having
  * typed *our* name, and the argv goes through unchanged instead of gaining a
  * leading binary name, which for `jup use pnpm@12` would otherwise arrive at
  * `runMain` as `["jup", "use", …]` and be rejected as an unknown command. The
@@ -1091,14 +1090,14 @@ function realpathOr(directory: string): string {
  *
  * This function never sees one of those names, by construction: `enable` takes
  * its names from the table, and `self-install` points both of ours at
- * `${CLI_ENTRY_NAME}` directly rather than at a stub of their own (§10.8) — which
+ * `${CLI_ENTRY_NAME}` directly rather than at a stub of their own (§10.9) — which
  * is also what keeps a `jup` stub from being written *over* our CLI entry, the
  * two having the same name.
  *
  * `interpreter` is the other half of that: `#!/usr/bin/env node` re-searches
- * `PATH` at every invocation, and §15.32 asks the user to put the shim directory
+ * `PATH` at every invocation, and §10.5 asks the user to put the shim directory
  * *first* on `PATH`. Once `enable node` has claimed the name `node` there
- * (§10.5), `env` finds the shim rather than the runtime and the stub execs
+ * (§10.7), `env` finds the shim rather than the runtime and the stub execs
  * itself until the machine gives up — a fork bomb through `cmd.exe` on Windows.
  * So when the interpreter's own name is in play, `enable` bakes in the absolute
  * path of the runtime it is itself running under and no lookup happens at all.
@@ -1109,7 +1108,7 @@ function realpathOr(directory: string): string {
  * entry module is covered too, and it is measured rather than assumed: on the
  * warm proxy path it is worth roughly 0.6 ms of a ~33 ms run: `codeSplitting:
  * false` puts the cold code in the same file, but behind rolldown's lazy init
- * thunks, so the run compiles the bundle once and evaluates only §16.3's warm
+ * thunks, so the run compiles the bundle once and evaluates only §16, Build shape's warm
  * set. The CLI entry gains more (~2 ms), since it evaluates further into it. A runtime whose cache directory is not writable gets a
  * documented no-op — the call reports failure through its return value rather
  * than throwing, and nothing here reads it.
@@ -1136,7 +1135,7 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
     `// ${SHIM_MARKER} — generated by \`${TOOL_NAME} enable\`; edits are overwritten.`,
     // `process.getBuiltinModule` rather than four static imports: the stub is
     // parsed on every warm run, and skipping the ESM import machinery for
-    // builtins the runtime has already loaded is worth ~2 ms of it (§16.3).
+    // builtins the runtime has already loaded is worth ~2 ms of it (§16, Build shape).
     `const { realpathSync } = process.getBuiltinModule("node:fs");`,
     `const nodeModule = process.getBuiltinModule("node:module");`,
     `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
@@ -1157,7 +1156,7 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
  *
  * It was an entry of its own until it was not worth one: `codeSplitting: false`
  * makes every entry a full copy of the module graph, so `dist/bin.mjs` was 168 kB
- * of which all but ~300 bytes was `dist/index.mjs` again (§16.3). What is
+ * of which all but ~300 bytes was `dist/index.mjs` again (§16, Build shape). What is
  * actually specific to this entry is the nine lines below, and none of them need
  * a bundler.
  *
@@ -1167,22 +1166,22 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
  * an `npm` bin symlink and `--preserve-symlinks-main` cannot send it into
  * `node_modules/dist/`, and the exit code assigned only when non-zero (§08.4).
  *
- * Two things differ, both §05.5's:
+ * Two things differ, both §05.4's:
  *
  * - the download prompt defaults to `0`, not `1`. The user typed our name, so
  *   they did ask to download something.
  * - `argv` is passed through unchanged. A shim prepends the name it was invoked
- *   under (§14.15); here that name *is* us, and `runMain` reads §09's commands
+ *   under (§10.1); here that name *is* us, and `runMain` reads §09's commands
  *   from position 0.
  *
- * @param interpreter Absolute path for the shebang — §15.46's pin. Omitted,
+ * @param interpreter Absolute path for the shebang — §10.2's pin. Omitted,
  * `/usr/bin/env node`, which is how it ships.
  */
 export function cliEntrySource(interpreter?: string): string {
   return [
     `#!${interpreter ?? RELOCATABLE_INTERPRETER}`,
-    // {@link SHIM_MARKER}, because §10.8 now points `jup` and `corepack` at this
-    // file on POSIX as well as on Windows, and §14.16's ownership test is "does
+    // {@link SHIM_MARKER}, because §10.9 now points `jup` and `corepack` at this
+    // file on POSIX as well as on Windows, and §10.6's ownership test is "does
     // the target carry the marker". Without it `disable` would leave the two
     // names it installed sitting on the user's `PATH`, and a re-`self-install`
     // would take its own shims for somebody else's binaries and decline to
@@ -1204,11 +1203,11 @@ export function cliEntrySource(interpreter?: string): string {
 }
 
 /**
- * §14.18 — map the read-only install to something the user can act on.
+ * §10.8 — map the read-only install to something the user can act on.
  *
  * `message` exists because this guard covers two different directories: the shim
  * directory, whose remedies are the default's, and jup's own package directory
- * (§10.7), whose remedies are nothing like them — see {@link stubNotWritable}.
+ * (§10.8), whose remedies are nothing like them — see {@link stubNotWritable}.
  */
 async function guardWrites<T>(
   directory: string,
@@ -1248,27 +1247,27 @@ async function readHead(file: string, length: number): Promise<string | undefine
 }
 
 /**
- * §15.45 — make sure the stub carries the execute bit, without writing when it
+ * §10.3 — make sure the stub carries the execute bit, without writing when it
  * already does.
  *
  * Installed stubs may lack the execute bit, and a symlink has no mode of its
  * own. Ensure the target is executable so `PATH` lookup cannot skip it.
  *
  * `stat` first and chmod only what needs it: a no-op chmod is still a write, and
- * §10.2 property 4 and §10.7 both want a warm `enable` against a read-only
+ * §10.3 property 4 and §10.8 both want a warm `enable` against a read-only
  * installation to touch nothing. Windows returns immediately — its wrappers are
- * regular files chmod'd as they are written (§10.3), and its mode bits do not
+ * regular files chmod'd as they are written (§10.4), and its mode bits do not
  * mean this anyway.
  */
 async function ensureExecutable(file: string, distFolder: string): Promise<void> {
   if (process.platform === "win32") return;
 
-  // `access`, not a mode comparison: §15.45 asks for a `chmod` "only when the
+  // `access`, not a mode comparison: §10.3 asks for a `chmod` "only when the
   // execute bits are missing", and the question that decides whether a shim runs
   // is whether *this* caller can exec the stub — which is what `X_OK` answers.
   // Demanding all three bits instead would fail a `0o744` or `0o700` stub that
   // already runs, and then either rewrite its mode on every warm `enable`
-  // (§10.2 property 4) or, on an install owned by someone else, turn a working
+  // (§10.3 property 4) or, on an install owned by someone else, turn a working
   // installation into a refusal. It also loops: `chmod +x` under a non-zero
   // umask yields `0o744`, which would fail the same test the message just asked
   // the user to satisfy.
@@ -1292,13 +1291,13 @@ async function ensureExecutable(file: string, distFolder: string): Promise<void>
 /**
  * Make sure the stub exists and is current, and hand back its path. It is
  * rewritten only when the content differs, so a warm `enable` writes nothing at
- * all — which is what lets §10.2's idempotency hold even when the dist folder is
+ * all — which is what lets §10.3's idempotency hold even when the dist folder is
  * read-only. {@link ensureExecutable} is the one exception, and only for a stub
- * that arrived without the execute bit (§15.45).
+ * that arrived without the execute bit (§10.3).
  *
  * `binName` names the stub: `<binName>.mjs`, one per name on every platform. The
  * per-name files are shipped, so a published install finds every one of them
- * already correct and writes nothing (§10.7).
+ * already correct and writes nothing (§10.8).
  */
 async function ensureStub(
   distFolder: string,
@@ -1306,7 +1305,7 @@ async function ensureStub(
   interpreter?: string,
 ): Promise<string> {
   // The stub resolves its entry module against its own realpath, so the pair
-  // stays relocatable (§10.2 property 2) whichever path the runtime hands the
+  // stays relocatable (§10.3 property 2) whichever path the runtime hands the
   // stub — see `shimSource`. Which specifier it gets depends on whether we are
   // running from source (`index.ts`, beside the stub) or from a build
   // (`../dist/index.mjs`, one directory over); `findEntrySpecifier` is the single
@@ -1321,7 +1320,7 @@ async function ensureStub(
   // One byte more than the stub is long, so a longer file cannot compare equal.
   // `byteLength`, not `length`: the banner is not ASCII.
   if ((await readHead(file, Buffer.byteLength(source) + 1)) === source) {
-    // Current content and executable mode are both required by §15.45.
+    // Current content and executable mode are both required by §10.3.
     await ensureExecutable(file, distFolder);
     return file;
   }
@@ -1339,34 +1338,34 @@ async function ensureStub(
 }
 
 /**
- * §15.46 — pin the interpreter into ${TOOL_NAME}'s **own** CLI entry, the same
- * way and for the same reason §10.1 pins it into the stub.
+ * §10.2 — pin the interpreter into ${TOOL_NAME}'s **own** CLI entry, the same
+ * way and for the same reason §10.2 pins it into the stub.
  *
  * `bin/jup.mjs` opens `#!/usr/bin/env ${INTERPRETER_NAME}`, and
- * that line is §14.26 consequence 2 waiting to happen to *us*. Once a
- * ${INTERPRETER_NAME} shim of ours is on the `PATH` §15.32 asks the user to
+ * that line is §10.2 consequence 2 waiting to happen to *us*. Once a
+ * ${INTERPRETER_NAME} shim of ours is on the `PATH` §10.5 asks the user to
  * prepend the shim directory to, `env` finds the shim, the shim resolves the
- * project's `devEngines.runtime` or `.nvmrc` (§15.40), and `jup --version`
+ * project's `devEngines.runtime` or `.nvmrc` (§03.1), and `jup --version`
  * downloads a 171 MB runtime to print a version string. Every subsequent run
  * still pays for a resolution and a second process. Baking the absolute path in
  * removes the lookup, so the entry runs under the same host runtime `enable`
  * chose for the shims.
  *
  * **Only the first line, and only when it is wrong.** The shebang is the whole
- * of §15.46's business with this file; everything from the first newline on is
+ * of §10.2's business with this file; everything from the first newline on is
  * copied through byte for byte. We ship `bin/jup.mjs` verbatim and could compare
  * it against `cliEntrySource()` — but the installation being enabled is
  * frequently not the one that wrote it (an `npx jup enable`, a global since
  * upgraded), and a body comparison would turn a version skew into a refusal over
  * a line nobody asked us to police. Testing before writing is also what keeps
- * §10.7's read-only installation and §10.2's idempotency intact for the second
+ * §10.8's read-only installation and §10.3's idempotency intact for the second
  * and every later `enable`.
  *
  * Temp-then-rename, unlike {@link ensureStub}: a `writeFile` truncates first, and
  * an interrupt between the two halves leaves an empty `jup.mjs`, which is the one
  * file that cannot be repaired by running this tool. The mode rides across, or a
  * `bin` target npm made `0o755` would come back as whatever the umask says and
- * stop being executable — §15.45's failure, one file over.
+ * stop being executable — §10.3's failure, one file over.
  */
 async function pinCliEntry(distFolder: string, interpreter: string): Promise<void> {
   const file = findCliEntry(distFolder);
@@ -1378,12 +1377,12 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
 }
 
 /**
- * §10.1 — carry the pin to every stub the shim folder already holds, not just
+ * §10.2 — carry the pin to every stub the shim folder already holds, not just
  * the ones this run is writing.
  *
- * §10.2 gives every name its own stub, so the pin is not transitive: writing it
+ * §10.3 gives every name its own stub, so the pin is not transitive: writing it
  * into the files this run happens to name would leave every stub an earlier run
- * wrote still saying `#!/usr/bin/env node`. That gap is §14.26's exec loop with a
+ * wrote still saying `#!/usr/bin/env node`. That gap is §10.2's exec loop with a
  * delay on it — `enable pnpm` writes `pnpm.mjs` relocatable, a later
  * `enable node` claims that name in the shim directory, and from then on
  * `pnpm install` resolves `node` through *our* shim, downloads the project's
@@ -1392,12 +1391,12 @@ async function pinCliEntry(distFolder: string, interpreter: string): Promise<voi
  *
  * So the condition is answered once per run and applied to the whole folder. The
  * files are read before they are written ({@link pinShebang} compares first), so
- * a warm run still writes nothing and §10.7's read-only installation is
+ * a warm run still writes nothing and §10.8's read-only installation is
  * unaffected.
  *
  * {@link CLI_ENTRY_NAME} is deliberately not here: {@link pinCliEntry} owns that
- * file, and only so that a read-only installation reports §15.46's message about
- * the entry rather than §10.1's about a stub.
+ * file, and only so that a read-only installation reports §10.2's message about
+ * the entry rather than §10.2's about a stub.
  */
 async function pinStubFolder(distFolder: string, interpreter: string): Promise<void> {
   // A folder we cannot list has no stubs to pin, and `enable` has no business
@@ -1412,7 +1411,7 @@ async function pinStubFolder(distFolder: string, interpreter: string): Promise<v
     if (name === CLI_ENTRY_NAME || !name.endsWith(".mjs")) continue;
     const file = join(distFolder, name);
     // The marker, not the name: `bin/` is ours but the test that decides whether
-    // a file may be rewritten is the same one §14.16 uses everywhere else.
+    // a file may be rewritten is the same one §10.6 uses everywhere else.
     const head = await readHead(file, 1024);
     if (head === undefined || !head.includes(SHIM_MARKER)) continue;
     await pinShebang(file, interpreter, stubNotWritable);
@@ -1476,8 +1475,8 @@ async function pinShebang(
         // `open`'s mode argument is masked by the umask, so the `mode:` above is
         // a floor and not the mode: under `umask 077` a `0o755` entry comes back
         // `0o700`, and every other user's `jup` on `PATH` is then a file the
-        // lookup passes over in silence — §15.45's failure, moved one file over,
-        // which the last bullet of §15.46 exists to prevent. `chmod` is not
+        // lookup passes over in silence — §10.3's failure, moved one file over,
+        // which the last bullet of §10.2 exists to prevent. `chmod` is not
         // masked, so it is what actually carries the mode across (`ensureStub`
         // does the same after its own write).
         await chmod(tmp, mode & 0o777);
@@ -1490,7 +1489,7 @@ async function pinShebang(
     () => notWritable(file),
   );
 }
-/** §10.2 — a `yarn`-ish name whose realpath lands inside a Yarn Switch install. */
+/** §10.3 — a `yarn`-ish name whose realpath lands inside a Yarn Switch install. */
 async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
   if (!binName.includes("yarn")) return false;
   // A dangling link has no realpath, and that is not a Switch install.
@@ -1505,11 +1504,11 @@ async function isYarnSwitch(binName: string, file: string): Promise<boolean> {
  * entry. The three owned shapes are:
  *
  * * a POSIX symlink whose target carries {@link SHIM_MARKER} — every stub, and
- *   the CLI entry §10.8 points our own two names at;
+ *   the CLI entry §10.9 points our own two names at;
  * * a **dangling** symlink that still names a file of ours — the per-name
- *   `<binName>.mjs` §10.2 links, or {@link CLI_ENTRY_NAME} for those same two
+ *   `<binName>.mjs` §10.3 links, or {@link CLI_ENTRY_NAME} for those same two
  *   names — which `enable` replaces and `disable` removes;
- * * a regular file carrying the marker, or one of §10.3's three Windows
+ * * a regular file carrying the marker, or one of §10.4's three Windows
  *   wrappers, which cannot carry it (see {@link WIN32_WRAPPER_HEADS}).
  */
 async function isOurEntry(file: string, binName: string, stats?: Stats): Promise<boolean> {
@@ -1541,7 +1540,7 @@ async function isOurEntry(file: string, binName: string, stats?: Stats): Promise
 /**
  * One entry `enable` moved out of the way.
  *
- * §15.15 asks for "path, type, and for a symlink its target". A *regular file*
+ * §10.6 asks for "path, type, and for a symlink its target". A *regular file*
  * needs one thing more to be restorable: its content. Recording a type alone
  * would let `disable` recreate an empty stand-in, which is worse than not
  * restoring at all — so the file itself is parked under `<home>/displaced/` and
@@ -1569,7 +1568,7 @@ function displacedRecordPath(): string {
 }
 
 /**
- * §15.15 — is this parsed object an entry `disable` may act on?
+ * §10.6 — is this parsed object an entry `disable` may act on?
  *
  * The record is a plain JSON file in `<home>`, and `disable` turns it straight
  * into filesystem operations: `symlink(target, path)`, `rename(backup, path)`,
@@ -1621,7 +1620,7 @@ export function readDisplacedRecord(): DisplacedEntry[] {
     const parsed = JSON.parse(raw) as DisplacedRecord;
     if (!Array.isArray(parsed.displaced)) return [];
     // A single malformed entry is dropped rather than failing the file: the rest
-    // of the record is still restorable, and §15.15 asks us to continue.
+    // of the record is still restorable, and §10.6 asks us to continue.
     return parsed.displaced.filter((entry) => isValidDisplacedEntry(entry));
   } catch {
     // A corrupt record is not a reason to refuse to disable; it only means there
@@ -1645,7 +1644,7 @@ function writeDisplacedRecord(entries: DisplacedEntry[]): void {
  * Append to the record.
  *
  * Deliberately synchronous: `enable` processes every binary name concurrently
- * (§10.5), and a sync read-modify-write cannot be interleaved by another
+ * (§10.7), and a sync read-modify-write cannot be interleaved by another
  * microtask, so no lock is needed for the in-process race that actually exists.
  */
 function appendDisplaced(entry: DisplacedEntry): void {
@@ -1664,7 +1663,7 @@ function backupPathFor(file: string): string {
 }
 
 /**
- * §15.15 — move an entry that is not ours out of the way, recording enough to
+ * §10.6 — move an entry that is not ours out of the way, recording enough to
  * put it back.
  *
  * Record every displaced foreign entry, including symlinks replaced without
@@ -1696,7 +1695,7 @@ async function displace(file: string, stats: Stats, installDirectory: string): P
 }
 
 /**
- * §15.15 — put back whatever `enable` displaced at these paths, then forget it.
+ * §10.6 — put back whatever `enable` displaced at these paths, then forget it.
  *
  * "If a recorded entry can no longer be restored, say so and continue": every
  * failure warns and the entry is dropped, so a second `disable` does not repeat
@@ -1753,17 +1752,17 @@ function restoreOne(entry: DisplacedEntry): string | undefined {
   }
 }
 /**
- * §10.2 — POSIX shims are relative symlinks, created with `lstat` (not `stat`,
+ * §10.3 — POSIX shims are relative symlinks, created with `lstat` (not `stat`,
  * so a dangling symlink is seen as a symlink) and **idempotent**: an
  * already-correct link is not rewritten and its mtime is unchanged.
  *
- * §14.16: refuse to replace a regular file that is not one of our own shims
+ * §10.6: refuse to replace a regular file that is not one of our own shims
  * unless `--force`. Yarn Switch then falls out of the general rule rather than
  * being a hard-coded exception — both are "this entry is not ours to touch",
  * both warn on stderr, both leave the entry alone, and both exit 0.
  *
  * Returns the installed shim's path, or `undefined` when the name was skipped —
- * §15.29 only verifies the names it actually wrote.
+ * §10.5 only verifies the names it actually wrote.
  */
 export async function generatePosixLink(
   installDirectory: string,
@@ -1781,12 +1780,12 @@ export async function generatePosixLink(
 }
 
 /**
- * §10.2's link, given the file it points at.
+ * §10.3's link, given the file it points at.
  *
  * Split out because §09.13 links at a stub it did not write: an upgrade adopts
- * the downloaded copy's own stub rather than generating one (§10.8). Everything
+ * the downloaded copy's own stub rather than generating one (§10.9). Everything
  * below the target — `lstat` over `stat`, the relative link, the Yarn Switch
- * skip, §15.15's displacement, and the idempotent no-write when the link is
+ * skip, §10.6's displacement, and the idempotent no-write when the link is
  * already correct — is the same for both, and is stated once here.
  */
 async function linkPosixEntry(
@@ -1820,7 +1819,7 @@ async function linkPosixEntry(
           warn(messages.yarnSwitchSkip(binName, file));
           return undefined;
         }
-        // Symlinks are ours to manage — §10.2 corrects one that points elsewhere.
+        // Symlinks are ours to manage — §10.3 corrects one that points elsewhere.
         // Anything else without our marker is a real binary and stays put.
         if (!existing.isSymbolicLink()) {
           advisory(messages.shimNotOurs(binName, file));
@@ -1828,7 +1827,7 @@ async function linkPosixEntry(
         }
       }
 
-      // §15.15 — whatever we are about to overwrite is somebody else's; record
+      // §10.6 — whatever we are about to overwrite is somebody else's; record
       // it so `disable` can put it back.
       if (await displace(file, existing, installDirectory)) {
         await guardWrites(installDirectory, () => symlink(target, file));
@@ -1844,7 +1843,7 @@ async function linkPosixEntry(
 }
 
 /**
- * §10.6 + §15.15 — POSIX removal: the Yarn Switch guard, then removal of the
+ * §10.6 — POSIX removal: the Yarn Switch guard, then removal of the
  * entry **only if we created it**, then `unlink` with `ENOENT` ignored.
  *
  * `--force` requests unconditional removal.
@@ -1879,7 +1878,7 @@ export async function removePosixLink(
   );
 }
 /**
- * The `.cmd` body of §10.3, byte for byte.
+ * The `.cmd` body of §10.4, byte for byte.
  *
  * The double spaces are real — an empty interpolated argument slot — and the
  * `PATHEXT` line drops `.JS` from the executable-extension list so that `node`
@@ -1908,7 +1907,7 @@ function win32CmdSource(rel: string, interpreter: string): string {
 }
 
 /**
- * The extensionless sh body of §10.3, for Git Bash / MSYS / Cygwin.
+ * The extensionless sh body of §10.4, for Git Bash / MSYS / Cygwin.
  *
  * The fallback is absolute for the same reason the `.cmd`'s is — a bare `node`
  * under Git Bash finds `<shimdir>/node`, this very file, once `enable node` has
@@ -1936,7 +1935,7 @@ function win32ShSource(rel: string, interpreter: string): string {
 }
 
 /**
- * The `.ps1` body of §10.3.
+ * The `.ps1` body of §10.4.
  *
  * `$exe` still decides the extension for the `$basedir` branch; the fallback
  * takes the absolute path instead, which already carries its own.
@@ -1976,11 +1975,11 @@ function win32Ps1Source(rel: string, interpreter: string): string {
 }
 
 /**
- * §10.3 — three files per binary name, all `0o755`, all written
+ * §10.4 — three files per binary name, all `0o755`, all written
  * **unconditionally**: there is no idempotency short-circuit on Windows, and no
- * Yarn Switch check either (§10.2 makes that check POSIX-only).
+ * Yarn Switch check either (§10.3 makes that check POSIX-only).
  *
- * §14.16 and §15.15 do still apply here — "unconditionally" in §10.3 is about
+ * §10.6 do still apply here — "unconditionally" in §10.4 is about
  * not short-circuiting on our *own* files, not a licence to delete somebody
  * else's `yarn.cmd`.
  *
@@ -2012,7 +2011,7 @@ export async function generateWin32Link(
   );
 }
 
-/** §10.3's three files — the bodies vary, everything around them does not. */
+/** §10.4's three files — the bodies vary, everything around them does not. */
 export interface Win32Wrappers {
   sh: string;
   cmd: string;
@@ -2020,11 +2019,11 @@ export interface Win32Wrappers {
 }
 
 /**
- * Write §10.3's trio for one name, given the three bodies.
+ * Write §10.4's trio for one name, given the three bodies.
  *
  * Split out for {@link linkPosixEntry}'s reason: §09.12 writes wrappers whose
  * bodies name our own CLI entry, or the compiled binary in the store, rather
- * than a per-name stub — and §14.16's all-or-nothing ownership decision, §15.15's
+ * than a per-name stub — and §10.6's all-or-nothing ownership decision, its
  * displacement and the unlink-before-write are the same either way.
  */
 async function writeWin32Entries(
@@ -2041,7 +2040,7 @@ async function writeWin32Entries(
     [`${file}.ps1`, wrappers.ps1],
   ] as const;
 
-  // §14.16 — decide for the whole binary name before writing any of the three,
+  // §10.6 — decide for the whole binary name before writing any of the three,
   // so a refusal never leaves two of our wrappers beside somebody else's third.
   for (const [path] of files) {
     const existing = await lstat(path).catch(() => undefined);
@@ -2075,7 +2074,7 @@ async function writeWin32Entries(
   return file;
 }
 
-/** §10.6 + §15.15 — Windows removal: all three files, ours only, `ENOENT` ignored. */
+/** §10.6 — Windows removal: all three files, ours only, `ENOENT` ignored. */
 export async function removeWin32Link(
   installDirectory: string,
   binName: string,
@@ -2086,7 +2085,7 @@ export async function removeWin32Link(
       const file = join(installDirectory, `${binName}${extension}`);
       const existing = await lstat(file).catch(() => undefined);
       if (existing === undefined) continue;
-      // No Yarn Switch check here — §10.2 makes it POSIX-only — but §15.15's
+      // No Yarn Switch check here — §10.3 makes it POSIX-only — but §10.6's
       // "only what we created" holds on every platform.
       if (!options.force && !(await isOurEntry(file, binName, existing))) continue;
       await unlink(file).catch((error: NodeJS.ErrnoException) => {
@@ -2116,7 +2115,7 @@ export function detectShell(): Shell {
   return "posix";
 }
 
-/** §15.13 point 3 — the exact line to add, for the detected shell. */
+/** §10.5 — the exact line to add, for the detected shell. */
 export function pathExportLine(directory: string, shell: Shell = detectShell()): string {
   switch (shell) {
     case "fish":
@@ -2135,7 +2134,7 @@ export function pathExportLine(directory: string, shell: Shell = detectShell()):
 /**
  * Is `directory` named by an entry of `PATH`?
  *
- * Only an **absolute** entry counts (§15.13 point 6). An empty entry means the
+ * Only an **absolute** entry counts (§10.5). An empty entry means the
  * current directory and a relative one means a directory that moves with it;
  * neither puts anything durably on `PATH`, and `samePath` resolves a relative
  * entry against the cwd — so without this a `PATH` of `bin` would report `~/bin`
@@ -2149,7 +2148,7 @@ function directoryOnPath(directory: string): boolean {
 }
 
 /**
- * §15.29 — `enable` verifies its own post-condition.
+ * §10.5 — `enable` verifies its own post-condition.
  *
  * Distinguish an install directory absent from `PATH` from a name shadowed by an
  * earlier entry. The directory-level warning subsumes per-name warnings.
@@ -2176,7 +2175,7 @@ export function verifyOnPath(installDirectory: string, installed: [string, strin
   if (shadowed) advisory(rehashNotice());
 }
 /**
- * §10.1 — does this install directory put our own shim on the name the shebang
+ * §10.2 — does this install directory put our own shim on the name the shebang
  * would look up?
  *
  * True when the run is claiming it, and true when an earlier run already did: a
@@ -2198,9 +2197,9 @@ async function claimsInterpreter(installDirectory: string, binaries: string[]): 
 
 /**
  * §10 — install the shims. Idempotent, and exits 0 with empty stdout and stderr
- * on success. A skipped entry — Yarn Switch, or §14.16's foreign binary — warns
- * on stderr and still exits 0: it is a warning, not a failure. So do §15.13's
- * fallback and §15.29's verification.
+ * on success. A skipped entry — Yarn Switch, or §10.6's foreign binary — warns
+ * on stderr and still exits 0: it is a warning, not a failure. So do §10.5's
+ * fallback and §10.5's verification.
  *
  * `distFolder` is a seam for the tests; production always uses our own folder.
  */
@@ -2210,9 +2209,9 @@ export async function cmdEnable(
 ): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);
   // Validate before touching the filesystem, so a bad name reports itself even
-  // when the install directory cannot be resolved (§12.9).
+  // when the install directory cannot be resolved (§12.10).
   const binaries = targetBinaries(names, exclude);
-  // §15.13 — choose, announce, probe, then fall back; nothing is written before
+  // §10.5 — choose, announce, probe, then fall back; nothing is written before
   // the directory is known to be writable.
   const choice = chooseInstallDirectory(options);
   if (choice.preferredOver !== undefined) {
@@ -2223,7 +2222,7 @@ export async function cmdEnable(
   // thunk only runs if that directory turned out to be unwritable — so the
   // selection, and the probe inside it, happens exactly once per `enable`.
   //
-  // `--system` is point 8's exception and returns *itself*, which
+  // `--system` is §10.5's exception and returns *itself*, which
   // `prepareInstallDirectory` turns into a refusal: the user named a scope, not
   // a directory, and quietly delivering the other scope is the failure mode this
   // flag exists to remove. A `RUN jup enable --system` layer that fell back to
@@ -2236,23 +2235,23 @@ export async function cmdEnable(
   );
 
   const generate = process.platform === "win32" ? generateWin32Link : generatePosixLink;
-  // §10.1 — Windows always bakes the path in (the bare `node` its wrappers used
+  // §10.2 — Windows always bakes the path in (the bare `node` its wrappers used
   // to name is resolved from the *current directory* first); POSIX only needs to
   // when this directory claims the interpreter's own name, and paying for it
-  // otherwise would rewrite the shipped stub and break §10.7's read-only
+  // otherwise would rewrite the shipped stub and break §10.8's read-only
   // `distFolder`.
   //
-  // §15.43 — `requireInterpreterPath` refuses rather than falling back when the
+  // §10.2 — `requireInterpreterPath` refuses rather than falling back when the
   // only runtime in sight is one of ours. Nothing is written yet, so the failure
   // leaves both directories exactly as they were; the alternatives would be a
-  // shebang that execs itself (§14.26) or one `cache clean` invalidates.
+  // shebang that execs itself (§10.2) or one `cache clean` invalidates.
   const claimsName = await claimsInterpreter(installDirectory, binaries);
   const pin = pinsInterpreter(claimsName);
   const interpreter = process.platform === "win32" || pin ? requireInterpreterPath() : undefined;
 
-  // §15.46 — the same pin goes into our own CLI entry, but **not** under the
+  // §10.2 — the same pin goes into our own CLI entry, but **not** under the
   // wrapper's "always on Windows" condition: under the *stub's*. The recursion
-  // §15.46 removes is `#!/usr/bin/env node` finding our own shim, and only a run
+  // §10.2 removes is `#!/usr/bin/env node` finding our own shim, and only a run
   // that claims the interpreter's name can put a shim there. Windows never reads
   // that shebang at all — `jup.cmd` is npm's cmd-shim and invokes the runtime
   // itself — so pinning there buys nothing and costs everything: `enable yarn`
@@ -2262,16 +2261,16 @@ export async function cmdEnable(
   // inert when the platform is the trigger.
   //
   // Before any shim is written, so a refusal here leaves the shim directory
-  // exactly as it found it — the ordering §15.45 gives the execute-bit check.
+  // exactly as it found it — the ordering §10.3 gives the execute-bit check.
   if (pin && interpreter !== undefined) {
     await pinCliEntry(distFolder, interpreter);
     // …and every stub already in the folder, which the run's own names get for
-    // free from `ensureStub` below. §10.2's per-name stubs made that two calls
+    // free from `ensureStub` below. §10.3's per-name stubs made that two calls
     // instead of one — see {@link pinStubFolder}.
     await pinStubFolder(distFolder, interpreter);
   }
 
-  // §10.5 — all binaries are processed concurrently.
+  // §10.7 — all binaries are processed concurrently.
   const installed = await Promise.all(
     binaries.map(async (binName): Promise<[string, string] | undefined> => {
       const shim = await generate(installDirectory, distFolder, binName, options, interpreter);
@@ -2289,21 +2288,21 @@ export async function cmdEnable(
 
 /**
  * §10.6 — removes only the names it was asked about, and within those only the
- * entries it created (§15.15); `disable yarn` also removes `yarnpkg`. Anything
+ * entries it created (§10.6); `disable yarn` also removes `yarnpkg`. Anything
  * `enable` displaced is then put back.
  *
- * The §15.46 pin remains because reverting it requires writing to the commonly
+ * The §10.2 pin remains because reverting it requires writing to the commonly
  * read-only ${TOOL_NAME} package directory and could leave a partial disable.
  * Re-running `enable` refreshes it.
  */
 export async function cmdDisable(args: string[]): Promise<number> {
   const { options, names, exclude } = parseShimArgs(args);
   // `includeOptOut` — removal covers every name the tool can install, including
-  // the §15.28 entries a bare `enable` leaves alone. Otherwise `jup disable`
+  // the §02.5 entries a bare `enable` leaves alone. Otherwise `jup disable`
   // would silently decline to undo a `jup enable bun`, which is the one thing a
   // no-argument disable is for.
   const binaries = targetBinaries(names, exclude, { includeOptOut: true });
-  // §10.4 — no realpath here: removal needs no relative-path computation.
+  // §10.5 — no realpath here: removal needs no relative-path computation.
   const installDirectory = resolveInstallDirectory(options, false);
 
   await Promise.all(
@@ -2314,7 +2313,7 @@ export async function cmdDisable(args: string[]): Promise<number> {
     ),
   );
 
-  // §15.15 — restore *after* removal, so the recorded path is free again. On
+  // §10.6 — restore *after* removal, so the recorded path is free again. On
   // Windows a name occupies three files, and each was recorded separately.
   const files =
     process.platform === "win32"
@@ -2336,7 +2335,7 @@ export async function cmdDisable(args: string[]): Promise<number> {
  *
  * The names are {@link OWN_BIN_NAMES} and not the table's, and that is the whole
  * of what makes this different from `enable`; everything about *how* an entry is
- * claimed — ownership, §15.15's displacement, idempotency, the platform split —
+ * claimed — ownership, §10.6's displacement, idempotency, the platform split —
  * is the machinery above, called with a different target.
  *
  * Both platforms now point at one file, the copy's `bin/${CLI_ENTRY_NAME}`:
@@ -2344,13 +2343,13 @@ export async function cmdDisable(args: string[]): Promise<number> {
  * * **POSIX** — a symlink straight at it, the shape {@link linkPosixEntry}
  *   gives every other name. Not a stub of its own, for two reasons that arrive
  *   at the same file: a stub for `jup` would be named `jup.mjs` and written
- *   *over* the CLI entry, and the entry already makes both of §05.5's decisions
- *   these two names need (§10.1).
- * * **Windows** — §10.3's trio, whose bodies name that same file directly.
+ *   *over* the CLI entry, and the entry already makes both of §05.4's decisions
+ *   these two names need (§10.9).
+ * * **Windows** — §10.4's trio, whose bodies name that same file directly.
  *
  * A downloaded copy (§09.13) needs no special case. Nothing here writes the file
  * it links, so an upgrade's `bin/${CLI_ENTRY_NAME}` is used exactly as it
- * arrived and the only byte that may change is §15.46's shebang.
+ * arrived and the only byte that may change is §10.2's shebang.
  *
  * Returns the `[name, path]` pairs actually installed, for {@link verifyOnPath}.
  */
@@ -2364,7 +2363,7 @@ export async function installSelfShims(
   const entry = join(binFolder, CLI_ENTRY_NAME);
   const rel = relative(installDirectory, entry);
 
-  // §10.1, unchanged: Windows wrappers always name the runtime, POSIX only when
+  // §10.2, unchanged: Windows wrappers always name the runtime, POSIX only when
   // this directory claims `node`. `claimsInterpreter` is asked with no names,
   // because a self-install claims none of the table's: only an *earlier*
   // `enable node` can have put our shim on the name the shebang looks up.
@@ -2373,19 +2372,19 @@ export async function installSelfShims(
       ? requireInterpreterPath()
       : undefined;
 
-  // §15.46, and for its reason: with our own `node` shim ahead of the runtime on
+  // §10.2, and for its reason: with our own `node` shim ahead of the runtime on
   // `PATH`, the copy's `#!/usr/bin/env node` finds that shim and every `jup`
   // command downloads a runtime to print its own version. Before any shim is
   // written, so a refusal leaves the directory as it found it. Windows reads no
-  // shebang, so it pins only under the POSIX condition (§10.1).
+  // shebang, so it pins only under the POSIX condition (§10.2).
   //
   // This is the file the two names below link to, so the pin and the execute bit
-  // are both about the same file §15.45 is about — no stub stands between them
+  // are both about the same file §10.3 is about — no stub stands between them
   // any more.
   if (runtime !== undefined && !isWindows) await pinCliEntry(binFolder, runtime);
   if (!isWindows) await ensureExecutable(entry, binFolder);
 
-  // §10.3's trio, built once and shared by both names — they differ only in the
+  // §10.4's trio, built once and shared by both names — they differ only in the
   // file each is written to. It is defined exactly when this is Windows, because
   // that is the first half of `runtime`'s condition above, and standing in for
   // `isWindows` below is what carries that fact into the wrappers' signature.
@@ -2405,7 +2404,7 @@ export async function installSelfShims(
 }
 
 /**
- * §10.3's trio for one of our own names, naming our CLI entry `rel` under
+ * §10.4's trio for one of our own names, naming our CLI entry `rel` under
  * `interpreter`.
  *
  * They are not {@link win32CmdSource} and its two siblings, and the differences
@@ -2413,9 +2412,9 @@ export async function installSelfShims(
  *
  * * The `%~dp0\node.exe` branch is gone. It exists so a shim directory that *is*
  *   a Node installation stays relocatable; the store copy is neither.
- * * They carry {@link SHIM_MARKER} in a comment. §10.3's bodies are fixed byte
+ * * They carry {@link SHIM_MARKER} in a comment. §10.4's bodies are fixed byte
  *   for byte and are recognised instead by their head plus the per-name stub
- *   they invoke (§14.16) — a test these name no stub to satisfy, so they say
+ *   they invoke (§10.6) — a test these name no stub to satisfy, so they say
  *   what they are outright.
  */
 export function selfWin32Wrappers(rel: string, interpreter: string): Win32Wrappers {

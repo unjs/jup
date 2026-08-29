@@ -2,7 +2,7 @@
  * Download, verify, promote — §06.1, §07.3–§07.6.
  *
  * One streaming pass: socket -> tee -> digest, and -> gunzip -> tar -> disk
- * (§16.5). Caps are checked as the stream flows, not afterwards; by then the
+ * (§06.2). Caps are checked as the stream flows, not afterwards; by then the
  * disk is full.
  */
 
@@ -65,20 +65,20 @@ interface ArtifactSource {
   /** The registry in force for this download; it selects §06.1's row. */
   registry?: RegistrySpec;
   /**
-   * The registry **base URL** in force, after §15.1's and §15.2's precedence.
+   * The registry **base URL** in force, after §05.2's precedence.
    * Carried rather than recomputed: `getRegistryUrl()` with no arguments answers
-   * for the *default* package manager, and §15.2 exists precisely so that yarn
+   * for the *default* package manager, and §05.2 exists precisely so that yarn
    * and pnpm can have different answers in the same run.
    */
   registryUrl: string;
   /** Reused by §06.3 rather than re-fetched, when §07.3 already asked for it. */
   integrity?: string;
-  /** §15.7's legacy digest, used only when the registry publishes no `integrity`. */
+  /** §06.1's legacy digest, used only when the registry publishes no `integrity`. */
   shasum?: string;
   signatures?: RegistrySignature[];
   /**
    * Whether the version metadata has been read. Not `integrity !== undefined`:
-   * a registry that publishes none is exactly the §15.7 case, and asking twice
+   * a registry that publishes none is exactly the §06.1 case, and asking twice
    * would double the requests on the path that can least afford them.
    */
   fetched?: boolean;
@@ -92,7 +92,7 @@ interface ArtifactSource {
  * signature verification, and a hash mismatch discards the temp folder so
  * nothing is ever cached — a re-run must fail identically.
  *
- * Per §14.10, the **tarball stream** is hashed even on the single-file
+ * Per §06.2, the **tarball stream** is hashed even on the single-file
  * (`registry.bin`) path and compared against the signed `dist.integrity`, which
  * closes the hole where Yarn Berry through a corporate mirror arrives unverified.
  */
@@ -107,7 +107,7 @@ export async function ensureInstalled(
   // path in `main` performs this same check *before* importing this module, so
   // reaching here at all normally means a miss.
   //
-  // §15.11 — `location` is the probe's answer, not `<name>/<version>` computed
+  // §07.2 — `location` is the probe's answer, not `<name>/<version>` computed
   // afresh: a reference whose pin the cached marker does not prove installs
   // into a directory of its own rather than adopting bytes nothing checked
   // against *its* digest.
@@ -124,7 +124,7 @@ export async function ensureInstalled(
 
   const pin = readHashPin(locator.reference, parsed?.build);
   // A bad algorithm in the `packageManager` field must fail before the network,
-  // not with an opaque crypto error halfway through the download (§14.11).
+  // not with an opaque crypto error halfway through the download (§06.2).
   //
   // The weak-algorithm warning is scoped to a hash the *user* pinned, per §06.2:
   // every embedded default is itself sha1 (§02.5), so warning unconditionally
@@ -148,13 +148,13 @@ export async function ensureInstalled(
   }
 
   // §06.1 rows 2–5, decided *before* the stream opens because the digest has to
-  // be taken as the bytes arrive (§16.5) and the algorithm comes from the SRI.
+  // be taken as the bytes arrive (§06.2) and the algorithm comes from the SRI.
   const expected = await resolveExpectedIntegrity(source, pin, version);
 
-  // §15.11 — every artifact clears one verification tier before a byte moves.
+  // §06.1 — every artifact clears one verification tier before a byte moves.
   assertVerificationTier(locator, source, pin, expected, version);
 
-  // §05.5 — artifacts only. The metadata request above deliberately does not
+  // §05.4 — artifacts only. The metadata request above deliberately does not
   // prompt, which is also what makes tests 49/50 name the *tarball* URL.
   await confirmDownload(source.url);
 
@@ -196,12 +196,12 @@ export async function ensureInstalled(
     // trustworthy. URL references keep their own `#algo.digest` notation and are
     // never rewritten into a version.
     //
-    // §15.28 — except for a per-host artifact, where the digest describes *this
+    // §02.4 — except for a per-host artifact, where the digest describes *this
     // machine's* download and nothing else. Folding it in here would put it in
     // the reference `use` writes to `package.json`, where a colleague on another
     // platform meets it as a pin their own artifact can never match. The marker
     // still records the hash below — the store is host-local, so there it is
-    // exactly the right fact — and §15.23 records it per host.
+    // exactly the right fact — and §04.4 records it per host.
     if (isKnown && !isPerHostSpec(getSpecFor(locator.name, version!))) {
       locator.reference = `${version!}+${hash}`;
     }
@@ -212,7 +212,7 @@ export async function ensureInstalled(
     let spec: InstallSpec = { location, bin, hash };
     if (!promote(tmp, location)) {
       // Lost the rename race. The winner is a completed install, but not
-      // necessarily *this* reference's artifact: the §15.11 probe that chose
+      // necessarily *this* reference's artifact: the §07.2 probe that chose
       // `location` ran before the download, when the plain directory was still
       // empty, so two references pinning different digests both aimed here.
       // Re-running the probe now that the marker exists is the same decision on
@@ -228,7 +228,7 @@ export async function ensureInstalled(
       }
     }
 
-    // §04.7 — only ever within the same major, only when an entry already
+    // §04.8 — only ever within the same major, only when an entry already
     // exists, and never when the caller only wanted the cache warmed. The guards
     // live in `store.bumpLastKnownGood`; `isKnown` only spares it the read.
     if (isKnown && options?.cacheOnly !== true) {
@@ -245,14 +245,14 @@ export async function ensureInstalled(
 }
 
 /**
- * §05.5 — printed before any **artifact** download, never before metadata.
+ * §05.4 — printed before any **artifact** download, never before metadata.
  *
  * The notice needs `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`; the interactive
  * confirmation additionally needs a TTY stdin and an unset `CI`. Any input other
  * than `n`/`N` — including a bare newline — is yes.
  */
 export async function confirmDownload(url: string): Promise<void> {
-  // §15.20 — `0` (and anything that is not `1`) suppresses both the notice and
+  // §05.4 — `0` (and anything that is not `1`) suppresses both the notice and
   // the confirmation, from every entry point, unconditionally.
   if (!envFlag(ENV.ENABLE_DOWNLOAD_PROMPT)) return;
 
@@ -275,7 +275,7 @@ export async function confirmDownload(url: string): Promise<void> {
 }
 
 /**
- * §16.5 — fetch `url` and hash it while it is being written, in one pass, and
+ * §06.2 — fetch `url` and hash it while it is being written, in one pass, and
  * return the digest of what actually arrived.
  *
  * One branch of the tee feeds the digest and the other feeds `write` — gunzip
@@ -325,7 +325,7 @@ async function chooseSource(
   if (version === undefined) {
     // A URL reference. `versionDir` is `encodeURIComponent(url without fragment)`
     // (§07.2), so decoding it is exactly §07.3's `decodeURIComponent(version)`.
-    // It belongs to no package manager's table entry, so §15.2 does not touch
+    // It belongs to no package manager's table entry, so §05.2 does not touch
     // it; only §05.2's default-origin rewrite applies.
     const registryUrl = getRegistryUrl({ name });
     return {
@@ -336,7 +336,7 @@ async function chooseSource(
 
   const spec = getSpecFor(locator.name, version);
 
-  // §15.28 — a native band answers version questions and artifact questions from
+  // §02.4 — a native band answers version questions and artifact questions from
   // two different npm packages, and it is the **artifact** one that governs
   // everything below: the URL, the digest, and the signature over it. Resolving
   // it here also means an unsupported host fails before any request, naming the
@@ -350,7 +350,7 @@ async function chooseSource(
   const registryUrl = getRegistryUrl({ name, packageName });
 
   const source: ArtifactSource = {
-    // §15.28 — `{}`, and optionally `{platform}` / `{arch}`. An unsupported host
+    // §02.4 — `{}`, and optionally `{platform}` / `{arch}`. An unsupported host
     // fails here, before any bytes move, rather than 404ing on a URL that still
     // carries the placeholder.
     url: resolveSpecUrl(spec, locator, version),
@@ -359,13 +359,13 @@ async function chooseSource(
   };
 
   // The packument path is taken only when a registry is actually configured for
-  // this package manager — through any of §15.1's or §15.2's tiers. Otherwise
+  // this package manager — through any of §05.2's tiers. Otherwise
   // the download URL comes from the table (§05.2), and no metadata request is
   // made until §06 needs one.
   const configured = resolveRegistry({ name, packageName }).kind !== "built-in";
   if (registry.type === "npm" && configured) {
     // `dist.tarball` verbatim — never synthesised — already rewritten onto the
-    // configured registry and validated by §14.9.
+    // configured registry and validated by §05.2.
     const metadata = await fetchTarballURLAndSignature(registry, version);
     source.url = metadata.tarball;
     source.integrity = metadata.integrity;
@@ -376,7 +376,7 @@ async function chooseSource(
     source.url = applySourceOverride(source.url, name);
   }
 
-  // §15.3 — compare origins to handle case and trailing slashes without
+  // §05.2 — compare origins to handle case and trailing slashes without
   // rewriting matching text in the middle of a URL. Re-applying it to a
   // `dist.tarball` that `fetchTarballURLAndSignature` already rewrote is a no-op.
   source.url = applyRegistryOverride(source.url, registryUrl);
@@ -490,7 +490,7 @@ export function resolveBin(
   const parsed = parse(locator.reference);
   const known = parsed !== null && isSupportedPackageManager(locator.name);
   const banded = known && hasRangeBand(locator.name, parsed.version);
-  // §15.28 — `resolveSpecBin`, not `.bin`: a native band spells its entry points
+  // §02.4 — `resolveSpecBin`, not `.bin`: a native band spells its entry points
   // with `{exe}`, and what goes in the marker must be the path that exists.
   const tableBin = known ? resolveSpecBin(getSpecFor(locator.name, parsed.version)) : undefined;
 
@@ -511,8 +511,8 @@ export function resolveBin(
     const bin = named
       ? { [manifest.name as string]: packageBin as string }
       : (packageBin as BinSpec);
-    // §15.17 point 3 — the two maintenance signals, both debug-level because
-    // neither changes the outcome of this run (§16.9).
+    // §07.7 — the two maintenance signals, both debug-level because
+    // neither changes the outcome of this run.
     if (known && !banded) {
       debugNote(messages.binFromPackage(locator.name, parsed.version));
     } else if (banded && isValidBinSpec(tableBin) && !sameBin(tableBin, bin)) {
@@ -554,7 +554,7 @@ function sameBin(a: BinSpec, b: BinSpec): boolean {
 }
 
 /**
- * §14.13 — every value of a package-supplied `bin` map stays inside the install.
+ * §08.1 — every value of a package-supplied `bin` map stays inside the install.
  *
  * `"bin": {"yarn": "../../../../etc/…"}` is one `join` away from writing the
  * tool's own handover at an attacker-chosen path. The check is one comparison,
@@ -582,14 +582,13 @@ function confine(
 /**
  * A note for whoever maintains the embedded table, on the debug channel.
  *
- * `DEBUG=jup` and `DEBUG=corepack` enable this compatibility channel. §15.35l
- * is explicit that it is "a debugging
- * aid, not a substitute for command output" — so this is the one place a
- * message is allowed to be conditional on it. Both names are honoured, for the
- * same reason §14.22 keeps both env-var prefixes.
+ * `DEBUG=jup` and `DEBUG=corepack` enable this compatibility channel (§11.5),
+ * as a debugging aid, not a substitute for command output — so this is the one
+ * place a message is allowed to be conditional on it. Both names are honoured,
+ * for the same reason §11.6 keeps both env-var prefixes.
  *
  * Not routed through `advisory()`: `DEBUG=jup` is a request for *more* output,
- * and the more specific ask wins over §11.5's blanket mute.
+ * and the more specific ask wins over §11.3's blanket mute.
  */
 function debugNote(message: string): void {
   const debug = process.env[SYSTEM_ENV.DEBUG];
@@ -605,7 +604,7 @@ function debugNote(message: string): void {
  * `undefined` when nothing is to be checked.
  *
  * Resolved before the download for two reasons: the digest algorithm comes from
- * the SRI string (§14.12) and the stream can only be hashed once (§16.5); and a
+ * the SRI string and the stream can only be hashed once (§06.2); and a
  * signature we already know is bad should not cost a tarball's worth of
  * bandwidth. Metadata therefore precedes the artifact transfer.
  */
@@ -624,7 +623,7 @@ async function resolveExpectedIntegrity(
 
   // Row 1: an explicit pin is a stronger, user-chosen assertion than the
   // registry's claim about itself, and it turns signature verification off —
-  // including §15.7's requirement and §15.8's extra request, neither of which
+  // including §06.1's requirement and §06.3's extra request, neither of which
   // may add a fetch to a path that already knows what it expects. When §07.3
   // fetched the metadata anyway (a configured registry supplies `dist.tarball`),
   // an unsigned registry is still worth one warning.
@@ -646,7 +645,7 @@ async function resolveExpectedIntegrity(
     source.fetched = true;
   }
 
-  // §15.7 tiers 2 and 3, plus §15.8's package-root retry: a verified signature,
+  // §06.1 tiers 2 and 3, plus §06.3's package-root retry: a verified signature,
   // a warned soft-fail onto the registry's own digest, or a refusal.
   await verifyRegistryTrust({
     spec: registry,
@@ -665,10 +664,10 @@ async function resolveExpectedIntegrity(
 }
 
 /**
- * §15.11 — refuse an artifact that clears no verification tier.
+ * §06.1 — refuse an artifact that clears no verification tier.
  *
  * The three tiers are a **user-pinned hash** (`pin.digest`), a **verified
- * registry signature** and the digest it covers, and §15.7's soft-fail onto a
+ * registry signature** and the digest it covers, and §06.1's soft-fail onto a
  * registry-published digest — all three of which arrive here as either
  * `pin.digest` or `expected`. Nothing else counts: TLS says the bytes came from
  * the host the URL named, not that the host is publishing what it published
@@ -679,21 +678,21 @@ async function resolveExpectedIntegrity(
  * * Yarn Berry from `repo.yarnpkg.com` — a url-type registry publishes no
  *   signatures and no digests at all (§02.5), so a version resolved from
  *   `/tags` rather than pinned had *nothing* checking it. This is the breaking
- *   half of §15.11: `packageManager: "yarn@4.x"` now needs a pinned hash, a
- *   `jup.lock` resolution (§15.23 records one, with its integrity), or
+ *   half of §06.1: `packageManager: "yarn@4.x"` now needs a pinned hash, a
+ *   `jup.lock` resolution (§04.4 records one, with its integrity), or
  *   the opt-out.
  * * A custom `packageManager` URL with no `#<algo>.<hex>` fragment. That path
  *   is already behind `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS`, which permits the
  *   *host*; §02.1's fragment is how the user says what should arrive from it.
  *
  * The built-in table pins a hash on `default` and on `transparent.default`
- * (§02.5), and §04.5's `latest` lookup attaches the registry's own signed
+ * (§02.5), and §04.6's `latest` lookup attaches the registry's own signed
  * digest as a build suffix, so an unpinned `yarn`/`pnpm`/`npm` still clears a
  * tier and this never fires for them.
  *
  * `COREPACK_INTEGRITY_KEYS` in {"", "0"} is honoured as an equivalent opt-out
  * rather than as a way past this check: §06.4 defines those two values as
- * "disable the mechanism", the variable is environment-only (§14.5), and making
+ * "disable the mechanism", the variable is environment-only (§03.2), and making
  * it refuse everything instead would turn one documented escape hatch into a
  * second, differently-spelled failure.
  */
@@ -720,7 +719,7 @@ function assertVerificationTier(
   throw new UsageError(messages.refusingUnverified(locator.name, shownVersion, origin));
 }
 
-/** §06.2 + §14.11 — constant-time, and the message format is load-bearing (§12.7). */
+/** §06.2 — constant-time, and the message format is load-bearing (§12.7). */
 export function assertDigest(expected: string, actual: string): void {
   if (!compareDigest(expected, actual)) {
     throw new Error(messages.mismatchHashes(expected, actual));
@@ -733,7 +732,7 @@ export function assertDigest(expected: string, actual: string): void {
  * The `.tgz` path bounds its output inside the extractor; the single-file path
  * had no cap at all, so a source that controls the served `.js` could write
  * until the disk filled. The exposure is narrow — the only non-opt-in `.js`
- * source is Yarn Berry from repo.yarnpkg.com, which §15.11 leaves at the
+ * source is Yarn Berry from repo.yarnpkg.com, which §06.1 leaves at the
  * TLS-only tier, and an adversary there already controls the code we are about
  * to execute — but a counter costs nothing and the cap should not depend on
  * which branch of the download the artifact took.

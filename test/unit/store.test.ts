@@ -30,8 +30,8 @@ import {
   writeLastKnownGood,
   writeMarker,
 } from "../../src/cache/store.ts";
-// §15.17 moved `resolveBin` onto the cold path — it runs once per *install*,
-// never on a cache hit, and the warm chunk is measured in bytes (§16.3).
+// §07.7 moved `resolveBin` onto the cold path — it runs once per *install*,
+// never on a cache hit, and the warm chunk is measured in bytes (§16).
 import { resolveBin } from "../../src/cache/install.ts";
 
 /**
@@ -41,7 +41,7 @@ import { resolveBin } from "../../src/cache/install.ts";
  * evaluated and capture their bindings.
  *
  * Every function delegates to the real implementation. The spies exist purely
- * so the §14.1 fast-path test can *count* directory reads, and so the
+ * so the §04.3 fast-path test can *count* directory reads, and so the
  * last-known-good tests can inject an `EROFS` without needing a read-only
  * filesystem. The file's own imports stay on the real `node:fs`, so a fixture
  * written by the test never lands in those counts.
@@ -113,7 +113,7 @@ describe("getHomeFolder — §07.1", () => {
     expect(getHomeFolder()).toBe(join("/xdg", "cache", "jup"));
   });
 
-  // §15.13 point 5 redirected this row (conformance 171). Corepack honours
+  // §07.1 redirected this row (conformance 171). Corepack honours
   // LOCALAPPDATA on POSIX, which is #673: a Linux process started through WSL
   // interop inherits it and lands its cache on /mnt/c.
   it("171: ignores LOCALAPPDATA off Windows", () => {
@@ -203,7 +203,7 @@ describe("readMarker / writeMarker — §07.2", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.11 — the cache hit checks the pin                                       */
+/* §06.1 — the cache hit checks the pin                                       */
 /* -------------------------------------------------------------------------- */
 
 /** How many of the recorded `readFileSync` calls asked for a `.jup`. */
@@ -226,7 +226,7 @@ describe("readHashPin — §02.1", () => {
   });
 });
 
-describe("resolveInstallTarget — §15.11's cache-hit check", () => {
+describe("resolveInstallTarget — §06.1's cache-hit check", () => {
   /** A complete install of `<name>/<version>` whose marker records `hash`. */
   function seed(name: string, version: string, hash: string): string {
     const dir = join(getInstallFolder(), name, version);
@@ -309,7 +309,7 @@ describe("resolveInstallTarget — §15.11's cache-hit check", () => {
     seed("pnpm", "9.0.0", "sha512.aaaa");
 
     // §01.3 budgets one `.jup` read for a warm, exactly-pinned run, and
-    // §15.11's check must not turn that into two. The second read exists only
+    // §06.1's check must not turn that into two. The second read exists only
     // for a reference the cached marker cannot vouch for.
     const readFileSyncMock = fs.readFileSync;
     readFileSyncMock.mockClear();
@@ -343,7 +343,7 @@ describe("referenceWithHash — §07.6 step 3", () => {
   });
 
   /**
-   * §15.28 — the choke point for "a per-host digest never travels".
+   * §02.4 — the choke point for "a per-host digest never travels".
    *
    * Every caller of this function writes the result somewhere that outlives the
    * machine: `packageManager` is committed, and `lastKnownGood.json` is copied
@@ -351,7 +351,7 @@ describe("referenceWithHash — §07.6 step 3", () => {
    * taken here is true of one platform's artifact only, and §06.1 row 1 reads a
    * reference-borne digest as an explicit pin — so carrying it turns the
    * *correct* artifact into a hash mismatch everywhere else. This is the test
-   * that keeps the four sites in §15.28's list agreeing, because it is the one
+   * that keeps the four sites in §02.4's list agreeing, because it is the one
    * function all of them go through.
    */
   it("declines to attach a per-host digest, keeping the bare version", () => {
@@ -364,16 +364,16 @@ describe("referenceWithHash — §07.6 step 3", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §14.1 — the exact-version fast path                                         */
+/* §04.3 — the exact-version fast path                                         */
 /* -------------------------------------------------------------------------- */
 
-describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
+describe("findInstalledVersion — the §04.3 exact-version fast path", () => {
   beforeEach(() => {
     fs.readdirSync.mockClear();
     fs.opendirSync.mockClear();
   });
 
-  /** The budget guard: an exact pin must never read a directory (§01.3, §16.3). */
+  /** The budget guard: an exact pin must never read a directory (§01.3, §16). */
   function expectNoDirectoryRead(): void {
     expect(fs.readdirSync).not.toHaveBeenCalled();
     expect(fs.opendirSync).not.toHaveBeenCalled();
@@ -402,7 +402,7 @@ describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
   });
 
   it("strips the build suffix before probing, and returns the plain version", () => {
-    // §15.11 redirected this row: the directory is still the plain version, but
+    // §06.1 redirected this row: the directory is still the plain version, but
     // a hash-bearing reference is a *hit* only when the marker records that very
     // digest — the probe used to answer from the directory name alone, which is
     // how two references differing only in their hash came to share one install.
@@ -416,7 +416,7 @@ describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
     expectNoDirectoryRead();
   });
 
-  it("answers a miss when the installed marker records a different digest (§15.11)", () => {
+  it("answers a miss when the installed marker records a different digest (§06.1)", () => {
     seedInstall("yarn", "4.1.0");
 
     expect(findInstalledVersion("yarn", "4.1.0+sha224.deadbeef")).toBeNull();
@@ -448,10 +448,10 @@ describe("findInstalledVersion — the §14.1 exact-version fast path", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §04.3 + §14.2 — the range probe                                             */
+/* §04.3 — the range probe                                                     */
 /* -------------------------------------------------------------------------- */
 
-describe("findInstalledVersion — the range probe (§04.3, §14.2)", () => {
+describe("findInstalledVersion — the range probe (§04.3)", () => {
   it("returns the highest matching installed version", () => {
     for (const version of ["1.0.0", "1.5.0", "1.22.22", "2.0.0"]) seedInstall("yarn", version);
     expect(findInstalledVersion("yarn", "^1.0.0")).toBe("1.22.22");
@@ -473,7 +473,7 @@ describe("findInstalledVersion — the range probe (§04.3, §14.2)", () => {
     expect(findInstalledVersion("yarn", "*")).toBe("1.0.0");
   });
 
-  it("§14.2 — matches a prerelease directory through a stable range", () => {
+  it("§04.3 — matches a prerelease directory through a stable range", () => {
     seedInstall("yarn", "4.0.0-rc.1");
     expect(findInstalledVersion("yarn", ">=2.0.0")).toBe("4.0.0-rc.1");
   });
@@ -600,7 +600,7 @@ describe("promote — §07.5", () => {
     expect(readFileSync(join(dest, "yarn.js"), "utf8")).toBe("stale");
   });
 
-  it("never creates a lockfile (§07.5, §16.6)", () => {
+  it("never creates a lockfile (§07.5, §16)", () => {
     const tmp = createTempDir();
     writeFileSync(join(tmp, "yarn.js"), "x");
     promote(tmp, join(getInstallFolder(), "yarn", "4.1.0"));
@@ -620,10 +620,10 @@ describe("promote — §07.5", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §04.4 + §14.3 — last known good                                             */
+/* §04.5 — last known good                                                     */
 /* -------------------------------------------------------------------------- */
 
-describe("readLastKnownGood — §04.4, forgiving in every direction", () => {
+describe("readLastKnownGood — §04.5, forgiving in every direction", () => {
   const lkgPath = () => join(home, "lastKnownGood.json");
 
   it("returns {} when the file is missing", () => {
@@ -663,7 +663,7 @@ describe("readLastKnownGood — §04.4, forgiving in every direction", () => {
   });
 });
 
-describe("writeLastKnownGood — §14.3, atomic", () => {
+describe("writeLastKnownGood — §04.5, atomic", () => {
   const lkgPath = () => join(home, "lastKnownGood.json");
 
   it("writes a temp file in the same directory and renames over the target", () => {
@@ -740,7 +740,7 @@ describe("resolveBin — §07.7", () => {
   });
 
   it("single file: names the file under the locator's own name", () => {
-    // §15.41 retired the last band that produced a single file, so this branch is
+    // §02.5 retired the last band that produced a single file, so this branch is
     // reached only by a URL reference to a `.js`. The marker names the file, not
     // just the binary — corepack's `BinList` left `resolveBinPath` to recover it
     // from the download URL a second time; §02.4 gives jup no such form.
@@ -757,7 +757,7 @@ describe("resolveBin — §07.7", () => {
     ).toEqual({ npm: "npm-cli.js" });
   });
 
-  it("tarball: the package's own bin wins over the band that covers it (§15.17)", () => {
+  it("tarball: the package's own bin wins over the band that covers it (§07.7)", () => {
     // The inversion. pnpm 11 *is* inside a declared band, and the band's paths
     // exist in the shipped table — but the package says its entry point moved,
     // and the package is the thing that knows.
@@ -795,7 +795,7 @@ describe("resolveBin — §07.7", () => {
   });
 
   it("tarball: reads the package's own bin map", () => {
-    // Yarn Berry, which since §15.41 is an ordinary `@yarnpkg/cli-dist` tarball
+    // Yarn Berry, which since §02.5 is an ordinary `@yarnpkg/cli-dist` tarball
     // like every other entry, described by its own manifest.
     writeFileSync(
       join(tmp, "package.json"),
@@ -816,8 +816,8 @@ describe("resolveBin — §07.7", () => {
     });
   });
 
-  it("tarball: §14.13 — a package `bin` that escapes the install is refused", () => {
-    // The values here come from a downloaded `package.json`, so §14.13 confines
+  it("tarball: §08.1 — a package `bin` that escapes the install is refused", () => {
+    // The values here come from a downloaded `package.json`, so §08.1 confines
     // them before they reach the marker. `exec.resolveBinPath` checks again at
     // the point of use, but failing here is what keeps the escaping path out of
     // the store at all.
@@ -839,7 +839,7 @@ describe("resolveBin — §07.7", () => {
     );
   });
 
-  it("tarball: a path that merely *looks* like an escape is kept (§14.13)", () => {
+  it("tarball: a path that merely *looks* like an escape is kept (§08.1)", () => {
     // The control: `..` inside the install is not an escape, and a check written
     // as "does the string contain `..`" would refuse this one.
     writeFileSync(
@@ -852,10 +852,10 @@ describe("resolveBin — §07.7", () => {
   });
 
   it("tarball: a URL reference has no band to fall back to", () => {
-    // No version, so no band — §02.3's fall-forward guess is exactly what §15.17
+    // No version, so no band — §02.3's fall-forward guess is exactly what §07.7
     // keeps out of the marker. With nothing in the package, that is an error.
     //
-    // Since §15.41 this is the *only* way to reach §12.8: every band in the table
+    // Since §02.5 this is the *only* way to reach §12.8: every band in the table
     // declares a usable `BinSpec`, so a banded version always has a fallback.
     // Yarn Berry used to be the counter-example, its band declaring a list of
     // names rather than paths.
@@ -889,15 +889,15 @@ describe("cacheClean — §07.9 (test 95)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §04.7 — the last-known-good auto-bump (tests 97–100)
+ * §04.8 — the last-known-good auto-bump (tests 97–100)
  *
  * The bump lives in `store` because both callers — `resolve`'s §04 pipeline and
- * `install`'s §07.6 promotion — sit above it in §16.10's layering. These tests
+ * `install`'s §07.6 promotion — sit above it in §16's layering. These tests
  * moved here with it; they were previously written against a second, unimported
  * copy in `resolve`, so nothing they asserted was ever reached at runtime.
  * ------------------------------------------------------------------ */
 
-describe("bumpLastKnownGood (§04.7)", () => {
+describe("bumpLastKnownGood (§04.8)", () => {
   beforeEach(() => {
     // The ambient environment must not decide whether the bump runs.
     vi.stubEnv("COREPACK_DEFAULT_TO_LATEST", undefined);

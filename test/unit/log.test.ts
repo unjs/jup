@@ -33,7 +33,7 @@ const RESET = `${ESC}[39m`;
  * A child, because colour is a property of the *stream*: vitest's own stdout is
  * a pipe, so the in-process half below can only ever observe the uncoloured
  * branch. `env` is built from nothing rather than spread over `process.env` —
- * the suite may itself be running under an agent (§11.4), which is one of the
+ * the suite may itself be running under an agent (§11.5), which is one of the
  * things these rows are here to measure.
  */
 async function runChild(source: string, env: Record<string, string>): Promise<string> {
@@ -48,14 +48,14 @@ const printWith = (source: string, env: Record<string, string>): Promise<string>
   runChild(`const log = await import(${LOG});\n${source}`, env);
 
 /**
- * §09.11 — the writers, and the one thing colour is not allowed to do.
+ * §09.14 — the writers, and the one thing colour is not allowed to do.
  *
  * The suite runs with `NO_COLOR=1` (both vitest configs), which is also the
  * state every row in §13 that matches exact output depends on: with colour off
  * these functions must be the plain `write`/`console.warn` they replaced, down
  * to the byte. That is what this half asserts.
  */
-describe("the writers with colour off — §09.11", () => {
+describe("the writers with colour off — §09.14", () => {
   let stdout: MockInstance<typeof process.stdout.write>;
   let stderr: MockInstance<typeof process.stderr.write>;
   let warned: MockInstance<typeof console.warn>;
@@ -119,7 +119,7 @@ describe("the writers with colour off — §09.11", () => {
  * The other half: that colour happens at all, and that removing it recovers the
  * exact bytes above.
  */
-describe("the writers with colour on — §09.11", () => {
+describe("the writers with colour on — §09.14", () => {
   it("colours the marker and nothing else", async () => {
     const printed = await printWith(`log.out("! jup validation warning: nope\\n");`, {
       FORCE_COLOR: "1",
@@ -163,13 +163,13 @@ describe("the writers with colour on — §09.11", () => {
 });
 
 /**
- * §11.4 — an AI agent reading the output, which is not a person looking at a
+ * §11.5 — an AI agent reading the output, which is not a person looking at a
  * terminal even when the stream says it is.
  *
  * The variables are `unjs/std-env`'s agent table; a handful of representative
  * rows stand in for the list, since they all reach the same branch.
  */
-describe("agent detection — §11.4", () => {
+describe("agent detection — §11.5", () => {
   const detect = (env: Record<string, string>): Promise<string> =>
     runChild(`const log = await import(${LOG});\nprocess.stdout.write(String(log.isAgent));`, env);
 
@@ -223,8 +223,8 @@ describe("agent detection — §11.4", () => {
   });
 });
 
-/** §09.11 — `--help`, which is colour applied to a fixed block of text. */
-describe("the help text — §09.11", () => {
+/** §09.14 — `--help`, which is colour applied to a fixed block of text. */
+describe("the help text — §09.14", () => {
   const helpWithColour = (): Promise<string> =>
     runChild(
       [
@@ -329,7 +329,7 @@ describe("the help text — §09.11", () => {
     expect(painted).toContain(`${BOLD}A heading:`);
     expect(painted).toContain("directory that never needs elevation:");
     expect(painted).not.toContain(`${BOLD}directory that never needs elevation:`);
-    // §09.11 rule 1 — colour may only wrap what the text already says.
+    // §09.14 rule 1 — colour may only wrap what the text already says.
     expect(painted.replaceAll(ANSI, "")).toBe(wrapped);
   });
 

@@ -92,7 +92,7 @@ export function isTransparentCommand(binaryName: string, args: string[]): boolea
 }
 
 /**
- * §15.31 — the spellings of "operate outside this project" that count.
+ * §01.4 — the spellings of "operate outside this project" that count.
  *
  * `--location=global` is npm's; `--location global` is the same flag written
  * apart and is handled by the scan below.
@@ -137,7 +137,7 @@ export async function runProxy(
   // thunk, because forcing it reads `lastKnownGood.json` and may hit the
   // network — which the §01.3 budget forbids on a warm, pinned run.
   const name = getPackageManagerFor(binaryName);
-  // §15.31 — a global invocation is transparent for the same reason a
+  // §01.4 — a global invocation is transparent for the same reason a
   // bootstrapping command is: neither one is asking the project for anything.
   const transparent =
     name !== undefined && (isTransparentCommand(binaryName, args) || isGlobalInvocation(args));
@@ -160,7 +160,7 @@ export async function runProxy(
   // the manifest is never parsed either, or a malformed `package.json` still
   // fails the very run `COREPACK_ENABLE_PROJECT_SPEC=0` was set to rescue. The
   // walk still happens, because the env file it loads is what may set the flag.
-  // §15.39 — `tool` is what makes this the spec *for the requested tool*: a
+  // §02.3 — `tool` is what makes this the spec *for the requested tool*: a
   // runtime reads `devEngines.runtime` and a package manager reads the pair it
   // always read. Passing the resolved name rather than the binary name is what
   // makes `bunx` ask bun's question and `nubx` ask nub's; an unknown binary
@@ -192,15 +192,15 @@ export async function runProxy(
     });
   }
 
-  // §15.23 — a project spec that is a range or a tag is answered by the recorded
+  // §04.4 — a project spec that is a range or a tag is answered by the recorded
   // `jup.lock`, then by the cache beside it; an exact pin never touches either.
   const projectDir = resolutionDirFor(specResult, reconciled, descriptor, binaryVersion);
 
-  // Step 5 — resolution, in the order §15.23 fixes: the committed decision, the
+  // Step 5 — resolution, in the order §04.4 fixes: the committed decision, the
   // cached memo, the exact pin, and only then a request. For an exact pin this
   // is answered inline by {@link resolveExactPin}; for a recorded range it is
   // one `jup.lock` read and nothing else.
-  // §15.23's order — recorded, then unexpired memo — is `readKnownResolution`,
+  // §04.4's order — recorded, then unexpired memo — is `readKnownResolution`,
   // shared with `install` (§09.2) so a warmed layer and the run it warms cannot
   // disagree about which version the files already name.
   const files: KnownResolution =
@@ -227,7 +227,7 @@ export async function runProxy(
   // Step 6 — one `.jup` read on a hit; download, verify and promote on a miss.
   const installSpec = await ensureInstalledLazily(locator, descriptor.range);
 
-  // §15.23 — this path never writes the project's recorded resolution: that file
+  // §04.4 — this path never writes the project's recorded resolution: that file
   // changes only when the user runs `jup use` or `jup up`. What it may write is
   // the memo in `node_modules`, and only when the answer came from the registry
   // — re-stamping an unexpired entry would churn a file for no new fact, and
@@ -247,16 +247,16 @@ export async function runProxy(
   // On the JavaScript path this resolves with 0 immediately and the package
   // manager sets the real exit code from its own module body, which runs
   // strictly after this returns — never wrap that in a catch (§08.4). On
-  // §15.28's native path it is the child's own exit code, and awaiting it is the
+  // §08.3's native path it is the child's own exit code, and awaiting it is the
   // only way to have one.
   return await execPackageManager(
     binaryName,
     installSpec,
     args,
-    // §15.28 — `{exe}`-substituted, so a Windows fallback names `bin\\bun.exe`.
+    // §02.4 — `{exe}`-substituted, so a Windows fallback names `bin\\bun.exe`.
     tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
     tableSpec?.exec,
-    // §15.28 — the argv this name needs in front of the user's, where the
+    // §08.3 — the argv this name needs in front of the user's, where the
     // artifact cannot recover the name it was invoked under (`pnpx` → `dlx`).
     tableSpec?.binArgs?.[binaryName],
   );
@@ -276,7 +276,7 @@ export async function runMain(argv: string[]): Promise<number> {
       return await runProxy(invocation);
     }
     // Loaded lazily: the proxy path is the hot one and must not pay for the
-    // command surface it never touches (§16.3).
+    // command surface it never touches (§16, Build shape).
     const { runManagementCommand } = await import("./commands/cli.ts");
     return await runManagementCommand(invocation.args);
   } catch (error) {
@@ -314,14 +314,14 @@ async function ensureInstalledLazily(locator: Locator, range: string): Promise<I
   try {
     return await ensureInstalled(locator);
   } catch (error) {
-    // §15.19 / §15.35j — the download's own message names a URL the user never
+    // §04.1, §12.6 — the download's own message names a URL the user never
     // typed. `parse` is already on the warm path, so recovering the version
     // costs nothing on the path that does not throw.
     const version = parse(locator.reference)?.version;
     const what = { name: locator.name, range, ...(version === undefined ? {} : { version }) };
     // `errors-cold.ts` rather than `errors.ts`: §12's download and network
     // vocabulary is the largest thing the warm chunk was carrying and could
-    // never print (§16.3). The import is free here — `install.ts` above already
+    // never print (§16, Build shape). The import is free here — `install.ts` above already
     // pulled the cold stack in, and this branch only runs when it threw.
     const { explainFetchFailure } = await import("./errors-cold.ts");
     throw explainFetchFailure(error, what) ?? error;
@@ -340,12 +340,12 @@ function resolveExactPin(descriptor: Descriptor): Locator | null {
   // version, and shedding the `+<hash>` suffix is what makes §07.2 re-attach the
   // marker's hash instead of demanding a store directory qualified by the pin.
   // Returning `descriptor.range` unconditionally sends every hash-bearing pin
-  // back to the registry. One `stat`, which is what §16.3 budgets (§14.1).
+  // back to the registry. One `stat`, which is what §01.3 budgets (§04.3).
   const cached = findInstalledVersion(descriptor.name, descriptor.range);
   return { name: descriptor.name, reference: cached ?? descriptor.range };
 }
 
-/** §15.19 — the same diagnostic around resolution, which is where a range fails. */
+/** §12.6 — the same diagnostic around resolution, which is where a range fails. */
 async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null> {
   const { resolveDescriptor } = await import("./version/resolve.ts");
   try {
@@ -357,7 +357,7 @@ async function resolveOrExplain(descriptor: Descriptor): Promise<Locator | null>
 }
 
 /**
- * §04.5's fallback reference, behind the same dynamic import.
+ * §04.6's fallback reference, behind the same dynamic import.
  *
  * Loading the resolver here keeps fallback resolution, including LKG reads and
  * network access, lazy until the fallback is forced.
@@ -394,7 +394,7 @@ interface Resolved {
 }
 
 /**
- * §15.5's availability statuses — `http.ts`'s retry set, for its reason.
+ * §05.1's availability statuses — `http.ts`'s retry set, for its reason.
  *
  * Everything else in the 4xx range is a statement about the *request* — 401 and
  * 403 about the credential, 404 about the version — and an older answer does not
@@ -415,9 +415,9 @@ function isAvailabilityStatus(status: number): boolean {
 const URL_SLOT = "\u0000";
 
 /**
- * §15.23 — whether an expired memo may answer *for this failure*.
+ * §04.4 — whether an expired memo may answer *for this failure*.
  *
- * §15.23 scopes the fallback to "an unreachable or degraded registry", so this
+ * §04.4 scopes the fallback to "an unreachable or degraded registry", so this
  * is a positive allowlist of §12.6's two transport shapes and everything else
  * propagates. Failing open here is worse than failing outright, because the
  * stamp is not extended: a swallowed error recurs silently on every run, and the
@@ -428,18 +428,18 @@ const URL_SLOT = "\u0000";
  * states the rule for both, that a control reporting success without having been
  * applied is worse than one that stops; **401 and 403**, where a rotated
  * credential is a permanent failure and the fallback would pin the project on it
- * indefinitely; and **404** and §15.4's TLS sentences, which are true about what
+ * indefinitely; and **404** and §05.1's TLS sentences, which are true about what
  * was asked for however old the memo is.
  */
 async function isRegistryUnavailable(error: unknown): Promise<boolean> {
   // A `UsageError` is jup answering "you asked for something that cannot be
   // done", never "the registry is down": §12.4's tag and range failures,
-  // §15.19's offline diagnostic (which {@link resolveOrExplain} has already made
-  // one through `explainFetchFailure`), §15.35e's two release-age refusals.
+  // §12.6's offline diagnostic (which {@link resolveOrExplain} has already made
+  // one through `explainFetchFailure`), §04.1's two release-age refusals.
   if (!(error instanceof Error) || error instanceof UsageError) return false;
 
   // Cold, and only on a failure: `errors-cold.ts` must stay off the warm graph
-  // (§16.3), which is also why this cannot be a synchronous predicate.
+  // (§16, Build shape), which is also why this cannot be a synchronous predicate.
   const { messages: coldMessages, parseBadStatus } = await import("./errors-cold.ts");
 
   // `parseBadStatus` is `messages.badStatus` read back — an inverse the errors
@@ -464,7 +464,7 @@ function versionOf(cached: CachedResolution): string {
  * The TTL exists so a range keeps moving, not so a laptop stops working on a
  * train: an entry that has aged out is still the last thing the registry
  * actually said, and answering with it beats failing a run that succeeded an
- * hour ago. This is §04.4's rule for `lastKnownGood.json`, applied to the file
+ * hour ago. This is §04.5's rule for `lastKnownGood.json`, applied to the file
  * that plays the same part for a project.
  *
  * It is a rule about *availability* and nothing else, which is what
@@ -493,7 +493,7 @@ async function resolveWithFallback(
   if (resolved !== null) return { locator: resolved, fromRegistry: true };
 
   // A `null` registry result is degraded service. A range-gated stale memo may
-  // still answer it under §15.23.
+  // still answer it under §04.4.
   if (cached !== null) {
     const { messages: coldMessages } = await import("./errors-cold.ts");
     advisory(
@@ -506,7 +506,7 @@ async function resolveWithFallback(
 }
 
 /**
- * §15.23 — the directory whose `jup.lock` files govern this run, or `undefined`
+ * §04.4 — the directory whose `jup.lock` files govern this run, or `undefined`
  * when no lockfile is involved.
  *
  * Three conditions, all necessary:
@@ -584,9 +584,9 @@ async function autoPin(specResult: SpecResult, fallback: LazyLocator): Promise<v
     hash: installSpec.hash,
   });
 
-  // §15.27, §15.35l — "it also covers the auto-pin case in §03.6". On **stderr**:
+  // §03.7, §12.11 — "it also covers the auto-pin case in §03.6". On **stderr**:
   // this is proxy mode, and stdout belongs entirely to the package manager
-  // (§09.11), so a line on it would corrupt `yarn --version | read`.
+  // (§09.14), so a line on it would corrupt `yarn --version | read`.
   err(`${messages.updatedManifest(target, locator.name, reference)}\n`);
 }
 

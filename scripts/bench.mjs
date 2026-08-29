@@ -1,6 +1,6 @@
 /**
- * What jup ships, and what it costs to start — the two numbers §16.1 puts a
- * budget on ("Small", and the warm proxy invocation).
+ * What jup ships, and what it costs to start — the two numbers §16, Quality
+ * gate puts a budget on ("Small", and the warm proxy invocation).
  *
  * Two sections, both measured against what ships — the built `dist/` and the
  * static `bin/` beside it — because that is what a user installs and what Node
@@ -16,7 +16,7 @@
  *   here that is really about jup.
  *
  * The project is exactly pinned and the store is seeded with a fake package
- * manager (the conformance harness's), so every proxy run takes §16.3's warm
+ * manager (the conformance harness's), so every proxy run takes §01.3's warm
  * path: manifest, marker, handover, no network.
  *
  * When corepack is on `PATH` its rows are measured too, against a copy of the
@@ -122,8 +122,9 @@ const kB = (bytes) => `${(bytes / 1000).toFixed(1)} kB`;
 //
 // One bundle now serves both entries, so this row no longer measures a chunk
 // sized for the warm path: it is the whole file, of which a warm run *evaluates*
-// only §16.3's set. What it still measures honestly is the bytes Node reads and
-// compiles on every `yarn`, `npm` and `pnpm` invocation on the machine.
+// only the warm set named in §16, Build shape. What it still measures honestly
+// is the bytes Node reads and compiles on every `yarn`, `npm` and `pnpm`
+// invocation on the machine.
 const WARM_ENTRIES = [join(BIN, "shim-proxy.mjs"), join(DIST, "index.mjs")];
 
 const sizes = [

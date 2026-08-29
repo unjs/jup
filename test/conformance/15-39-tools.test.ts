@@ -1,16 +1,16 @@
 /**
- * §15.39 — tools, not only package managers (rows 230–236).
+ * §02.3 — tools, not only package managers (rows 230–236).
  *
- * The table has always held one *kind* of thing. §15.28 built the machinery that
+ * The table has always held one *kind* of thing. §02.4 built the machinery that
  * makes a non-JavaScript, per-host tool an ordinary entry, and once that exists
  * "package manager" stops being a property of the pipeline and is only a
  * property of the manifest field an entry is declared in. `kind` is that
  * property, `node` is the first entry carrying `kind: "runtime"`, and these rows
- * are the four things §15.39 says `kind` may decide — plus the one thing it must
+ * are the four things §02.3 says `kind` may decide — plus the one thing it must
  * not, which is anything at all between resolution and execution.
  *
  * So the shape of this file is deliberately lopsided. Row 230 proves node is an
- * ordinary §15.28 entry (launcher for versions, per-host package for bytes, run
+ * ordinary §02.4 entry (launcher for versions, per-host package for bytes, run
  * directly) in a single assertion, because there is nothing new there to test.
  * Everything else is about §03 and §10: which field speaks (231, 232), which
  * field may not (233), where a pin is written (234), and what a bare `enable`
@@ -116,7 +116,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers", () => {
+describe.skipIf(!POSIX)("§02.3 node, and tools that are not package managers", () => {
   function options(fixture: Fixture, env?: Record<string, string | undefined>) {
     return {
       cwd: fixture.cwd,
@@ -136,7 +136,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=node args=--version");
 
-    // §15.28's split, unchanged by the `kind`: the version line comes from the
+    // §02.4's split, unchanged by the `kind`: the version line comes from the
     // launcher and the bytes from the per-host package, and the launcher's own
     // tarball — a `preinstall` stub that shells out to `npm install` — is never
     // fetched. A runtime needed no new machinery, and this is that claim.
@@ -160,7 +160,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
 
     // §03.5's mismatch cannot arise across kinds, because the spec being
     // reconciled is the one for the *requested tool*: `node` reads
-    // `devEngines.runtime` and never sees the pin beside it. Before §15.39 this
+    // `devEngines.runtime` and never sees the pin beside it. Before §02.3 this
     // was `This project is configured to use pnpm`.
     const node = await run(["node", "server.js"], options(fixture));
     expect(node.stderr).toBe("");
@@ -211,7 +211,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
   it("233: and the stray field does not quietly become the runtime's pin", async () => {
     const fixture = createFixture({ name: "app", packageManager: `node@${NODE_VERSION}` });
 
-    // §15.39 — the top-level field speaks for package managers, full stop. A
+    // §02.3 — the top-level field speaks for package managers, full stop. A
     // runtime request reads `devEngines.runtime`, finds nothing, and falls back
     // (§03.5), so this project says nothing about the runtime and gets the
     // default rather than the 22.23.2 someone wrote in the wrong place. Honouring
@@ -238,7 +238,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
 
     const result = await run(["use", `node@${NODE_VERSION}`], options(fixture));
     expect(result.exitCode).toBe(0);
-    // §15.27 — every mutating command names the file it touched.
+    // §03.7 — every mutating command names the file it touched.
     expect(result.stdout).toContain(fixture.path("package.json"));
 
     const manifest = fixture.json("package.json") as {
@@ -282,7 +282,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
     const manifest = fixture.json("package.json") as {
       devEngines: { runtime: { name: string; version: string } };
     };
-    // §15.23 — a runtime's field is validated as a semver range, so a typed
+    // §04.4 — a runtime's field is validated as a semver range, so a typed
     // range goes in as written, exactly as `packageManager` takes one.
     expect(manifest.devEngines.runtime).toMatchObject({ name: "node", version: "22.x" });
     expect(
@@ -309,7 +309,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
       devEngines: { runtime: { name: string; version: string } };
     };
     expect(manifest.devEngines.runtime).toMatchObject({ name: "node", version: NODE_VERSION });
-    // §15.26 bullet 2, arrived at from the other direction: a runtime's pin has
+    // §03.7 bullet 2, arrived at from the other direction: a runtime's pin has
     // exactly one home, so there is no second field for `use` to create.
     expect(manifest.packageManager).toBeUndefined();
     // The document's own formatting survives the insertion (§03.7 steps 5–8).
@@ -330,7 +330,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
     };
     expect(manifest.devEngines.runtime).toMatchObject({ name: "node", version: NODE_VERSION });
     // The declaration already there is untouched — it speaks for a different
-    // tool, and §15.39 is explicit that neither member constrains the other.
+    // tool, and §03.3 is explicit that neither member constrains the other.
     expect(manifest.devEngines.packageManager).toEqual({ name: "pnpm" });
     // And it is inserted at the nesting its sibling uses, not at the document's.
     expect(fixture.read("package.json")).toContain(
@@ -368,7 +368,7 @@ describe.skipIf(!POSIX)("§15.39 node, and tools that are not package managers",
     expect((await run(["enable", "--install-directory", shims], options(fixture))).exitCode).toBe(
       0,
     );
-    // §02.3 makes this a requirement rather than a judgement call: §10.5's test
+    // §02.3 makes this a requirement rather than a judgement call: §10.7's test
     // is whether the name means anything outside a project, and a runtime's does
     // by definition. `node` is the case where getting it wrong would be worst.
     expect(existsSync(join(shims, "node"))).toBe(false);

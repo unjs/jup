@@ -1,5 +1,5 @@
 /**
- * A real forward proxy for conformance rows 71 and 72 (§05.1, §14.8, §15.6).
+ * A real forward proxy for conformance rows 71 and 72 (§05.1).
  *
  * It speaks both halves of the contract:
  *
@@ -12,7 +12,7 @@
  * forwards the decrypted request on. The spawned tool trusts that certificate
  * through `NODE_EXTRA_CA_CERTS` ({@link ProxyFixture.caFile}), so the rows run
  * with certificate verification **on** — a tunnel that skipped verification
- * would prove nothing about §14.6.
+ * would prove nothing about §05.1.
  *
  * `x-original-url` carries the URL the tool actually asked for, which is what
  * the mock writes its `dist.tarball` against, exactly as the `intercept.ts`

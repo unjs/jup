@@ -21,7 +21,7 @@ export const CH_RBRACE = 0x7d;
 /** Tolerant read: strips a BOM for parsing, treats empty content as `{}`. */
 export function parseManifest(text: string): unknown {
   const body = stripBom(text);
-  // An empty (or whitespace-only) manifest behaves as `{}` — §03.7 step 4.
+  // An empty (or whitespace-only) manifest behaves as `{}` — §03.7.
   if (body.trim().length === 0) {
     return {};
   }
@@ -35,7 +35,7 @@ const MAX_SCAN_DEPTH = 64;
  *
  * The proxy path reads exactly two fields of `package.json` (§03.3), and
  * resolving a 400-dependency manifest into a general-purpose object costs
- * hundreds of allocations to answer that — against §16.1's budget of fewer than
+ * hundreds of allocations to answer that — against §01.3's budget of fewer than
  * fifty on the whole warm path. This walks the text instead, allocating only for
  * the values actually asked for.
  *

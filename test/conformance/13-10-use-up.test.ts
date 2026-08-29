@@ -15,7 +15,7 @@ import {
 const registry = new MockRegistry();
 
 /**
- * §15.11 redirected these rows. Half of them resolve Yarn **Berry** from
+ * §06.1 redirected these rows. Half of them resolve Yarn **Berry** from
  * `repo.yarnpkg.com`, a url-type registry that publishes no signatures and no
  * digests, so the artifact clears no verification tier and the install is now
  * refused. The opt-out keeps every row about what it is about — which field
@@ -36,7 +36,7 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
   return (fixture.json("package.json") as { packageManager?: string }).packageManager;
 }
 
-/** §15.26 — the pin lives here for a project that declares only `devEngines`. */
+/** §03.7 — the pin lives here for a project that declares only `devEngines`. */
 function devEnginesOf(fixture: { json(relative: string): unknown }): unknown {
   return (fixture.json("package.json") as { devEngines?: { packageManager?: unknown } }).devEngines
     ?.packageManager;
@@ -61,7 +61,7 @@ beforeAll(async () => {
     { distTags: { latest: "4.9.9", stable: "4.9.9" } },
   );
 
-  // §15.41 — the older Berry lines the `up` rows walk, published the same way.
+  // §02.5 — the older Berry lines the `up` rows walk, published the same way.
   // These used to be single `.js` files on `repo.yarnpkg.com`, listed by a
   // `/tags` document; the versions a range can reach are the packument's now.
   for (const version of ["2.1.0", "2.4.3"]) {
@@ -83,7 +83,7 @@ describe("§13.10 use / up", () => {
     const result = await run(["use", "yarn@1.22.4"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
-    // §15.35l added the middle line: every mutating command names the file it
+    // §12.11 added the middle line: every mutating command names the file it
     // modified, which is the whole of #607 and costs one line of output.
     expect(result.stdout).toBe(
       `Installing yarn@1.22.4 in the project...\n` +
@@ -216,7 +216,7 @@ describe("§13.10 use / up", () => {
     expect(pinOf(fixture)).toMatch(/^yarn@2\.4\.3\+sha512\./);
   });
 
-  // §15.26 redirected row 114. It used to require `up` to *create* a
+  // §03.7 redirected row 114. It used to require `up` to *create* a
   // `packageManager` field beside the `devEngines` declaration — which is #874:
   // the two then disagree (a hash-presence difference is enough) and the very
   // next read fails §03.3. The pin is written where the declaration already is,
@@ -236,16 +236,16 @@ describe("§13.10 use / up", () => {
       integrity: expect.stringMatching(/^sha512-[\d+/A-Za-z]+=*$/),
     });
 
-    // §15.26's post-write requirement: the project it just edited re-reads
+    // §03.7's post-write requirement: the project it just edited re-reads
     // cleanly, with no warning and no error.
     const rerun = await run(["yarn", "--version"], { ...fixture, registry, env: trusted() });
     expect(rerun.exitCode).toBe(0);
     expect(rerun.stderr).toBe("");
   });
 
-  // The other half of row 114, once §15.23 landed: a *range* declared in the
+  // The other half of row 114, once §04.4 landed: a *range* declared in the
   // same place is not a pin to rewrite but a range to keep. `use <name>@<range>`
-  // writes exactly this shape on a project with no top-level field (§15.26), so
+  // writes exactly this shape on a project with no top-level field (§03.7), so
   // an `up` that read only `packageManager` would collapse the range it had just
   // written and delete its own record along with it.
   it("114: up on a devEngines-only range keeps the range and records the resolution", async () => {

@@ -1,8 +1,8 @@
 /**
- * §15.21 / §15.28 — bun, deno, aube and nub as built-in entries (rows 212–218,
+ * §03.1 / §02.4 — bun, deno, aube and nub as built-in entries (rows 212–218,
  * 220, 221 and 222–229).
  *
- * §15.28 required the *architecture* to admit a native package manager;
+ * §02.4 and §08.3 required the *architecture* to admit a native package manager;
  * `15-28-native.test.ts` proves that with a fixture manager and adds nothing to
  * the table. This file is the other half: the two entries the table now ships,
  * exercised through the same public surface a user reaches.
@@ -14,7 +14,7 @@
  * scripts, so it goes to those per-host packages directly. The version line and
  * the dist-tags still come from the launcher (§02.3's `registry`), the bytes and
  * npm's signature over them from `@oven/bun-<target>` / `@deno/<target>`
- * (§15.28's `artifactRegistry`). Everything downstream of "which digest?" then
+ * (§02.4's `artifactRegistry`). Everything downstream of "which digest?" then
  * has to stop assuming there is one.
  *
  * aube is the third, and is here for what it does *not* share with the other
@@ -34,7 +34,7 @@
  * a whole tool. It also has the one thing the four above do not — a second name
  * its artifact cannot recognise. `bunx`, `aubx` and `nubx` read `argv[0]`;
  * pnpm's binary reads its own **file name**, which a spawn cannot set, so `pnpx`
- * is §15.28's `binArgs` instead: the `dlx` its own POSIX `pnpx` script injects.
+ * is §02.4's `binArgs` instead: the `dlx` its own POSIX `pnpx` script injects.
  *
  * The mock publishes under `hostTarget()`, so the suite asserts about whatever
  * host it is running on rather than about Linux.
@@ -234,7 +234,7 @@ afterAll(async () => {
   if (POSIX) await registry.stop();
 });
 
-describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
+describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
   function options(fixture: Fixture, env?: Record<string, string | undefined>) {
     return {
       cwd: fixture.cwd,
@@ -266,7 +266,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
   it("213: verifies against the artifact package's own signature, not the launcher's", async () => {
     const fixture = createFixture({ name: "app", packageManager: `bun@${BUN_VERSION}` });
 
-    // §15.7's strict mode: a signature must exist and verify, or the install
+    // §06.1's strict mode: a signature must exist and verify, or the install
     // fails. It is the launcher that carries the version, so a build that read
     // `dist.integrity` from *there* would be checking the wrong bytes — and
     // would fail here rather than quietly install something unverified.
@@ -349,7 +349,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
 
     // An ordinary run takes the recorded version, verifies its own download
     // through npm's signature (§06.3) — the tier a native artifact always has —
-    // and writes nothing: §15.23 leaves the project's file to `use` and `up`.
+    // and writes nothing: §04.4 leaves the project's file to `use` and `up`.
     expect((await run(["bun", "--version"], options(fixture))).exitCode).toBe(0);
     expect(fixture.read("jup.lock")).toBe(before);
 
@@ -372,7 +372,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
   });
 
   it("220: the default-version lookup pins no digest, because the launcher's is the wrong one", async () => {
-    // No project at all, so §04.5 decides — the one path that asks the registry
+    // No project at all, so §04.6 decides — the one path that asks the registry
     // what `latest` is rather than being told a version. `fetchLatestFrom` names
     // the **launcher**, whose `dist.integrity` describes a stub nobody
     // downloads; attaching it as a build suffix put a ~15 kB package's digest on
@@ -403,7 +403,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
     // The other end of row 220. That row proves a *fresh* record never gains a
     // digest; this one is about the records an earlier build already wrote —
     // `lastKnownGood.json` is derived state that outlives a release, and the
-    // entry it left is returned by §04.5 step 1 with no network, ahead of every
+    // entry it left is returned by §04.6 step 1 with no network, ahead of every
     // guard downstream. So a machine that ran the broken build stays broken
     // forever unless the read itself repairs it.
     const fixture = createFixture();
@@ -459,7 +459,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
     expect((await run(["enable", "--install-directory", shims], options(fixture))).exitCode).toBe(
       0,
     );
-    // §10.5 still shims everything else, npm included (§15.16).
+    // §10.7 still shims everything else, npm included.
     expect(exists(join(shims, "yarn"))).toBe(true);
     expect(exists(join(shims, "pnpm"))).toBe(true);
     expect(exists(join(shims, "bun"))).toBe(false);
@@ -526,7 +526,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
     expect((await run(["enable", "--install-directory", shims], options(fixture))).exitCode).toBe(
       0,
     );
-    // The line §15.21 draws is runtime-versus-package-manager, not old-versus-new:
+    // The line §03.1 draws is runtime-versus-package-manager, not old-versus-new:
     // `aube`, `aubr` and `aubx` mean nothing outside a project, so they belong to
     // the default set exactly as `pnpm` and `pnpx` do.
     expect(exists(join(shims, "aube"))).toBe(true);
@@ -585,7 +585,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
       0,
     );
     // nub is a package manager — `nub install` is pnpm-compatible — and is still
-    // out of the default set, which is what pins down what §10.5's flag means.
+    // out of the default set, which is what pins down what §10.7's flag means.
     // It is not category and not recency: `nub server.ts` runs a file, so the
     // name means something outside a project and usually belongs to an install
     // the user chose. aube, in the same bare `enable`, is claimed.
@@ -632,7 +632,7 @@ describe.skipIf(!POSIX)("§15.21 bun, deno, aube, nub and pnpm 12", () => {
     });
   });
 
-  it("265: `pnpx` reaches that same binary with `dlx` in front (§15.28 `binArgs`)", async () => {
+  it("265: `pnpx` reaches that same binary with `dlx` in front (§02.4 `binArgs`)", async () => {
     const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM_VERSION}` });
 
     const result = await run(["pnpx", "cowsay", "moo"], options(fixture));

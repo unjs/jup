@@ -1,5 +1,5 @@
 /**
- * §15.35d — `COREPACK_SPEC_FILE`, an external file supplying the project spec.
+ * §03.1 — `COREPACK_SPEC_FILE`, an external file supplying the project spec.
  *
  * #682 and #402: a vendored or generated tree whose `package.json` cannot be
  * edited — sometimes because it names the *wrong* package manager, sometimes
@@ -7,7 +7,7 @@
  * wants. The variable names a file that supplies `packageManager` /
  * `devEngines.packageManager` instead, and **overrides the manifest**.
  *
- * §15.37 marks it env-file **ineligible**, and that is the half worth being
+ * §03.2 marks it env-file **ineligible**, and that is the half worth being
  * careful about: eligibility in `env.ts` is a *deny*-list, so a `COREPACK_*`
  * variable is project-settable until it is named. A `.jup.env` able to set
  * this would let a cloned repository run a package manager its own manifest
@@ -37,7 +37,7 @@ function project() {
   return fixture;
 }
 
-describe("§15.35d — COREPACK_SPEC_FILE overrides the manifest", () => {
+describe("§03.1 — COREPACK_SPEC_FILE overrides the manifest", () => {
   it("supplies `packageManager` for a manifest that cannot be edited", async () => {
     const fixture = project();
     fixture.write("vendor/spec.json", `{"packageManager":"pnpm@11.1.2"}\n`);
@@ -88,7 +88,7 @@ describe("§15.35d — COREPACK_SPEC_FILE overrides the manifest", () => {
   });
 
   it("does not read the manifest at all — a broken one no longer fails the run", async () => {
-    // §15.35d's driving case: the file exists *because* the manifest is not
+    // §03.1's driving case: the file exists *because* the manifest is not
     // usable. A walk that still parsed it would go on failing on exactly the
     // file the variable was set to bypass.
     const fixture = createFixture("{ this is not JSON");
@@ -135,7 +135,7 @@ describe("§15.35d — COREPACK_SPEC_FILE overrides the manifest", () => {
     expect(result.stderr).toContain(fixture.path("vendor/spec.json"));
   });
 
-  it("§15.37: a project's .jup.env cannot set it", async () => {
+  it("§03.2: a project's .jup.env cannot set it", async () => {
     const fixture = project();
     fixture.write("vendor/spec.json", `{"packageManager":"pnpm@11.1.2"}\n`);
     fixture.write(".jup.env", "COREPACK_SPEC_FILE=vendor/spec.json\n");
@@ -147,7 +147,7 @@ describe("§15.35d — COREPACK_SPEC_FILE overrides the manifest", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("This project is configured to use yarn");
     expect(result.stderr).toContain(fixture.path("package.json"));
-    // §14.5 — refused loudly, because it is a security-relevant variable.
+    // §03.2 — refused loudly, because it is a security-relevant variable.
     expect(result.stderr).toContain("COREPACK_SPEC_FILE");
   });
 

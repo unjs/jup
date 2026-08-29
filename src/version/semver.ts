@@ -542,7 +542,7 @@ export function satisfiesWithPrereleases(version: string, range: string): boolea
 }
 
 /**
- * §15.24 — whether the range itself names a prerelease.
+ * §04.1 — whether the range itself names a prerelease.
  *
  * The implicit-resolution filter in §04.1 step 6 discards prerelease candidates,
  * but a user who wrote `>=11.0.0-0` or `^4.0.0-rc.1` has asked for that band on

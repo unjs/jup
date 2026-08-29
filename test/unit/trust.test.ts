@@ -1,5 +1,5 @@
 /**
- * §15.9 — trust-key freshness (`src/trust.ts`).
+ * §06.3 — trust-key freshness (`src/trust.ts`).
  *
  * Every assertion here counts **requests**, not outcomes. The requirement is not
  * "a rotated key eventually works" — it is that exactly one branch of §06.3
@@ -111,7 +111,7 @@ const savedProxies: Record<string, string | undefined> = {};
  * Replace the *embedded* table for one test.
  *
  * `COREPACK_INTEGRITY_KEYS` would do the same job for the trust store, but it
- * also disables the refresh (§15.9), so it cannot express "the shipped keys do
+ * also disables the refresh (§06.3), so it cannot express "the shipped keys do
  * not explain this signature" — which is the entire subject of this file.
  */
 function useEmbedded(keys: TrustedKey[]): void {
@@ -184,7 +184,7 @@ afterEach(() => {
 
 /* -------------------------------------------------------------------------- */
 
-describe("verifySignatureWithRefresh — §15.9", () => {
+describe("verifySignatureWithRefresh — §06.3", () => {
   it("makes no request when the shipped keys already verify", async () => {
     const npm = makeKeypair("SHA256:shipped");
     useEmbedded([trustedKey(npm)]);
@@ -227,7 +227,7 @@ describe("verifySignatureWithRefresh — §15.9", () => {
     const npm = makeKeypair("SHA256:shipped");
     serveKeys([trustedKey(makeKeypair("SHA256:rotated"))]);
 
-    // The keyid matched, so §15.9 spends no request on it: a refresh would
+    // The keyid matched, so §06.3 spends no request on it: a refresh would
     // return the same key with the same expiry, and §06.5 has already decided
     // what to do with it — accept the signature it verifies, with a warning.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -280,7 +280,7 @@ describe("verifySignatureWithRefresh — §15.9", () => {
   it("decides against a refresh under COREPACK_ENABLE_NETWORK=0, cache or no cache", () => {
     // Asserted on the decision rather than on the socket, deliberately: `httpGet`
     // refuses under this flag by itself, so a request count cannot distinguish
-    // §15.9's rule from its absence. The mutation that deletes the check is only
+    // §06.3's rule from its absence. The mutation that deletes the check is only
     // visible here.
     const rotated = makeKeypair("SHA256:rotated");
     const stale = { keys: [], fetchedAt: undefined };
@@ -333,7 +333,7 @@ describe("verifySignatureWithRefresh — §15.9", () => {
 
     await expect(verify([signature(rotated)])).rejects.toBeInstanceOf(UntrustedKeyidError);
 
-    // One attempt, not §15.5's three: this is a repair on an already-failing path.
+    // One attempt, not §05.1's three: this is a repair on an already-failing path.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     // Nothing was cached, so the next run is free to try again immediately.
     expect(readKeysCache().fetchedAt).toBeUndefined();
@@ -351,7 +351,7 @@ describe("verifySignatureWithRefresh — §15.9", () => {
 
 /* -------------------------------------------------------------------------- */
 
-describe("the keys cache — §15.9, §07.8", () => {
+describe("the keys cache — §06.3, §07.8", () => {
   it("round-trips through the cache file with a timestamp", () => {
     const key = trustedKey(makeKeypair("SHA256:written"));
     writeKeysCache([key]);
@@ -381,7 +381,7 @@ describe("the keys cache — §15.9, §07.8", () => {
       JSON.stringify({ version: 2, registries: { [DEFAULT_REGISTRY]: { keys: [key] } } }),
       JSON.stringify({ version: KEYS_CACHE_VERSION, registries: null }),
       JSON.stringify({ version: KEYS_CACHE_VERSION, registries: [] }),
-      // An entry for an origin §15.10 forbids auto-fetching keys from is ignored
+      // An entry for an origin §06.3 forbids auto-fetching keys from is ignored
       // rather than adopted.
       JSON.stringify({
         version: KEYS_CACHE_VERSION,
@@ -499,7 +499,7 @@ describe("sanitiseKeys / mergeKeys / fetchNpmKeys", () => {
   });
 
   it("sends no credentials from an .npmrc scoped to npm's own registry either", async () => {
-    // The environment tier is withheld by omitting `registryOrigin`; §15.1's is
+    // The environment tier is withheld by omitting `registryOrigin`; §05.3's is
     // not, because an `//registry.npmjs.org/:_authToken` line names a scope this
     // very URL falls inside. Only an explicitly anonymous request keeps the
     // user's npm token off a document that never needed it.

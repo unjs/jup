@@ -31,7 +31,7 @@ export interface ManifestFormat {
 export function detectFormat(text: string): ManifestFormat {
   const indent = /^[ \t]+/m.exec(text)?.[0] ?? "  ";
 
-  // Count CRLF against *bare* LF; a CRLF file has zero bare LFs. §03.7 step 8.
+  // Count CRLF against *bare* LF; a CRLF file has zero bare LFs. §03.7, Formatting.
   let crlf = 0;
   let lf = 0;
   for (let i = 0; i < text.length; i++) {
@@ -119,7 +119,7 @@ export function setTopLevelString(text: string, key: string, value: string): str
 
   const result = prefix + rewriteBody(body, key, literal, format);
 
-  // §16.4: validate by re-scanning our own output — the literal has to be where
+  // §16: validate by re-scanning our own output — the literal has to be where
   // the next reader will look for it.
   const span = scanTopLevelKey(result, key);
   if (!span || result.slice(span.start, span.end) !== literal) {
@@ -131,7 +131,7 @@ export function setTopLevelString(text: string, key: string, value: string): str
   // malformed (`{"a": ]}`, `{"a": 1]}`) and we would hand `writeFileSync` a
   // manifest that does not parse. Parsing is the only check that proves it does.
   // `pin.ts` relies on this guard to prevent writing a broken manifest, and
-  // `setNestedString` applies the same validation (§16.4).
+  // `setNestedString` applies the same validation (§16).
   try {
     JSON.parse(stripBom(result));
   } catch {
@@ -143,7 +143,7 @@ export function setTopLevelString(text: string, key: string, value: string): str
 /**
  * The same surgical edit, one level down: `devEngines.packageManager.version`.
  *
- * §15.26 requires every field that encodes the pin to be updated together, and
+ * §03.7 requires every field that encodes the pin to be updated together, and
  * `devEngines.packageManager` is an object. Everything {@link setTopLevelString}
  * preserves is preserved here too — key order, indentation, line endings, the
  * BOM — because this walks to the innermost object's *text span* and then reuses
@@ -200,7 +200,7 @@ export function setNestedString(
 
   const result = prefix + body.slice(0, start) + rewritten + body.slice(end);
 
-  // §16.4 — validate by re-scanning our own output, exactly as the top-level
+  // §16 — validate by re-scanning our own output, exactly as the top-level
   // form does. A surgical edit that produced something unparseable must never
   // reach `writeFileSync`.
   try {
@@ -227,7 +227,7 @@ function rewriteBody(body: string, key: string, literal: string, format: Manifes
     if (body.trim().length !== 0) {
       throw new Error(`Failed to set "${key}" in package.json`);
     }
-    // No manifest at all (§03.7 step 9 creates one from scratch).
+    // No manifest at all (§03.7 creates one from scratch for `NoProject`).
     return `{${eol}${indent}${entry}${eol}}${eol}`;
   }
 

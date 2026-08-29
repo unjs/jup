@@ -10,19 +10,19 @@
  */
 
 /**
- * §02.3, §15.39 — which of §03's rules an entry is subject to.
+ * §02.3 — which of §03's rules an entry is subject to.
  *
  * The *only* discriminator between a package manager and a runtime, and it
  * decides exactly four things: which manifest field is the project spec (§03.3),
  * whether the name is legal in `packageManager` (§03.4), whether §03.5's name
  * mismatch is enforced, and that a runtime must stay out of the default shim set
- * (§10.5). Nothing in §04–§08 may branch on it: resolution, registry access,
+ * (§10.7). Nothing in §04–§08 may branch on it: resolution, registry access,
  * integrity, the store and execution are one path over both kinds.
  */
 export type ToolKind = "package-manager" | "runtime";
 
 /**
- * §02.7, §15.39 — the `devEngines` member that carries a tool's pin.
+ * §02.7, §02.3 — the `devEngines` member that carries a tool's pin.
  *
  * Chosen by the requested tool's {@link ToolKind}, not by what the manifest
  * happens to declare: a project may carry both, and neither constrains the other.
@@ -30,11 +30,11 @@ export type ToolKind = "package-manager" | "runtime";
 export type DevEnginesField = "packageManager" | "runtime";
 
 /**
- * §02.3, §15.40 — a file the tool's own ecosystem writes the wanted version
+ * §02.3, §03.1 — a file the tool's own ecosystem writes the wanted version
  * into, consulted when the manifest declares nothing for this tool.
  *
  * Per **entry**, so the name of the file is a table fact and appears nowhere
- * else: §15.21 requires that adding one be a data-only change, and hardcoding
+ * else: §02.3 requires that adding one be a data-only change, and hardcoding
  * "if the tool is node, read `.nvmrc`" anywhere in §03 would be exactly the
  * name-in-the-structure that rule forbids.
  *
@@ -102,7 +102,7 @@ export interface NpmRegistrySpec {
    * The earliest version this npm package carries, when the band claims a wider
    * range than the package was ever published over.
    *
-   * §15.41 moved every band onto the npm registry, and one of them landed on a
+   * §02.2 moved every band onto the npm registry, and one of them landed on a
    * package whose history is shorter than the range it serves: Yarn Berry is
    * `@yarnpkg/cli-dist`, whose 2.x line begins at 2.4.1, while the band claims
    * `>=2.0.0`. Everything between exists — on `repo.yarnpkg.com`, which jup no
@@ -136,7 +136,7 @@ export interface ToolSpec {
   /**
    * Download URL template.
    *
-   * `{}` is replaced by the version, always. §15.28 adds three opt-in
+   * `{}` is replaced by the version, always. §02.4 adds three opt-in
    * placeholders for a band whose artifact is per-host: `{platform}`, `{arch}`,
    * and `{target}` — the last being whatever {@link ToolSpec.targets}
    * maps this host's `<platform>-<arch>` onto.
@@ -163,7 +163,7 @@ export interface ToolSpec {
   /** Used *instead of* `registry` when the user has set a custom npm registry (§05.3). */
   npmRegistry?: NpmRegistrySpec;
   /**
-   * §15.28 — `<platform>-<arch>` → the string `{target}` expands to.
+   * §02.4 — `<platform>-<arch>` → the string `{target}` expands to.
    *
    * A table rather than a pair of alias maps because the published names are not
    * a product of two independent axes: bun spells the same two architectures
@@ -178,7 +178,7 @@ export interface ToolSpec {
    */
   targets?: Record<string, string>;
   /**
-   * §15.28 — the npm package the **artifact** is published as, when it differs
+   * §02.4 — the npm package the **artifact** is published as, when it differs
    * from the one {@link ToolSpec.registry} answers version questions
    * about. `package` may carry `{target}`, `{platform}` and `{arch}`.
    *
@@ -195,10 +195,10 @@ export interface ToolSpec {
    */
   exec?: "js" | "native";
   /**
-   * §15.28 — argv this band's artifact needs in front of the user's, keyed by
+   * §02.4 — argv this band's artifact needs in front of the user's, keyed by
    * the `bin` name that was invoked.
    *
-   * The mechanism §15.28 reaches for first is `argv[0]`: two `bin` names, one
+   * The mechanism §02.4 reaches for first is `argv[0]`: two `bin` names, one
    * path, and the artifact tells them apart by the word the shell used. That is
    * how `bun`/`bunx`, `nub`/`nubx` and `aube`/`aubr`/`aubx` are spelled, and it
    * costs nothing.
@@ -226,12 +226,12 @@ export interface ToolSpec {
  */
 export interface ToolDefinition {
   /**
-   * §02.3, §15.39 — what sort of tool this is. Absent means
+   * §02.3 — what sort of tool this is. Absent means
    * `"package-manager"`.
    *
    * Consult it in §03 and §10 only, and only for the four questions
    * {@link ToolKind} lists. A `"runtime"` entry MUST also set
-   * `shimByDefault: false`: §10.5's test is whether the name means anything
+   * `shimByDefault: false`: §10.7's test is whether the name means anything
    * outside a project, and a runtime's does by definition.
    */
   kind?: ToolKind;
@@ -246,14 +246,14 @@ export interface ToolDefinition {
    * publishes 22.x and 24.x yet stopped adding `v<N>-lts` tags after `v20-lts`
    * (20.11.1), so the newest tag naming an LTS line points two majors behind the
    * line that is actually in maintenance. There is no query over those tags that
-   * reaches the right answer, and §15.21 rules out reaching for a second source
+   * reaches the right answer, and jup rules out reaching for a second source
    * to get it.
    *
    * So the value is a literal on the same footing as {@link ToolDefinition.default}:
    * a human-reviewed constant, resolved with no request at all — which also makes
    * `node@lts` work offline. It rots the way `default` rots, and
    * `scripts/refresh-table.mjs` flags it for review for the same reason it does
-   * not auto-merge one (§16.9, §15.33).
+   * not auto-merge one (§16, Built-in table and trust keys).
    *
    * A name here shadows the registry's tag of the same name. Nothing in the
    * table currently shadows one; node's `lts` fills a gap rather than
@@ -270,7 +270,7 @@ export interface ToolDefinition {
   };
   ranges: Array<readonly [range: string, spec: ToolSpec]>;
   /**
-   * §02.3, §15.40 — the version file this entry's ecosystem already writes.
+   * §02.3, §03.1 — the version file this entry's ecosystem already writes.
    *
    * Absent for every package manager, and for a runtime whose ecosystem has no
    * such convention: it is not a property of the {@link ToolKind}. It ranks
@@ -279,7 +279,7 @@ export interface ToolDefinition {
    */
   versionFile?: VersionFileSpec;
   /**
-   * §10.5 — whether a bare `jup enable` installs this entry's shims.
+   * §10.7 — whether a bare `jup enable` installs this entry's shims.
    *
    * Absent means yes. `false` is for an
    * entry whose binary name is routinely a *system* install the user chose
@@ -293,7 +293,7 @@ export interface ToolDefinition {
   shimByDefault?: boolean;
 }
 export interface TrustedKey {
-  /** ISO-8601 timestamp, or `null` for "never expires". Honoured per §14.4. */
+  /** ISO-8601 timestamp, or `null` for "never expires". Honoured per §06.5. */
   expires: string | null;
   keyid: string;
   keytype: string;
@@ -303,7 +303,7 @@ export interface TrustedKey {
 }
 
 /**
- * §02.6, §15.10 — keyed by registry origin.
+ * §02.6 — keyed by registry origin.
  *
  * Phase 1 populates only `https://registry.npmjs.org`. For compatibility,
  * `{"npm": [...]}` maps onto the default registry origin on read.
@@ -330,13 +330,13 @@ export interface DevEnginesEntry {
 
 export interface Manifest {
   /**
-   * §03.4, §15.39 — never a `kind: "runtime"` name. A manifest that says
-   * otherwise is the §12.12 error, not a pin.
+   * §03.4, §02.3 — never a `kind: "runtime"` name. A manifest that says
+   * otherwise is the §12.2 error, not a pin.
    */
   packageManager?: unknown;
   devEngines?: {
     packageManager?: unknown;
-    /** §15.39 — the only field a runtime's pin can live in. */
+    /** §02.3 — the only field a runtime's pin can live in. */
     runtime?: unknown;
   };
   [key: string]: unknown;
@@ -358,7 +358,7 @@ export interface DevEnginesRange {
 }
 
 /**
- * §15.26 — the validated `devEngines.packageManager`, whether or not it names a
+ * §03.3 — the validated `devEngines.packageManager`, whether or not it names a
  * version.
  *
  * {@link DevEnginesRange} is the Descriptor-shaped view and exists only when a
@@ -378,7 +378,7 @@ export interface DevEnginesDeclaration {
 export interface ParseSpecOptions {
   requireVersion: boolean;
   /**
-   * §03.4, §15.39 — is this string a manifest's `packageManager` field?
+   * §03.4, §02.3 — is this string a manifest's `packageManager` field?
    *
    * The one place a `kind: "runtime"` name is rejected. It is a property of the
    * *field*, not of `parseSpec`: `jup node@22`, `jup use node@22` and
@@ -401,15 +401,15 @@ export type SpecResult =
       getSpec: (opts: ParseSpecOptions) => Descriptor;
       range?: DevEnginesRange;
       /**
-       * §15.26 — the declared `devEngines` member for the requested tool,
-       * version or not. §15.39: `devEngines.packageManager` for a package
+       * §03.3 — the declared `devEngines` member for the requested tool,
+       * version or not. §02.3: `devEngines.packageManager` for a package
        * manager, `devEngines.runtime` for a runtime.
        */
       devEngines?: DevEnginesDeclaration;
       /**
        * Whether the manifest itself declares `packageManager`, as opposed to the
        * spec having been synthesised from `devEngines.packageManager` (§03.3).
-       * §15.23's `up` needs the distinction: a declared range is the user's own
+       * §09.4's `up` needs the distinction: a declared range is the user's own
        * statement of intent and must survive an update, while a synthesised one
        * is what row 114 turns into a fresh pin.
        */
@@ -421,7 +421,7 @@ export type Invocation =
       mode: "proxy";
       /** Any binary name the table declares (§02.4) — of either {@link ToolKind}. */
       binaryName: string;
-      /** Present when the CLI argument was `<binary>@<version>` (§04.6). */
+      /** Present when the CLI argument was `<binary>@<version>` (§04.7). */
       binaryVersion?: string;
       args: string[];
     }

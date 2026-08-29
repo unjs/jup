@@ -27,13 +27,13 @@ function getOwnRoot(): string {
 }
 
 /**
- * §15.13 points 1 and 5 — the per-user shim directory. Windows uses
+ * §10.5 — the per-user shim directory. Windows uses
  * `%LOCALAPPDATA%\jup\bin`.
  *
- * It lives here rather than in `shims.ts`, which imports it: §15.32 needs it on
+ * It lives here rather than in `shims.ts`, which imports it: §08.7 needs it on
  * every proxy invocation, and the directory this prepends and the one `enable`
  * writes into must never drift apart. `undefined` means there is no home
- * directory to derive one from — §14.17's error for `enable`, and simply nothing
+ * directory to derive one from — §12.10's error for `enable`, and simply nothing
  * to prepend for a proxy run.
  */
 export function perUserShimDirectory(): string | undefined {
@@ -49,7 +49,7 @@ export function perUserShimDirectory(): string | undefined {
   // macOS has no XDG convention; Linux and the BSDs do.
   //
   // `resolve`d for the same reason `COREPACK_SHIM_DIRECTORY` is below: this
-  // directory is prepended to `PATH` for every child process (§15.32), and a
+  // directory is prepended to `PATH` for every child process (§08.7), and a
   // relative value there is a *cwd-relative* `PATH` entry — one that follows the
   // package manager into every directory it happens to chdir into. The XDG base
   // directory specification requires an absolute path anyway.
@@ -63,7 +63,7 @@ export function perUserShimDirectory(): string | undefined {
 }
 
 /**
- * §15.13 point 8 — the machine-wide directory: `--system`'s target, and the one
+ * §10.5 — the machine-wide directory: `--system`'s target, and the one
  * alternate a `root` process may reach.
  *
  * POSIX uses `/usr/local/bin`; Windows uses `%ProgramData%\jup\bin` and returns
@@ -78,7 +78,7 @@ export function systemShimDirectory(): string | undefined {
 }
 
 /**
- * §15.13 point 6 — the **closed list** of directories `enable` may choose from:
+ * §10.5 — the **closed list** of directories `enable` may choose from:
  * the default first, then the alternates. Nothing here comes from `PATH`, which
  * only decides *among* these, and only under `enable`. Deduped, since the default
  * is one of the alternates on every platform but macOS-without-XDG.
@@ -104,10 +104,10 @@ export function shimDirectoryCandidates(): string[] {
     add(join(home, "bin"));
   }
 
-  // §15.13 point 8 — last, and only for uid 0: a per-user directory already on
+  // §10.5 — last, and only for uid 0: a per-user directory already on
   // `PATH` remains the better answer even for `root`, and for anyone else the
   // ownership gate would reject this one anyway. A *candidate* rather than a
-  // branch inside `enable`, because point 7's scan is how `disable`, `info` and
+  // branch inside `enable`, because §10.5's scan is how `disable`, `info` and
   // the promotion below find those shims again.
   if (process.getuid?.() === 0) add(systemShimDirectory());
 
@@ -115,19 +115,19 @@ export function shimDirectoryCandidates(): string[] {
 }
 
 /**
- * §14.16 — how we recognise a stub we wrote.
+ * §10.6 — how we recognise a stub we wrote.
  *
  * It lives here rather than in `shims.ts` because `shims.ts` imports *this*
- * module and the reverse would be a cycle — and because §15.32's `PATH`
+ * module and the reverse would be a cycle — and because §08.7's `PATH`
  * promotion below is the one reader of it that runs on every invocation, not
  * just under `enable`. `shims.ts` re-exports it, so there is still one spelling.
  */
 export const SHIM_MARKER = "@jup-shim";
 
 /**
- * §10.2 — the stub a shim points at, one per binary name. `.mjs` so the runtime
+ * §10.3 — the stub a shim points at, one per binary name. `.mjs` so the runtime
  * knows the format from the name and never walks up for a `package.json`
- * `"type"` (§14.27). Here for the reason `SHIM_MARKER` is: §14.16's ownership
+ * `"type"`. Here for the reason `SHIM_MARKER` is: §10.6's ownership
  * test reads it on every invocation.
  */
 export function stubNameFor(binName: string): string {
@@ -135,12 +135,12 @@ export function stubNameFor(binName: string): string {
 }
 
 /**
- * The first line of each §10.3 Windows wrapper.
+ * The first line of each §10.4 Windows wrapper.
  *
- * The wrappers cannot carry {@link SHIM_MARKER} — §10.3 fixes their bodies byte
+ * The wrappers cannot carry {@link SHIM_MARKER} — §10.4 fixes their bodies byte
  * for byte — so they are recognised by their head plus the {@link stubNameFor}
  * stub they invoke. Here for the reason {@link SHIM_MARKER} is: {@link isOurShim}
- * reads it on every invocation and decides which `node` on `PATH` §15.43 may
+ * reads it on every invocation and decides which `node` on `PATH` §10.2 may
  * bake in. `shims.ts` re-exports it, so there is one list.
  */
 export const WIN32_WRAPPER_HEADS = ["@SETLOCAL", "#!/bin/sh", "#!/usr/bin/env pwsh"];
@@ -164,14 +164,14 @@ function readHeadSync(file: string, length: number): string | undefined {
  * Is the entry at `file` a shim **we** wrote, rather than any file that happens
  * to wear the name?
  *
- * A POSIX shim is a symlink to a stub of ours (§10.2), so the open follows it
+ * A POSIX shim is a symlink to a stub of ours (§10.3), so the open follows it
  * and reads the stub's banner: a link is ours exactly when what it points at is.
- * §10.3's Windows wrappers cannot carry the marker (their bodies are byte-exact)
+ * §10.4's Windows wrappers cannot carry the marker (their bodies are byte-exact)
  * and are recognised by shebang plus the {@link stubNameFor} stub they invoke.
  *
  * Two names satisfy the dangling case, one per shape a link of ours can have:
- * the per-name stub §10.2 writes, and {@link CLI_ENTRY_NAME} for the two names
- * §10.8 points at the CLI entry itself.
+ * the per-name stub §10.3 writes, and {@link CLI_ENTRY_NAME} for the two names
+ * §10.9 points at the CLI entry itself.
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
@@ -189,9 +189,9 @@ export function isOurShim(file: string, binName: string): boolean {
   if (head.includes(SHIM_MARKER)) return true;
   // All three shapes, and not gated on the platform — `isOurEntry` reads them
   // the same way. The gate was the bug: `whichAll` walks `PATHEXT` on Windows,
-  // so the only candidates it can hand this are `.cmd` and `.ps1`, and a §15.43
+  // so the only candidates it can hand this are `.cmd` and `.ps1`, and a §10.2
   // tier-2 walk blind to those baked our own `node.cmd` into every wrapper it
-  // wrote — §14.26's exec loop, by hand.
+  // wrote — §10.2's exec loop, by hand.
   return (
     WIN32_WRAPPER_HEADS.some((start) => head.startsWith(start)) &&
     head.includes(stubNameFor(binName))
@@ -199,10 +199,10 @@ export function isOurShim(file: string, binName: string): boolean {
 }
 
 /**
- * §15.32 — the directory to put in front of `PATH` for a JavaScript package
+ * §08.7 — the directory to put in front of `PATH` for a JavaScript package
  * manager, or `undefined` when there is none.
  *
- * §14.15's shims are self-dispatching, so the shim directory *is* a directory
+ * §10.1's shims are self-dispatching, so the shim directory *is* a directory
  * containing the resolved package manager's binaries: a nested `pnpm` re-enters
  * this tool, walks the same project and resolves the same version, with nothing
  * copied or generated to make it so.
@@ -210,7 +210,7 @@ export function isOurShim(file: string, binName: string): boolean {
  * The check keeps that claim honest. Shims may never have been installed, and
  * the per-user default (`~/.local/bin`) is full of *other* programs; prepending
  * it when it holds no shim of ours would put the package manager nowhere and
- * only re-rank the user's own binaries for the child — which is what §15.32's
+ * only re-rank the user's own binaries for the child — which is what §08.7's
  * "the prepended entry MUST be the only modification" forbids.
  *
  * A plain existence test was not enough for that. `~/.local/bin/pnpm` installed
@@ -218,13 +218,14 @@ export function isOurShim(file: string, binName: string): boolean {
  * dropped there — was enough to move that directory to the **front** of `PATH`
  * for every child of every `jup pnpm` run, re-ranking the whole of the user's
  * `PATH` on the strength of a name. Reading the banner costs one open+read on a
- * path we were about to `stat` anyway (§16.3) and makes the promotion mean what
+ * path we were about to `stat` anyway (§16, Build shape) and makes the promotion mean what
  * it says.
  *
- * §15.13 point 7 makes that same read the *selector*, since `enable` may have
- * chosen an alternate and this MUST NOT read `PATH` to find out which. §16.3
- * carries the measured cost and the `argv[1]` branch that pays for it: §14.15's
- * shim is a symlink named `<binName>` and Node does not `realpath` `argv[1]`, so
+ * §10.5 makes that same read the *selector*, since `enable` may have
+ * chosen an alternate and this MUST NOT read `PATH` to find out which. §16,
+ * Build shape carries the measured cost and the `argv[1]` branch that pays for
+ * it: §10.1's shim is a symlink named `<binName>` and Node does not `realpath`
+ * `argv[1]`, so
  * a run *through* a shim already holds the answer and opens nothing. Both halves
  * of that test are load-bearing — a promotion decided on a name alone is what the
  * banner check exists to prevent.
@@ -281,7 +282,7 @@ function setPath(env: Record<string, string | undefined>, value: string): void {
 /**
  * §08.1 — locate the entry point.
  *
- * Per §14.13, when `bin` came from a downloaded `package.json` rather than the
+ * Per §08.1, when `bin` came from a downloaded `package.json` rather than the
  * embedded table its values are attacker-controlled: resolve the joined path and
  * verify it stays inside `<location>`. The marker file (§07.2) does not record
  * which of the two sources its `bin` came from, so the check is unconditional —
@@ -304,7 +305,7 @@ export function resolveBinPath(binName: string, spec: InstallSpec, fallbackBin?:
 
   const binPath = resolve(location, declared);
   if (binPath !== location && !binPath.startsWith(location + sep)) {
-    // §14.13 — `<installFolder>/<name>/<version>` is the store layout (§07.2), so
+    // §08.1 — `<installFolder>/<name>/<version>` is the store layout (§07.2), so
     // the two trailing segments name the locator this install belongs to.
     const name = getPackageManagerFor(binName) ?? basename(dirname(location));
     throw new Error(messages.binEscapes(declared, name, basename(location)));
@@ -334,7 +335,7 @@ export function execPackageManager(
 ): number | Promise<number> {
   const binPath = resolveBinPath(binName, spec, fallbackBin);
 
-  // §15.28 — the band's argv for *this* name, in front of the user's own. It is
+  // §08.3 — the band's argv for *this* name, in front of the user's own. It is
   // how `pnpx` reaches pnpm 12: one binary, and one of the two names it answers
   // to is spelled as a subcommand rather than as an `argv[0]` it can read. The
   // words are prepended and nothing else — this is not a place to rewrite what
@@ -347,7 +348,7 @@ export function execPackageManager(
   writeEnv(ENV.ROOT, getOwnRoot());
 
   if (execMode === "native") {
-    // §15.32 — what goes in front of `PATH` for a native artifact is the
+    // §08.7 — what goes in front of `PATH` for a native artifact is the
     // directory holding it. This branch spawns, so it has a real child
     // environment: the entry is written into *that* and `process.env.PATH` is
     // never touched, which is "MUST NOT leak into the tool's own process" in its
@@ -357,17 +358,17 @@ export function execPackageManager(
     if (path !== undefined) setPath(env, path);
 
     // Imported here and nowhere else: `node:child_process` must not enter the
-    // module graph of a JavaScript cache hit (§01.3, §16.3).
-    // `binName`, not `binPath`: §15.28's artifacts dispatch on `argv[0]`, and
+    // module graph of a JavaScript cache hit (§01.3, §16, Build shape).
+    // `binName`, not `binPath`: §08.3's artifacts dispatch on `argv[0]`, and
     // `bunx` and `bun` are the same file.
     return import("./native.ts").then((native) => native.execNative(binPath, argv, env, binName));
   }
 
-  // §15.32 — the JavaScript path hands over **in process**, so there is no child
+  // §08.7 — the JavaScript path hands over **in process**, so there is no child
   // environment to write into: `process.env` *is* what the package manager will
   // read. "Must not leak into the tool's own process" is therefore honoured by
   // scope rather than by copying — this is the last statement before handover,
-  // after every write the tool performs (§08.3.2) and after all of its own work,
+  // after every write the tool performs (§08.3) and after all of its own work,
   // none of which resolves a binary from `PATH`. Nothing of ours ever observes
   // the modified value.
   const shimDirectory = shimDirectoryFor(binName);
@@ -394,7 +395,7 @@ export function execPackageManager(
   // silently reports `0.0.0` when that throws. Unlike `node:child_process`, which
   // this file never names, `node:module` is looked up at the top of it: the CJS
   // loader is already instantiated during bootstrap, so a cache hit pays nothing
-  // for it (§16.3). Failures reach the runtime uncaught, per §08.4 above.
+  // for it (§16, Build shape). Failures reach the runtime uncaught, per §08.4 above.
   process.nextTick(runMain, binPath);
 
   return 0;

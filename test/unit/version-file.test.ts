@@ -1,5 +1,5 @@
 /**
- * §15.40 — the version-file reader, at the grammar level.
+ * §03.1 — the version-file reader, at the grammar level.
  *
  * The conformance rows prove the walk consults it and what happens when it says
  * something jup cannot answer. These are the cases underneath: nvm's own content
@@ -25,7 +25,7 @@ const NVM: VersionFile["format"] = "nvm";
 const rangeOf = (content: string): string =>
   versionFileRange({ path: "/p/.nvmrc", content, format: NVM }, ".nvmrc");
 
-describe("§15.40 version files", () => {
+describe("§03.1 version files", () => {
   let dir = "";
 
   beforeEach(() => {
@@ -138,7 +138,7 @@ describe("§15.40 version files", () => {
 
   describe("the table is the authority", () => {
     it("declares the file on `node` and on nothing else", () => {
-      // §15.21 — one entry in the table, no code. If a second tool ever declares
+      // §02.3 — one entry in the table, no code. If a second tool ever declares
       // one, this is the only line that has to change.
       expect(versionFileFor("node")).toEqual({ path: ".nvmrc", format: "nvm" });
       for (const name of ["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub"]) {

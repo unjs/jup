@@ -8,7 +8,7 @@
  * `<JSON x>` in the spec means `JSON.stringify(x)` — strings appear quoted.
  *
  * This file is the **warm** half: the error classes, the advisory gate, and the
- * messages a module in §16.3's warm chunk can raise. Everything a download, a
+ * messages a module in §16's warm chunk (Build shape) can raise. Everything a download, a
  * verification, a registry lookup or a management command raises lives in
  * `errors-cold.ts`, which re-exports this module and merges the two message
  * tables into one — so a cold call site sees no difference, and a warm run does
@@ -41,12 +41,12 @@ const json = (value: unknown): string => JSON.stringify(value);
 export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
 
 /**
- * §11.5 — an advisory line **this** implementation adds, which
+ * §11.3 — an advisory line **this** implementation adds, which
  * `COREPACK_QUIET_ADVISORIES=1` silences. Split by origin, not by severity.
  *
  * Compatibility advisories call `warn()` or stderr directly because §13 fixes
  * their text. Routing only additional advisories here lets "quiet" leave
- * contract output intact (§14.23).
+ * contract output intact (§11.3).
  *
  * `readEnv`, not `envFlag`: `project/env.ts` imports this module, so reaching
  * for its flag reader would close a cycle over the warm path.
@@ -61,7 +61,7 @@ export function advisory(message: string): void {
  *
  * That is the whole of the split: these are the messages reachable from a
  * module in the warm chunk (`config/table.ts`, `project/manifest.ts`,
- * `cache/store.ts`, `run/exec.ts`, `main.ts` and the rest of §16.3's set), and
+ * `cache/store.ts`, `run/exec.ts`, `main.ts` and the rest of §16's warm set), and
  * every other string §12 defines lives in `errors-cold.ts`, which re-exports
  * this object merged with its own. A download, a signature check, a registry
  * lookup and every management command are all cold, so their vocabulary is
@@ -84,7 +84,7 @@ export const messages = {
 
   invalidPackageJson: (relativePath: string) => `Invalid package.json in ${relativePath}`,
   /*
-   * §15.39 — these four take the member they are about, defaulting to
+   * §03.3 — these four take the member they are about, defaulting to
    * `packageManager`.
    *
    * The default preserves §12.3's required `packageManager` text;
@@ -120,7 +120,7 @@ export const messages = {
     `This package manager (${name}) isn't supported by this jup build`,
 
   /**
-   * §15.23 — verbatim. The file name is spelled out rather than imported from
+   * §04.4 — verbatim. The file name is spelled out rather than imported from
    * `lockfile.ts` because every module imports this one, and it must stay free
    * of the imports that would make it a cycle.
    */
@@ -151,12 +151,12 @@ export const messages = {
   autoPinDocs: () =>
     `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
 
-  /** §15.27, §15.35l — every mutating command names the file it touched. */
+  /** §12.11 — every mutating command names the file it touched. */
   updatedManifest: (path: string, name: string, reference: string) =>
     `Updated ${path} to use ${name}@${reference}`,
 
   /**
-   * §15.35d — `COREPACK_SPEC_FILE` names a file that is not there. Falling back
+   * §03.1 — `COREPACK_SPEC_FILE` names a file that is not there. Falling back
    * to the manifest is the worst outcome available: the variable exists for
    * trees whose manifest says the *wrong* thing, so ignoring a typo runs the
    * package manager the file was pointed at to override.
@@ -179,7 +179,7 @@ export const messages = {
     `${name}@${reference} ships per-platform artifacts, and there is none for architecture '${arch}' (supported: arm64, x64)`,
 
   /**
-   * §15.28 — a `{target}` this band does not ship for.
+   * §02.4 — a `{target}` this band does not ship for.
    *
    * Distinct from the two above, and more specific than either: `{platform}` and
    * `{arch}` fail when the *host* is outside the tool's vocabulary, whereas this
@@ -192,7 +192,7 @@ export const messages = {
     `${name}@${reference} publishes no artifact for ${host} (this version ships: ${supported.join(", ")})`,
 
   /**
-   * §12.12, §03.4, §15.39 — a runtime named in the manifest's `packageManager`.
+   * §12.2, §03.4, §02.3 — a runtime named in the manifest's `packageManager`.
    *
    * Raised on the *field*, never on `parseSpec` in general: `jup node@22`,
    * `jup use node@22` and `jup install -g node@24` all put a runtime name
@@ -229,7 +229,7 @@ export const messages = {
     `Invalid "devEngines.packageManager.integrity" field: ${JSON.stringify(value) ?? String(value)}`,
 
   /**
-   * Both spellings of the pin are present and they disagree. §15.12 requires
+   * Both spellings of the pin are present and they disagree. §03.3 requires
    * both forms to be *accepted*; it does not make one silently outrank a
    * conflicting other, and two different digests for one artifact means at most
    * one of them describes what will run.

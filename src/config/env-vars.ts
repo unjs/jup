@@ -2,7 +2,7 @@
  * Every environment variable name this implementation reads or writes — §11.
  *
  * Reading the environment is the only configuration input the tool has (§03.2),
- * so the *set of names* is part of the observable contract: §11's table, §14.5's
+ * so the *set of names* is part of the observable contract: §11's table, §03.2's
  * env-file deny-list and §13's conformance rows all key off the exact spellings.
  * Holding them in one file means the inventory can be audited against §11 by
  * reading a single table, and that `env.ts`'s eligibility sets and `info.ts`'s
@@ -39,7 +39,7 @@ export const COREPACK_PREFIX = "COREPACK_";
  * `JUP_X` and `COREPACK_X` name the same setting,
  * with `JUP_X` winning when both are set, since it is the more specific statement
  * about *this* tool. Everything downstream — the env-file prefix filter (§03.2),
- * the eligibility deny-lists (§14.5), `info`'s environment snapshot — treats the
+ * the eligibility deny-lists (§03.2), `info`'s environment snapshot — treats the
  * pair as one variable.
  */
 export const JUP_PREFIX = "JUP_";
@@ -47,7 +47,7 @@ export const JUP_PREFIX = "JUP_";
 /** Both prefixes, highest precedence first. */
 export const ENV_PREFIXES = [JUP_PREFIX, COREPACK_PREFIX] as const;
 
-/** §15.2 — the per-package-manager registry override. */
+/** §05.2 / §11.2 — the per-package-manager registry override. */
 export const REGISTRY_PREFIX = "COREPACK_REGISTRY_";
 
 /** The tool's own variables, keyed by name minus {@link COREPACK_PREFIX}. */
@@ -70,32 +70,34 @@ export const ENV = {
   NPM_PASSWORD: "COREPACK_NPM_PASSWORD",
   INTEGRITY_KEYS: "COREPACK_INTEGRITY_KEYS",
 
-  // §11.3 — set by the tool, read by the package manager it runs.
+  // §11.4 — set by the tool, read by the package manager it runs.
   ROOT: "COREPACK_ROOT",
   MIGRATE_FROM: "COREPACK_MIGRATE_FROM",
 
-  // §15.43 — set by the tool, read by *the tool*, one process further down: the
+  // §08.3 — set by the tool, read by *the tool*, one process further down: the
   // realpath of the runtime hosting a chain that has since entered the store.
   HOST_RUNTIME: "COREPACK_HOST_RUNTIME",
 
-  // §11.5 / §15 — new in this spec.
-  NODE_EXECPATH: "COREPACK_NODE_EXECPATH",
-  CAFILE: "COREPACK_CAFILE",
-  STRICT_SSL: "COREPACK_STRICT_SSL",
-  NETWORK_TIMEOUT: "COREPACK_NETWORK_TIMEOUT",
-  NETWORK_RETRIES: "COREPACK_NETWORK_RETRIES",
-  MINIMUM_RELEASE_AGE: "COREPACK_MINIMUM_RELEASE_AGE",
-  ALLOW_UNVERIFIED: "COREPACK_ALLOW_UNVERIFIED",
-  REQUIRE_SIGNATURES: "COREPACK_REQUIRE_SIGNATURES",
-  ENABLE_PRERELEASES: "COREPACK_ENABLE_PRERELEASES",
-  FROZEN_LOCKFILE: "COREPACK_FROZEN_LOCKFILE",
-  SPEC_FILE: "COREPACK_SPEC_FILE",
-  SHIM_DIRECTORY: "COREPACK_SHIM_DIRECTORY",
-  QUIET_ADVISORIES: "COREPACK_QUIET_ADVISORIES",
+  // Now split across §11.3 (execution and shims), §11.1 (behaviour) and §11.2
+  // (registry, auth and trust) — interleaved below rather than regrouped, so
+  // this table's key order stays untouched by the docs' reshuffle.
+  NODE_EXECPATH: "COREPACK_NODE_EXECPATH", // §11.3
+  CAFILE: "COREPACK_CAFILE", // §11.2
+  STRICT_SSL: "COREPACK_STRICT_SSL", // §11.2
+  NETWORK_TIMEOUT: "COREPACK_NETWORK_TIMEOUT", // §11.2
+  NETWORK_RETRIES: "COREPACK_NETWORK_RETRIES", // §11.2
+  MINIMUM_RELEASE_AGE: "COREPACK_MINIMUM_RELEASE_AGE", // §11.1
+  ALLOW_UNVERIFIED: "COREPACK_ALLOW_UNVERIFIED", // §11.2
+  REQUIRE_SIGNATURES: "COREPACK_REQUIRE_SIGNATURES", // §11.2
+  ENABLE_PRERELEASES: "COREPACK_ENABLE_PRERELEASES", // §11.1
+  FROZEN_LOCKFILE: "COREPACK_FROZEN_LOCKFILE", // §11.1
+  SPEC_FILE: "COREPACK_SPEC_FILE", // §11.1
+  SHIM_DIRECTORY: "COREPACK_SHIM_DIRECTORY", // §11.3
+  QUIET_ADVISORIES: "COREPACK_QUIET_ADVISORIES", // §11.3
 } as const;
 
 /**
- * §11.4 — variables owned by the host environment: consumed, never set.
+ * §11.5 — variables owned by the host environment: consumed, never set.
  *
  * The proxy family is deliberately not here. §05.1 looks each one up in *both*
  * cases and the scheme decides which one, so {@link PROXY_ENV} holds them.
@@ -103,20 +105,20 @@ export const ENV = {
 export const SYSTEM_ENV = {
   /** §08.6 — any non-empty value means an automated, non-interactive run. */
   CI: "CI",
-  /** §16 — a value containing `jup` (or `corepack`) enables diagnostic logging. */
+  /** §11.5 — a value containing `jup` (or `corepack`) enables diagnostic logging. */
   DEBUG: "DEBUG",
-  /** §07.1 / §10.4 — store and shim-directory fallback chains. */
+  /** §07.1 / §10.5 — store and shim-directory fallback chains. */
   HOME: "HOME",
   USERPROFILE: "USERPROFILE",
   LOCALAPPDATA: "LOCALAPPDATA",
   XDG_CACHE_HOME: "XDG_CACHE_HOME",
   XDG_BIN_HOME: "XDG_BIN_HOME",
-  /** §15.13 point 8 — `--system`'s directory on Windows, which has no `/usr/local`. */
+  /** §10.5 — `--system`'s directory on Windows, which has no `/usr/local`. */
   PROGRAMDATA: "ProgramData",
-  /** §08.3 / §10.4 — executable lookup. */
+  /** §08.3 / §10.5 — executable lookup. */
   PATH: "PATH",
   PATHEXT: "PATHEXT",
-  /** §15.1 — npm's own prefix, which locates the global `.npmrc`. */
+  /** §05.3 — npm's own prefix, which locates the global `.npmrc`. */
   NPM_CONFIG_PREFIX: "npm_config_prefix",
   PREFIX: "PREFIX",
   /** §10 — shell detection for `enable`'s hints. */
@@ -125,7 +127,7 @@ export const SYSTEM_ENV = {
 } as const;
 
 /**
- * §11.4 / §14.8 — the proxy variables, lowercase-canonical.
+ * §11.5 / §05.1 — the proxy variables, lowercase-canonical.
  *
  * Each is looked up lowercase first, then uppercase — the CGI-safety rule, see
  * `net/proxy.ts`.
@@ -149,7 +151,7 @@ export type JupSpelling<N extends string> = N extends `${typeof COREPACK_PREFIX}
 export type ToolEnvVar = CorepackEnvVar | JupSpelling<CorepackEnvVar>;
 
 /**
- * §15.2's `COREPACK_REGISTRY_<NAME>`: the *upper-cased package manager name*.
+ * §05.2's `COREPACK_REGISTRY_<NAME>`: the *upper-cased package manager name*.
  *
  * Non-alphanumerics are folded to `_` so an unknown, hyphenated package-manager
  * name still has a spellable variable rather than an unreachable one. Returns the
@@ -196,7 +198,7 @@ export function readEnv(name: string): string | undefined {
 /**
  * As {@link readEnv}, but reports *which* spelling supplied the value.
  *
- * Diagnostics name the variable the user actually set — §15.4's "set by
+ * Diagnostics name the variable the user actually set — §11.6's "set by
  * COREPACK_CAFILE" is a lie when `JUP_CAFILE` is what did it — so the sites that
  * print a source use this instead.
  */
@@ -214,7 +216,7 @@ export function envEntry<N extends string>(
 /**
  * Set a variable under **both** spellings, for the package manager we exec into.
  *
- * §11.3's two variables are the only ones written rather than read, and they are
+ * §11.4's two variables are the only ones written rather than read, and they are
  * read by something else entirely: a package manager that wants to know it is
  * running under a version manager looks for `COREPACK_ROOT`. It gets both, so a
  * tool that has learnt the new name finds it too.
@@ -225,8 +227,8 @@ export function writeEnv(name: string, value: string): void {
 
 /**
  * As {@link writeEnv}, but into a **child** environment block rather than our own:
- * §15.32's native handover builds one by hand so its edits cannot leak back into
- * this process, and §15.43's forwarded runtime travels the same way.
+ * §08.3's native handover builds one by hand so its edits cannot leak back into
+ * this process, and the forwarded runtime travels the same way.
  */
 export function writeEnvInto(env: NodeJS.ProcessEnv, name: string, value: string): void {
   env[name] = value;

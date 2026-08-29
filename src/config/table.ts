@@ -1,5 +1,5 @@
 /**
- * The embedded registry table — §02.5, §14.20.
+ * The embedded registry table — §02.5.
  *
  * This is the only "configuration" the tool has, and it is compiled in: there is
  * deliberately no mechanism for a user to supply a different one at runtime.
@@ -10,9 +10,9 @@
  * which is why `yarn@latest` reads `@yarnpkg/cli-dist`'s tags even though
  * `yarn@1.22.22` comes from the `yarn` package.
  *
- * §15.41 — every `url` and every `registry` here names the npm registry. Nothing
+ * §02.2 — every `url` and every `registry` here names the npm registry. Nothing
  * in this table reaches a vendor's own distribution host, which is what lets
- * §15.11's verification tier hold for every entry without an opt-in, and what
+ * §06.1's verification tier hold for every entry without an opt-in, and what
  * lets `COREPACK_NPM_REGISTRY` mirror all of it.
  */
 
@@ -138,7 +138,7 @@ const NODE_BAND = {
  *
  * There is no musl entry because Node publishes no musl build, so an Alpine host
  * is told `unsupportedTarget` before any request rather than handed a glibc
- * binary — deno's situation exactly (§15.28). `linux-armv7l`, which node *does*
+ * binary — deno's situation exactly (§02.4). `linux-armv7l`, which node *does*
  * publish, is outside {@link ARCHITECTURES}' vocabulary altogether and is the
  * other error.
  */
@@ -219,7 +219,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           commands: { use: ["pnpm", "install"] },
         },
       ],
-      // §15.28 — pnpm is native from 12.0.0, and the first entry in this table
+      // §02.5 — pnpm is native from 12.0.0, and the first entry in this table
       // to cross that line rather than to have been born on one side of it. The
       // version line and the dist-tags stay on `pnpm`; the bytes come from
       // `@pnpm/exe.<host>` (see {@link PNPM_EXE_TARGETS}).
@@ -246,7 +246,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   yarn: {
-    // §15.33 — the default and transparent floor share the current supported
+    // §02.5 / §04.6 — the default and transparent floor share the current supported
     // major but remain separate fields. The SHA-1 digest covers the signed npm
     // tarball and is refreshed by `scripts/refresh-table.mjs`.
     default: "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85",
@@ -284,7 +284,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ],
   },
 
-  // §15.28, §15.21 — the entries the table's per-host machinery exists for;
+  // §02.4 — the entries the table's per-host machinery exists for;
   // `BUN_BAND` above explains the launcher-versus-artifact split they share.
   bun: {
     default: "1.4.0",
@@ -359,9 +359,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ],
   },
 
-  // §15.21 — a package manager, not a runtime, so unlike bun and deno it takes
+  // §02.5 — a package manager, not a runtime, so unlike bun and deno it takes
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
-  // nothing outside a project, which is exactly what §10.5's default set is for.
+  // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
     default: "2.2.0",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
@@ -384,10 +384,10 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ranges: [["*", { ...AUBE_BAND, targets: { ...AUBE_TARGETS, ...AUBE_MUSL_TARGETS } }]],
   },
 
-  // §15.21 — a package manager *and* a runtime, which is what this entry adds to
+  // §02.5 — a package manager *and* a runtime, which is what this entry adds to
   // the flag below: `nub install` is pnpm-compatible, and `nub server.ts` runs a
   // file. Being a package manager is not what earns a place in the default shim
-  // set; meaning nothing outside a project is, and `nub` means plenty (§10.5).
+  // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
     default: "0.7.5",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
@@ -404,13 +404,13 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ranges: [["*", { ...NUB_BAND, targets: NUB_TARGETS }]],
   },
 
-  // §15.39 — the first entry that is not a package manager. `kind` is the only
+  // §02.3 — the first entry that is not a package manager. `kind` is the only
   // field that says so, and the four things it decides all live in §03 and §10.
   node: {
     kind: "runtime",
     // The current LTS line, bare per §02.3: node's artifact is per-host, so
     // there is no portable digest to pin and the registry signature over this
-    // host's own `node-<target>` is what clears §15.11's tier.
+    // host's own `node-<target>` is what clears §06.1's tier.
     default: "24.20.0",
     // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
     //
@@ -419,10 +419,11 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // even though the same package publishes 22.x and 24.x. So every reading of
     // those tags is wrong — the highest `v<N>-lts` is two LTS majors behind, and
     // its value is nine patches behind its own line. nodejs.org/dist/index.json
-    // knows the answer and is exactly the second source §15.21 refuses.
+    // knows the answer and is exactly the second source jup refuses.
     //
     // A literal is the honest remaining option, and it is the same kind of
-    // literal as `default` above: human-reviewed, refreshed by §16.9's script,
+    // literal as `default` above: human-reviewed, refreshed by the §16 "Built-in
+    // table and trust keys" script,
     // and correct at the moment someone looked. Bare, for the reason `default`
     // is bare — node's artifact is per-host, so there is no portable digest.
     tags: { lts: "24.20.0" },
@@ -431,10 +432,10 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // bootstrapping command escape §03.5's enforcement, and a runtime is never
     // enforced against in the first place. There is nothing to bypass.
     transparent: { commands: [] },
-    // Required of a runtime (§02.3, §10.5), not a judgement call: `node` means
+    // Required of a runtime (§02.3, §10.7), not a judgement call: `node` means
     // something outside a project on every machine that has ever had one.
     shimByDefault: false,
-    // §15.40 — the file node's own ecosystem already writes the wanted version
+    // §03.1 — the file node's own ecosystem already writes the wanted version
     // into. `devEngines.runtime` outranks it and is the only field jup writes;
     // this is read, in the directories §03.1 was walking anyway, and only where
     // the manifest said nothing about the runtime.
@@ -455,20 +456,20 @@ export function isSupportedPackageManager(name: string): boolean {
 }
 
 /**
- * §02.3, §15.39 — what sort of tool this is. Absent in the table means
+ * §02.3 — what sort of tool this is. Absent in the table means
  * `"package-manager"`, which is every entry but `node`.
  */
 export function toolKind(name: string): ToolKind {
   return getDefinition(name)?.kind ?? "package-manager";
 }
 
-/** §15.39 — is this entry a runtime? The four questions below are the only callers. */
+/** §02.3 — is this entry a runtime? The four questions below are the only callers. */
 export function isRuntime(name: string): boolean {
   return getDefinition(name)?.kind === "runtime";
 }
 
 /**
- * §03.1, §15.40 — the version file this entry declares, if it declares one.
+ * §03.1 — the version file this entry declares, if it declares one.
  *
  * The only reader of the field, and the reason §03.1 can consult `.nvmrc`
  * without the string `.nvmrc` appearing outside this file.
@@ -478,7 +479,7 @@ export function versionFileFor(name: string): VersionFileSpec | undefined {
 }
 
 /**
- * §03.3, §15.39 — which `devEngines` member speaks for this tool.
+ * §03.3, §02.3 — which `devEngines` member speaks for this tool.
  *
  * Chosen by the requested tool's kind, never by what the manifest happens to
  * declare: a project may carry both members, and neither constrains the other.
@@ -503,7 +504,7 @@ function findBand(definition: ToolDefinition, version: string): ToolSpec | undef
 }
 
 /**
- * §15.17 — uncovered versions use the newest band's registry and URL, but not
+ * §07.7 — uncovered versions use the newest band's registry and URL, but not
  * its `bin`; {@link hasRangeBand} distinguishes declared and fallback bands.
  */
 export function getSpecFor(name: string, version: string): ToolSpec {
@@ -513,7 +514,7 @@ export function getSpecFor(name: string, version: string): ToolSpec {
   return findBand(definition, version) ?? definition.ranges.at(-1)![1];
 }
 
-/** §15.17 — does a *declared* band cover this version, or is {@link getSpecFor} guessing? */
+/** §07.7 — does a *declared* band cover this version, or is {@link getSpecFor} guessing? */
 export function hasRangeBand(name: string, version: string): boolean {
   const definition = getDefinition(name);
   return definition !== undefined && findBand(definition, version) !== undefined;
@@ -529,7 +530,7 @@ export function getTableSpec(locator: Locator): ToolSpec | undefined {
   return getSpecFor(locator.name, parsed.version);
 }
 /**
- * §15.28 — the normalised platform names `{platform}` resolves against.
+ * §02.4 — the normalised platform names `{platform}` resolves against.
  *
  * The spec fixes the vocabulary at `linux` / `darwin` / `win32`, which is also
  * what Node reports, so on this host the table is very nearly an identity. It is
@@ -543,7 +544,7 @@ const PLATFORMS: Record<string, string> = {
 };
 
 /**
- * §15.28 — the same for `{arch}`: `x64` / `arm64`.
+ * §02.4 — the same for `{arch}`: `x64` / `arm64`.
  *
  * The two aliases are there because a re-implementation in another language
  * reads the machine name from `uname`, which spells the same two architectures
@@ -559,7 +560,7 @@ const ARCHITECTURES: Record<string, string> = {
 };
 
 /**
- * §15.28 — the dynamic loader each libc puts at a fixed absolute path.
+ * §02.4 — the dynamic loader each libc puts at a fixed absolute path.
  *
  * Only the two architectures {@link ARCHITECTURES} normalises to are listed,
  * spelled the way the loader filenames spell them rather than the way Node does.
@@ -570,7 +571,7 @@ const LIBC_LOADERS: Record<string, { musl: string; glibc: string }> = {
 };
 
 /**
- * §15.28 — is this Linux host musl or glibc?
+ * §02.4 — is this Linux host musl or glibc?
  *
  * Linux is the one platform where the pair `<platform>-<arch>` does not name a
  * binary interface: a glibc build does not run on Alpine, and a publisher that
@@ -582,8 +583,8 @@ const LIBC_LOADERS: Record<string, { musl: string; glibc: string }> = {
  * **Both** loaders are checked, and musl wins only when it is the *only* one
  * present. Alpine has no glibc loader; a glibc distribution with `musl` merely
  * installed as a package has both, and is a glibc host. One `stat` each, and the
- * §16.3 cost is nil for the entries that are not per-host: the only callers are
- * a `targets` lookup and §15.23's per-host integrity map, neither of which npm,
+ * §01.3 cost is nil for the entries that are not per-host: the only callers are
+ * a `targets` lookup and §04.4's per-host integrity map, neither of which npm,
  * pnpm or yarn ever reaches.
  *
  * Memoised by architecture rather than outright, because the suite reaches the
@@ -611,7 +612,7 @@ function linuxLibc(arch: string): string {
 }
 
 /**
- * §15.28 — the normalised name of this host: `<platform>-<arch>`, and on a musl
+ * §02.4 — the normalised name of this host: `<platform>-<arch>`, and on a musl
  * Linux `<platform>-<arch>-musl`.
  *
  * The key `targets` is indexed by, and the vocabulary `{platform}` and `{arch}`
@@ -633,13 +634,13 @@ export function hostTarget(): string {
  * `.exe` on Windows, empty everywhere else — what `{exe}` expands to in a band's
  * `bin` paths.
  *
- * Read once. `process.platform` cannot change within a process, and §16.3 counts
+ * Read once. `process.platform` cannot change within a process, and §01.3 counts
  * the work on the path `resolveSpecBin` sits on.
  */
 const EXE = process.platform === "win32" ? ".exe" : "";
 
 /**
- * §15.28 — what `{target}` expands to for this host, or an error naming the host.
+ * §02.4 — what `{target}` expands to for this host, or an error naming the host.
  *
  * A band declaring `targets` is declaring the complete set of hosts that band
  * ships for, so a miss is a real answer — "bun 1.2.0 has no Windows arm64
@@ -664,7 +665,7 @@ function targetFor(spec: ToolSpec, locator: Locator): string {
 }
 
 /**
- * §15.28 — substitute `{}`, `{platform}` and `{arch}` into a band's `url`.
+ * §02.4 — substitute `{}`, `{platform}` and `{arch}` into a band's `url`.
  *
  * `{}` is always substituted; the host placeholders are opt-in per band. An
  * `includes` guard avoids unnecessary host resolution on the common path.
@@ -725,7 +726,7 @@ export function isEmbeddedReference(name: string, reference: string): boolean {
  * The union of every `bin` name across every range entry, in both directions.
  *
  * Built once at module load rather than per call: `getPackageManagerFor` runs on
- * every proxy invocation to classify argv (§01.2), and §16.3 counts allocations
+ * every proxy invocation to classify argv (§01.2), and §01.3 counts allocations
  * on that path. The table is static, so the maps can be too.
  */
 const BINARIES_BY_NAME = new Map<string, string[]>();
@@ -747,7 +748,7 @@ for (const [name, definition] of Object.entries(DEFINITIONS)) {
  *
  * Identity, not equality: `getSpecFor` hands back the very objects declared
  * above, so the lookup is a `Map` hit rather than a structural comparison. Both
- * maps exist because §15.2 needs the *name* to find `COREPACK_REGISTRY_<NAME>`,
+ * maps exist because §05.2 needs the *name* to find `COREPACK_REGISTRY_<NAME>`,
  * and §05.2 rewrite 1 needs the alternative — and `registry.ts` is handed a
  * `RegistrySpec` alone, with no way back to either.
  *
@@ -761,7 +762,7 @@ const NPM_ALTERNATIVE_BY_REGISTRY = new Map<RegistrySpec, NpmRegistrySpec>();
  *
  * Needed because {@link resolveArtifactRegistry} mints a registry spec at call
  * time (the package name carries `{target}`) and has to enter it into
- * `NAME_BY_REGISTRY` under the right name, or §15.2's `JUP_REGISTRY_<NAME>`
+ * `NAME_BY_REGISTRY` under the right name, or §05.2 / §11.2's `JUP_REGISTRY_<NAME>`
  * would stop finding a native entry.
  */
 const NAME_BY_SPEC = new Map<ToolSpec, string>();
@@ -790,7 +791,7 @@ export function npmAlternativeFor(spec: RegistrySpec): NpmRegistrySpec | undefin
 
 /**
  * Every binary name this package manager declares, across all range entries,
- * deduped. This union is also the set of shims `enable` creates (§10.5).
+ * deduped. This union is also the set of shims `enable` creates (§10.7).
  */
 export function getBinariesFor(name: string): string[] {
   return BINARIES_BY_NAME.get(name) ?? [];
@@ -805,8 +806,8 @@ export function getPackageManagerFor(binName: string): string | undefined {
  *
  * Three consequences hang off the answer, and all three are about a **digest
  * that is not portable**: `use` must not write one into `packageManager`
- * (§15.28), `jup.lock` must record one per host rather than one flat
- * (§15.23), and the install must not fold one into the locator's reference.
+ * (§02.4), `jup.lock` must record one per host rather than one flat
+ * (§04.4), and the install must not fold one into the locator's reference.
  *
  * Derived rather than declared, so a band cannot say one thing and do another:
  * anything that makes the URL or the artifact package host-dependent makes the
@@ -824,11 +825,11 @@ export function isPerHost(locator: Locator): boolean {
 }
 
 /**
- * §15.28 — a band's `bin` with `{exe}` substituted.
+ * §02.4 — a band's `bin` with `{exe}` substituted.
  *
  * Memoised on the band object: the table is static, the answer cannot change
  * within a process, and this is read on the install path for every native
- * entry. Every band declares a `BinSpec` of paths (§15.41 retired the list form),
+ * entry. Every band declares a `BinSpec` of paths (§02.4 retired the list form),
  * so there is one shape to walk.
  */
 const BIN_CACHE = new WeakMap<ToolSpec, BinSpec>();
@@ -850,13 +851,13 @@ export function resolveSpecBin(spec: ToolSpec): BinSpec {
 }
 
 /**
- * §15.28 — the npm package this band's **artifact** is published as, with
+ * §02.4 — the npm package this band's **artifact** is published as, with
  * `{target}`, `{platform}` and `{arch}` substituted, or `undefined` when the
  * band's own `registry` is already that package.
  *
  * Memoised for the same reason as `resolveSpecBin`, and additionally because the
  * result has to keep its **identity**: `packageManagerForRegistry` is a `Map`
- * lookup on the spec object, so minting a fresh one per call would lose §15.2's
+ * lookup on the spec object, so minting a fresh one per call would lose §05.2's
  * per-package-manager registry override on exactly the entries that need it.
  */
 const ARTIFACT_REGISTRY_CACHE = new WeakMap<ToolSpec, NpmRegistrySpec>();
@@ -892,7 +893,7 @@ export function resolveArtifactRegistry(
   const resolved: NpmRegistrySpec = { ...declared, package: packageName };
   ARTIFACT_REGISTRY_CACHE.set(spec, resolved);
 
-  // Enter it under the name that declares the band, so §15.2 keeps working.
+  // Enter it under the name that declares the band, so §05.2 keeps working.
   const name = NAME_BY_SPEC.get(spec);
   if (name !== undefined) NAME_BY_REGISTRY.set(resolved, name);
 
@@ -900,7 +901,7 @@ export function resolveArtifactRegistry(
 }
 
 /**
- * §10.5 — whether a bare `jup enable` / `disable` covers this tool. Absent means yes.
+ * §10.7 — whether a bare `jup enable` / `disable` covers this tool. Absent means yes.
  */
 export function shimsByDefault(name: string): boolean {
   return getDefinition(name)?.shimByDefault !== false;

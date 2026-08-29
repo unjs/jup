@@ -1,15 +1,15 @@
 /**
- * §15.35 — sundry required behaviours (rows 178, 202, 204, 206).
+ * Sundry required behaviours (rows 178, 202, 204, 206).
  *
  * Four small requirements that share one theme: the tool should say what it did
  * and what went wrong, in terms of what the user typed.
  *
  * | Row | § | Requirement |
  * |---|---|---|
- * | 178 | §15.19 | an airgapped failure names the seeding command |
- * | 202 | §15.35g | `use` is idempotent — no doubled build suffix |
- * | 204 | §15.35j | a nonexistent version is named as such, not as a bare 404 |
- * | 206 | §15.35l | `cache clean` reports what it removed |
+ * | 178 | §12.6 | an airgapped failure names the seeding command |
+ * | 202 | §09.5 | `use` is idempotent — no doubled build suffix |
+ * | 204 | §04.1 | a nonexistent version is named as such, not as a bare 404 |
+ * | 206 | §12.11 | `cache clean` reports what it removed |
  */
 
 import { existsSync } from "node:fs";
@@ -49,10 +49,10 @@ afterAll(async () => {
 beforeEach(() => registry.reset());
 
 /* -------------------------------------------------------------------------- */
-/* §15.19 — offline diagnostics                                                */
+/* §12.6 — offline diagnostics                                                */
 /* -------------------------------------------------------------------------- */
 
-describe("§15.19 airgapped installs", () => {
+describe("§12.6 airgapped installs", () => {
   it("178: an uncached version with the network off names the seeding command", async () => {
     const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
 
@@ -114,10 +114,10 @@ describe("§15.19 airgapped installs", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.35g — idempotent use                                                    */
+/* §09.5 — idempotent use                                                    */
 /* -------------------------------------------------------------------------- */
 
-describe("§15.35g idempotent use", () => {
+describe("§09.5 idempotent use", () => {
   it("202: running `use` twice on the same version leaves the pin identical", async () => {
     const fixture = createFixture({ name: "project" });
 
@@ -163,10 +163,10 @@ describe("§15.35g idempotent use", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.35j — nonexistent versions                                              */
+/* §04.1 — nonexistent versions                                              */
 /* -------------------------------------------------------------------------- */
 
-describe("§15.35j nonexistent versions", () => {
+describe("§04.1 nonexistent versions", () => {
   it("204: an exact pin that was never published is named as nonexistent", async () => {
     // §04.1 step 5 hands back an exact version without asking whether it exists,
     // so before this the first sign of trouble was `Server answered with HTTP
@@ -215,7 +215,7 @@ describe("§15.35j nonexistent versions", () => {
    * §04.1's `publishedFrom` — the narrower half of the same row.
    *
    * "Does not exist" is the wrong sentence when the version plainly does exist
-   * and jup simply stopped reading the host that carries it. §15.41 put every
+   * and jup simply stopped reading the host that carries it. §02.5 put every
    * band on npm, and Yarn Berry landed on `@yarnpkg/cli-dist`, whose 2.x line
    * starts at 2.4.1 — so `yarn@2.2.2`, which `repo.yarnpkg.com` still serves,
    * 404s. The band declares `publishedFrom` and the 404 says which release to
@@ -269,10 +269,10 @@ describe("§15.35j nonexistent versions", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.35l — mutating commands report                                          */
+/* §12.11 — mutating commands report                                          */
 /* -------------------------------------------------------------------------- */
 
-describe("§15.35l cache clean reports what it removed", () => {
+describe("§12.11 cache clean reports what it removed", () => {
   it("206: reports the count removed, then `Nothing to remove`", async () => {
     const fixture = createFixture();
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
@@ -284,7 +284,7 @@ describe("§15.35l cache clean reports what it removed", () => {
     expect(first.stdout).toBe(`Removed 2 cached version(s) from ${join(fixture.home, "v1")}\n`);
     expect(first.stderr).toBe("");
 
-    // §15.35l is "report what you did", and a report is only worth having if it
+    // §12.11 is "report what you did", and a report is only worth having if it
     // is true: a `cache clean` that printed the right count and removed nothing
     // would satisfy every assertion above.
     expect(existsSync(join(fixture.home, "v1"))).toBe(false);

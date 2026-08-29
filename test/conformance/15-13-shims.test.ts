@@ -1,24 +1,24 @@
 /**
- * §15.38 rows 170–175 and 195 — the shims-and-enablement cluster.
+ * rows 170–175 and 195 — the shims-and-enablement cluster.
  *
  * `enable` is the one command a corepack migrant runs first, and every item here
  * comes from a long-open issue about it:
  *
  * | Row | § | Issue |
  * |---|---|---|
- * | 170 | §15.13 | #71 (34👍), #265, #416 — the install directory needs root |
- * | 171 | §15.13 | #673 — `LOCALAPPDATA` honoured on Linux/WSL |
- * | 172 | §15.13 | #71 — shims installed somewhere inert, silently |
- * | 173 | §15.14 | #751 — a stale shim pointing at a `dist/` that is gone |
- * | 174 | §15.15 | #112 (10👍) — `disable` deletes the real yarn `enable` ate |
- * | 175 | §15.16 | #138 — npm is not shimmed, so `npm install` bypasses the pin |
- * | 195 | §15.29 | #507 (12👍) — `enable` exits 0 and nothing changed |
- * | 246–249 | §15.13 | the per-user default is not on macOS's `PATH` at all, and is on Debian's only after the next login |
- * | 254 | §15.45 | the stubs `npm pack` ships are not executable, so every shim is inert |
- * | 255 | §15.46 | the tool's own entry point runs through the tool's own `node` shim |
+ * | 170 | §10.5 | #71 (34👍), #265, #416 — the install directory needs root |
+ * | 171 | §10.5 | #673 — `LOCALAPPDATA` honoured on Linux/WSL |
+ * | 172 | §10.5 | #71 — shims installed somewhere inert, silently |
+ * | 173 | §10.3 | #751 — a stale shim pointing at a `dist/` that is gone |
+ * | 174 | §10.6 | #112 (10👍) — `disable` deletes the real yarn `enable` ate |
+ * | 175 | §10.7 | #138 — npm is not shimmed, so `npm install` bypasses the pin |
+ * | 195 | §10.5 | #507 (12👍) — `enable` exits 0 and nothing changed |
+ * | 246–249 | §10.5 | the per-user default is not on macOS's `PATH` at all, and is on Debian's only after the next login |
+ * | 254 | §10.3 | the stubs `npm pack` ships are not executable, so every shim is inert |
+ * | 255 | §10.2 | the tool's own entry point runs through the tool's own `node` shim |
  *
  * Every row runs the real entry point through a throwaway copy of the tool
- * (`copyTool`) with `HOME` redirected into the fixture, because §15.13's default
+ * (`copyTool`) with `HOME` redirected into the fixture, because §10.5's default
  * is a directory under the *user's* home and a row that forgets would install
  * into the developer's own `PATH`.
  */
@@ -59,7 +59,7 @@ const IS_WINDOWS = process.platform === "win32";
 const IS_ROOT = process.getuid?.() === 0;
 
 /**
- * §15.13 point 8's directory, spelled here rather than imported: a conformance
+ * §10.5 point 8's directory, spelled here rather than imported: a conformance
  * row asserts what the spec says, not what the implementation computed.
  */
 const SYSTEM_DIR = "/usr/local/bin";
@@ -92,7 +92,7 @@ function systemDirWritable(): boolean {
  *
  * CI images ship their own `yarn` there, so a row asserting that jup installed
  * nothing into point 8's directory has to compare the entry with what it was
- * rather than require the path to be empty. A shim is a symlink (§10.2), so the
+ * rather than require the path to be empty. A shim is a symlink (§10.1), so the
  * target answers for one of ours; type, size and mtime answer for anything else.
  */
 function systemEntry(name: string): string | undefined {
@@ -113,7 +113,7 @@ interface ShimFixtureOptions {
 
 function shimFixture(options: ShimFixtureOptions = {}) {
   const fixture = createFixture();
-  // §15.13's per-user default is spelled differently on each platform, and so
+  // §10.5's per-user default is spelled differently on each platform, and so
   // is the variable that redirects it — see `perUserShims`.
   const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   mkdirSync(shimDir, { recursive: true });
@@ -140,13 +140,13 @@ function shimFixture(options: ShimFixtureOptions = {}) {
 
 afterAll(cleanupFixtures);
 
-describe("§15.13 — never require elevation", () => {
+describe("§10.5 — never require elevation", () => {
   // Skipped on Windows for the same reason it is skipped for root: nothing
   // here can make the directory unwritable. `chmod` on that platform toggles
   // the read-only *file* attribute and has no effect on a directory, so
-  // `enable` correctly writes into it and never falls back. Reaching §15.13
+  // `enable` correctly writes into it and never falls back. Reaching §10.5
   // point 2 there would mean denying a WRITE_DATA ACE through `icacls`, which
-  // is a different test than this one. §14.18 is unaffected: the refusal it
+  // is a different test than this one. §10.8 is unaffected: the refusal it
   // describes is the same code path, reached from the same probe.
   it.skipIf(IS_ROOT || IS_WINDOWS)(
     "170: a read-only install directory falls back to the per-user one, and says so",
@@ -159,7 +159,7 @@ describe("§15.13 — never require elevation", () => {
       const result = await run(["enable", "--install-directory", readOnly, "yarn"], options);
 
       expect(result.exitCode).toBe(0);
-      // Byte-exact (§15.13 point 2).
+      // Byte-exact (§10.5 point 2).
       expect(result.stderr).toBe(
         `! ${readOnly} is not writable; installing shims to ${shimDir} instead\n`,
       );
@@ -242,10 +242,10 @@ describe("§15.13 — never require elevation", () => {
   });
 
   /**
-   * Rows 246–249 — §15.13 point 6, the `PATH` preference.
+   * Rows 246–249 — §10.5 point 6, the `PATH` preference.
    *
    * Windows is skipped throughout, and not for the usual reason: its candidate
-   * list has exactly one entry (§15.13 point 6), so there is no preference to
+   * list has exactly one entry (§10.5 point 6), so there is no preference to
    * exercise and a row that invented an alternate would be testing something the
    * spec does not require.
    */
@@ -263,7 +263,7 @@ describe("§15.13 — never require elevation", () => {
       const result = await run(["enable", "yarn"], withAlternate);
 
       expect(result.exitCode).toBe(0);
-      // Byte-exact (§15.13 point 6), and the *only* line: the chosen directory is
+      // Byte-exact (§10.5 point 6), and the *only* line: the chosen directory is
       // on `PATH` by construction, so point 3's advisory has nothing to say.
       expect(result.stderr).toBe(
         `! ${shimDir} is not on your PATH; installing shims to ${alternate} instead\n`,
@@ -271,7 +271,7 @@ describe("§15.13 — never require elevation", () => {
       expect(existsSync(join(alternate, "yarn"))).toBe(true);
       expect(existsSync(join(shimDir, "yarn"))).toBe(false);
 
-      // §15.13 point 7 — removal does not read `PATH`, so a `disable` from a
+      // §10.5 point 7 — removal does not read `PATH`, so a `disable` from a
       // shell that never had the alternate on it still finds the shims.
       const removed = await run(["disable", "yarn"], options);
       expect(removed.exitCode).toBe(0);
@@ -378,7 +378,7 @@ describe("§15.13 — never require elevation", () => {
   );
 
   /**
-   * Rows 266–270 — §15.13 point 8, the system directory.
+   * Rows 266–270 — §10.5 point 8, the system directory.
    *
    * Point 8 is the answer to the shape this file's other rows cannot reach: a
    * container whose only user is `root`, where every per-user candidate is inert
@@ -457,7 +457,7 @@ describe("§15.13 — never require elevation", () => {
       // get: it would exit 0 and ship an image whose shims are in a directory
       // nothing on `PATH` names.
       expect(result.exitCode).toBe(1);
-      // §12 puts a usage error on stdout, corepack's own choice (§14.24).
+      // §12 puts a usage error on stdout, corepack's own choice.
       expect(result.stdout).toContain(`Unable to write shims to ${SYSTEM_DIR}`);
       expect(result.stderr).not.toContain("installing shims to");
       expect(existsSync(join(shimDir, "yarn"))).toBe(false);
@@ -492,7 +492,7 @@ describe("§15.13 — never require elevation", () => {
         expect(enabled.exitCode).toBe(0);
         expect(lstatSync(foreign).isSymbolicLink()).toBe(true);
 
-        // §15.15 — `disable` is non-destructive, and `--system` is how a run
+        // §10.6 — `disable` is non-destructive, and `--system` is how a run
         // that is not `root` names the directory point 7's scan cannot see.
         const removed = await run(["disable", "--system", "yarn"], options);
         expect(removed.exitCode).toBe(0);
@@ -519,7 +519,7 @@ describe("§15.13 — never require elevation", () => {
   });
 });
 
-describe("§15.14 — stale shims", () => {
+describe("§10.3 — stale shims", () => {
   it.skipIf(IS_WINDOWS)("173: enable replaces a shim whose target is gone", async () => {
     const { fixture, shimDir, options } = shimFixture();
     // #751 exactly: Node 25 stopped bundling corepack, so `dist/yarn.mjs` is no
@@ -551,7 +551,7 @@ describe("§15.14 — stale shims", () => {
   });
 });
 
-describe("§15.15 — disable is non-destructive", () => {
+describe("§10.6 — disable is non-destructive", () => {
   it.skipIf(IS_WINDOWS)(
     "174: enable --force over a real binary, then disable, restores it",
     async () => {
@@ -561,7 +561,7 @@ describe("§15.15 — disable is non-destructive", () => {
       writeFileSync(real, body);
       await chmod(real, 0o755);
 
-      // Without --force it is refused outright (§14.16) — the first half of the
+      // Without --force it is refused outright (§10.6) — the first half of the
       // guarantee. #112 is about what happens when the user insists.
       const refused = await run(["enable", "yarn"], options);
       expect(refused.exitCode).toBe(0);
@@ -605,7 +605,7 @@ describe("§15.15 — disable is non-destructive", () => {
   );
 });
 
-describe("§15.16 — npm is shimmed by default", () => {
+describe("§10.7 — npm is shimmed by default", () => {
   it("175: enable with no arguments creates npm shims; --exclude npm omits them", async () => {
     const withNpm = shimFixture();
     expect((await run(["enable"], withNpm.options)).exitCode).toBe(0);
@@ -630,7 +630,7 @@ describe("§15.16 — npm is shimmed by default", () => {
   });
 });
 
-describe("§15.29 — enable verifies its own post-condition", () => {
+describe("§10.5 — enable verifies its own post-condition", () => {
   it.skipIf(IS_WINDOWS)(
     "195: warns, naming the winner, when another manager shadows the shim",
     async () => {
@@ -646,11 +646,11 @@ describe("§15.29 — enable verifies its own post-condition", () => {
 
       // Exit 0 — the shim is installed correctly, it simply does not win.
       expect(result.exitCode).toBe(0);
-      // Byte-exact (§15.29 point 2).
+      // Byte-exact (§10.5 point 2).
       expect(result.stderr).toContain(
         `! yarn on PATH resolves to ${join(volta, "yarn")}, not the shim just installed at ${join(shimDir, "yarn")}. Another version manager may be shadowing it.`,
       );
-      // §15.29 point 4.
+      // §10.5 point 4.
       expect(result.stderr).toContain("hash -r");
       expect(existsSync(join(shimDir, "yarn"))).toBe(true);
     },
@@ -668,17 +668,17 @@ describe("§15.29 — enable verifies its own post-condition", () => {
 });
 
 /**
- * §14.25 — the stub must not depend on the runtime resolving its main module
+ * §10.1 — the stub must not depend on the runtime resolving its main module
  * through the realpath.
  *
- * The shim on `PATH` is a symlink to the stub (§10.2), so a relative specifier
+ * The shim on `PATH` is a symlink to the stub (§10.1), so a relative specifier
  * inside the stub is resolved against whichever path the runtime considers the
  * main module's. Stock Node makes that the realpath, which is why the relative
  * form appeared to work — but `--preserve-symlinks-main` is a supported flag
  * that turns it off, and the stub then dies with `ERR_MODULE_NOT_FOUND` before
  * any of this tool's code runs. Non-Node ESM runtimes resolve from the link too.
  */
-describe("§14.25 — the stub resolves its own entry", () => {
+describe("§10.1 — the stub resolves its own entry", () => {
   it.skipIf(IS_WINDOWS)("211: the shim runs under --preserve-symlinks-main", async () => {
     const { fixture, shimDir, options } = shimFixture();
     fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
@@ -713,7 +713,7 @@ describe("§14.25 — the stub resolves its own entry", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §10.2 — row 244: the name a shim runs is written into the file
+ * §10.1 — row 244: the name a shim runs is written into the file
  *
  * The alternative is a single stub reading `basename(process.argv[1])`,
  * which rests on node's promise that it does not `realpath` that value.
@@ -726,7 +726,7 @@ describe("§14.25 — the stub resolves its own entry", () => {
  * not consult `argv[1]` to get there.
  * ------------------------------------------------------------------ */
 
-describe("§10.2 — the name a stub runs is baked into it", () => {
+describe("§10.1 — the name a stub runs is baked into it", () => {
   it.skipIf(IS_WINDOWS)("244: each name links its own stub and reaches its own tool", async () => {
     const { fixture, shimDir, options } = shimFixture();
     fixture.write("package.json", `${JSON.stringify({ packageManager: "yarn@1.22.4" })}\n`);
@@ -734,7 +734,7 @@ describe("§10.2 — the name a stub runs is baked into it", () => {
 
     expect((await run(["enable", "yarn", "pnpm"], options)).exitCode).toBe(0);
 
-    // One stub per name, and no two names sharing one. The staleness §15.14
+    // One stub per name, and no two names sharing one. The staleness §10.3
     // worried about is handled by `enable` rewriting the link, not by there
     // being a single file to point at.
     expect(basename(readlinkSync(join(shimDir, "yarn")))).toBe("yarn.mjs");
@@ -773,11 +773,11 @@ describe("§10.2 — the name a stub runs is baked into it", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.43 — rows 250 and 251
+ * §10.2 — rows 250 and 251
  *
- * §14.26 has `enable` bake `realpath(process.execPath)` into the shim
+ * §10.2 has `enable` bake `realpath(process.execPath)` into the shim
  * stub's shebang whenever the shim directory claims the name `node`,
- * and §15.39 makes `node` a name it can claim. Once it has, §15.32's
+ * and §02.3 makes `node` a name it can claim. Once it has, §08.3's
  * advice puts the shim ahead of the real runtime on `PATH`, the tool's
  * own `#!/usr/bin/env node` resolves through it, and `enable` ends up
  * running under a runtime out of `<home>` — baking in a path the next
@@ -791,7 +791,7 @@ describe("§10.2 — the name a stub runs is baked into it", () => {
  * nothing here depends on that directory being ours.
  *
  * The link is `<home>/v1`, not `<home>`, and that is not a detail:
- * §15.43's boundary is the folder `cache clean` empties, and §07.11 puts
+ * §10.2's boundary is the folder `cache clean` empties, and §07.11 puts
  * `self/` — along with any runtime an install script parks beside it —
  * outside `v1` deliberately. A runtime merely somewhere under `<home>`
  * is not one a clean can take away, and is therefore safe to bake in.
@@ -802,7 +802,7 @@ const HOST_RUNTIME = realpathSync(process.execPath);
 const HOST_RUNTIME_DIR = dirname(HOST_RUNTIME);
 
 describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
-  "§15.43 — the interpreter a shim names",
+  "§10.2 — the interpreter a shim names",
   () => {
     /**
      * Two tool copies of their own. These rows rewrite stub shebangs and make
@@ -813,7 +813,7 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
     const READ_ONLY = copyTool();
     const BOOTSTRAPPED = copyTool();
 
-    /** The stub `<shimDir>/<binName>` points at — §10.2's relative symlink. */
+    /** The stub `<shimDir>/<binName>` points at — §10.3's relative symlink. */
     function stubFor(shimDir: string, binName: string): string {
       return resolve(shimDir, readlinkSync(join(shimDir, binName)));
     }
@@ -865,7 +865,7 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
 
       // Tier 2. Nothing forwarded now, and the first `node` on `PATH` is the
       // shim the run above installed — which is skipped, or this would be a
-      // shebang naming a file that execs itself (§14.26).
+      // shebang naming a file that execs itself (§10.2).
       const second = await run(["enable", "node"], {
         ...options,
         bin: PINNED,
@@ -886,7 +886,7 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
       const { fixture, shimDir, options } = shimFixture();
 
       // An ordinary machine. `env` reaches a runtime, so the shipped relocatable
-      // shebang is what a `pnpm` shim keeps and §10.7's read-only stub folder is
+      // shebang is what a `pnpm` shim keeps and §10.8's read-only stub folder is
       // never written to.
       const ordinary = await run(["enable", "pnpm"], {
         ...options,
@@ -902,9 +902,9 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
 
       // The machine an install script bootstraps: no `node` on `PATH` anywhere,
       // because the runtime it downloaded lives beside the store and was never
-      // put on the user's `PATH`. A generic shebang there is not §14.26's
-      // recursion but exit 127, so §10.1's second condition pins the runtime
-      // even though nothing claims the name — and what it names is §15.43 tier
+      // put on the user's `PATH`. A generic shebang there is not §10.2's
+      // recursion but exit 127, so §10.2's second condition pins the runtime
+      // even though nothing claims the name — and what it names is §10.2 tier
       // 0, the runtime this very run is executing under.
       const bootstrapped = await run(["enable", "pnpm"], {
         ...options,
@@ -955,7 +955,7 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
           const unwritable = await run(["enable", "node"], { ...options, bin: READ_ONLY });
 
           expect(unwritable.exitCode).toBe(1);
-          // §10.1 pins every stub in the folder, not only the ones this run
+          // §10.2 pins every stub in the folder, not only the ones this run
           // writes, so which one the refusal names is whichever the sweep
           // reaches first. What the row is about is that it names a *stub* —
           // a file in jup's own folder — rather than the shim directory.
@@ -968,7 +968,7 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
           expect(unwritable.stdout).not.toContain("--install-directory <a writable");
           expect(unwritable.stdout).not.toContain("set JUP_SHIM_DIRECTORY");
 
-          // §10.7 — and the case that must keep working: `enable` of anything but
+          // §10.8 — and the case that must keep working: `enable` of anything but
           // the interpreter compares the stub before writing it, so it never
           // touches the package directory at all.
           const again = await run(["enable", "pnpm"], { ...options, bin: READ_ONLY });
@@ -985,15 +985,15 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
 );
 
 /* ------------------------------------------------------------------ *
- * §15.45 — row 254
+ * §10.3 — row 254
  *
- * §10.2's shim is a symlink, so the execute bit the kernel checks
+ * §10.1's shim is a symlink, so the execute bit the kernel checks
  * before running the name is the **stub's**. The build chmods the
  * stubs `0o755` and `npm pack` undoes it: it
  * re-applies the bit to the package's `bin` targets and to nothing
  * else, so a published install has `dist/bin.mjs` executable and every
  * stub at `0o644`. `enable` compared the stub's *content*, found it
- * already correct, and left the mode alone — which is right for §10.7
+ * already correct, and left the mode alone — which is right for §10.8
  * and wrong for the shim, since a `PATH` lookup passes over a file it
  * cannot execute without a word.
  *
@@ -1004,11 +1004,11 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
 
 const execFileAsync = promisify(execFile);
 
-describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable", () => {
+describe.skipIf(IS_WINDOWS)("§10.3 — the stub a shim points at is executable", () => {
   /** Its own copy: this row rewrites the mode of a stub inside it. */
   const PUBLISHED = copyTool();
 
-  /** The stub `<shimDir>/<binName>` points at — §10.2's relative symlink. */
+  /** The stub `<shimDir>/<binName>` points at — §10.3's relative symlink. */
   function stubOf(shimDir: string, binName: string): string {
     return resolve(shimDir, readlinkSync(join(shimDir, binName)));
   }
@@ -1049,8 +1049,8 @@ describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable
     // Stated rather than inherited from the row above, which shares this copy.
     await chmod(stub, 0o755);
     // `ctime` moves for a chmod even when the mode it writes is the mode already
-    // there, so this is what an unconditional one would show. §10.2 property 4
-    // and §10.7 both want this run to write nothing.
+    // there, so this is what an unconditional one would show. §10.3 property 4
+    // and §10.8 both want this run to write nothing.
     const before = statSync(stub).ctimeMs;
 
     const again = await run(["enable", "yarn"], { ...options, bin: PUBLISHED });
@@ -1063,18 +1063,18 @@ describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable
 });
 
 /* ------------------------------------------------------------------ *
- * §15.46 — row 255
+ * §10.2 — row 255
  *
  * `bin/jup.mjs` — what `package.json`'s `bin` points `jup` and
- * `corepack` at — opens `#!/usr/bin/env node`, and §14.26 consequence 2
+ * `corepack` at — opens `#!/usr/bin/env node`, and §10.2 consequence 2
  * is about that spelling rather than about who wrote it. Once
- * `enable node` has put our shim on the `PATH` §15.32 asks the user to
+ * `enable node` has put our shim on the `PATH` §08.3 asks the user to
  * prepend, `env node` finds the shim, the shim resolves the project's
- * `.nvmrc` (§15.40), and `jup --version` downloads a runtime to print
+ * `.nvmrc` (§03.1), and `jup --version` downloads a runtime to print
  * its own version string.
  *
  * The row plants a `jup.mjs` beside the copy's entry — an installation
- * without one makes §15.46 a no-op rather than a failure — and then
+ * without one makes §10.2 a no-op rather than a failure — and then
  * runs it through a real `execve`, because `node <entry>` is
  * precisely the spelling that never reads a shebang. `JUP_ENABLE_NETWORK=0`
  * turns the recursion into a loud failure instead of a 171 MB download,
@@ -1082,132 +1082,129 @@ describe.skipIf(IS_WINDOWS)("§15.45 — the stub a shim points at is executable
  * network.
  * ------------------------------------------------------------------ */
 
-describe.skipIf(IS_WINDOWS)(
-  "§15.46 — jup's own entry point does not run through jup's shim",
-  () => {
-    /** Its own copy: this row rewrites a file inside the installation. */
-    const BUILT = copyTool();
+describe.skipIf(IS_WINDOWS)("§10.2 — jup's own entry point does not run through jup's shim", () => {
+  /** Its own copy: this row rewrites a file inside the installation. */
+  const BUILT = copyTool();
 
-    /** `<copy>/src/jup.mjs` — the CLI entry §15.46 pins, beside the copy's stubs. */
-    const ENTRY = join(dirname(BUILT), "jup.mjs");
+  /** `<copy>/src/jup.mjs` — the CLI entry §10.2 pins, beside the copy's stubs. */
+  const ENTRY = join(dirname(BUILT), "jup.mjs");
 
-    /** What §15.43 tier 0 chooses for a suite running outside any `<home>`. */
-    const HOST = realpathSync(process.execPath);
+  /** What §10.2 tier 0 chooses for a suite running outside any `<home>`. */
+  const HOST = realpathSync(process.execPath);
 
-    const UNPINNED = "#!/usr/bin/env node";
+  const UNPINNED = "#!/usr/bin/env node";
 
-    /**
-     * The entry, in the shape a published install has it: a `bin` target npm left
-     * `0o755`, opening on the relocatable shebang. Re-written between the phases
-     * below, which is how the "already pinned" and "unpinned again" states are
-     * reached without a second copy of the tool.
-     */
-    function writeEntry(shebang: string): void {
-      writeFileSync(ENTRY, `${shebang}\nimport "./bin.ts";\n`);
-      chmodSync(ENTRY, 0o755);
+  /**
+   * The entry, in the shape a published install has it: a `bin` target npm left
+   * `0o755`, opening on the relocatable shebang. Re-written between the phases
+   * below, which is how the "already pinned" and "unpinned again" states are
+   * reached without a second copy of the tool.
+   */
+  function writeEntry(shebang: string): void {
+    writeFileSync(ENTRY, `${shebang}\nimport "./bin.ts";\n`);
+    chmodSync(ENTRY, 0o755);
+  }
+
+  function firstLine(file: string): string {
+    return readFileSync(file, "utf8").split("\n")[0]!;
+  }
+
+  it("255: enable pins its first line, only when a node shim is claimed, and only once", async () => {
+    const { shimDir, options } = shimFixture();
+    const run255 = (args: string[]) => run(args, { ...options, bin: BUILT });
+    writeEntry(UNPINNED);
+    const before = readFileSync(ENTRY);
+
+    // An `enable` that claims no `node` leaves it byte-identical: §10.8's
+    // read-only installation and §10.3's idempotency both rest on that.
+    expect((await run255(["enable", "pnpm"])).exitCode).toBe(0);
+    expect(readFileSync(ENTRY).equals(before)).toBe(true);
+
+    // Claiming the name is what requires the pin — the same condition §10.2
+    // puts on the stub, and the same interpreter that section chooses for it.
+    expect((await run255(["enable", "node"])).exitCode).toBe(0);
+    expect(firstLine(ENTRY)).toBe(`#!${HOST}`);
+    expect(existsSync(join(shimDir, "node"))).toBe(true);
+    // The body and the mode are the artifact's, not ours: only line one moved.
+    expect(readFileSync(ENTRY, "utf8").slice(firstLine(ENTRY).length)).toBe(
+      before.toString("utf8").slice(UNPINNED.length),
+    );
+    expect(statSync(ENTRY).mode & 0o777).toBe(0o755);
+
+    // Warm: already the line we want, so nothing is written. `ctime` moves for
+    // the rename even when the bytes are identical, which is what an
+    // unconditional rewrite would show here.
+    const ctime = statSync(ENTRY).ctimeMs;
+    const again = await run255(["enable", "node"]);
+    expect(again.exitCode).toBe(0);
+    expect(again.stdout).toBe("");
+    expect(statSync(ENTRY).ctimeMs).toBe(ctime);
+  });
+
+  it("255: so `jup --version` in a project pinning an uncached runtime installs nothing", async () => {
+    const { fixture, shimDir, options } = shimFixture();
+    // §03.1 — a runtime the store does not hold, and no network to get it.
+    fixture.write(".nvmrc", "22.14.0\n");
+    const env = {
+      ...options.env,
+      COREPACK_HOME: fixture.home,
+      COREPACK_ENABLE_NETWORK: "0",
+      // The shim directory is first on `PATH` already (`shimFixture`), which is
+      // §08.3's own advice and the precondition for the whole failure.
+      PATH: [shimDir, process.env.PATH ?? ""].join(delimiter),
+    } as NodeJS.ProcessEnv;
+
+    writeEntry(UNPINNED);
+    expect((await run(["enable", "node"], { ...options, bin: BUILT })).exitCode).toBe(0);
+    expect(firstLine(ENTRY)).toBe(`#!${HOST}`);
+
+    // Pinned: the kernel runs the host runtime named on line one, so nothing
+    // resolves `.nvmrc` and nothing is installed.
+    const { stdout } = await execFileAsync(ENTRY, ["--version"], { cwd: fixture.cwd, env });
+    expect(stdout).toBe("0.0.0\n");
+    expect(existsSync(join(fixture.home, "v1", "node"))).toBe(false);
+
+    // And the contrast, from the same tree: put the relocatable shebang back —
+    // what every `enable` before §10.2 left — and the entry resolves through
+    // our own `node` shim, which goes looking for a runtime it cannot have.
+    writeEntry(UNPINNED);
+    const recursed = await execFileAsync(ENTRY, ["--version"], {
+      cwd: fixture.cwd,
+      env,
+    }).catch((error: Error & { code?: number; stderr?: string }) => error);
+
+    expect(recursed).toBeInstanceOf(Error);
+    expect((recursed as { stderr?: string }).stderr ?? "").toContain("22.14.0");
+  });
+
+  it.skipIf(IS_ROOT)("255: and fails naming that file when it cannot be rewritten", async () => {
+    const { shimDir, options } = shimFixture();
+    writeEntry(UNPINNED);
+    // Seed the stub, so the refusal below is about the entry rather than about a
+    // stub that was never written.
+    expect((await run(["enable", "pnpm"], { ...options, bin: BUILT })).exitCode).toBe(0);
+    // The file *and* its directory: the write is temp-then-rename, and a system
+    // package install puts both beyond the user's reach.
+    await chmod(ENTRY, 0o555);
+    await chmod(dirname(ENTRY), 0o555);
+
+    try {
+      const refused = await run(["enable", "node"], { ...options, bin: BUILT });
+
+      // §12 — a `UsageError` is reported on stdout, with the usage line after it.
+      expect(refused.exitCode).toBe(1);
+      expect(refused.stdout).toContain(ENTRY);
+      // Not §10.2's stub message, which names the wrong file, and not §10.3's,
+      // whose remedy is for a different property.
+      expect(refused.stdout).not.toContain("shim stub");
+      expect(refused.stdout).not.toContain("chmod +x");
+      expect(refused.stdout).not.toContain("set JUP_SHIM_DIRECTORY");
+      // Nothing half-written: the check precedes every shim it protects.
+      expect(existsSync(join(shimDir, "node"))).toBe(false);
+      expect(firstLine(ENTRY)).toBe(UNPINNED);
+    } finally {
+      await chmod(dirname(ENTRY), 0o755);
+      await chmod(ENTRY, 0o755);
     }
-
-    function firstLine(file: string): string {
-      return readFileSync(file, "utf8").split("\n")[0]!;
-    }
-
-    it("255: enable pins its first line, only when a node shim is claimed, and only once", async () => {
-      const { shimDir, options } = shimFixture();
-      const run255 = (args: string[]) => run(args, { ...options, bin: BUILT });
-      writeEntry(UNPINNED);
-      const before = readFileSync(ENTRY);
-
-      // An `enable` that claims no `node` leaves it byte-identical: §10.7's
-      // read-only installation and §10.2's idempotency both rest on that.
-      expect((await run255(["enable", "pnpm"])).exitCode).toBe(0);
-      expect(readFileSync(ENTRY).equals(before)).toBe(true);
-
-      // Claiming the name is what requires the pin — the same condition §10.1
-      // puts on the stub, and the same interpreter §15.43 chooses for it.
-      expect((await run255(["enable", "node"])).exitCode).toBe(0);
-      expect(firstLine(ENTRY)).toBe(`#!${HOST}`);
-      expect(existsSync(join(shimDir, "node"))).toBe(true);
-      // The body and the mode are the artifact's, not ours: only line one moved.
-      expect(readFileSync(ENTRY, "utf8").slice(firstLine(ENTRY).length)).toBe(
-        before.toString("utf8").slice(UNPINNED.length),
-      );
-      expect(statSync(ENTRY).mode & 0o777).toBe(0o755);
-
-      // Warm: already the line we want, so nothing is written. `ctime` moves for
-      // the rename even when the bytes are identical, which is what an
-      // unconditional rewrite would show here.
-      const ctime = statSync(ENTRY).ctimeMs;
-      const again = await run255(["enable", "node"]);
-      expect(again.exitCode).toBe(0);
-      expect(again.stdout).toBe("");
-      expect(statSync(ENTRY).ctimeMs).toBe(ctime);
-    });
-
-    it("255: so `jup --version` in a project pinning an uncached runtime installs nothing", async () => {
-      const { fixture, shimDir, options } = shimFixture();
-      // §15.40 — a runtime the store does not hold, and no network to get it.
-      fixture.write(".nvmrc", "22.14.0\n");
-      const env = {
-        ...options.env,
-        COREPACK_HOME: fixture.home,
-        COREPACK_ENABLE_NETWORK: "0",
-        // The shim directory is first on `PATH` already (`shimFixture`), which is
-        // §15.32's own advice and the precondition for the whole failure.
-        PATH: [shimDir, process.env.PATH ?? ""].join(delimiter),
-      } as NodeJS.ProcessEnv;
-
-      writeEntry(UNPINNED);
-      expect((await run(["enable", "node"], { ...options, bin: BUILT })).exitCode).toBe(0);
-      expect(firstLine(ENTRY)).toBe(`#!${HOST}`);
-
-      // Pinned: the kernel runs the host runtime named on line one, so nothing
-      // resolves `.nvmrc` and nothing is installed.
-      const { stdout } = await execFileAsync(ENTRY, ["--version"], { cwd: fixture.cwd, env });
-      expect(stdout).toBe("0.0.0\n");
-      expect(existsSync(join(fixture.home, "v1", "node"))).toBe(false);
-
-      // And the contrast, from the same tree: put the relocatable shebang back —
-      // what every `enable` before §15.46 left — and the entry resolves through
-      // our own `node` shim, which goes looking for a runtime it cannot have.
-      writeEntry(UNPINNED);
-      const recursed = await execFileAsync(ENTRY, ["--version"], {
-        cwd: fixture.cwd,
-        env,
-      }).catch((error: Error & { code?: number; stderr?: string }) => error);
-
-      expect(recursed).toBeInstanceOf(Error);
-      expect((recursed as { stderr?: string }).stderr ?? "").toContain("22.14.0");
-    });
-
-    it.skipIf(IS_ROOT)("255: and fails naming that file when it cannot be rewritten", async () => {
-      const { shimDir, options } = shimFixture();
-      writeEntry(UNPINNED);
-      // Seed the stub, so the refusal below is about the entry rather than about a
-      // stub that was never written.
-      expect((await run(["enable", "pnpm"], { ...options, bin: BUILT })).exitCode).toBe(0);
-      // The file *and* its directory: the write is temp-then-rename, and a system
-      // package install puts both beyond the user's reach.
-      await chmod(ENTRY, 0o555);
-      await chmod(dirname(ENTRY), 0o555);
-
-      try {
-        const refused = await run(["enable", "node"], { ...options, bin: BUILT });
-
-        // §12 — a `UsageError` is reported on stdout, with the usage line after it.
-        expect(refused.exitCode).toBe(1);
-        expect(refused.stdout).toContain(ENTRY);
-        // Not §15.43's stub message, which names the wrong file, and not §15.45's,
-        // whose remedy is for a different property.
-        expect(refused.stdout).not.toContain("shim stub");
-        expect(refused.stdout).not.toContain("chmod +x");
-        expect(refused.stdout).not.toContain("set JUP_SHIM_DIRECTORY");
-        // Nothing half-written: the check precedes every shim it protects.
-        expect(existsSync(join(shimDir, "node"))).toBe(false);
-        expect(firstLine(ENTRY)).toBe(UNPINNED);
-      } finally {
-        await chmod(dirname(ENTRY), 0o755);
-        await chmod(ENTRY, 0o755);
-      }
-    });
-  },
-);
+  });
+});

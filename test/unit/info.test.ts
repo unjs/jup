@@ -1,5 +1,5 @@
 /**
- * §15.30 — the report builder behind `corepack info`.
+ * §09.9 — the report builder behind `corepack info`.
  *
  * The conformance rows (`test/conformance/15-30-info.test.ts`) assert the
  * command's observable contract through a real process; these assert the shape
@@ -44,14 +44,14 @@ const PATH_EXTENSION = IS_WINDOWS ? ".CMD" : "";
 
 const ENV_KEYS = [
   "COREPACK_HOME",
-  // §15.1 — the report reads the user and global `.npmrc`, so both tiers are
+  // §05.3 — the report reads the user and global `.npmrc`, so both tiers are
   // pointed at the fixture. Left alone, every assertion about them would be an
   // assertion about whoever happens to be running the suite.
   "HOME",
   "USERPROFILE",
   "npm_config_prefix",
   "PREFIX",
-  // §15.13 — the shim directory is now configurable, so it has to be scrubbed
+  // §10.5 — the shim directory is now configurable, so it has to be scrubbed
   // like every other input.
   "COREPACK_SHIM_DIRECTORY",
   "COREPACK_NPM_REGISTRY",
@@ -85,7 +85,7 @@ beforeEach(async () => {
   process.env.USERPROFILE = home;
   process.env.npm_config_prefix = home;
   // The `.npmrc` load is memoised, and its key is the working directory alone —
-  // a redirected home does not invalidate it (§15.1).
+  // a redirected home does not invalidate it (§05.3).
   resetNpmrcCache();
 
   stdout = "";
@@ -97,7 +97,7 @@ beforeEach(async () => {
 
   cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(project);
 
-  // Nothing in this module may reach the network (§15.30); every test therefore
+  // Nothing in this module may reach the network (§09.9); every test therefore
   // runs against a `fetch` that fails loudly if it is called at all.
   fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(() => {
     throw new Error("info must not perform a network request");
@@ -147,7 +147,7 @@ function report(): InfoReport {
  * The project spec
  * ------------------------------------------------------------------ */
 
-describe("buildReport — the project spec (§15.30)", () => {
+describe("buildReport — the project spec (§09.9)", () => {
   it("names the manifest, the field and the spec, with an absolute path", async () => {
     await manifest({ packageManager: "pnpm@11.1.2+sha512.abcd" });
     seed("pnpm", "11.1.2");
@@ -225,7 +225,7 @@ describe("buildReport — the project spec (§15.30)", () => {
  * Every invalid shape §03/§12 defines
  * ------------------------------------------------------------------ */
 
-describe("buildReport — an invalid spec is diagnosed, never thrown (§15.30)", () => {
+describe("buildReport — an invalid spec is diagnosed, never thrown (§09.9)", () => {
   const cases: Array<[label: string, manifest: unknown, expected: RegExp]> = [
     ["a missing version", { packageManager: "yarn" }, /No version specified/],
     ["a trailing @", { packageManager: "yarn@" }, /No version specified/],
@@ -278,7 +278,7 @@ describe("buildReport — an invalid spec is diagnosed, never thrown (§15.30)",
  * Resolution, without a network
  * ------------------------------------------------------------------ */
 
-describe("buildReport — resolution (§15.23, §15.30)", () => {
+describe("buildReport — resolution (§04.4, §09.9)", () => {
   it("reads the version and hash straight off an exact pin", async () => {
     await manifest({ packageManager: "pnpm@11.1.2+sha512.abcd" });
     seed("pnpm", "11.1.2");
@@ -293,7 +293,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
       installed: true,
     });
     expect(info.source).toBe(`packageManager in ${join(project, "package.json")}`);
-    // An exact pin never involves the lockfile at all (§15.23).
+    // An exact pin never involves the lockfile at all (§04.4).
     expect(report().lockfile.key).toBeNull();
   });
 
@@ -340,7 +340,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
   it("skips a recorded resolution that no longer satisfies its range", async () => {
     // Reachable from a hand edit, a bad merge, or a `jup.lock` restored beside a
     // manifest that has since moved on. The run resolves around such an entry
-    // (§15.23), so reporting it as `locked` would name a version the very next
+    // (§04.4), so reporting it as `locked` would name a version the very next
     // invocation refuses.
     await manifest({ packageManager: "pnpm@^11.0.0" });
     seed("pnpm", "10.0.0");
@@ -369,7 +369,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
 
     expect(info.lockfile.frozen).toBe(true);
     expect(info.lockfile.frozenSource).toBe("COREPACK_FROZEN_LOCKFILE");
-    // §15.23 — freezing the recorded file says nothing about *this* run: a proxy
+    // §04.4 — freezing the recorded file says nothing about *this* run: a proxy
     // run never writes it, so the resolution is reported on its own terms.
     expect(info.resolution.status).toBe("network");
   });
@@ -435,7 +435,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
   it("ignores a memo stamped further out than the window it is allowed to claim", async () => {
     // A `node_modules` restored from an image, or written under a fast clock:
     // believed as-is it would pin the range with no request for as long as it
-    // says. §15.23 gives the stamp an upper bound as well as a lower one.
+    // says. §04.4 gives the stamp an upper bound as well as a lower one.
     await manifest({ packageManager: "pnpm@^11.0.0" });
     mkdirSync(join(project, "node_modules", ".jup"), { recursive: true });
     await writeFile(
@@ -506,7 +506,7 @@ describe("buildReport — resolution (§15.23, §15.30)", () => {
  * The env file and the environment
  * ------------------------------------------------------------------ */
 
-describe("buildReport — the env file (§03.2, §15.30)", () => {
+describe("buildReport — the env file (§03.2, §09.9)", () => {
   it("sorts every line into applied, overridden, refused and ignored", async () => {
     await manifest({ packageManager: "pnpm@11.1.2" });
     await writeFile(
@@ -527,7 +527,7 @@ describe("buildReport — the env file (§03.2, §15.30)", () => {
     expect(info.path).toBe(join(project, ".jup.env"));
     expect(info.applied).toEqual(["COREPACK_ENABLE_STRICT"]);
     expect(info.overridden).toEqual(["COREPACK_NPM_REGISTRY"]);
-    // §14.5 — a project file may never supply a credential.
+    // §03.2 — a project file may never supply a credential.
     expect(info.refused).toEqual(["COREPACK_NPM_TOKEN"]);
     expect(info.ignored).toEqual(["PATH"]);
   });
@@ -555,7 +555,7 @@ describe("buildReport — the env file (§03.2, §15.30)", () => {
  * Registries, store, defaults
  * ------------------------------------------------------------------ */
 
-describe("buildReport — registries (§15.30, §15.1 seam)", () => {
+describe("buildReport — registries (§09.9, §05.3 seam)", () => {
   it("agrees with the real registry resolver in both directions", () => {
     // `effectiveRegistry` deliberately mirrors `registry.getRegistryUrl` rather
     // than importing it; this is the guard that keeps the mirror honest.
@@ -579,7 +579,7 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
 
     const yarn = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.binaries).toEqual(["yarn", "yarnpkg"]);
-    // §15.41 — there is no surprise left to report. Every band is an npm
+    // §02.5 — there is no surprise left to report. Every band is an npm
     // registry, so the notes that explained Berry's odd one out are empty, for
     // yarn and for everything else.
     expect(yarn.notes).toEqual([]);
@@ -593,14 +593,14 @@ describe("buildReport — registries (§15.30, §15.1 seam)", () => {
   });
 
   it("reports no .npmrc files when the machine has none in scope", () => {
-    // The fixture home has no `.npmrc`, and §15.1's report says so with an empty
+    // The fixture home has no `.npmrc`, and §05.3's report says so with an empty
     // list rather than a note about an unimplemented feature.
     expect(report().npmrc.registry).toBeNull();
     expect(report().npmrc.auth).toEqual([]);
   });
 });
 
-describe("buildReport — the store and the recorded defaults (§15.19, §15.30)", () => {
+describe("buildReport — the store and the recorded defaults (§12.6, §09.9)", () => {
   it("lists the cached versions, the store path, and whether it is writable", () => {
     seed("yarn", "1.22.4");
     seed("pnpm", "11.1.2");
@@ -644,12 +644,12 @@ describe("buildReport — the store and the recorded defaults (§15.19, §15.30)
  * Shims
  * ------------------------------------------------------------------ */
 
-describe("buildReport — shims (§10, §15.29, §15.30)", () => {
+describe("buildReport — shims (§10, §10.5, §09.9)", () => {
   it("reports every binary name, and what PATH resolves it to", () => {
     const info = report().shims;
 
-    // §15.28's entries are here even though a bare `enable` does not install
-    // them: §15.30 asks what each binary name *currently resolves to*, and for
+    // §02.5's per-host entries are here even though a bare `enable` does not install
+    // them: §09.9 asks what each binary name *currently resolves to*, and for
     // `bun` that question is the interesting one precisely because the answer is
     // usually somebody else's install.
     expect(info.entries.map((entry) => entry.binary)).toEqual([
@@ -667,7 +667,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
       "aubx",
       "nub",
       "nubx",
-      // §15.39 — a runtime is reported for exactly the reason `bun` is: what the
+      // §02.3 — a runtime is reported for exactly the reason `bun` is: what the
       // name currently resolves to is the interesting question, and for `node`
       // the answer is somebody else's install on essentially every machine.
       "node",
@@ -680,13 +680,13 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
   it("recognises one of our own stubs, and something else's binary", () => {
     const bin = join(home, "bin");
     mkdirSync(bin, { recursive: true });
-    // §15.13 replaced §14.17's "wherever our own binary lives" with an explicit
+    // §10.5 replaced the old "wherever our own binary lives" lookup with an explicit
     // per-user chain, so the fixture names the directory instead of planting a
     // `jup` beside it.
     process.env.COREPACK_SHIM_DIRECTORY = bin;
 
-    // A stub carrying the marker, plus what `enable` puts on the name: §10.2's
-    // relative symlink, or §10.3's wrappers, which carry no marker and are
+    // A stub carrying the marker, plus what `enable` puts on the name: §10.3's
+    // relative symlink, or §10.4's wrappers, which carry no marker and are
     // recognised by their shebang plus the `<binName>.mjs` they invoke.
     writeFileSync(join(bin, "yarn.mjs"), `// ${SHIM_MARKER} — generated\n`, { mode: 0o755 });
     if (IS_WINDOWS) {
@@ -719,13 +719,13 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     expect(winning.shadowed).toBe(false);
   });
 
-  // §15.14 / #751 — the ownership test is now the one `run/exec.ts` exports,
-  // shared with `enable`, `disable` and §15.43's interpreter walk instead of
+  // §10.3 / #751 — the ownership test is now the one `run/exec.ts` exports,
+  // shared with `enable`, `disable` and §10.2's interpreter walk instead of
   // copied here. It is a superset of the copy it replaced: a **dangling**
   // symlink that still names our stub is ours. That is the answer `info` wants —
   // such a shim is one `enable` replaces and `disable` removes, and reporting it
   // as somebody else's would hide the exact breakage the report exists to
-  // explain (§15.30: "a shim is installed" means one of ours).
+  // explain (§09.9: "a shim is installed" means one of ours).
   it.skipIf(IS_WINDOWS)("reports a shim whose stub has moved away as ours", () => {
     const bin = join(home, "bin");
     mkdirSync(bin, { recursive: true });
@@ -756,7 +756,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
     expect(yarn.shim).toBeNull();
   });
 
-  // §15.13 redirected this row: the shim directory is now always determinable —
+  // §10.5 redirected this row: the shim directory is now always determinable —
   // that is the whole of #71 — so the case this asserted no longer arises. What
   // survives is the promise underneath it: the report is complete either way.
   it("names the per-user directory even with an empty PATH", () => {
@@ -774,7 +774,7 @@ describe("buildReport — shims (§10, §15.29, §15.30)", () => {
  * The commands and their output
  * ------------------------------------------------------------------ */
 
-describe("cmdInfo / cmdCacheList (§15.19, §15.30)", () => {
+describe("cmdInfo / cmdCacheList (§12.6, §09.9)", () => {
   it("emits parseable JSON carrying the schema version", async () => {
     await manifest({ packageManager: "pnpm@11.1.2+sha512.abcd" });
 

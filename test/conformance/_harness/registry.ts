@@ -17,7 +17,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from "node:net";
 import { sriOf } from "./tarball.ts";
 
-/** §15.9 — the document npm publishes its signing keys at. */
+/** §06.3 — the document npm publishes its signing keys at. */
 export const KEYS_PATH = "/-/npm/v1/keys";
 
 /** One entry of a trust store, as both `/-/npm/v1/keys` and §02.6 spell it. */
@@ -34,16 +34,16 @@ export type RegistryMode =
   | "invalid_signature"
   | "invalid_integrity"
   | "no_signatures"
-  /** §15.7 tier 1: a `dist`-less version document, as #570's registries serve. */
+  /** §06.1 tier 1: a `dist`-less version document, as #570's registries serve. */
   | "no_dist"
-  /** §15.8: JFrog Artifactory's shape — signed at the root, stripped per version. */
+  /** §06.3: JFrog Artifactory's shape — signed at the root, stripped per version. */
   | "root_only_signatures"
   /**
    * The packument 5xxs while version documents and tarballs serve normally —
    * the shape of a real registry incident, where the metadata API degrades and
    * the CDN in front of the tarballs does not. It is the one arrangement that
    * makes a *resolution* fail without also making the install fail, which is
-   * what §15.23's expired-memo fallback exists for.
+   * what §04.4's expired-memo fallback exists for.
    */
   | "packument_error"
   | "untrusted_key";
@@ -63,7 +63,7 @@ interface PublishedVersion {
   /** What `dist.integrity` claims — normally the tarball's own digest. */
   integrity: string;
   /**
-   * §15.35e — when this version was published, ISO-8601, or `undefined` for a
+   * §04.1 — when this version was published, ISO-8601, or `undefined` for a
    * version published without one.
    *
    * Additive: a version published with no `time` simply does not appear in the
@@ -106,7 +106,7 @@ export class MockRegistry {
   /** When set, `dist.tarball` is advertised on this origin instead (row 83). */
   tarballOrigin?: string;
   /**
-   * §15.9 — what `GET /-/npm/v1/keys` publishes.
+   * §06.3 — what `GET /-/npm/v1/keys` publishes.
    *
    * `undefined` is a 404, and it is the default on purpose: a row that has not
    * opted in must not accidentally acquire a working key refresh, or the rows
@@ -116,7 +116,7 @@ export class MockRegistry {
   /**
    * A path the whole registry lives under, e.g. `/artifactory/api/npm/npm`.
    *
-   * §15.3 requires the override's *path prefix* to be prepended when a URL is
+   * §05.2 requires the override's *path prefix* to be prepended when a URL is
    * rebased, and row 152 asserts it is prepended exactly once. A mock that only
    * ever served from the root could not tell a doubled prefix from a correct
    * one — it would 404 either way, and both look like "the test failed".
@@ -141,7 +141,7 @@ export class MockRegistry {
   /**
    * One trust-store entry for the key this mock signs with.
    *
-   * §15.9's `/-/npm/v1/keys` document and §15.10's origin-keyed
+   * §06.3's `/-/npm/v1/keys` document and §02.6's origin-keyed
    * `COREPACK_INTEGRITY_KEYS` are both built from these, so a row can put the
    * *same* key under a different origin, or under a keyid that does not match
    * what was signed, and tell the two selectors apart.
@@ -200,7 +200,7 @@ export class MockRegistry {
     entry.versions.set(version, {
       tarball,
       integrity: sriOf(tarball),
-      // §15.35e — republishing the same version keeps a time already recorded,
+      // §04.1 — republishing the same version keeps a time already recorded,
       // so `publish(v, …)` followed by `publish(v, …, {distTags})` (which is how
       // several rows set a dist-tag) does not silently undate it.
       time: options?.time?.toISOString() ?? entry.versions.get(version)?.time,
@@ -254,7 +254,7 @@ export class MockRegistry {
     }
     const path = raw.slice(this.basePath.length) || "/";
 
-    // §15.9's key document, ahead of package routing: `/-/npm/v1/keys` would
+    // §06.3's key document, ahead of package routing: `/-/npm/v1/keys` would
     // otherwise be read as a package named `-`.
     if (path === KEYS_PATH) {
       if (this.publishedKeys === undefined) {
@@ -273,7 +273,7 @@ export class MockRegistry {
     }
 
     // The base every advertised URL is written against: whatever host the tool
-    // believes it is talking to, so `dist.tarball` passes §14.9's host check in
+    // believes it is talking to, so `dist.tarball` passes §05.2's host check in
     // both the default-registry and the COREPACK_NPM_REGISTRY mode.
     const base = `${new URL(original).origin}${this.basePath}`;
 
@@ -309,7 +309,7 @@ export class MockRegistry {
       }
       const document: Record<string, unknown> = { name, "dist-tags": entry.distTags, versions };
 
-      // §15.35e — `time` belongs to the **full** packument only. A client asking
+      // §04.1 — `time` belongs to the **full** packument only. A client asking
       // for `application/vnd.npm.install-v1+json` gets the abbreviated document,
       // which npm strips it from, and so does this mock: serving dates to that
       // client anyway would let an implementation that never switched its
@@ -338,13 +338,13 @@ export class MockRegistry {
   /**
    * @param endpoint Which document this is going into: `GET /<pkg>` or
    * `GET /<pkg>/<version>`. They differ only under `root_only_signatures`, which
-   * is exactly the Artifactory shape §15.8 exists for.
+   * is exactly the Artifactory shape §06.3 exists for.
    */
   #versionDoc(name: string, version: string, base: string, endpoint: "root" | "version"): unknown {
     const published = this.#packages.get(name)!.versions.get(version)!;
     const basename = name.split("/").pop()!;
 
-    // §15.7 tier 1 — the metadata shape corepack destructures blind.
+    // §06.1 tier 1 — the metadata shape corepack destructures blind.
     if (this.mode === "no_dist") {
       return { name, version };
     }
@@ -395,7 +395,7 @@ export class MockRegistry {
 }
 
 /**
- * §05.2 / §15.35e — whether this request asked for the *full* packument.
+ * §05.2 / §04.1 — whether this request asked for the *full* packument.
  *
  * Anything naming the abbreviated media type is served the abbreviated document,
  * whatever `q=` it attached: that is the header §05.2 mandates on every path but

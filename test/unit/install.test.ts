@@ -185,11 +185,11 @@ function packument(options: {
   version: string;
   tarball: string;
   integrityOf?: Uint8Array;
-  /** §15.7's legacy digest — the only thing a pre-integrity registry publishes. */
+  /** §06.1's legacy digest — the only thing a pre-integrity registry publishes. */
   shasumOf?: Uint8Array;
   keyid?: string;
   signWith?: KeyObject;
-  /** Omit `dist` entirely, the way #570's private registries do (§15.7 tier 1). */
+  /** Omit `dist` entirely, the way #570's private registries do (§06.1 tier 1). */
   noDist?: boolean;
 }): unknown {
   const dist: Record<string, unknown> = { tarball: options.tarball };
@@ -272,7 +272,7 @@ describe("marker hit (§07.2, test 96)", () => {
     await mkdir(location, { recursive: true });
     await writeFile(
       join(location, ".jup"),
-      // §15.11 redirected this row: the marker used to be allowed to record any
+      // §06.1 redirected this row: the marker used to be allowed to record any
       // hash at all, so a pinned reference adopted whatever was in the
       // directory. §07.2's *directory* name still carries no build suffix —
       // which is what this row is about — but the marker now has to prove the
@@ -290,7 +290,7 @@ describe("marker hit (§07.2, test 96)", () => {
     expect(requested).toEqual([]);
   });
 
-  it("does not adopt an install whose marker records a different digest (§15.11)", async () => {
+  it("does not adopt an install whose marker records a different digest (§06.1)", async () => {
     // Traced against the built binary and recorded against P12: §07.2 gives
     // `pnpm@9.1.0+sha512.<A>` and `+sha512.<B>` one directory, so the second
     // silently ran the first's bytes. The pinned reference now installs into a
@@ -350,7 +350,7 @@ describe("download shapes (§07.3, §07.4)", () => {
     expect(await readFile(join(spec.location, "bin/pnpm.cjs"), "utf8")).toBe(
       "console.log('pnpm')\n",
     );
-    // §07.7, §15.17 — the package's own `bin` string wins over the table's band,
+    // §07.7 — the package's own `bin` string wins over the table's band,
     // and a string becomes `{ <package name>: <path> }`.
     expect(spec.bin).toEqual({ pnpm: "./bin/pnpm.cjs" });
     // §06.2 — a full extraction hashes the raw tarball stream.
@@ -375,9 +375,9 @@ describe("download shapes (§07.3, §07.4)", () => {
     const script = "#!/usr/bin/env node\nconsole.log('yarn 3')\n";
     routes["/custom/yarn.js"] = bytesRoute(Buffer.from(script));
 
-    // §15.41 — no *band* produces a single file any more, so the `.js` shape is
+    // §02.5 — no *band* produces a single file any more, so the `.js` shape is
     // reached only by a URL reference (§04.1 step 1). The hash in the fragment
-    // is what clears §15.11: a bare URL publishes no signature.
+    // is what clears §06.1: a bare URL publishes no signature.
     const spec = await ensureInstalled({
       name: "yarn",
       reference: `${origin}/custom/yarn.js#sha512.${hashOf(Buffer.from(script))}`,
@@ -393,7 +393,7 @@ describe("download shapes (§07.3, §07.4)", () => {
     expect(requested).toEqual([`${origin}/custom/yarn.js`]);
   });
 
-  it("installs the whole @yarnpkg/cli-dist tarball, unfiltered (§15.41)", async () => {
+  it("installs the whole @yarnpkg/cli-dist tarball, unfiltered (§02.5)", async () => {
     const pair = keypair();
     const tarball = await tarballOf({
       "package.json": JSON.stringify({ name: "@yarnpkg/cli-dist", version: "3.0.0" }),
@@ -617,7 +617,7 @@ describe("registry signatures (§06.1 row 2)", () => {
     expect(spec.hash).toBe(`sha512.${hashOf(evil)}`);
   });
 
-  it("refuses when the registry publishes neither a signature nor a digest (§15.7)", async () => {
+  it("refuses when the registry publishes neither a signature nor a digest (§06.1)", async () => {
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.1.0"}` });
     routes["/pnpm/9.1.0"] = jsonRoute(
       packument({
@@ -631,7 +631,7 @@ describe("registry signatures (§06.1 row 2)", () => {
 
     const error = await rejection(ensureInstalled({ name: "pnpm", reference: "9.1.0" }));
 
-    // Nothing signed *and* nothing to compare the bytes against: §15.7's
+    // Nothing signed *and* nothing to compare the bytes against: §06.1's
     // "otherwise refuse". Corepack installs these bytes unverified.
     expect(error.message).toBe(
       `pnpm@9.1.0 metadata from ${origin} has neither "dist.integrity" nor "dist.shasum"`,
@@ -641,14 +641,14 @@ describe("registry signatures (§06.1 row 2)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.7 — the three-outcome tiering on the download path
+ * §06.1 — the three-outcome tiering on the download path
  * ------------------------------------------------------------------ */
 
-describe("§15.7 registry metadata tiering", () => {
+describe("§06.1 registry metadata tiering", () => {
   /**
    * `pnpm@<version>` served with whatever `dist` shape a test asks for.
    *
-   * Every test uses its own version: §15.7's warning is emitted once per package
+   * Every test uses its own version: §06.1's warning is emitted once per package
    * and version for the life of the process, which is the behaviour under test —
    * so sharing a version between tests would silence all but the first.
    */
@@ -737,7 +737,7 @@ describe("§15.7 registry metadata tiering", () => {
   it("§06.1 row 1: a pinned hash still overrides the tiering, and warns once", async () => {
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.6.0"}` });
     await serve("9.6.0", {}, tarball);
-    // Mandating signatures must not override §14.21: the user's own hash is the
+    // Mandating signatures must not override §06.1: the user's own hash is the
     // stronger assertion, and it is what gets checked.
     process.env.COREPACK_REQUIRE_SIGNATURES = "1";
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -750,11 +750,11 @@ describe("§15.7 registry metadata tiering", () => {
     expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("does not publish signatures"));
-    // §15.8 must not add a request on a path that is already verified.
+    // §06.3 must not add a request on a path that is already verified.
     expect(requested).not.toContain(`${origin}/pnpm`);
   });
 
-  it("§15.8: signatures absent from the version endpoint are read from the package root", async () => {
+  it("§06.3: signatures absent from the version endpoint are read from the package root", async () => {
     const pair = keypair();
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.7.0"}` });
     const signed = packument({
@@ -781,7 +781,7 @@ describe("§15.7 registry metadata tiering", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("§15.8: a signed happy path never asks the package root", async () => {
+  it("§06.3: a signed happy path never asks the package root", async () => {
     const pair = keypair();
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.8.0"}` });
     await serve(
@@ -801,17 +801,17 @@ describe("§15.7 registry metadata tiering", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §14.10 — the hole, and the way §15.41 closed it instead
+ * §06.2 — the hole, and the way §02.5 closed it instead
  *
- * §14.10 widened §06.1 row 2 so that the *stream* was hashed even when the
+ * §06.2 widened §06.1 row 2 so that the *stream* was hashed even when the
  * download was filtered down to one file, which is what left Yarn Berry
- * unverified behind a corporate mirror. §15.41 removed the filtered path
+ * unverified behind a corporate mirror. §02.5 removed the filtered path
  * altogether — Berry is an ordinary `@yarnpkg/cli-dist` tarball — so the
  * widening has no special case left to cover. These rows stay because what
  * they actually assert is that Berry's bytes are checked at all.
  * ------------------------------------------------------------------ */
 
-describe("§14.10 — Berry's tarball is verified like any other (§15.41)", () => {
+describe("§06.2 — Berry's tarball is verified like any other (§02.5)", () => {
   const berry = {
     "package.json": JSON.stringify({ name: "@yarnpkg/cli-dist", version: "3.0.0" }),
     "bin/yarn.js": "console.log('berry')\n",
@@ -842,7 +842,7 @@ describe("§14.10 — Berry's tarball is verified like any other (§15.41)", () 
     const signed = await tarballOf(berry);
     // A tampered mirror. The archive still extracts cleanly, so nothing but the
     // digest can tell: corepack's guard (`!registry.bin`) skipped this check
-    // entirely for Berry, which is the hole §14.10 was written against.
+    // entirely for Berry, which is the hole §06.2 was written against.
     const tampered = await tarballOf({ ...berry, "bin/yarn.js": "steal(process.env)\n" });
     expect(hashOf(tampered)).not.toBe(hashOf(signed));
 
@@ -890,17 +890,17 @@ describe("§14.10 — Berry's tarball is verified like any other (§15.41)", () 
 });
 
 /* ------------------------------------------------------------------ *
- * §05.5 — the download prompt
+ * §05.4 — the download prompt
  * ------------------------------------------------------------------ */
 
-describe("download prompt (§05.5, tests 46, 47)", () => {
+describe("download prompt (§05.4, tests 46, 47)", () => {
   /**
    * What these rows assert is the notice — one line, naming the artifact that
    * is about to be fetched — and the silence around it. The artifact itself is
-   * incidental, so it is the cheapest one that still has to clear §15.11: a
+   * incidental, so it is the cheapest one that still has to clear §06.1: a
    * URL reference to a `.js`, with the hash in the fragment as its tier.
    *
-   * It used to be a `yarn@3.0.0` spec pointing at `repo.yarnpkg.com`. §15.41
+   * It used to be a `yarn@3.0.0` spec pointing at `repo.yarnpkg.com`. §02.5
    * moved that band to an `@yarnpkg/cli-dist` tarball, which would drag a
    * packument, a signature and a trusted key into a test about a prompt.
    */
@@ -1009,10 +1009,10 @@ describe("download prompt (§05.5, tests 46, 47)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §04.7 — last-known-good auto-bump
+ * §04.8 — last-known-good auto-bump
  * ------------------------------------------------------------------ */
 
-describe("last-known-good auto-bump (§04.7)", () => {
+describe("last-known-good auto-bump (§04.8)", () => {
   async function servePnpm(): Promise<Uint8Array> {
     const tarball = await tarballOf({ "package.json": `{"name":"pnpm","version":"9.1.0"}` });
     routes["/pnpm/9.1.0"] = jsonRoute(

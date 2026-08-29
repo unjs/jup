@@ -1,5 +1,5 @@
 /**
- * The two error helpers §15 added, and the round trip that keeps them honest.
+ * The two error helpers behind §12.6's diagnostics, and the round trip that keeps them honest.
  *
  * `parseBadStatus` reads back a sentence {@link messages.badStatus} produced, so
  * the pattern and the template have to agree byte for byte. Nothing enforces
@@ -40,7 +40,7 @@ describe("parseBadStatus", () => {
   });
 });
 
-describe("explainFetchFailure — §15.19, §15.35j", () => {
+describe("explainFetchFailure — §12.6", () => {
   const what = { name: "pnpm", range: "^11.0.0", version: "11.9.9" };
 
   it("names the seeding command when the network is disabled", () => {
@@ -109,13 +109,13 @@ describe("explainFetchFailure — §15.19, §15.35j", () => {
 });
 
 /**
- * §11.5 / §14.23 — the advisory mute, and the half of stderr it must not reach.
+ * §11.3 — the advisory mute, and the half of stderr it must not reach.
  *
  * The gate is three lines of code; what needs a test is the *classification*.
  * The negative control lives in `manifest.test.ts`, next to the `devEngines`
  * warnings whose text §13 matches byte for byte.
  */
-describe("advisory — §11.5", () => {
+describe("advisory — §11.3", () => {
   let warn: MockInstance<typeof console.warn>;
   let originalEnv: NodeJS.ProcessEnv;
 

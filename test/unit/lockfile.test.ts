@@ -1,5 +1,5 @@
 /**
- * §15.23 — `jup.lock`.
+ * §04.4 — `jup.lock`.
  *
  * The conformance rows prove the pipeline end to end; these prove the rules the
  * pipeline leans on, in particular the two that are invisible from outside: an
@@ -69,7 +69,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("usesLockfile — §15.23", () => {
+describe("usesLockfile — §04.4", () => {
   it("is false for an exact version, so an exact pin never touches the file", () => {
     for (const range of ["1.22.4", "11.1.2", "4.0.0-rc.1", "1.22.4+sha1.abc"]) {
       expect(usesLockfile({ name: "yarn", range }), range).toBe(false);
@@ -94,7 +94,7 @@ describe("usesLockfile — §15.23", () => {
   });
 });
 
-describe("readLockfile — §15.23", () => {
+describe("readLockfile — §04.4", () => {
   it("returns null for a missing file", () => {
     expect(readLockfile(dir)).toBeNull();
   });
@@ -145,7 +145,7 @@ describe("readLockfile — §15.23", () => {
   });
 });
 
-describe("readResolution — §15.23", () => {
+describe("readResolution — §04.4", () => {
   it("returns the recorded version with its digest as a build suffix", () => {
     writeResolution(dir, RANGE, { name: "pnpm", reference: "11.1.2" }, HASH);
 
@@ -195,7 +195,7 @@ describe("readResolution — §15.23", () => {
   });
 });
 
-describe("writeResolution / removeResolution — §15.23", () => {
+describe("writeResolution / removeResolution — §04.4", () => {
   it("writes the documented shape: two-space indent, sorted keys, trailing newline", () => {
     writeResolution(
       dir,
@@ -276,7 +276,7 @@ describe("writeResolution / removeResolution — §15.23", () => {
   });
 });
 
-describe("the SRI codec — §15.23", () => {
+describe("the SRI codec — §04.4", () => {
   it("round-trips a hash through the spelling npm uses", () => {
     expect(integrityFromHash(HASH)).toMatch(/^sha512-[\d+/A-Za-z]+=*$/);
     expect(hashFromIntegrity(integrityFromHash(HASH)!)).toBe(HASH);
@@ -306,10 +306,10 @@ describe("the SRI codec — §15.23", () => {
 });
 
 /* -------------------------------------------------------------------------- *
- * §15.28 — a per-host artifact has no single digest
+ * §04.4 — a per-host artifact has no single digest
  * -------------------------------------------------------------------------- */
 
-describe("per-host resolutions — §15.28 within §15.23", () => {
+describe("per-host resolutions (§04.4)", () => {
   const BUN = { name: "bun", range: "^1.4.0" };
   const OTHER = "darwin-arm64" === hostTarget() ? "linux-x64" : "darwin-arm64";
 
@@ -428,7 +428,7 @@ describe("per-host resolutions — §15.28 within §15.23", () => {
     // flat digest for a 12 — of the wrapper package, which is not what this
     // build downloads. Reading it back as a pin would fail every machine that
     // had run that build, on a file the user committed, so the version stands
-    // and the digest does not (§15.28). npm's signature over the host's own
+    // and the digest does not (§04.4). npm's signature over the host's own
     // artifact is what verifies the bytes instead (§06.3).
     const range = { name: "pnpm", range: "12" };
     write(
@@ -452,7 +452,7 @@ describe("per-host resolutions — §15.28 within §15.23", () => {
   });
 });
 
-describe("the resolution cache — §15.23", () => {
+describe("the resolution cache — §04.4", () => {
   it("writes into node_modules/.jup, with an expiry a day out", () => {
     const now = 1_700_000_000_000;
     modules();
@@ -597,7 +597,7 @@ describe("the resolution cache — §15.23", () => {
   });
 });
 
-describe("readKnownResolution — §15.23's read order", () => {
+describe("readKnownResolution — §04.4's read order", () => {
   const LOCATOR = { name: "pnpm", reference: "11.1.2" };
 
   it("prefers the recorded resolution and does not read the memo at all", () => {
@@ -628,7 +628,7 @@ describe("readKnownResolution — §15.23's read order", () => {
     const known = readKnownResolution(dir, RANGE, now + CACHE_TTL_MS + 1);
 
     // Nothing to run on without asking — but the stale answer survives for the
-    // caller that has to degrade rather than block (§15.23, §04.4).
+    // caller that has to degrade rather than block (§04.4, §04.5).
     expect(known.locator).toBeNull();
     expect(known.cached).toEqual({
       locator: { ...LOCATOR, reference: `11.1.2+${HASH}` },

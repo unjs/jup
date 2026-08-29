@@ -1,5 +1,5 @@
 /**
- * §15.38 row 176 — `bin` paths come from the verified package (§15.17).
+ * row 176 — `bin` paths come from the verified package (§07.7).
  *
  * #775: corepack hardcodes each package manager's entry point and breaks every
  * time one restructures. pnpm has forced a new range band twice already
@@ -8,8 +8,8 @@
  * maintainer states the tradeoff honestly: reading `bin` from the download is
  * more correct but trusts attacker-controlled metadata.
  *
- * §15.17 takes both horns, because verification already happened — the
- * `package.json` being read has cleared §15.11's tier — and §14.13 confines the
+ * §07.7 takes both horns, because verification already happened — the
+ * `package.json` being read has cleared §06.1's tier — and §08.1 confines the
  * paths it yields to the install directory.
  *
  * **The band does not get a veto.** Every band in the shipped table is
@@ -21,8 +21,8 @@
  *
  * The version doing the restructuring here is a pnpm 11 and not the pnpm 12 the
  * issue named, because 12 restructured further than #775 imagined: it is a
- * native binary now, and §15.28's band fetches it from `@pnpm/exe.<host>`, a
- * package with no `bin` for §15.17 to read. Nothing about the rule changed —
+ * native binary now, and §02.4's band fetches it from `@pnpm/exe.<host>`, a
+ * package with no `bin` for §07.7 to read. Nothing about the rule changed —
  * what changed is which of pnpm's bands can demonstrate it. The uncovered-version
  * rows use `npm` for a related reason: pnpm's newest band is per-host, and it is
  * the band a version past the table falls forward onto.
@@ -77,14 +77,14 @@ const UNCOVERED = npmTarball({
   "dist/npx-cli.js": pmScript("npx", "12.0.0"),
 });
 
-/** A package that declares nothing: the band is the fallback (§15.17 point 2). */
+/** A package that declares nothing: the band is the fallback (§07.7 point 2). */
 const SILENT = npmTarball({
   "package.json": `${JSON.stringify({ name: "pnpm", version: "11.9.8" })}\n`,
   "bin/pnpm.mjs": pmScript("pnpm", "11.9.8"),
   "bin/pnpx.mjs": pmScript("pnpx", "11.9.8"),
 });
 
-/** §14.13 — the same package, declaring a `bin` that climbs out of the install. */
+/** §08.1 — the same package, declaring a `bin` that climbs out of the install. */
 const ESCAPING = npmTarball({
   "package.json": `${JSON.stringify({
     name: "pnpm",
@@ -121,7 +121,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.17 — `bin` comes from the verified package", () => {
+describe("§07.7 — `bin` comes from the verified package", () => {
   it("176: a restructured pnpm runs from the entry point its own package.json declares", async () => {
     // The shipped table: `>=11.0.0` covers this version and points at
     // `./bin/pnpm.mjs`, which this package does not contain. The band loses.
@@ -145,7 +145,7 @@ describe("§15.17 — `bin` comes from the verified package", () => {
   });
 
   it("176: a package that declares no `bin` falls back to its range band", async () => {
-    // §15.17 point 2. The table is still the safety net for anything published
+    // §07.7 point 2. The table is still the safety net for anything published
     // without a `bin` map; it is just no longer the first answer.
     const fixture = createFixture({ packageManager: `pnpm@11.9.8+sha512.${hashOf(SILENT)}` });
 
@@ -156,8 +156,8 @@ describe("§15.17 — `bin` comes from the verified package", () => {
   });
 
   it("176: DEBUG=corepack reports the band the package disagreed with", async () => {
-    // §15.17 point 3, second bullet. The run succeeds either way; without this
-    // note nothing would ever say the band has rotted (§16.9).
+    // §07.7 point 3, second bullet. The run succeeds either way; without this
+    // note nothing would ever say the band has rotted (§16).
     const fixture = createFixture({ packageManager: `pnpm@11.9.9+sha512.${hashOf(MOVED)}` });
 
     const result = await run(["pnpm", "--version"], {
@@ -173,7 +173,7 @@ describe("§15.17 — `bin` comes from the verified package", () => {
   });
 
   it("176: DEBUG=corepack notes a version no band covers, so it is not lost", async () => {
-    // §15.17 point 3, first bullet — the tool whose table stops below npm 12.
+    // §07.7 point 3, first bullet — the tool whose table stops below npm 12.
     const fixture = createFixture({ packageManager: `npm@12.0.0+sha512.${hashOf(UNCOVERED)}` });
 
     const result = await run(["npm", "--version"], {
@@ -198,9 +198,9 @@ describe("§15.17 — `bin` comes from the verified package", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("176: §14.13 — a `bin` that escapes the install directory is refused", async () => {
+  it("176: §08.1 — a `bin` that escapes the install directory is refused", async () => {
     // The security-critical half. The package is verified, so its metadata is
-    // "trusted" in the only sense §15.17 claims; that is not a licence to write
+    // "trusted" in the only sense §07.7 claims; that is not a licence to write
     // the handover target wherever the package says.
     const fixture = createFixture({ packageManager: `pnpm@11.9.7+sha512.${hashOf(ESCAPING)}` });
 

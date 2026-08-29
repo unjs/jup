@@ -45,7 +45,7 @@ describe(`UseCommand`, () => {
         });
       });
     });
-    // SKIP (jup §15.26/§15.27): the usage line printed with the error carries
+    // SKIP (jup §09): the usage line printed with the error carries
     // jup's extra flags — `$ corepack use [--here] [--pin-style=suffix|sidecar]
     // <pattern>` — where Corepack has `$ corepack use <pattern>`. The refusal
     // itself, and its message, match.

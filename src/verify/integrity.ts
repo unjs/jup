@@ -14,7 +14,7 @@ import { DEFAULT_REGISTRY, getTrustedKeys as getEmbeddedTrustedKeys } from "../c
 import { advisory, messages, UsageError } from "../errors-cold.ts";
 import type { RegistrySignature, TrustedKey, TrustStore } from "../types.ts";
 
-/** §14.11 — explicit allowlist; anything else is a clear error, not a crash. */
+/** §06.2 — explicit allowlist; anything else is a clear error, not a crash. */
 export const SUPPORTED_HASH_ALGOS = ["sha1", "sha224", "sha256", "sha384", "sha512"] as const;
 
 export type HashAlgo = (typeof SUPPORTED_HASH_ALGOS)[number];
@@ -28,7 +28,7 @@ const DIGEST_BYTES: Record<HashAlgo, number> = {
   sha512: 64,
 };
 
-/** §14.11 — a pin is not rejected for being weak, but it is called out once. */
+/** §06.2 — a pin is not rejected for being weak, but it is called out once. */
 const WEAK_HASH_ALGOS = new Set(["sha1", "md5"]);
 
 const warnedWeakAlgos = new Set<string>();
@@ -58,7 +58,7 @@ export function assertSupportedAlgo(algo: string, userPinned = false): HashAlgo 
   return normalized as HashAlgo;
 }
 
-/** Hex digest of a stream, computed as it flows (§16.5). */
+/** Hex digest of a stream, computed as it flows (§06.2). */
 export async function hashStream(
   stream: ReadableStream<Uint8Array>,
   algo: string,
@@ -90,7 +90,7 @@ export async function hashFile(path: string, algo: string): Promise<string> {
 }
 
 /**
- * §14.12 — parse `<algo>-<base64>` without assuming an algorithm. SRI strings
+ * §06.2 — parse `<algo>-<base64>` without assuming an algorithm. SRI strings
  * may carry multiple space-separated entries and `?opt` suffixes; the first
  * entry wins, and algorithms outside the allowlist are rejected.
  */
@@ -112,7 +112,7 @@ export function parseSri(integrity: string): { algo: HashAlgo; hex: string } {
   return { algo, hex: digest.toString("hex") };
 }
 
-/** §14.11 — constant-time. */
+/** §06.2 — constant-time. */
 export function compareDigest(expected: string, actual: string): boolean {
   const a = Buffer.from(expected, "utf8");
   const b = Buffer.from(actual, "utf8");
@@ -132,14 +132,14 @@ export function shouldSkipIntegrityCheck(): boolean {
 }
 
 /**
- * §06.4, §15.10 — the trust store in force for one registry origin.
+ * §06.4 — the trust store in force for one registry origin.
  *
  * `COREPACK_INTEGRITY_KEYS` **replaces** the embedded store (it never merges).
  * Both compatibility shapes are accepted: `{"npm": [...]}` applies to the
  * active registry, while §02.6's form is keyed by registry origin.
  * Malformed JSON throws here, at verification time, not at startup (§06.4).
  *
- * Note the env var is ineligible in an env file (§14.5); `env.ts` drops it
+ * Note the env var is ineligible in an env file (§03.2); `env.ts` drops it
  * before it can reach `process.env`, so reading it here is safe.
  */
 export function getTrustedKeys(registryOrigin?: string): TrustedKey[] {
@@ -175,7 +175,7 @@ export class UntrustedKeyidError extends UsageError {}
  * §06.3 — verify npm's ECDSA signature over `<packageName>@<version>:<integrity>`.
  *
  * Walks trusted keys **in order**, taking the first whose `keyid` matches a
- * signature. Per §14.4, expired keys are excluded from selection. The key
+ * signature. Per §06.5, expired keys are excluded from selection. The key
  * material is a bare base64 DER SPKI; the signature is base64 DER `(r, s)`; the
  * curve is whatever that SPKI declares.
  */
@@ -186,7 +186,7 @@ export function verifySignature(input: {
   version: string;
   registryOrigin?: string;
   /**
-   * §15.9 — the trust store to walk, when it is not the configured one.
+   * §06.3 — the trust store to walk, when it is not the configured one.
    *
    * `trust.ts` passes the embedded set merged with the keys it just refreshed,
    * for the retry. Nothing else supplies it, so the ordinary path still reads
@@ -220,7 +220,7 @@ export function verifySignature(input: {
     }
     const expiresAt = expiryOf(key);
     if (expiresAt !== undefined) {
-      // §14.4 — an expired key is never *selected*: the walk keeps going, so a
+      // §06.5 — an expired key is never *selected*: the walk keeps going, so a
       // live key later in the store always wins. The first expired match is
       // remembered only for the fallback below, which needs to name it.
       expired ??= { key, signature, expires: expiresAt };
@@ -249,11 +249,11 @@ export function verifySignature(input: {
       // and still the more actionable half.
       throw new Error(messages.expiredKey(expired.key.keyid, expired.expires));
     }
-    // §15.9's one repairable failure — see {@link UntrustedKeyidError}. Note
+    // §06.3's one repairable failure — see {@link UntrustedKeyidError}. Note
     // that the branch above is deliberately *not* repairable: the keyid matched,
     // so a refresh would return the same key with the same expiry. (A packument
     // carrying both an expired and a fresh signature would be repairable in
-    // principle; npm publishes one signature per version, and §15.9 scopes the
+    // principle; npm publishes one signature per version, and §06.3 scopes the
     // refresh to "no trusted key matched" rather than to "nothing usable
     // matched".)
     throw new UntrustedKeyidError(messages.notSignedByTrustedKeys({ signatures, trustedKeys }));

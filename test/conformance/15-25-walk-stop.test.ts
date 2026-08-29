@@ -1,5 +1,5 @@
 /**
- * §15.25 — symmetric manifest-walk stop conditions (rows 187–188).
+ * §03.1 — symmetric manifest-walk stop conditions (rows 187–188).
  *
  * Corepack's loop condition is `!selection || !selection.data.packageManager`,
  * so only one of the two package-manager fields halts the climb (#779, fix PR
@@ -24,7 +24,7 @@ function ancestorManifest(fixture: { root: string }, data: unknown): void {
   writeFileSync(join(fixture.root, "package.json"), `${JSON.stringify(data, undefined, 2)}\n`);
 }
 
-describe("§15.25 walk stop conditions", () => {
+describe("§03.1 walk stop conditions", () => {
   it("187: a devEngines-only manifest stops the walk; the parent's pin does not win", async () => {
     const fixture = createFixture({
       name: "nested",

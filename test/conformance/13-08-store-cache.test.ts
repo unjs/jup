@@ -1,5 +1,5 @@
 /**
- * §13.8 — store, cache and offline operation (rows 86–96), plus §15.44's rows
+ * §13.8 — store, cache and offline operation (rows 86–96), plus §07.9's rows
  * 252 and 253.
  *
  * The store's whole concurrency story is "rename is atomic and losing the race is
@@ -34,8 +34,8 @@ import {
 const registry = new MockRegistry();
 
 /**
- * Yarn Berry, hash-pinned. §15.41 moved it onto `@yarnpkg/cli-dist`, so it now
- * clears §15.11 on the mock's signature alone and the pin is no longer load
+ * Yarn Berry, hash-pinned. §02.5 moved it onto `@yarnpkg/cli-dist`, so it now
+ * clears §06.1 on the mock's signature alone and the pin is no longer load
  * bearing — but these rows are about the *store* (banners, atomicity, offline
  * operation), and a pinned reference is the one they have always quoted.
  */
@@ -82,16 +82,16 @@ describe("§13.8 store, cache and offline", () => {
 
   it("86: corepack install leaves lastKnownGood.json untouched", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-    // Same major and strictly below 2.2.2, so §04.7's guarded bump would fire —
+    // Same major and strictly below 2.2.2, so §04.8's guarded bump would fire —
     // §09.2 says this command does not touch the file, and being specific it
-    // wins over §04.7's general rule.
+    // wins over §04.8's general rule.
     const lastKnownGood = join(fixture.home, "lastKnownGood.json");
     writeFileSync(lastKnownGood, `${JSON.stringify({ yarn: "2.0.0" }, undefined, 2)}\n`);
 
     const result = await run(["install"], {
       ...fixture,
       registry,
-      // The harness pins this to `0`, which would disable §04.7's bump on its
+      // The harness pins this to `0`, which would disable §04.8's bump on its
       // own; the point here is that `install` leaves the file alone even when
       // the bump is enabled.
       env: trusted({ COREPACK_DEFAULT_TO_LATEST: undefined }),
@@ -306,21 +306,21 @@ describe("§13.8 store, cache and offline", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.44 — rows 252 and 253
+ * §07.9 — rows 252 and 253
  *
- * The backstop for §15.43. An install shimmed by an older build has
- * the store path §14.26 used to bake in still sitting in its stub's
+ * The backstop for §10.2. An install shimmed by an older build has
+ * the store path §10.2 used to bake in still sitting in its stub's
  * shebang, and `cache clean` deleting the file underneath it leaves
  * every shim dying with `bad interpreter` (exit 126) and `jup` itself
  * unreachable behind the broken `node` shim (exit 127).
  *
  * The state is reproduced by rewriting the stub's first line in a
  * private copy of the tool, which is exactly what such an install
- * looks like on disk — and the only way to reach it now that §15.43
+ * looks like on disk — and the only way to reach it now that §10.2
  * refuses to write it.
  * ------------------------------------------------------------------ */
 
-describe.skipIf(process.platform === "win32")("§15.44 cache clean spares the interpreter", () => {
+describe.skipIf(process.platform === "win32")("§07.9 cache clean spares the interpreter", () => {
   /** The one stub these rows pin. Any name in the table would do. */
   const PINNED_STUB = "yarn.mjs";
 
@@ -329,7 +329,7 @@ describe.skipIf(process.platform === "win32")("§15.44 cache clean spares the in
    * stub folder is a set of files every other suite reads.
    *
    * The whole folder is normalised to `#!/usr/bin/env node` before `interpreter`
-   * is pinned into one file, which is what makes the row say what it means. §10.2
+   * is pinned into one file, which is what makes the row say what it means. §10.3
    * gives every name its own stub, so the copied folder holds a dozen of them,
    * and their first lines are whatever the working tree happened to have — a
    * developer's own `enable node` leaves absolute paths in a source checkout's
@@ -416,7 +416,7 @@ describe.skipIf(process.platform === "win32")("§15.44 cache clean spares the in
     expect(existsSync(join(fixture.home, "v1"))).toBe(false);
 
     // The other half of the row: a stub whose interpreter is outside `<home>` —
-    // the only state §15.43 now produces — behaves exactly as §15.35l fixed it,
+    // the only state §10.2 now produces — behaves exactly as §12.11 fixed it,
     // with nothing added to either stream.
     const pinned = createFixture();
     seedPackageManager(pinned.home, "pnpm", "11.1.2");

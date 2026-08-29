@@ -1,5 +1,5 @@
 /**
- * TLS configuration and diagnostics — §15.4, conformance row 153.
+ * TLS configuration and diagnostics — §05.1, conformance row 153.
  *
  * Everything here runs against a **real** TLS server holding
  * `test/_fixtures/tls.ts`, which is its own CA and is trusted by nothing until a
@@ -150,7 +150,7 @@ afterEach(async () => {
  * Settings
  * ------------------------------------------------------------------ */
 
-describe("tlsSettings (§15.4)", () => {
+describe("tlsSettings (§05.1)", () => {
   it("verifies with the platform trust store when nothing is configured", () => {
     expect(tlsSettings()).toEqual({ verify: true });
     expect(tlsConfigured()).toBe(false);
@@ -237,7 +237,7 @@ function coded(code: string, message = "boom"): Error {
   return Object.assign(new Error(message), { code });
 }
 
-describe("classifyTlsFailure (§15.4)", () => {
+describe("classifyTlsFailure (§05.1)", () => {
   it.for([
     ["UNABLE_TO_GET_ISSUER_CERT"],
     ["UNABLE_TO_GET_ISSUER_CERT_LOCALLY"],
@@ -336,12 +336,12 @@ describe("an untrusted certificate authority (row 153)", () => {
       (error_: Error) => error_,
     );
 
-    // Not `Error when performing the request to …`: §15.4 forbids surfacing a
+    // Not `Error when performing the request to …`: §05.1 forbids surfacing a
     // bare transport error for exactly this case.
     expect((error as Error).message).toBe(messages.tlsUnknownAuthority(`127.0.0.1:${origin.port}`));
     expect((error as Error).message).toContain("JUP_CAFILE");
     expect((error as Error).message).not.toContain("performing the request");
-    // §15.5 — the underlying reason survives, on the chain and in the stack.
+    // §05.1 — the underlying reason survives, on the chain and in the stack.
     expect((error as Error).cause).toBeDefined();
     expect((error as Error).stack).toContain("Caused by:");
   });
@@ -489,7 +489,7 @@ describe("applyTlsConfiguration", () => {
 
     applyTlsConfiguration({ cafile: path, cafileSource: "COREPACK_CAFILE", verify: true });
 
-    // Replacement, not extension: §15.4 states a precedence order ending at the
+    // Replacement, not extension: §05.1 states a precedence order ending at the
     // platform store, and npm's `cafile` replaces the default set too.
     // `getCACertificates` normalises the PEM with a trailing newline.
     expect(getCACertificates("default").map((pem) => pem.trim())).toEqual([CERT]);
@@ -505,10 +505,10 @@ describe("applyTlsConfiguration", () => {
   });
 
   /**
-   * §15.4, row 209 — `setDefaultCACertificates` returns nothing, so an unchecked
+   * §05.1, row 209 — `setDefaultCACertificates` returns nothing, so an unchecked
    * call is a wish. Without the readback both shapes below fail much later as a
    * bare `UNABLE_TO_GET_ISSUER_CERT`, which is the unexplained certificate error
-   * §15.4 exists to abolish — reached, this time, by a user who has already
+   * §05.1 exists to abolish — reached, this time, by a user who has already
    * configured the fix.
    */
   function stubTls(tls: Record<string, unknown>): void {
@@ -549,7 +549,7 @@ describe("applyTlsConfiguration", () => {
 
   it("209: leaves the check alone when the request is not going over fetch", () => {
     // `COREPACK_STRICT_SSL=0` routes through `node:https` with `ca` passed
-    // explicitly (§14.8), so the process trust store is not what carries it.
+    // explicitly (§05.1), so the process trust store is not what carries it.
     process.env.COREPACK_STRICT_SSL = "0";
     vi.spyOn(console, "warn").mockImplementation(() => {});
     stubTls({ setDefaultCACertificates: () => {}, getCACertificates: () => defaultCertificates });
@@ -565,7 +565,7 @@ describe("applyTlsConfiguration", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §01.3 / §16.3 — the warm path must not reach TLS
+ * §01.3 / §16, Build shape — the warm path must not reach TLS
  *
  * `main.test.ts` owns the module-graph budget, but its
  * `COLD_PATH_MODULES` list names modules explicitly, so a *new* cold
@@ -574,7 +574,7 @@ describe("applyTlsConfiguration", () => {
  * name `tls.ts` or `node:tls` at all.
  * ------------------------------------------------------------------ */
 
-describe("the warm path never reaches TLS (§16.3)", () => {
+describe("the warm path never reaches TLS (§16)", () => {
   const WARM = [
     "main.ts",
     "bin.ts",
@@ -610,10 +610,10 @@ describe("the warm path never reaches TLS (§16.3)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.1's middle tier — `cafile` / `ca` / `strict-ssl` from `.npmrc`
+ * §05.3's middle tier — `cafile` / `ca` / `strict-ssl` from `.npmrc`
  * ------------------------------------------------------------------ */
 
-describe("tlsSettings — the .npmrc tier (§15.1, §15.4)", () => {
+describe("tlsSettings — the .npmrc tier (§05.3, §05.1)", () => {
   const roots: string[] = [];
   let home: string;
   let savedHome: string | undefined;
@@ -626,7 +626,7 @@ describe("tlsSettings — the .npmrc tier (§15.1, §15.4)", () => {
     roots.push(root);
     home = join(root, "home");
     mkdirSync(home, { recursive: true });
-    // §15.1's home directory is `$HOME`, or `%USERPROFILE%` on Windows. Both
+    // §05.3's home directory is `$HOME`, or `%USERPROFILE%` on Windows. Both
     // spellings are redirected, so the row reads the fixture's `.npmrc` on
     // every platform rather than the developer's own.
     process.env.HOME = home;
@@ -659,7 +659,7 @@ describe("tlsSettings — the .npmrc tier (§15.1, §15.4)", () => {
     expect(tlsConfigured()).toBe(true);
   });
 
-  it("lets COREPACK_CAFILE outrank it (§15.4's precedence)", () => {
+  it("lets COREPACK_CAFILE outrank it (§05.1's precedence)", () => {
     userNpmrc("cafile=/etc/ssl/corp.pem\n");
     process.env.COREPACK_CAFILE = "/etc/ssl/env.pem";
 
@@ -685,7 +685,7 @@ describe("tlsSettings — the .npmrc tier (§15.1, §15.4)", () => {
     const settings = tlsSettings();
     expect(settings.verify).toBe(false);
     expect(settings.verifySource).toBe(`strict-ssl (${join(home, ".npmrc")})`);
-    // §15.4's verbatim sentence, naming the source rather than the setting.
+    // §05.1's verbatim sentence, naming the source rather than the setting.
     applyTlsConfiguration(settings);
     expect(warn).toHaveBeenCalledWith(
       messages.strictSslDisabled(`strict-ssl (${join(home, ".npmrc")})`),

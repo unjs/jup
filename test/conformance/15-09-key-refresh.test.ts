@@ -1,10 +1,10 @@
 /**
- * §15.38 rows 162–164 — trust-key freshness, decoupled from release cadence
- * (§15.9).
+ * rows 162–164 — trust-key freshness, decoupled from release cadence
+ * (§06.3).
  *
  * The incident these rows exist for is #612/#616: npm rotated its signing keys
  * in February 2025 and every released corepack broke worldwide, because the
- * trust store is baked into the bundle at release time. The remedy §15.9
+ * trust store is baked into the bundle at release time. The remedy §06.3
  * prescribes is narrow on purpose — one refresh, on one failure, from one
  * registry — so the rows have to pin the *absences* as tightly as the success:
  *
@@ -63,7 +63,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.9 — key refresh on an unknown keyid", () => {
+describe("§06.3 — key refresh on an unknown keyid", () => {
   it("162: a keyid no embedded key matches is refreshed once, then verifies", async () => {
     registry.publishedKeys = [registry.keyEntry()];
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
@@ -74,7 +74,7 @@ describe("§15.9 — key refresh on an unknown keyid", () => {
     expect(result.stdout).toBe("6.6.2\n");
     expect(result.stderr).toBe("");
 
-    // Exactly one refresh, and — §15.10's anti-circularity rule — asked of npm's
+    // Exactly one refresh, and — §06.3's anti-circularity rule — asked of npm's
     // own registry rather than of whatever registry served the package.
     expect(keyRequests()).toEqual(["https://registry.npmjs.org/-/npm/v1/keys"]);
 
@@ -83,7 +83,7 @@ describe("§15.9 — key refresh on an unknown keyid", () => {
     const paths = registry.requests.map((request) => request.path);
     expect(paths.indexOf(KEYS_PATH)).toBeGreaterThan(paths.indexOf("/pnpm/6.6.2"));
 
-    // §15.9 — cached with a fetch timestamp, at `<home>/keys.json`.
+    // §06.3 — cached with a fetch timestamp, at `<home>/keys.json`.
     const cache = cachedKeys(fixture.home) as {
       registries: Record<string, { fetchedAt: string; keys: Array<{ keyid: string }> }>;
     };
@@ -138,7 +138,7 @@ describe("§15.9 — key refresh on an unknown keyid", () => {
     const second = await run(["pnpm", "--version"], { ...fixture, registry });
 
     expect(second.exitCode).toBe(1);
-    // §15.9's timestamp doing its job: a failing build in a loop must not put a
+    // §06.3's timestamp doing its job: a failing build in a loop must not put a
     // request on `/-/npm/v1/keys` every time round.
     expect(keyRequests()).toEqual([]);
   });
@@ -146,8 +146,8 @@ describe("§15.9 — key refresh on an unknown keyid", () => {
   it("162: a refreshed key that npm has expired installs, naming the key it accepted", async () => {
     // Every package manager npm published before 2025-01-29, reproduced
     // hermetically: the signature's keyid is one the embedded table does not
-    // ship (§14.4 ships only unexpired keys), and `/-/npm/v1/keys` marks it
-    // `expires: 2025-01-29`. Before §15.9 the only available answer was "not
+    // ship (§06.5 ships only unexpired keys), and `/-/npm/v1/keys` marks it
+    // `expires: 2025-01-29`. Before §06.3 the only available answer was "not
     // signed by any trusted keys", which reads like a bug in the tool. The
     // refresh supplies the key, and §06.5's leniency accepts the signature that
     // verifies under it rather than refusing half the registry's history.
@@ -213,7 +213,7 @@ describe("§15.9 — key refresh on an unknown keyid", () => {
 
     expect(warm.exitCode).toBe(0);
     expect(warm.stdout).toBe("6.6.2\n");
-    // §01.3: the warm path is a `stat` and an `exec`. §15.9 must not have added
+    // §01.3: the warm path is a `stat` and an `exec`. §06.3 must not have added
     // a request, a key read, or anything else to it.
     expect(registry.requests).toEqual([]);
   });

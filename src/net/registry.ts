@@ -29,8 +29,8 @@ const DEFAULT_REGISTRY_ORIGIN = new URL(DEFAULT_REGISTRY).origin;
  * `COREPACK_REGISTRY_<NAME>`, `COREPACK_NPM_REGISTRY`, `.npmrc`, then the
  * built-in default.
  *
- * @param options `name` selects §15.2's per-package-manager override;
- * `packageName` selects §15.1's `@scope:registry`.
+ * @param options `name` selects §05.2's per-package-manager override;
+ * `packageName` selects §05.3's `@scope:registry`.
  */
 export function getRegistryUrl(options?: { name?: string; packageName?: string }): string {
   return resolveRegistry(options).registry;
@@ -52,7 +52,7 @@ export function resolveRegistrySpec(spec: RegistrySpec): RegistrySpec {
     : alternative;
 }
 
-/** §15.2's `COREPACK_REGISTRY_<NAME>`, trailing slashes stripped, or `undefined`. */
+/** §05.2's `COREPACK_REGISTRY_<NAME>`, trailing slashes stripped, or `undefined`. */
 function sourceOverrideFor(name: string): string | undefined {
   const configured = readEnv(registryVariableFor(name));
   if (configured === undefined || configured === "") return undefined;
@@ -60,7 +60,7 @@ function sourceOverrideFor(name: string): string | undefined {
 }
 
 /**
- * §15.2 — move a URL derived from a package manager's **own** table entry onto
+ * §05.2 — move a URL derived from a package manager's **own** table entry onto
  * `COREPACK_REGISTRY_<NAME>`.
  *
  * Unconditional origin replacement, unlike {@link applyRegistryOverride}: a
@@ -82,19 +82,19 @@ export const NPM_ACCEPT_HEADER =
   "application/vnd.npm.install-v1+json; q=1.0, application/json; q=0.8";
 
 /**
- * §15.35e — the only header that gets a `time` map back.
+ * §04.1 — the only header that gets a `time` map back.
  *
  * The abbreviated packument {@link NPM_ACCEPT_HEADER} asks for deliberately
  * omits per-version publish dates, and it is an order of magnitude smaller. So
  * this header is sent on exactly one request, on exactly one path: the candidate
  * list of §04.1 step 6, and only while `COREPACK_MINIMUM_RELEASE_AGE` is set.
- * Every other request — dist-tags, `latest`, the version document, §15.8's
+ * Every other request — dist-tags, `latest`, the version document, §06.3's
  * signature fallback — keeps the abbreviated header whatever the gate says.
  */
 export const NPM_FULL_ACCEPT_HEADER = "application/json";
 
 /**
- * §05.2 rewrite 2 / §15.3 — move a URL that lives on the default registry onto
+ * §05.2 rewrite 2 — move a URL that lives on the default registry onto
  * `COREPACK_NPM_REGISTRY`.
  *
  * Compare normalized origins and rebuild only an actual default-registry match,
@@ -109,14 +109,14 @@ export function applyRegistryOverride(url: string, registryUrl: string = getRegi
   try {
     if (new URL(url).origin !== DEFAULT_REGISTRY_ORIGIN) return url;
   } catch {
-    // Not our business to diagnose: the caller validates (§14.9) and reports.
+    // Not our business to diagnose: the caller validates (§05.2) and reports.
     return url;
   }
   return rebase(url, registryUrl);
 }
 
 /**
- * §15.3's rewrite, in one place: parse both, take the override's scheme, host,
+ * §05.2's rewrite, in one place: parse both, take the override's scheme, host,
  * port and userinfo, and prepend the override's own path prefix.
  *
  * Never use string replacement: URL parsing normalizes host case and ports and
@@ -133,7 +133,7 @@ function rebase(url: string, base: string): string {
   }
 
   const prefix = override.pathname.replace(/\/+$/, "");
-  // Already there: re-applying must not double the prefix (§15.38 row 152).
+  // Already there: re-applying must not double the prefix (§05.2).
   if (target.origin === override.origin && (prefix === "" || target.pathname.startsWith(prefix))) {
     return url;
   }
@@ -145,7 +145,7 @@ function rebase(url: string, base: string): string {
 /**
  * The gate, in milliseconds, or `undefined` when it is off.
  *
- * Hours, per §15.37's table. Unset and empty are off; so is an explicit `0`,
+ * Hours, per §11.1's table. Unset and empty are off; so is an explicit `0`,
  * which is how npm and pnpm spell "no minimum" for the same setting.
  *
  * **An unparseable or negative value is refused, not ignored.** Every other
@@ -154,7 +154,7 @@ function rebase(url: string, base: string): string {
  * mistyped timeout costs a user some latency. This one is a supply-chain
  * control: falling back would mean `COREPACK_MINIMUM_RELEASE_AGE=24h` silently
  * turns the protection *off* on the machine of someone who believes they turned
- * it on, which is the same fail-open shape §15.35e exists to close.
+ * it on, which is the same fail-open shape §04.1 exists to close.
  *
  * Read at the point of use rather than at startup: the whole feature is
  * cold-path, and a warm run (§01.3) must not parse an environment variable it
@@ -182,7 +182,7 @@ export interface VersionCandidates {
    */
   versions: string[];
   /**
-   * §15.35e, blocker 3 — set to the document's URL when the gate is on and this
+   * §04.1, blocker 3 — set to the document's URL when the gate is on and this
    * source publishes no release dates at all, so nothing in {@link versions}
    * could be filtered.
    *
@@ -195,7 +195,7 @@ export interface VersionCandidates {
 }
 
 /**
- * §15.35e's refusal. Deliberately fail **closed**: a source that publishes no
+ * §04.1's refusal. Deliberately fail **closed**: a source that publishes no
  * dates cannot be gated, and a security control that reports success without
  * having been applied is worse than one that stops.
  *
@@ -218,8 +218,8 @@ function noEligibleReleaseError(packageName: string): UsageError {
 }
 
 /**
- * §04.1 step 6's candidate set — {@link fetchAvailableVersions}, with §15.35e
- * applied.
+ * §04.1 step 6's candidate set — {@link fetchAvailableVersions}, with the
+ * release-age gate applied.
  *
  * With the gate off this **is** `fetchAvailableVersions`: the same one request,
  * with the same abbreviated `Accept` header. The only thing the gate changes is
@@ -265,8 +265,8 @@ export async function fetchResolvableVersions(input: RegistrySpec): Promise<Vers
 }
 
 /**
- * §15.35e applied to a single version the *registry* chose — §04.1 step 3's
- * dist-tag, and §04.5's `latest`.
+ * The release-age gate applied to a single version the *registry* chose —
+ * §04.1 step 3's dist-tag, and §04.6's `latest`.
  *
  * A tag is not an exact pin: the user named a channel and let the registry
  * decide what is in it, which is precisely the choice a freshly-published
@@ -277,7 +277,7 @@ export async function fetchResolvableVersions(input: RegistrySpec): Promise<Vers
  * Returns `version` untouched, and makes **no request**, when the gate is off.
  *
  * @param version The tag's target, or `undefined` to mean "the newest eligible
- * stable release" — §04.5's `latest`, where the target is not yet known and
+ * stable release" — §04.6's `latest`, where the target is not yet known and
  * asking for it would cost a request this can answer from the same document.
  */
 export async function capToReleaseAge(
@@ -294,7 +294,7 @@ export async function capToReleaseAge(
     throw undatedSourceError(candidates.undatedSource);
   }
 
-  // §15.24 — a prerelease is never chosen implicitly unless the thing being
+  // §04.1 — a prerelease is never chosen implicitly unless the thing being
   // capped is itself one (`yarn@canary` stays on the canary line).
   const wantsPrereleases = version !== undefined && isPrerelease(version);
 
@@ -342,7 +342,7 @@ export async function fetchAvailableTags(input: RegistrySpec): Promise<Record<st
 }
 
 /**
- * §04.5 — npm reads `{registry}/{package}/latest` and returns a hash-bearing
+ * §04.6 — npm reads `{registry}/{package}/latest` and returns a hash-bearing
  * reference; url registries read `data[fields.tags].stable` (note **stable**,
  * not `latest`) and attach no hash. Any failure in the npm path is re-thrown
  * wrapped in `messages.cannotDownloadLatest`.
@@ -351,7 +351,7 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
   const spec = resolveRegistrySpec(input);
 
   if (spec.type !== "npm") {
-    // §15.35e — `stable` is the document choosing on the user's behalf, and this
+    // §04.1 — `stable` is the document choosing on the user's behalf, and this
     // document dates nothing, so the gate cannot be enforced here at all.
     if (minimumReleaseAge() !== undefined) {
       throw undatedSourceError(applySourceOverride(spec.url, packageManagerForRegistry(spec)));
@@ -370,12 +370,12 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
     // `latest` is a dist-tag the registry resolves server-side, so this is one
     // request rather than two.
     //
-    // §15.35e — with the gate on it cannot be: the age of what `latest` points
+    // §04.1 — with the gate on it cannot be: the age of what `latest` points
     // at is only in the packument, so the selector becomes the newest eligible
     // stable release instead. That costs one extra request, and only while the
     // gate is set. (Taking the eligible semver maximum rather than capping at
-    // `dist-tags.latest` is the same choice §15.24 was decided on here — §04.1
-    // step 6 unions bands, a dist-tag names one.)
+    // `dist-tags.latest` is the same choice the release-age gate was decided on
+    // here — §04.1 step 6 unions bands, a dist-tag names one.)
     const selector =
       minimumReleaseAge() === undefined ? "latest" : await capToReleaseAge(spec, undefined);
     const metadata = asRecord(await npmGetJson(`${spec.package}/${selector}`, spec));
@@ -386,7 +386,7 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
       );
     }
 
-    // §15.28 — a per-host package manager's `fetchLatestFrom` names its
+    // §04.6 — a per-host package manager's `fetchLatestFrom` names its
     // **launcher** package, and everything in `dist` below describes that
     // launcher's tarball rather than the artifact this host is going to
     // download. Attaching it as a build suffix pins the wrong bytes outright:
@@ -396,7 +396,7 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
     // The version is the only fact the launcher has that is true for every host,
     // so it is the only one taken. Nothing is lost by not signing it here:
     // §06.3 verifies the *artifact's* own signature at download time, which is
-    // the tier §15.11 asks for and is a check about the bytes that will actually
+    // the tier §06.1 asks for and is a check about the bytes that will actually
     // run. Returning before `requireDist` is deliberate for the same reason — a
     // launcher with no `dist` says nothing about whether this host can install.
     const perHostName = packageManagerForRegistry(spec);
@@ -409,7 +409,7 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
     const integrity = asString(dist.integrity);
     const shasum = asString(dist.shasum);
 
-    // §15.7 tiers 2 and 3. The digest this returns becomes the reference's pin,
+    // §06.1 tiers 2 and 3. The digest this returns becomes the reference's pin,
     // so "the bytes match the registry's claim" is enforced by §06.2 at download
     // time; what this decides is whether that claim was *signed*.
     await verifyRegistryTrust({
@@ -422,7 +422,7 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
     });
 
     if (integrity !== undefined) {
-      // §14.12 — the algorithm comes from the SRI string, never from `slice(7)`:
+      // §06.2 — the algorithm comes from the SRI string, never from `slice(7)`:
       // a `sha256-…` registry would otherwise produce a silently wrong digest,
       // and §06.2 reads this very algorithm back off the reference.
       const { algo, hex } = parseSri(integrity);
@@ -435,29 +435,29 @@ export async function fetchLatestStableVersion(input: RegistrySpec): Promise<str
       throw new Error(messages.noRegistryDigest(spec.package, version, registryUrl));
     }
 
-    // §04.5's legacy branch: unsigned, but still a digest the download is
+    // §04.6's legacy branch: unsigned, but still a digest the download is
     // checked against. `verifyRegistryTrust` has warned about the missing
     // signature already.
     return `${version}+sha1.${shasum}`;
   } catch (error) {
-    // Verbatim §04.5 wrapper — both env var names in it are asserted, which is
+    // Verbatim §04.6 wrapper — both env var names in it are asserted, which is
     // why it comes from the message builder rather than from here.
     //
     // The wrapper names two remedies but never the reason, and the reason is
     // what a user needs: as of writing, npm signs `yarn@latest` with keyid
     // `SHA256:jl3bws…`, which npm's own `/-/npm/v1/keys` marks
     // `expires: 2025-01-29`, so a bare `yarn` fails here on an untrusted keyid
-    // and the sentence alone reads like a network fault. §15.5 requires the
+    // and the sentence alone reads like a network fault. §05.1 requires the
     // underlying cause to survive; `networkError` appends it to the stack,
     // where `main.ts` will actually print it, and leaves the message byte for
-    // byte as §04.5 specifies.
+    // byte as §04.6 specifies.
     throw networkError(new Error(messages.cannotDownloadLatest(spec.package)), error);
   }
 }
 
 /**
  * §07.3 — the tarball URL is read verbatim from `dist.tarball`, never
- * synthesised, and validated through `assertSafeArtifactUrl` (§14.9).
+ * synthesised, and validated through `assertSafeArtifactUrl` (§05.2).
  */
 export async function fetchTarballURLAndSignature(
   spec: NpmRegistrySpec,
@@ -478,28 +478,28 @@ export async function fetchTarballURLAndSignature(
   }
 
   // Proxying registries (Artifactory, Nexus) hand back `dist.tarball` values
-  // still pointing at registry.npmjs.org. Rewrite before validating, so §14.9's
-  // host check sees the URL that will actually be fetched — §15.3's "composes
-  // with §14.9".
+  // still pointing at registry.npmjs.org. Rewrite before validating, so §05.2's
+  // host check sees the URL that will actually be fetched — the override
+  // rewrite composes with the host check.
   const rewritten = applyRegistryOverride(tarball, registryUrl);
   assertSafeArtifactUrl(rewritten, registryUrl);
 
   return {
     tarball: rewritten,
     integrity: asString(dist.integrity),
-    // §15.7's soft-fail accepts the legacy digest when that is all the registry
-    // publishes, so the caller needs it in hand — §04.5's `latest` path has
+    // §06.1's soft-fail accepts the legacy digest when that is all the registry
+    // publishes, so the caller needs it in hand — §04.6's `latest` path has
     // always used it, and refusing it only here would make the same registry
     // work for `pnpm` and fail for `pnpm@6.x`.
     shasum: asString(dist.shasum),
     signatures: readSignatures(dist),
   };
 }
-/** One warning per `<registry>\0<pkg>\0<version>`; §15.7 asks for exactly one. */
+/** One warning per `<registry>\0<pkg>\0<version>`; §06.1 asks for exactly one. */
 const warnedUnsigned = new Set<string>();
 
 /**
- * §15.7's tier-2 warning, emitted at most once per package and version.
+ * §06.1's tier-2 warning, emitted at most once per package and version.
  *
  * Exported because §06.1 row 1 short-circuits the rest of the tiering — a
  * user-pinned hash is the check, and it must not be turned into a signature
@@ -519,18 +519,18 @@ export function warnUnsignedRegistry(
 }
 
 /**
- * §15.7's three outcomes, in one place, for every site that reads `dist`.
+ * §06.1's three outcomes, in one place, for every site that reads `dist`.
  *
  * | Registry response | Outcome |
  * |---|---|
  * | `dist` absent | already an error — `requireDist`, upstream of here |
- * | `signatures` absent or empty | §15.8's retry, then soft-fail: proceed on a digest, warn once |
+ * | `signatures` absent or empty | §06.3's retry, then soft-fail: proceed on a digest, warn once |
  * | `signatures` present | verified; an invalid one is `Signature does not match` |
  *
  * `COREPACK_REQUIRE_SIGNATURES=1` turns the soft-fail into a hard failure, for
  * organisations mandating signed sources. It is deliberately *not* consulted on
  * §06.1 row 1's pinned-hash path, which never reaches here: an explicit hash is
- * a stronger, user-chosen assertion than the registry's own claim (§14.21), and
+ * a stronger, user-chosen assertion than the registry's own claim (§06.1), and
  * making it depend on registry metadata would both weaken that rule and cost a
  * request the fast path does not make.
  *
@@ -539,7 +539,7 @@ export function warnUnsignedRegistry(
  * returns without a warning, a request, or a refusal.
  */
 export async function verifyRegistryTrust(input: {
-  /** The npm registry spec in force; §15.8's fallback re-queries it. */
+  /** The npm registry spec in force; §06.3's fallback re-queries it. */
   spec: NpmRegistrySpec;
   version: string;
   registryUrl: string;
@@ -553,7 +553,7 @@ export async function verifyRegistryTrust(input: {
 
   if (shouldSkipIntegrityCheck()) return;
 
-  // §15.8 — the version endpoint is the one Artifactory strips; the package
+  // §06.3 — the version endpoint is the one Artifactory strips; the package
   // root often still carries the signatures. One extra request, on a path that
   // was heading for a degraded outcome anyway, and never on the happy path.
   // Skipped when there is no `integrity` either: the signed statement is *about*
@@ -564,7 +564,7 @@ export async function verifyRegistryTrust(input: {
 
   // Tier 3: a signature exists, so it decides. `verifySignature` reports an
   // untrusted keyid, an expired key and a bad signature distinctly (§06.3), and
-  // §15.9's wrapper turns the first of those three — and only the first — into
+  // §06.3's wrapper turns the first of those three — and only the first — into
   // one key refresh and one retry.
   if (signatures !== undefined && integrity !== undefined) {
     await verifySignatureWithRefresh({
@@ -586,7 +586,7 @@ export async function verifyRegistryTrust(input: {
   }
 
   // "otherwise refuse": no signature *and* no digest is an unverifiable
-  // artifact, and installing it would be the silent downgrade §15.7 exists to
+  // artifact, and installing it would be the silent downgrade §06.1 exists to
   // prevent.
   if (!hasDigest) {
     throw new Error(messages.noRegistryDigest(packageName, version, registryUrl));
@@ -596,11 +596,11 @@ export async function verifyRegistryTrust(input: {
 }
 
 /**
- * §15.8 — `versions[<version>].dist.signatures` from `GET /<pkg>`.
+ * §06.3 — `versions[<version>].dist.signatures` from `GET /<pkg>`.
  *
  * Exactly one extra request, and only from a caller that has already seen an
  * unsigned version endpoint. Best-effort by construction: a failure here leaves
- * the caller where it already was — at §15.7's soft-fail — rather than turning a
+ * the caller where it already was — at §06.1's soft-fail — rather than turning a
  * metadata quirk into an error.
  */
 async function fetchRootSignatures(
@@ -620,10 +620,10 @@ async function fetchRootSignatures(
   }
 }
 /**
- * §15.1 + §15.2 — the base URL for one registry spec.
+ * §05.3 + §05.2 — the base URL for one registry spec.
  *
- * The spec knows which package manager declared it (§15.2's
- * `COREPACK_REGISTRY_<NAME>`) and which npm package is being fetched (§15.1's
+ * The spec knows which package manager declared it (§05.2's
+ * `COREPACK_REGISTRY_<NAME>`) and which npm package is being fetched (§05.3's
  * `@scope:registry`), which is everything the precedence chain needs.
  */
 export function registryUrlFor(spec: NpmRegistrySpec): string {
@@ -651,10 +651,10 @@ function npmGetJson(
   }
 
   return httpGetJson(`${registryUrl}/${path}`, {
-    // §15.35e — the abbreviated document unless the caller needs `time`, which
+    // §04.1 — the abbreviated document unless the caller needs `time`, which
     // only §04.1 step 6's candidate list ever does.
     headers: { accept: options?.full === true ? NPM_FULL_ACCEPT_HEADER : NPM_ACCEPT_HEADER },
-    // §14.6 — without this the HTTP layer sends no credentials at all.
+    // §05.1 — without this the HTTP layer sends no credentials at all.
     registryOrigin: registryUrl,
   });
 }
@@ -683,7 +683,7 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value !== "" ? value : undefined;
 }
 
-/** §15.7 tier 1 — an absent `dist` is a clear error, never a `TypeError`. */
+/** §06.1 tier 1 — an absent `dist` is a clear error, never a `TypeError`. */
 function requireDist(
   metadata: Record<string, unknown> | undefined,
   packageName: string,

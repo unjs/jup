@@ -48,14 +48,14 @@ describe("registry table — shape (§02.5)", () => {
       "deno",
       "aube",
       "nub",
-      // §15.39 — the first entry that is not a package manager. It is in
+      // §02.3 — the first entry that is not a package manager. It is in
       // `SUPPORTED_NAMES` like any other: the table is a table of *tools*, and
       // `kind` is read in §03 and §10 only.
       "node",
     ]);
     expect(isSupportedPackageManager("yarn")).toBe(true);
     expect(isSupportedPackageManager("bun")).toBe(true);
-    // §01.7 / §15.21 — the table is closed and compiled in. `vlt` stands in for
+    // §01.7 / §03.1 — the table is closed and compiled in. `vlt` stands in for
     // "a real package manager this build does not ship", which is what every
     // negative assertion in this file needs and what `bun` used to be.
     expect(isSupportedPackageManager("vlt")).toBe(false);
@@ -68,25 +68,25 @@ describe("registry table — shape (§02.5)", () => {
   });
 
   /**
-   * §15.33 bullet 2 overrules §14.21's "deliberately not changed" and §02.5's
-   * literal: an embedded `default` MUST track the current supported major, and
-   * Yarn Classic 1.22.22 has been unsupported since 2020 (#812).
+   * This overrules §06.1's "deliberately not changed" and demands more than
+   * §02.5's literal: an embedded `default` MUST track the current supported
+   * major, and Yarn Classic 1.22.22 has been unsupported since 2020 (#812).
    *
    * The assertion is the *literal*, not `expect(yarn.default).toBe(
    * yarn.transparent.default)` — the tautology would pass just as well against
    * a table that had drifted back to Classic in both fields.
    */
-  it("puts yarn's default on the supported major, hash-pinned (§15.33)", () => {
+  it("puts yarn's default on the supported major, hash-pinned (§02.5)", () => {
     const yarn = DEFINITIONS.yarn!;
     const supported = "4.18.0+sha1.5f508685a3a4b84783972c25f392f75232b17f85";
     expect(yarn.default).toBe(supported);
     expect(yarn.transparent.default).toBe(supported);
-    // §14.21's asymmetry is gone, and the classic line is what it is gone *from*.
+    // §06.1's asymmetry is gone, and the classic line is what it is gone *from*.
     expect(yarn.default.startsWith("1.")).toBe(false);
   });
 
   /**
-   * §02.5, §15.11 — every compiled-in default carries a digest, in the
+   * §02.5, §06.1 — every compiled-in default carries a digest, in the
    * `<version>+<algo>.<hex>` form §06.1 row 1 checks. A default that did not
    * would be refused by `assertVerificationTier` on any machine without a
    * `lastKnownGood.json`, i.e. every fresh install.
@@ -95,8 +95,8 @@ describe("registry table — shape (§02.5)", () => {
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
       for (const reference of [definition.default, definition.transparent.default]) {
         if (reference === undefined) continue;
-        // §15.28 — a per-host entry's artifact differs from machine to machine,
-        // so there is no one digest to compile in. What clears §15.11's tier for
+        // §02.4 — a per-host entry's artifact differs from machine to machine,
+        // so there is no one digest to compile in. What clears §06.1's tier for
         // it is npm's signature over the host's own artifact, checked on every
         // install; the default is therefore a bare version, and asserting that it
         // *is* bare is what stops a well-meant edit from pinning one host's
@@ -167,14 +167,14 @@ describe("registry table — shape (§02.5)", () => {
   });
 
   /**
-   * §15.41 — the table reaches exactly one origin.
+   * §02.5 — the table reaches exactly one origin.
    *
    * Written as a sweep rather than as a yarn assertion so that a band added
-   * later on a vendor's own host fails here, which is the regression §15.11
+   * later on a vendor's own host fails here, which is the regression §06.1
    * lost its dedicated row to: with every source npm-signed there is no longer
    * an entry that can demonstrate the refusal.
    */
-  it("names no origin but the npm registry (§15.41)", () => {
+  it("names no origin but the npm registry (§02.5)", () => {
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
       for (const [range, spec] of definition.ranges) {
         expect(`${name}@${range} -> ${new URL(spec.url).origin}`).toBe(
@@ -226,7 +226,7 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
     expect(spec.npmRegistry).toBeUndefined();
   });
 
-  it("gives yarn 4.14.1 the @yarnpkg/cli-dist tarball with a BinSpec (§15.41)", () => {
+  it("gives yarn 4.14.1 the @yarnpkg/cli-dist tarball with a BinSpec (§02.5)", () => {
     const spec = getSpecFor("yarn", "4.14.1");
     expect(spec.url).toBe("https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz");
     // A tarball like every other band: paths, not the list of bare names the
@@ -256,14 +256,14 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
 });
 
 /**
- * §15.17 — a version outside every declared band.
+ * §07.7 — a version outside every declared band.
  *
  * Every band the table ships today is open-ended at one end, so no real version
  * can escape them all; that is exactly why this path went unexercised, and why
  * these tests close a band on a *copy* of pnpm's range list rather than waiting
  * for the day a real one breaks.
  */
-describe("getSpecFor / hasRangeBand — no matching band (§15.17)", () => {
+describe("getSpecFor / hasRangeBand — no matching band (§07.7)", () => {
   const original = DEFINITIONS.pnpm!.ranges;
 
   afterEach(() => {
@@ -352,7 +352,7 @@ describe("binary names (§02.4)", () => {
   });
 });
 
-describe("trust store (§02.6, §14.4)", () => {
+describe("trust store (§02.6)", () => {
   it("is keyed by registry origin", () => {
     expect(Object.keys(TRUST_KEYS)).toEqual([DEFAULT_REGISTRY]);
     expect(DEFAULT_REGISTRY).toBe("https://registry.npmjs.org");
@@ -370,7 +370,7 @@ describe("trust store (§02.6, §14.4)", () => {
     }
   });
 
-  it("drops the key that expired on 2025-01-29 (§14.4)", () => {
+  it("drops the key that expired on 2025-01-29 (§02.6)", () => {
     const keyids = Object.values(TRUST_KEYS)
       .flat()
       .map((key) => key.keyid);
@@ -394,7 +394,7 @@ describe("trust store (§02.6, §14.4)", () => {
     // returns nothing for a custom registry, which turns that defence into a
     // hard failure on exactly the deployments it exists for.
     //
-    // Note that this assertion alone cannot establish §15.10 — the embedded
+    // Note that this assertion alone cannot establish §06.3 — the embedded
     // store holds one origin, so "keyed by origin" and "flattened" agree on
     // every line of it. The two-origin test below is the one that separates
     // them.
@@ -408,10 +408,10 @@ describe("trust store (§02.6, §14.4)", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.10 — per-origin trust                                                   */
+/* §06.3 — per-origin trust                                                   */
 /* -------------------------------------------------------------------------- */
 
-describe("getTrustedKeys — §15.10 origin scoping", () => {
+describe("getTrustedKeys — §06.3 origin scoping", () => {
   const key = (keyid: string): TrustedKey => ({
     expires: null,
     keyid,
@@ -466,7 +466,7 @@ describe("getTrustedKeys — §15.10 origin scoping", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.28 — `{platform}` / `{arch}` URL templates                              */
+/* §02.4 — `{platform}` / `{arch}` URL templates                              */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -491,7 +491,7 @@ const REAL_ARCH = process.arch;
  */
 const EXE = REAL_PLATFORM === "win32" ? ".exe" : "";
 
-describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
+describe("resolveSpecUrl — §02.4 per-platform URL templates", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
   const locator = { name: "bunny", reference: "1.0.0" };
@@ -524,7 +524,7 @@ describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
     pretendHost("sunos", "s390x");
     // The unsupported host must not matter to a band that never asked: every
     // entry in the shipped table is in this case, and none of them may start
-    // failing on an exotic platform because §15.28 exists.
+    // failing on an exotic platform because §02.4 exists.
     expect(
       resolveSpecUrl(specFor("https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz"), locator, "9.0.0"),
     ).toBe("https://registry.npmjs.org/pnpm/-/pnpm-9.0.0.tgz");
@@ -553,14 +553,14 @@ describe("resolveSpecUrl — §15.28 per-platform URL templates", () => {
 });
 
 /* -------------------------------------------------------------------------- *
- * §15.28 / §15.21 — the native entries
+ * §02.4 / §03.1 — the native entries
  * -------------------------------------------------------------------------- */
 
-describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => {
+describe("bun and deno — §02.4's per-host entries (§03.1, §02.5)", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
   /**
-   * §15.21's central claim, checked rather than asserted in prose: adding a
+   * §03.1's central claim, checked rather than asserted in prose: adding a
    * package manager is a **data-only** change. If it were not, some field below
    * would have needed a name-shaped special case somewhere in the tool, and the
    * generic accessors would not be able to answer for `bun` and `deno` the way
@@ -581,7 +581,7 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
     }
   });
 
-  it("splits the version source from the artifact source (§15.28)", () => {
+  it("splits the version source from the artifact source (§02.4)", () => {
     const bun = getSpecFor("bun", "1.4.0");
     // Versions and dist-tags: the small launcher package.
     expect(bun.registry).toEqual({ type: "npm", package: "bun" });
@@ -675,7 +675,7 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
     expect(getBinariesFor("bun")).toEqual(["bun", "bunx"]);
   });
 
-  it("keeps the resolved artifact registry's identity, so §15.2 still finds it", () => {
+  it("keeps the resolved artifact registry's identity, so §05.2 still finds it", () => {
     pretendHost("linux", "x64");
     const spec = getSpecFor("bun", "1.4.0");
     const locator = { name: "bun", reference: "1.4.0" };
@@ -706,7 +706,7 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
     expect(hostTarget()).toBe("win32-x64");
   });
 
-  it("keeps the native entries out of a bare `enable` (§10.5)", () => {
+  it("keeps the native entries out of a bare `enable` (§10.7)", () => {
     expect(shimsByDefault("npm")).toBe(true);
     expect(shimsByDefault("pnpm")).toBe(true);
     expect(shimsByDefault("yarn")).toBe(true);
@@ -727,7 +727,7 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.21 — aube                                                              */
+/* §03.1 — aube                                                              */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -744,7 +744,7 @@ describe("bun and deno — §15.28's per-host entries (§15.21, §02.5)", () => 
  * purpose; `aube`, `aubr` and `aubx` mean nothing outside a project, so they
  * join npm, pnpm and yarn in the set a bare `jup enable` claims.
  */
-describe("aube — §15.21's third per-host entry", () => {
+describe("aube — §03.1's third per-host entry", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
   it("splits the launcher from the artifact, like bun and deno", () => {
@@ -847,7 +847,7 @@ describe("aube — §15.21's third per-host entry", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.21 — nub                                                               */
+/* §03.1 — nub                                                               */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -866,7 +866,7 @@ describe("aube — §15.21's third per-host entry", () => {
  * covers every host the table can name, which is the case where a reader might
  * reasonably ask why the map is written at all.
  */
-describe("nub — §15.21's fourth per-host entry", () => {
+describe("nub — §03.1's fourth per-host entry", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
   it("splits the launcher from the artifact, like the three before it", () => {
@@ -941,7 +941,7 @@ describe("nub — §15.21's fourth per-host entry", () => {
   it("still names a host outside the vocabulary as the tool's own gap", () => {
     // A `targets` miss is the *release's* answer; an unrecognised platform is
     // the tool's, and stays a different error even for an entry that ships
-    // everywhere the tool can name (§15.28).
+    // everywhere the tool can name (§02.4).
     pretendHost("freebsd", "x64");
     expect(() => getSpecUrl({ name: "nub", reference: "0.7.5" })).toThrow(
       messages.unsupportedTarget("nub", "0.7.5", "freebsd-x64", [
@@ -981,10 +981,10 @@ describe("nub — §15.21's fourth per-host entry", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.39 — `node`, the first entry that is not a package manager             */
+/* §02.3 — `node`, the first entry that is not a package manager             */
 /* -------------------------------------------------------------------------- */
 
-describe("the node entry (§02.5, §15.39)", () => {
+describe("the node entry (§02.5, §02.3)", () => {
   afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
   it("is the only entry declaring a `kind`, and that kind is `runtime`", () => {
@@ -1009,7 +1009,7 @@ describe("the node entry (§02.5, §15.39)", () => {
     expect(devEnginesFieldFor("vlt")).toBe("packageManager");
   });
 
-  it("MUST stay out of the default shim set, being a runtime (§02.3, §10.5)", () => {
+  it("MUST stay out of the default shim set, being a runtime (§02.3, §10.7)", () => {
     // For `bun`, `deno` and `nub` this is a judgement about what the name means
     // outside a project. For a runtime it is a requirement, and asserting it
     // over every entry is what makes a future runtime unable to forget it.
@@ -1052,7 +1052,7 @@ describe("the node entry (§02.5, §15.39)", () => {
     expect(getSpecUrl({ name: "node", reference: "24.20.0" })).toBe(
       "https://registry.npmjs.org/node-win-x64/-/node-win-x64-24.20.0.tgz",
     );
-    // §15.28's split: the launcher answers §04's questions, the per-host package
+    // §02.4's split: the launcher answers §04's questions, the per-host package
     // answers §06's and §07's.
     expect(
       resolveArtifactRegistry(getSpecFor("node", "24.20.0"), {

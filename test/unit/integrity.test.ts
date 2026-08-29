@@ -75,7 +75,7 @@ function verify(signatures: RegistrySignature[] | undefined): void {
 
 afterEach(() => {
   delete process.env.COREPACK_INTEGRITY_KEYS;
-  // §14.4's leniency is only safe because it warns, so the expiry tests spy on
+  // §06.5's leniency is only safe because it warns, so the expiry tests spy on
   // `console.warn`; without this the spy would swallow every later test's output.
   vi.restoreAllMocks();
 });
@@ -208,7 +208,7 @@ describe("verifySignature — §06.3", () => {
   });
 });
 
-describe("verifySignature — key expiry (§14.4, tests 82, 208)", () => {
+describe("verifySignature — key expiry (§06.5, tests 82, 208)", () => {
   it("82: accepts a valid signature from the only, expired match — loudly", () => {
     const npm = makeKeypair("SHA256:npm-expired");
     const expires = "2025-01-29T00:00:00.000Z";
@@ -321,7 +321,7 @@ describe("verifySignature — key-type validation (§06.3)", () => {
   });
 });
 
-describe("parseSri — §14.12", () => {
+describe("parseSri — §06.2", () => {
   it("parses sha512 without assuming the prefix length", () => {
     const digest = createHash("sha512").update("hello").digest();
     const { algo, hex } = parseSri(`sha512-${digest.toString("base64")}`);
@@ -382,7 +382,7 @@ describe("parseSri — §14.12", () => {
   });
 });
 
-describe("assertSupportedAlgo — §14.11", () => {
+describe("assertSupportedAlgo — §06.2", () => {
   it("accepts every allowlisted algorithm", () => {
     for (const algo of ["sha1", "sha224", "sha256", "sha384", "sha512"]) {
       expect(assertSupportedAlgo(algo)).toBe(algo);
@@ -408,7 +408,7 @@ describe("assertSupportedAlgo — §14.11", () => {
   });
 });
 
-describe("compareDigest — §14.11", () => {
+describe("compareDigest — §06.2", () => {
   it("is true for equal digests", () => {
     const digest = createHash("sha512").update("hello").digest("hex");
     expect(compareDigest(digest, digest)).toBe(true);

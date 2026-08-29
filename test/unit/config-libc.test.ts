@@ -1,5 +1,5 @@
 /**
- * §15.28 — the libc half of the host name.
+ * §02.4 — the libc half of the host name.
  *
  * Linux is the one platform where `<platform>-<arch>` does not name a binary
  * interface: a glibc build will not start on Alpine. Publishers that ship both
@@ -70,7 +70,7 @@ beforeAll(() => {
 
 afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
 
-describe("hostTarget — §15.28's libc suffix", () => {
+describe("hostTarget — §02.4's libc suffix", () => {
   it("names a musl host, so its own artifact can be asked for", () => {
     pretendHost("linux", "x64");
     expect(hostTarget()).toBe("linux-x64-musl");

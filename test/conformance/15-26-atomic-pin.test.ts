@@ -1,5 +1,5 @@
 /**
- * §15.26 — one logical pin, updated atomically (rows 189–190).
+ * §03.7 — one logical pin, updated atomically (rows 189–190).
  *
  * #874: `corepack use pnpm@latest` on a devEngines-only project writes a
  * top-level `packageManager` that then conflicts with the declaration beside it,
@@ -49,7 +49,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.26 atomic pin updates", () => {
+describe("§03.7 atomic pin updates", () => {
   it("189: `use` on a devEngines-only project updates devEngines and creates no packageManager", async () => {
     const fixture = createFixture({
       name: "project",
@@ -64,7 +64,7 @@ describe("§15.26 atomic pin updates", () => {
     expect(written.packageManager).toBeUndefined();
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
-      // §15.12's shape: the field stays a valid semver range, and the digest
+      // §03.7's shape: the field stays a valid semver range, and the digest
       // lives beside it rather than as a `+sha512.…` suffix inside it.
       version: "11.1.2",
       integrity: expect.stringMatching(/^sha512-[\d+/A-Za-z]+=*$/),
@@ -155,7 +155,7 @@ describe("§15.26 atomic pin updates", () => {
       devEngines: { packageManager: { name: "pnpm", version: "^11.0.0" } },
     });
 
-    // 10.0.0 is outside the declared range, and nothing about §15.26 makes that
+    // 10.0.0 is outside the declared range, and nothing about §03.7 makes that
     // acceptable: the constraint is the user's statement, and the default
     // `onFail` is an error (§03.3).
     const outside = await run(["use", "pnpm@10.0.0"], { ...fixture, registry, env: env() });
@@ -186,7 +186,7 @@ describe("§15.26 atomic pin updates", () => {
   });
 
   it("189: a devEngines block naming a *different* package manager is not a write target", async () => {
-    // §15.26 is about the pin's own fields. A declaration for another tool is a
+    // §03.7 is about the pin's own fields. A declaration for another tool is a
     // conflict to report (§03.3's name check), not a field to overwrite — and
     // before this it imposed nothing at all, because `writePin` only reached the
     // check through a declared *version*.

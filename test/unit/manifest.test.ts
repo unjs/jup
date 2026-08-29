@@ -74,7 +74,7 @@ function lazyFallback(name = "yarn"): LazyLocator {
   return { name, reference: () => Promise.resolve("9.9.9") };
 }
 
-/** A manifest pin in proxy mode: it must name a version, but §15.23 lets that version be a range. */
+/** A manifest pin in proxy mode: it must name a version, but §04.4 lets that version be a range. */
 const PINNED = { requireVersion: true };
 /** A CLI pattern, or a pin with a CLI version override: a bare name is allowed too. */
 const LOOSE = { requireVersion: false };
@@ -124,7 +124,7 @@ describe("parseSpec — §03.4", () => {
     );
   });
 
-  // Tests 3 / 4, rewritten by §15.23: a pin may now be a range or a dist-tag, and
+  // Tests 3 / 4, rewritten by §04.4: a pin may now be a range or a dist-tag, and
   // only the *absence* of a version is still an error. `requireVersion` is
   // therefore the only thing separating the two modes.
   it("accepts tags and ranges in a pin", () => {
@@ -152,7 +152,7 @@ describe("parseSpec — §03.4", () => {
       () => parseSpec("@scope/pkg@1.0.0", "CLI arguments", LOOSE),
       messages.unsupportedSpec("@scope/pkg@1.0.0"),
     );
-    // §15.23 removed the exact-version check that used to fire first here, so
+    // §04.4 removed the exact-version check that used to fire first here, so
     // both modes now reach the same unsupported-name error.
     expectUsageError(
       () => parseSpec("@scope/pkg@1.0.0", "package.json", PINNED),
@@ -378,7 +378,7 @@ describe("the upward walk — §03.1", () => {
   });
 
   it("defers spec validation until getSpec is called (test 109)", () => {
-    // `yarn@^1` is no longer among these: §15.23 makes a range a valid pin.
+    // `yarn@^1` is no longer among these: §04.4 makes a range a valid pin.
     for (const packageManager of ["yarn", "yarn@", 42]) {
       manifest(".", { packageManager });
       // Discovery itself must not throw — `use` overwrites this field.
@@ -598,7 +598,7 @@ describe("devEngines — §03.3", () => {
 
   it("ignores an absent or null devEngines.packageManager", () => {
     // `hasPin` reports whether the manifest declares `packageManager` itself:
-    // §15.23's `up` refreshes a declared range in place, but still creates a pin
+    // §04.4's `up` refreshes a declared range in place, but still creates a pin
     // from a spec synthesised out of `devEngines`.
     expect(read({ packageManager: "yarn@1.22.4" })).toEqual({
       raw: "yarn@1.22.4",
@@ -611,7 +611,7 @@ describe("devEngines — §03.3", () => {
     });
   });
 
-  // Test 22, as §15.23 leaves it: the derived spec is a range, and a range is a
+  // Test 22, as §04.4 leaves it: the derived spec is a range, and a range is a
   // valid pin, so it parses instead of failing.
   it("derives `<name>@*` when only a name is declared", () => {
     manifest(".", { devEngines: { packageManager: { name: "yarn" } } });
@@ -643,7 +643,7 @@ describe("devEngines — §03.3", () => {
     ).toEqual({
       raw: pm,
       range: { name: "pnpm", range: "6.x", onFail: undefined },
-      // §15.26 — the declaration is reported alongside the Descriptor-shaped
+      // §03.7 — the declaration is reported alongside the Descriptor-shaped
       // view of it, because `writePin` has to honour it even with no version.
       devEngines: { name: "pnpm", version: "6.x", onFail: undefined },
       hasPin: true,
@@ -657,7 +657,7 @@ describe("devEngines — §03.3", () => {
     expect(read({ packageManager: pm, devEngines: { packageManager: { name: "pnpm" } } })).toEqual({
       raw: pm,
       range: undefined,
-      // §15.26 — no version declared, but the *name* still is, and that alone
+      // §03.7 — no version declared, but the *name* still is, and that alone
       // constrains what `writePin` may write.
       devEngines: { name: "pnpm", onFail: undefined },
       hasPin: true,
@@ -736,7 +736,7 @@ describe("devEngines — §03.3", () => {
     );
   });
 
-  // §11.5 / §14.23 — the mute is scoped by *origin*. All three warnings in this
+  // §11.3 — the mute is scoped by *origin*. All three warnings in this
   // block are ones corepack prints too, and §13 rows 27–29 match their text byte
   // for byte, so `COREPACK_QUIET_ADVISORIES` must not reach any of them.
   it("keeps printing corepack's own devEngines warnings when advisories are quiet", () => {
@@ -835,7 +835,7 @@ describe("devEngines — §03.3", () => {
     expectUsageError(() => read(versionMismatch()), versionMismatchMessage);
   });
 
-  // §15.23 — the shape pnpm 11.21 generates: a range in `packageManager` beside
+  // §04.4 — the shape pnpm 11.21 generates: a range in `packageManager` beside
   // a range in `devEngines`. `satisfies` takes a *version* on its left, so
   // comparing the two ranges answers `false` for every input; the check is
   // skipped rather than turned into a hard error on a perfectly ordinary
@@ -1051,7 +1051,7 @@ describe("writePin — §03.7", () => {
     expect(updated.indexOf(`"name"`)).toBeLessThan(updated.indexOf(`"packageManager"`));
   });
 
-  // Test 13 — the BOM survives (§14.7).
+  // Test 13 — the BOM survives (§03.7).
   it("preserves a UTF-8 BOM", () => {
     write("package.json", `\uFEFF{\n  "packageManager": "yarn@1.22.4"\n}\n`);
 
@@ -1192,10 +1192,10 @@ describe("writePin — §03.7", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.25 — symmetric walk stop conditions
+ * §03.1 — symmetric walk stop conditions
  * ------------------------------------------------------------------ */
 
-describe("discoverProjectSpec — §15.25 stop conditions", () => {
+describe("discoverProjectSpec — §03.1 stop conditions", () => {
   it("stops on a devEngines-only manifest instead of climbing past it", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("nested", { devEngines: { packageManager: { name: "pnpm", version: "11.1.2" } } });
@@ -1248,10 +1248,10 @@ describe("discoverProjectSpec — §15.25 stop conditions", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.27 — write targets
+ * §03.1 — write targets
  * ------------------------------------------------------------------ */
 
-describe("discoverProjectSpec — §15.27 mutating walks", () => {
+describe("discoverProjectSpec — §03.1 mutating walks", () => {
   it("stops a mutating walk at a `workspaces` root", () => {
     manifest(".", { packageManager: "yarn@1.22.4" });
     manifest("repo", { workspaces: ["packages/*"] });
@@ -1322,10 +1322,10 @@ describe("discoverProjectSpec — §15.27 mutating walks", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.26 — one logical pin
+ * §03.7 — one logical pin
  * ------------------------------------------------------------------ */
 
-describe("writePin — §15.26", () => {
+describe("writePin — §03.7", () => {
   const read = () =>
     JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
       packageManager?: string;
@@ -1349,10 +1349,10 @@ describe("writePin — §15.26", () => {
     });
   });
 
-  // §15.12 — the sidecar describes the version beside it. Declared beside a
+  // §03.7 — the sidecar describes the version beside it. Declared beside a
   // *range* it describes no single release, so it may not be folded into a
   // `packageManager` pin that outranks it: the two would name different versions.
-  it("ignores a sidecar integrity declared beside a range (§15.12)", () => {
+  it("ignores a sidecar integrity declared beside a range (§03.7)", () => {
     const spec = readSpecFromManifest(
       {
         packageManager: "yarn@1.22.4",
@@ -1364,7 +1364,7 @@ describe("writePin — §15.26", () => {
     expect(spec.raw).toBe("yarn@1.22.4");
   });
 
-  it("still folds a sidecar integrity declared beside the exact version (§15.12)", () => {
+  it("still folds a sidecar integrity declared beside the exact version (§03.7)", () => {
     const spec = readSpecFromManifest(
       {
         packageManager: "yarn@1.22.4",
@@ -1428,7 +1428,7 @@ describe("writePin — §15.26", () => {
   });
 
   it("checks the name even when devEngines declares no version", () => {
-    // The gap §15.26 closes here: `writePin` only ever reached the devEngines
+    // The gap §03.7 closes here: `writePin` only ever reached the devEngines
     // check through a declared *range*, so a name-only block imposed nothing and
     // the resulting manifest was one §03.3 rejects by default on every run.
     manifest(".", { devEngines: { packageManager: { name: "yarn" } } });
@@ -1448,19 +1448,19 @@ describe("writePin — §15.26", () => {
     expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
   });
 
-  // §15.12 — the sidecar digest describes the version beside it, so a pin that
+  // §03.7 — the sidecar digest describes the version beside it, so a pin that
   // moves the version must settle the digest in the same edit. Skipping the
   // write instead leaves a digest for a release the project no longer uses; it
   // is inert while the field holds a range, and turns into a hash mismatch on
   // every install the moment anyone narrows the version back to one release.
-  it("removes a stale integrity when the pin becomes a range (§15.23)", () => {
+  it("removes a stale integrity when the pin becomes a range (§04.4)", () => {
     manifest(".", {
       devEngines: {
         packageManager: { name: "pnpm", version: "10.5.0", integrity: "sha512-q83v" },
       },
     });
 
-    // §15.28 — a range pin carries no digest: the resolved one lives in `jup.lock`.
+    // §03.7 — a range pin carries no digest: the resolved one lives in `jup.lock`.
     writePin(root, { name: "pnpm", reference: "^11.0.0", resolved: "11.1.2" });
 
     expect(read().devEngines?.packageManager).toEqual({ name: "pnpm", version: "^11.0.0" });
@@ -1476,7 +1476,7 @@ describe("writePin — §15.26", () => {
       },
     });
 
-    // §15.28 — a per-host tool's digest never reaches the manifest.
+    // §03.7 — a per-host tool's digest never reaches the manifest.
     writePin(root, { name: "pnpm", reference: "10.6.0" });
 
     expect(read().devEngines?.packageManager).toEqual({ name: "pnpm", version: "10.6.0" });
@@ -1491,7 +1491,7 @@ describe("writePin — §15.26", () => {
 
     writePin(root, { name: "pnpm", reference: "10.5.0" });
 
-    // Nothing moved, so nothing is stale: §15.11 keeps the verification tier.
+    // Nothing moved, so nothing is stale: §06.1 keeps the verification tier.
     expect(read().devEngines?.packageManager).toEqual({
       name: "pnpm",
       version: "10.5.0",
@@ -1539,7 +1539,7 @@ describe("writePin — §15.26", () => {
     );
   });
 
-  it("reports the path it wrote, which is what the caller prints (§15.35l)", () => {
+  it("reports the path it wrote, which is what the caller prints (§12.11)", () => {
     manifest(".", { name: "demo" });
     dir("nested");
 

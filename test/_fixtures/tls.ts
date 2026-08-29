@@ -42,7 +42,7 @@ Ars=
 -----END CERTIFICATE-----`;
 
 /* -------------------------------------------------------------------------- */
-/* Certificates outside their validity window — §15.4                         */
+/* Certificates outside their validity window — §05.1                         */
 /* -------------------------------------------------------------------------- */
 
 /**
@@ -50,7 +50,7 @@ Ars=
  * their validity window: one that stopped being valid in 2021, one that starts
  * being valid in 2100.
  *
- * They exist because §15.4's validity sentence is the one branch that cannot be
+ * They exist because §05.1's validity sentence is the one branch that cannot be
  * reached with `CERT`: it is good until 2126, so no amount of arranging makes a
  * real socket present it as expired. Faking the runtime's error code proves
  * only that the mapping table is wired up — it cannot prove that the code Node

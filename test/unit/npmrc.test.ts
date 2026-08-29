@@ -1,6 +1,6 @@
 /**
- * `.npmrc` — the constrained subset (§15.1) and the registry decision it feeds
- * (§15.2, §15.3).
+ * `.npmrc` — the constrained subset (§05.3) and the registry decision it feeds
+ * (§05.2).
  *
  * The security rules are the reason this file exists at all, so they are tested
  * from both sides: a project-level file must not be able to supply a credential
@@ -105,7 +105,7 @@ describe("parseNpmrc — the INI-ish line format", () => {
   });
 });
 
-describe("expandVariables — §15.1's `${VAR}`", () => {
+describe("expandVariables — §05.3's `${VAR}`", () => {
   it("substitutes a defined variable", () => {
     process.env.JUP_TEST_TOKEN = "s3cret";
     expect(expandVariables("${JUP_TEST_TOKEN}")).toEqual({ value: "s3cret" });
@@ -125,7 +125,7 @@ describe("expandVariables — §15.1's `${VAR}`", () => {
 
 /* -------------------------------------------------------------------------- */
 
-describe("loadNpmrc — precedence (§15.1)", () => {
+describe("loadNpmrc — precedence (§05.3)", () => {
   it("orders global < user < project, closest project file winning", () => {
     const { home, prefix, project } = tree();
     write(join(prefix, "etc", "npmrc"), "registry=https://global.example.org\n");
@@ -154,7 +154,7 @@ describe("loadNpmrc — precedence (§15.1)", () => {
     expect(loadNpmrc(project).registry?.value).toBe("https://user.example.org");
   });
 
-  it("ignores every key §15.1 does not list", () => {
+  it("ignores every key §05.3 does not list", () => {
     const { home, project } = tree();
     write(
       join(home, ".npmrc"),
@@ -172,7 +172,7 @@ describe("loadNpmrc — precedence (§15.1)", () => {
   it("says nothing about a project file's *unlisted* keys", () => {
     const { project } = tree();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // §15.1 ignores everything outside its table. A project `.npmrc` full of
+    // §05.3 ignores everything outside its table. A project `.npmrc` full of
     // ordinary npm settings is the common case, and warning about each of them
     // would make the one warning that matters — a refused credential —
     // invisible.
@@ -228,7 +228,7 @@ describe("loadNpmrc — precedence (§15.1)", () => {
   });
 });
 
-describe("loadNpmrc — the project-level security rule (§15.1)", () => {
+describe("loadNpmrc — the project-level security rule (§05.3)", () => {
   it("refuses auth and TLS keys from a project file, and says so", () => {
     const { project } = tree();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -268,7 +268,7 @@ describe("loadNpmrc — the project-level security rule (§15.1)", () => {
       "strict-ssl",
     ]);
     // Announced, not silently dropped — a credential that vanishes without a
-    // word looks exactly like a broken tool (§14.5's precedent).
+    // word looks exactly like a broken tool (§03.2's precedent).
     expect(warn).toHaveBeenCalledTimes(7);
     expect(warn.mock.calls.map(([message]) => String(message)).join("\n")).toContain(
       "a project-level .npmrc may only set registry and @scope:registry",
@@ -330,7 +330,7 @@ describe("loadNpmrc — credentials", () => {
   });
 });
 
-describe("npmrcAuthorizationFor — prefix scoping (§15.1)", () => {
+describe("npmrcAuthorizationFor — prefix scoping (§05.3)", () => {
   function configuredWith(lines: string[]): ReturnType<typeof loadNpmrc> {
     const { home, project } = tree();
     write(join(home, ".npmrc"), `${lines.join("\n")}\n`);
@@ -392,7 +392,7 @@ describe("npmrcAuthorizationFor — prefix scoping (§15.1)", () => {
 
 /* -------------------------------------------------------------------------- */
 
-describe("resolveRegistry — §15.1 and §15.2's precedence", () => {
+describe("resolveRegistry — §05.2 and §05.3's precedence", () => {
   it("uses the built-in default when nothing is configured", () => {
     const { project } = tree();
     expect(resolveRegistry({ name: "pnpm", cwd: project })).toMatchObject({
@@ -411,7 +411,7 @@ describe("resolveRegistry — §15.1 and §15.2's precedence", () => {
     expect(decision.source).toContain(join(home, ".npmrc"));
   });
 
-  it("lets COREPACK_NPM_REGISTRY beat .npmrc (§15.38 row 148)", () => {
+  it("lets COREPACK_NPM_REGISTRY beat .npmrc (row 148)", () => {
     const { home, project } = tree();
     write(join(home, ".npmrc"), "registry=https://npmrc.example.org\n");
     process.env.COREPACK_NPM_REGISTRY = "https://env.example.org/";
@@ -422,7 +422,7 @@ describe("resolveRegistry — §15.1 and §15.2's precedence", () => {
     });
   });
 
-  it("lets COREPACK_REGISTRY_<NAME> beat COREPACK_NPM_REGISTRY (§15.2)", () => {
+  it("lets COREPACK_REGISTRY_<NAME> beat COREPACK_NPM_REGISTRY (§05.2)", () => {
     const { project } = tree();
     process.env.COREPACK_NPM_REGISTRY = "https://env.example.org";
     process.env.COREPACK_REGISTRY_YARN = "https://yarn-mirror.example.org/";
@@ -438,7 +438,7 @@ describe("resolveRegistry — §15.1 and §15.2's precedence", () => {
     });
   });
 
-  it("prefers @scope:registry over registry for a scoped package (§15.38 row 150)", () => {
+  it("prefers @scope:registry over registry for a scoped package (row 150)", () => {
     const { home, project } = tree();
     write(
       join(home, ".npmrc"),
@@ -488,7 +488,7 @@ describe("hasNpmProtocolRegistry — §05.2 rewrite 1's condition", () => {
   });
 });
 
-describe("npmrcTlsSettings — §15.4's middle tier", () => {
+describe("npmrcTlsSettings — §05.1's middle tier", () => {
   it("reads cafile, ca and strict-ssl from the user file", () => {
     const { home, project } = tree();
     write(

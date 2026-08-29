@@ -29,20 +29,20 @@ export const ENV_FILE_PREFIX = COREPACK_PREFIX;
 export const DEFAULT_ENV_FILE_NAME = ".jup.env";
 
 /**
- * §03.2, §14.24 — `.corepack.env` remains a supported compatibility filename.
+ * §03.2 — `.corepack.env` remains a supported compatibility filename.
  */
 export const LEGACY_ENV_FILE_NAME = ".corepack.env";
 
 /**
- * §03.2 + §14.5 — variables an env file may never supply.
+ * §03.2 — variables an env file may never supply.
  *
  * `COREPACK_ENV_FILE` is chicken-and-egg; `COREPACK_ENABLE_DOWNLOAD_PROMPT`'s
  * default depends on how the tool was invoked, which a project file must not be
- * able to override. The rest are §14.5's and §15.37's security additions: a
+ * able to override. The rest are §03.2's security additions: a
  * hostile repo must not be able to disable signature verification, point at an
  * arbitrary host, pair a token with a hostile registry to exfiltrate it,
  * switch off (or redirect) TLS certificate verification, or nominate any of the
- * three *locations* code is loaded and run from (§14.5, below).
+ * three *locations* code is loaded and run from, below.
  */
 export const ENV_FILE_INELIGIBLE = new Set<string>([
   ENV.ENV_FILE,
@@ -72,7 +72,7 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   ENV.NPM_TOKEN,
   ENV.NPM_USERNAME,
   ENV.NPM_PASSWORD,
-  // §15.37 marks both TLS variables env-file INELIGIBLE, and for the same
+  // §03.2 marks both TLS variables env-file INELIGIBLE, and for the same
   // reason as the rest of this list: a cloned repository must not be able to
   // switch certificate verification off, or to nominate the certificate
   // authority its downloads are checked against. `COREPACK_NETWORK_TIMEOUT` and
@@ -80,20 +80,20 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // decisions.
   ENV.CAFILE,
   ENV.STRICT_SSL,
-  // §15.11 / §15.37 — the one opt-out from "every artifact clears a verification
+  // §06.1 / §03.2 — the one opt-out from "every artifact clears a verification
   // tier". A cloned repository that could set it from an env file would be
   // able to turn its own unsigned, unpinned download into a permitted one, which
-  // is the whole of what §15.11 refuses; the deny-list is what keeps the opt-out
+  // is the whole of what §06.1 refuses; the deny-list is what keeps the opt-out
   // a decision the person running the tool makes.
   ENV.ALLOW_UNVERIFIED,
-  // §15.35d / §15.37 — the file that supplies the project spec. Eligibility is a
+  // §03.1 / §03.2 — the file that supplies the project spec. Eligibility is a
   // *deny*-list, so a variable is project-settable until it is named here: a
   // cloned repository whose env file set this could point the spec at a
   // file of its own and run a package manager the manifest never names.
   ENV.SPEC_FILE,
-  // §11.5 / §14.23 — the advisory mute covers TLS verification being off
-  // (§15.4), a registry that publishes no signatures (§15.11), an unverified
-  // artifact permitted (§15.11) — and this very warning. A cloned repository
+  // §11.3 — the advisory mute covers TLS verification being off
+  // (§05.1), a registry that publishes no signatures (§06.1), an unverified
+  // artifact permitted (§06.1) — and this very warning. A cloned repository
   // able to set it could silence the evidence of what its *other* variables
   // were refused for, so muting stays the caller's decision to make.
   ENV.QUIET_ADVISORIES,
@@ -108,7 +108,7 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // keys (§06), so the second reading of it is "which publishers are trusted".
   // Relocating the store stays the decision of whoever runs the tool.
   ENV.HOME,
-  // §15.13 / §15.37 — the shim directory is prepended to the `PATH` the package
+  // §10.5 / §03.2 — the shim directory is prepended to the `PATH` the package
   // manager and every process it spawns inherits (§08.4), which makes it the
   // first place the *system* looks for `git`, `node`, and every other helper —
   // not merely where this tool's own shims are written. A repository that could
@@ -116,14 +116,14 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
   // helper the package manager shells out to would be its own. What runs ahead
   // of the user's `PATH` is a trust decision, not a layout preference.
   ENV.SHIM_DIRECTORY,
-  // §08.3.1 — the interpreter package managers are executed *with*. Nothing in
+  // §08.3 — the interpreter package managers are executed *with*. Nothing in
   // this host reads it yet, so the entry is here before the hazard is: whoever
-  // implements §08.3.1's "if COREPACK_NODE_EXECPATH is set, use it" would
+  // implements §08.3's "if COREPACK_NODE_EXECPATH is set, use it" would
   // otherwise be giving a cloned repository the ability to name the binary that
   // runs on `git clone && yarn`. Choosing the interpreter is choosing what
   // executes; it can never come from the project.
   ENV.NODE_EXECPATH,
-  // §15.43 — the runtime `enable` bakes into the shim shebang when its own
+  // §10.2 — the runtime `enable` bakes into the shim shebang when its own
   // `process.execPath` is in the store. A project able to supply it would name
   // the interpreter every shimmed `npm`, `yarn` and `pnpm` runs under from then
   // on: `COREPACK_NODE_EXECPATH`'s decision, persisted.
@@ -133,7 +133,7 @@ export const SECURITY_ONLY_FROM_ENVIRONMENT = new Set<string>([
 /**
  * Warned-about `<path>\0<NAME>` pairs.
  *
- * §14.5 asks for one warning per offending variable. Only the closest env file
+ * §03.2 asks for one warning per offending variable. Only the closest env file
  * is ever loaded (§03.2), so a run applies at most one file and keying by path
  * as well as name costs nothing while keeping repeated applications of *the same*
  * file quiet.
@@ -342,7 +342,7 @@ function readIfPresent(path: string): string | null {
  * disables env files entirely. `ENOENT` is not an error. Only the **closest**
  * file is ever loaded.
  *
- * With the variable unset, `.corepack.env` is tried second (§03.2, §14.24) — per
+ * With the variable unset, `.corepack.env` is tried second (§03.2) — per
  * directory, which is what keeps a parent's `.jup.env` from out-ranking a child's
  * `.corepack.env`: closest still wins, whichever name it carries. A *configured*
  * path gets no fallback — naming a file that is not there is worth surfacing.
@@ -437,8 +437,8 @@ export function envDisabled(name: string): boolean {
  * value means a non-interactive automated environment.
  *
  * It gates two unrelated things, which is why it lives here rather than in
- * either caller: the interactive half of the download prompt (§05.5), and
- * §15.23's frozen-lockfile default.
+ * either caller: the interactive half of the download prompt (§05.4), and
+ * §04.4's frozen-lockfile default.
  */
 export function isCI(): boolean {
   const ci = process.env[SYSTEM_ENV.CI];
@@ -446,12 +446,12 @@ export function isCI(): boolean {
 }
 
 /**
- * §15.23 / §15.37 — whether the project's `jup.lock` may be written.
+ * §04.4 — whether the project's `jup.lock` may be written.
  *
  * Only `COREPACK_FROZEN_LOCKFILE=1` freezes it. Package-manager runs never edit
  * the recorded file; `use` and `up` are its writers.
  *
- * The cache in `node_modules` is outside this entirely (§15.23). It is not a
+ * The cache in `node_modules` is outside this entirely (§04.4). It is not a
  * committed record, freezing it would only cost a request per run, and a job
  * that wants no writes at all has a read-only filesystem for that.
  */

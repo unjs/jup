@@ -1,5 +1,5 @@
 /**
- * §15.38 rows 148–150 — the `.npmrc` subset (§15.1).
+ * rows 148–150 — the `.npmrc` subset (§05.3).
  *
  * #540 is the single most-upvoted missing capability in corepack's tracker, and
  * the thread reframes it as a supply-chain problem rather than a convenience: a
@@ -86,7 +86,7 @@ beforeEach(() => {
   for (const registry of [fallback, mirror, other]) registry.reset();
 });
 
-describe("§15.1 — the .npmrc subset", () => {
+describe("§05.3 — the .npmrc subset", () => {
   it("148: a user-level `registry` is honoured, and COREPACK_NPM_REGISTRY still overrides it", async () => {
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
     userNpmrc(fixture, `registry=${mirror.origin}\n`);
@@ -106,7 +106,7 @@ describe("§15.1 — the .npmrc subset", () => {
     expect(fallback.requests).toEqual([]);
     expect(other.requests).toEqual([]);
 
-    // §15.1's precedence: the environment sits above the file.
+    // §05.3's precedence: the environment sits above the file.
     const overridden = createFixture({ packageManager: "pnpm@6.6.2" });
     userNpmrc(overridden, `registry=${mirror.origin}\n`);
     mirror.reset();
@@ -160,7 +160,7 @@ describe("§15.1 — the .npmrc subset", () => {
     expect(fallback.requests).toEqual([]);
     expect(`${result.stdout}${result.stderr}`).not.toContain("project-token");
 
-    // Refused out loud, not silently — §14.5's precedent, and the one line that
+    // Refused out loud, not silently — §03.2's precedent, and the one line that
     // explains a token which "should" have been picked up.
     expect(result.stderr).toContain(
       `! Ignoring //${host}/:_authToken from ${join(fixture.cwd, ".npmrc")}: a project-level .npmrc may only set registry and @scope:registry`,
@@ -179,7 +179,7 @@ describe("§15.1 — the .npmrc subset", () => {
       tls: { cafile: string | null; verify: boolean };
       npmrc: { files: Array<{ level: string; refused: string[] }> };
     };
-    // A bundle nothing can read would have failed the very next request; §15.1
+    // A bundle nothing can read would have failed the very next request; §05.3
     // means it never gets that far.
     expect(report.tls.cafile).toBeNull();
     expect(report.tls.verify).toBe(true);

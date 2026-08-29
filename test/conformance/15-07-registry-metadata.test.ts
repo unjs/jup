@@ -1,12 +1,12 @@
 /**
- * §15.38 rows 158–161 — registry metadata robustness (§15.7, §15.8).
+ * rows 158–161 — registry metadata robustness (§06.1, §06.3).
  *
  * The driving reports are corepack #570, #725 and #808: a private registry that
  * omits `dist`, or strips `dist.signatures`, produced a raw
  * `TypeError: Cannot read properties of undefined`, and the only documented
  * remedy — `COREPACK_INTEGRITY_KEYS=0` — traded a metadata-shape problem for a
  * permanent, global security downgrade. These rows pin the three outcomes
- * §15.7 requires instead, and §15.8's package-root retry.
+ * §06.1 requires instead, and §06.3's package-root retry.
  */
 
 import { existsSync } from "node:fs";
@@ -52,7 +52,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.7 / §15.8 registry metadata robustness", () => {
+describe("§06.1 / §06.3 registry metadata robustness", () => {
   it("158: metadata with no `dist` key reports the registry, rather than crashing", async () => {
     registry.mode = "no_dist";
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
@@ -76,7 +76,7 @@ describe("§15.7 / §15.8 registry metadata robustness", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
-    // §15.7's soft-fail, worded verbatim and emitted exactly once.
+    // §06.1's soft-fail, worded verbatim and emitted exactly once.
     const warning = `! ${registry.origin} does not publish signatures for pnpm@6.6.2; falling back to integrity-only verification`;
     expect(occurrences(result.stderr, warning)).toBe(1);
   });
@@ -103,13 +103,13 @@ describe("§15.7 / §15.8 registry metadata robustness", () => {
   });
 
   it("159: a pinned hash is not subject to COREPACK_REQUIRE_SIGNATURES", async () => {
-    // §06.1 row 1 versus §15.7's last line, decided here rather than left to
+    // §06.1's row 1 versus its own REQUIRE_SIGNATURES rule, decided here rather than left to
     // whichever the code happened to reach first — the audit found this path
     // untested in *either* direction.
     //
-    // The pinned-hash path wins. §14.21 records the reasoning as deliberate: an
+    // The pinned-hash path wins. §06.1 records the reasoning as deliberate: an
     // explicit hash is a stronger, user-chosen assertion than the registry's
-    // claim about itself, and §15.11 counts it as a full verification tier. The
+    // claim about itself, and §06.1 counts it as a full verification tier. The
     // alternative is also incoherent in practice — on the default registry a
     // pinned install makes no metadata request at all (§06.1 row 1 forbids the
     // extra fetch), so honouring the variable here would refuse over a mirror
@@ -160,7 +160,7 @@ describe("§15.7 / §15.8 registry metadata robustness", () => {
     expect(result.stdout).toBe("6.6.2\n");
     expect(result.stderr).not.toContain("does not publish signatures");
 
-    // §15.8's one extra request, and it comes *after* the version endpoint that
+    // §06.3's one extra request, and it comes *after* the version endpoint that
     // failed to carry the signatures.
     const paths = registry.requests.map((request) => request.path);
     expect(paths.indexOf("/pnpm")).toBeGreaterThan(paths.indexOf("/pnpm/6.6.2"));
@@ -176,7 +176,7 @@ describe("§15.7 / §15.8 registry metadata robustness", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    // The happy path pays for none of §15.8: metadata, then tarball.
+    // The happy path pays for none of §06.3: metadata, then tarball.
     expect(registry.requests.map((request) => request.path)).toStrictEqual([
       "/pnpm/6.6.2",
       "/pnpm/-/pnpm-6.6.2.tgz",

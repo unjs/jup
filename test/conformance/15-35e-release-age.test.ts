@@ -1,5 +1,5 @@
 /**
- * §15.35e — `COREPACK_MINIMUM_RELEASE_AGE` (row 203).
+ * §04.1 — `COREPACK_MINIMUM_RELEASE_AGE` (row 203).
  *
  * The gate exists to stop a freshly-published, compromised release being picked
  * up within minutes of publication, and it is the same `minimumReleaseAge`
@@ -10,7 +10,7 @@
  * * §04.1 **step 3**'s dist-tag is the *registry* choosing on the user's behalf,
  *   which is exactly what a fresh malicious publish subverts, so the tag's
  *   target is capped rather than trusted.
- * * §04.1 **step 5**'s exact version is never filtered — §15.35e says so
+ * * §04.1 **step 5**'s exact version is never filtered — the text says so
  *   outright — and it returns before either of the above runs.
  *
  * ## The two fixtures that would make this file worthless
@@ -33,7 +33,7 @@
  * **The `undated source fails closed` rows are gone.** They asserted the other
  * half of blocker 3 — that a source publishing no dates refuses under the gate
  * rather than resolving unchecked — against `repo.yarnpkg.com`'s `/tags`
- * document, the table's only url-type registry. §15.41 moved Yarn Berry onto
+ * document, the table's only url-type registry. §02.5 moved Yarn Berry onto
  * `@yarnpkg/cli-dist`, so every source the table names is an npm packument with
  * a `time` field and nothing reachable can be undated. `undatedSourceError` and
  * the branch that raises it are still there for a band that is not an npm
@@ -97,7 +97,7 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
   return (fixture.json("package.json") as { packageManager?: string }).packageManager;
 }
 
-describe("§15.35e COREPACK_MINIMUM_RELEASE_AGE", () => {
+describe("§04.1 COREPACK_MINIMUM_RELEASE_AGE", () => {
   it("203: a release younger than the age is filtered out of implicit resolution", async () => {
     const fixture = createFixture({ name: "app", packageManager: "pnpm@^11.0.0" });
 
@@ -141,7 +141,7 @@ describe("§15.35e COREPACK_MINIMUM_RELEASE_AGE", () => {
     // so on its own it cannot tell "§04.1 step 5 returns before the gate" from
     // "the gate is simply unreachable on that path". `use` has no such fast
     // path: it calls `resolveDescriptor` directly, so this row is what pins the
-    // exemption where §15.35e puts it.
+    // exemption where §04.1 puts it.
     const fixture = createFixture({ name: "app" });
 
     const result = await run(["use", `pnpm@${FRESH}`], {
@@ -171,7 +171,7 @@ describe("§15.35e COREPACK_MINIMUM_RELEASE_AGE", () => {
 
   it("203: an explicit dist-tag is capped, not trusted", async () => {
     // `latest` points at FRESH. A tag is not an exact pin — the user named a
-    // channel and let the registry decide what is in it — so §15.35e applies and
+    // channel and let the registry decide what is in it — so §04.1 applies and
     // the target is capped at the newest release old enough to be chosen.
     const fixture = createFixture({ name: "app" });
 
@@ -236,7 +236,7 @@ describe("§15.35e COREPACK_MINIMUM_RELEASE_AGE", () => {
 /* Blocker 3 — a source that publishes no release dates                        */
 /* -------------------------------------------------------------------------- */
 
-describe("§15.35e — unset costs nothing", () => {
+describe("§04.1 — unset costs nothing", () => {
   it("203: the same command makes the same requests, with the abbreviated header", async () => {
     const ungated = createFixture({ name: "app" });
     expect((await run(["use", "pnpm"], { ...ungated, registry, env: env() })).exitCode).toBe(0);

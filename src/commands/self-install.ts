@@ -8,7 +8,7 @@
  * npm install is tied to the Node that owns it. `self-install` copies whichever
  * of those is running into `<home>/self/<version>` — a directory `cache clean`
  * does not touch (§07.11) — and links `jup` and `corepack` to it from the same
- * per-user directory `enable` uses (§15.13), so one directory on `PATH` ends up
+ * per-user directory `enable` uses (§10.5), so one directory on `PATH` ends up
  * holding jup and the tool commands alike.
  *
  * What it copies is a package — `dist/`, `bin/` and the manifest of an npm
@@ -85,7 +85,7 @@ const DIGEST_ALGO = "sha256";
  * A source checkout has an `src/` and no build, and the two things this command
  * copies are exactly the two the bundler produces.
  *
- * Refusing rather than copying `src/` is the same call §15.46 makes about the
+ * Refusing rather than copying `src/` is the same call §10.2 makes about the
  * shebang pin: a checkout is not an installation. Copying one would put a tree
  * that changes under `git pull` behind the `jup` on someone's `PATH`, and every
  * `.ts` in it would then be type-stripped on every invocation.
@@ -118,7 +118,7 @@ export const selfDirectoryBusy = (directory: string, reason: string) =>
 export const implausibleVersion = (version: string) =>
   `Unable to install ${TOOL_NAME}: its own version reads as ${JSON.stringify(version)}, which is not a version a store directory can be named after. The installation this was run from has a corrupt \`${MANIFEST_NAME}\`.`;
 
-/** Where the copy went. Informational, on stdout (§09.11). */
+/** Where the copy went. Informational, on stdout (§09.14). */
 export const installedTo = (version: string, directory: string) =>
   `${TOOL_NAME} ${version} -> ${directory}`;
 
@@ -220,7 +220,7 @@ function expand(root: string, folder: string): PayloadFile[] {
  *
  * Names and the execute bit are hashed alongside the bytes, so a file that only
  * moved or only lost its mode still reads as a change; the store cares about
- * both (§15.45). It is computed over the *source* rather than over a staged
+ * both (§07.11). It is computed over the *source* rather than over a staged
  * copy, which is what lets a repeated `self-install` do no I/O beyond reading
  * what it would otherwise have written.
  */
@@ -243,7 +243,7 @@ function digestPayload(files: PayloadFile[]): string {
  * The execute bit is re-applied rather than inherited: `copyFileSync` carries
  * the source mode over, but a package unpacked by npm can arrive with its stubs
  * at `0o644` (§16 says why), and a shim linked to a stub the kernel will not
- * execute is passed over in silence — §15.45's failure. The bit is set from what
+ * execute is passed over in silence — §10.3's failure. The bit is set from what
  * the source *is*, so nothing gains one it did not have.
  */
 function stage(files: PayloadFile[], directory: string): void {
@@ -375,7 +375,7 @@ export function parseSelfArgs(args: string[], command: string): ShimOptions {
     }
   }
 
-  // §15.13 point 8 — the two spellings of "install here" are equally explicit,
+  // §10.5 — the two spellings of "install here" are equally explicit,
   // and picking one silently would put shims where the command line also said
   // not to. `shims.ts` raises the same refusal for `enable`.
   if (options.system === true && options.installDirectory !== undefined) {
@@ -454,7 +454,7 @@ function isRunningFrom(directory: string): boolean {
 export async function linkSelf(version: string, dest: string, options: ShimOptions): Promise<void> {
   out(`${installedTo(version, dest)}\n`);
 
-  // §15.13 — choose, announce, probe, then fall back; nothing is written before
+  // §10.5 — choose, announce, probe, then fall back; nothing is written before
   // the directory is known to be writable. `enable`'s chain exactly, because the
   // two commands must not disagree about where a user's shims live.
   const choice = chooseInstallDirectory(options);
@@ -478,7 +478,7 @@ export async function linkSelf(version: string, dest: string, options: ShimOptio
     );
   }
 
-  // §15.29 — verify the post-condition and name whatever beat the shims.
+  // §10.5 — verify the post-condition and name whatever beat the shims.
   verifyOnPath(installDirectory, installed);
 
   // Only now: until the names point at `dest`, an older copy is still the one a
@@ -488,7 +488,7 @@ export async function linkSelf(version: string, dest: string, options: ShimOptio
 
 /**
  * §09.12 — copy, then shim. Exit 0, and idempotent in both halves: an unchanged
- * payload writes nothing to the store, and a correct shim is left alone (§10.2).
+ * payload writes nothing to the store, and a correct shim is left alone (§10.3).
  */
 export async function cmdSelfInstall(args: string[]): Promise<number> {
   const options = parseSelfArgs(args, "self-install");

@@ -251,7 +251,7 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(originals).toContain("https://example.com/pnpm/-/pnpm-6.6.2.tgz");
   });
 
-  it("72: the same without NODE_USE_ENV_PROXY still tunnels (§14.8)", async () => {
+  it("72: the same without NODE_USE_ENV_PROXY still tunnels (§05.1)", async () => {
     // Corepack needs this second flag before `HTTP_PROXY` does anything at all,
     // which is the whole of #447 and #458. Here its absence changes nothing.
     expect(process.env.NODE_USE_ENV_PROXY).toBeUndefined();
@@ -274,7 +274,7 @@ describe("§13.7 registry, auth and integrity", () => {
     // §06.3 step 4: an unmatched keyid is "not signed by any trusted keys". The
     // row's `No compatible signature found in package metadata` is step 1's
     // message, which an *absent* signature list used to produce here too —
-    // §15.7 makes that case a soft-fail instead, so row 160 asserts the step-1
+    // §06.1 makes that case a soft-fail instead, so row 160 asserts the step-1
     // message on the path that still refuses (COREPACK_REQUIRE_SIGNATURES).
     expect(result.stderr).toContain("The package was not signed by any trusted keys");
 
@@ -282,7 +282,7 @@ describe("§13.7 registry, auth and integrity", () => {
     const unsigned = createFixture({ packageManager: "pnpm@6.6.2" });
     const missing = await run(["pnpm", "--version"], { ...unsigned, registry, env: trusted() });
 
-    // §15.7 tier 2: no signature, but a matching `integrity` — proceed, warned.
+    // §06.1 tier 2: no signature, but a matching `integrity` — proceed, warned.
     // A missing signature is a registry-shape problem (Artifactory, Nexus), and
     // refusing every such registry is what drove users to
     // `COREPACK_INTEGRITY_KEYS=0`, a permanent global downgrade.
@@ -325,7 +325,7 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(byTag.stderr).toContain("Signature does not match");
 
     // No-arg default resolution verifies the signature over `<pkg>/latest`, and
-    // §04.5 wraps whatever went wrong in its own message.
+    // §04.6 wraps whatever went wrong in its own message.
     const fallback = createFixture();
     const byDefault = await run(["pnpm", "--version"], {
       ...fallback,
@@ -442,7 +442,7 @@ describe("§13.7 registry, auth and integrity", () => {
     );
   });
 
-  it("82: a trust store whose only matching key has expired accepts, loudly (§14.4)", async () => {
+  it("82: a trust store whose only matching key has expired accepts, loudly (§06.5)", async () => {
     const expires = "2020-01-01T00:00:00.000Z";
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -464,7 +464,7 @@ describe("§13.7 registry, auth and integrity", () => {
     );
   });
 
-  it("208: an expired key whose signature does not verify still fails (§14.4)", async () => {
+  it("208: an expired key whose signature does not verify still fails (§06.5)", async () => {
     const expires = "2020-01-01T00:00:00.000Z";
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 
@@ -487,7 +487,7 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(result.stderr).not.toContain("accepting it");
   });
 
-  it("83: a dist.tarball on another host is refused (§14.9)", async () => {
+  it("83: a dist.tarball on another host is refused (§05.2)", async () => {
     registry.tarballOrigin = "https://evil.example.com";
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
 

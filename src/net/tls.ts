@@ -18,7 +18,7 @@ export interface TlsSettings {
   /** Where {@link cafile} came from, for diagnostics. */
   cafileSource?: string;
   /**
-   * §15.1's `ca` — the certificates inline rather than by path. Same tier as
+   * §05.3's `ca` — the certificates inline rather than by path. Same tier as
    * {@link cafile} and the same semantics: it **replaces** the platform store.
    */
   ca?: string[];
@@ -31,13 +31,13 @@ export interface TlsSettings {
 }
 
 /**
- * §15.4's precedence: `COREPACK_CAFILE`, then `.npmrc`'s `cafile`/`ca`, then the
+ * §05.1's precedence: `COREPACK_CAFILE`, then `.npmrc`'s `cafile`/`ca`, then the
  * platform trust store.
  *
- * The `.npmrc` middle tier is §15.1's, and it is read from the **user and
+ * The `.npmrc` middle tier is §05.3's, and it is read from the **user and
  * global files only** — a project-level `.npmrc` is attacker-controlled in a
  * cloned repository, and `cafile` / `ca` / `strict-ssl` are exactly the keys
- * §15.1 forbids it from supplying. `npmrc.ts` enforces that at parse time, so a
+ * §05.3 forbids it from supplying. `npmrc.ts` enforces that at parse time, so a
  * project file's value never reaches this function at all.
  *
  * `ca` (inline PEM) and `cafile` (a path) are the same tier; `cafile` wins when
@@ -68,7 +68,7 @@ export function tlsSettings(): TlsSettings {
     settings.verify = false;
     settings.verifySource = strictSsl.name;
   } else if (strictSsl === undefined) {
-    // §15.4 — "`strict-ssl=false` MUST be honoured only from the user/global
+    // §05.1 — "`strict-ssl=false` MUST be honoured only from the user/global
     // files, and MUST print a warning naming the file it came from".
     const npmrc = npmrcTlsSettings();
     if (npmrc.strictSsl?.value === false) {
@@ -80,7 +80,7 @@ export function tlsSettings(): TlsSettings {
   return settings;
 }
 
-/** `strict-ssl (/home/u/.npmrc)` — the setting *and* the file, as §15.4 asks. */
+/** `strict-ssl (/home/u/.npmrc)` — the setting *and* the file, as §05.1 asks. */
 function describe(origin: NpmrcOrigin): string {
   return `${origin.key} (${origin.path})`;
 }
@@ -151,7 +151,7 @@ function certificatesIn(content: string): string[] {
   );
 }
 
-/** §15.1's `ca`: the certificates are already in hand, so only the armour matters. */
+/** §05.3's `ca`: the certificates are already in hand, so only the armour matters. */
 export function inlineCertificates(values: string[], source: string): string[] {
   const certificates = values.flatMap((value) => certificatesIn(value));
   if (certificates.length === 0) {
@@ -167,7 +167,7 @@ export function inlineCertificates(values: string[], source: string): string[] {
  * runtime that does not have it at all throws a bare `TypeError` from inside a
  * function the user has never heard of; one that accepts the call and ignores it
  * leaves the request to fail later with `UNABLE_TO_GET_ISSUER_CERT`, which is
- * precisely the unexplained certificate error §15.4 exists to abolish — except
+ * precisely the unexplained certificate error §05.1 exists to abolish — except
  * now the user has configured the fix and still sees it. Either way the
  * diagnostic must name `JUP_CAFILE`, because that is the setting being ignored.
  *
@@ -227,8 +227,8 @@ export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): vo
   const certificates = trustStoreFor(settings);
   const key = settings.cafile ?? settings.caSource;
   if (certificates !== undefined && key !== undefined && installed !== key) {
-    // Replaces rather than extends: §15.4 states a *precedence* order ending at
-    // the platform store, and npm's own `cafile`/`ca` — the §15.1 tier feeding
+    // Replaces rather than extends: §05.1 states a *precedence* order ending at
+    // the platform store, and npm's own `cafile`/`ca` — the §05.3 tier feeding
     // this same seam — replace the default set too, as does `COREPACK_CAFILE`.
     // A TLS-inspecting proxy re-signs everything with the CA being configured
     // here, so replacement is also the shape that actually works behind one.
@@ -236,7 +236,7 @@ export function applyTlsConfiguration(settings: TlsSettings = tlsSettings()): vo
     installed = key;
   }
 
-  // §15.4, verbatim. Once per source per process: it is a standing property of
+  // §05.1, verbatim. Once per source per process: it is a standing property of
   // the run, not a property of any one request.
   if (!settings.verify) {
     const source = settings.verifySource ?? "the environment";
@@ -347,7 +347,7 @@ function codesOf(error: unknown): string[] {
 }
 
 /**
- * §15.4 — the sentence for a TLS failure, or `undefined` when this is not one.
+ * §05.1 — the sentence for a TLS failure, or `undefined` when this is not one.
  *
  * @param host The authority whose certificate was rejected: the target's,
  * normally, but the *proxy's* when the failure happened while connecting to an

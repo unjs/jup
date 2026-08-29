@@ -23,7 +23,7 @@ import {
 const registry = new MockRegistry();
 
 /**
- * §15.11 — Berry from `repo.yarnpkg.com` clears a verification tier only
+ * §06.1 — Berry from `repo.yarnpkg.com` clears a verification tier only
  * through a pinned hash, so the rows that install one pin the digest of the
  * bytes the mock serves.
  */
@@ -56,7 +56,7 @@ beforeAll(async () => {
     distTags: { latest: "7.24.2", "latest-7": "7.24.2" },
   });
 
-  // §15.41 — Berry is an npm package, so its versions and its dist-tags come
+  // §02.5 — Berry is an npm package, so its versions and its dist-tags come
   // from one packument. It used to be single `.js` files on `repo.yarnpkg.com`
   // plus a url-type `/tags` document (tags under `aliases`, versions under
   // `tags`, §05.3).
@@ -177,11 +177,11 @@ describe("§13.9 default version and last-known-good", () => {
   it("103: install -g yarn (bare) resolves the true latest, not the 1.x line", async () => {
     const fixture = createFixture({});
 
-    // §15.41 — no opt-out. This row needed `COREPACK_ALLOW_UNVERIFIED=1` for as
+    // §02.5 — no opt-out. This row needed `COREPACK_ALLOW_UNVERIFIED=1` for as
     // long as a bare name resolved through Berry's `/tags` document on
     // `repo.yarnpkg.com`, which published neither signatures nor digests: the
     // most ordinary first command anyone types was also the one that could not
-    // clear §15.11. Resolving through `@yarnpkg/cli-dist` gives it npm's
+    // clear §06.1. Resolving through `@yarnpkg/cli-dist` gives it npm's
     // signature, so the plain form now works on a clean machine — and the empty
     // stderr below is the assertion that says so.
     const result = await run(["install", "-g", "yarn"], {

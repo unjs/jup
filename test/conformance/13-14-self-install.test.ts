@@ -66,7 +66,7 @@ function builtTool(version: string = VERSION): { root: string; entry: string } {
   mkdirSync(join(root, "bin"), { recursive: true });
   const entry = join(root, "bin", CLI_ENTRY_NAME);
   writeFileSync(entry, cliEntrySource());
-  // One §10.2 stub beside it, so the copied payload has the shape a published
+  // One §10.3 stub beside it, so the copied payload has the shape a published
   // install has: `enable` links these, `self-install` links the entry above.
   writeFileSync(join(root, "bin", stubNameFor("pnpm")), shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"));
   chmodSync(entry, 0o755);
@@ -81,7 +81,7 @@ function builtTool(version: string = VERSION): { root: string; entry: string } {
 }
 
 /**
- * A fixture whose per-user shim directory is inside it and on `PATH` — §15.13's
+ * A fixture whose per-user shim directory is inside it and on `PATH` — §10.5's
  * default, redirected, so a row never writes into the developer's own `PATH`.
  */
 function selfFixture() {
@@ -166,7 +166,7 @@ describe("§09.12 self-install", () => {
     expect(statSync(join(fixture.home, "self", VERSION)).isDirectory()).toBe(true);
   });
 
-  // §10.8 — both names link the CLI entry, which passes the argv through
+  // §10.9 — both names link the CLI entry, which passes the argv through
   // instead of prepending a binary name. Without that, this is
   // `Unknown command "jup"`.
   it.skipIf(IS_WINDOWS)("installs a jup that runs, under both of its names", async () => {
@@ -198,8 +198,8 @@ describe("§09.12 self-install", () => {
     expect(second.stderr).toBe("");
     expect(statSync(join(selfDir, ".jup")).ino).toBe(marker.ino);
     expect(statSync(join(selfDir, ".jup")).mtimeMs).toBe(marker.mtimeMs);
-    // The shim is unchanged on both platforms, but only §10.2's link is left
-    // *untouched*: §10.3 has no idempotency short-circuit, so Windows rewrites
+    // The shim is unchanged on both platforms, but only §10.3's link is left
+    // *untouched*: §10.4 has no idempotency short-circuit, so Windows rewrites
     // its trio byte for byte and the mtime moves (as it does for `enable`).
     expect(readFileSync(join(shimDir, "jup"), "utf8")).toBe(body);
     if (!IS_WINDOWS) expect(lstatSync(join(shimDir, "jup")).mtimeMs).toBe(shim.mtimeMs);
@@ -240,13 +240,13 @@ describe("§09.12 self-install", () => {
 
     expect(forced.exitCode).toBe(0);
     expect(lstatSync(join(shimDir, "corepack")).isSymbolicLink()).toBe(true);
-    // §15.15 — what it displaced is recorded, so `disable` can put it back.
+    // §10.6 — what it displaced is recorded, so `disable` can put it back.
     expect(readFileSync(join(options.home, "shims.json"), "utf8")).toContain("corepack");
   });
 
   // §09.12's own ownership rule: a link into `<home>/self` is ours whatever it
   // points at. Without it the second run files the first run's shim under
-  // §15.15 as somebody else's.
+  // §10.6 as somebody else's.
   it.skipIf(IS_WINDOWS)("recognises its own shims rather than displacing them", async () => {
     const { options } = selfFixture();
 
@@ -331,7 +331,7 @@ describe("§09.12 self-install", () => {
 });
 
 /**
- * §10.3's trio for our own names, which `installSelfShims` writes on Windows and
+ * §10.4's trio for our own names, which `installSelfShims` writes on Windows and
  * which no POSIX row above can reach. The bodies are platform-independent, so
  * they are asserted here rather than skipped everywhere but one runner.
  */
@@ -343,7 +343,7 @@ describe("§09.12 Windows wrappers", () => {
     );
 
     for (const source of Object.values(wrappers)) {
-      // §14.16 reads ownership off the marker, these wrappers naming no stub.
+      // §10.6 reads ownership off the marker, these wrappers naming no stub.
       expect(source).toContain(SHIM_MARKER);
       expect(source).toContain(CLI_ENTRY_NAME);
     }

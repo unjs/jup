@@ -9,7 +9,7 @@ The five CLI-level files are copied with their **test bodies untouched**. Three
 kinds of edit were made and no others: the import lines were rewritten (below),
 rows covering a deliberate divergence were turned into `it.skip` /
 `describe.skip` with a `// SKIP (jup §…)` comment above naming the section that
-makes them deliberate, and seven path literals renamed by §14.24 were respelled
+makes them deliberate, and seven path literals renamed by §03.2 were respelled
 in place. Every skip is listed under *What it reports*.
 
 The third kind is new and deliberately narrow, and every instance of it names a
@@ -20,8 +20,8 @@ fixture rather than a behaviour:
 | `corepack.tgz` → `jup.tgz` | 3 | the hydration rows are about `pack` / `install -g` round-tripping |
 | `.corepack` → `.jup` | 4 | jup's store marker (§07.1) |
 | `{}` → `{hash: MARKER_HASH}` | 4 | §07.2 — a marker without a digest reads as *no* marker, and the row would fall through to a download |
-| `yarn.js` → `bin/yarn.js` | 4 | §15.41 — Berry is an npm tarball now, not a single file at the root |
-| `yarn@2.2.2` → `yarn@2.4.1` | 12 | §15.41 — `@yarnpkg/cli-dist`'s 2.x line starts at 2.4.1 |
+| `yarn.js` → `bin/yarn.js` | 4 | §02.5 — Berry is an npm tarball now, not a single file at the root |
+| `yarn@2.2.2` → `yarn@2.4.1` | 12 | §02.5 — `@yarnpkg/cli-dist`'s 2.x line starts at 2.4.1 |
 
 Those rows are about `pack`/`install -g` round-tripping, about exit codes and
 ESM handover, about parallel installs and `use`; which Berry release stands in,
@@ -34,7 +34,7 @@ one-token edit per site so the upstream diff still reads as one.
 
 Where the literal *is* the assertion, the row is skipped instead: the five
 `testedPackageManagers` entries in `UNREACHABLE_BERRY` pin a Berry version or a
-`repo.yarnpkg.com` digest that §15.41 put out of jup's reach, and substituting
+`repo.yarnpkg.com` digest that §02.5 put out of jup's reach, and substituting
 either would be rewriting what the row tests.
 
 | Upstream | Here |
@@ -71,7 +71,7 @@ several rows install multi-megabyte package managers.
 
 Every upstream row that writes a `.corepack.env` is left exactly as it is, and
 passes: §03.2 still reads that name when the directory has no `.jup.env`, which
-is what §14.24 asks for. The suite is therefore also the regression test for the
+is what §03.2 asks for. The suite is therefore also the regression test for the
 legacy spelling — the fallback going away would show up here as ten-odd red rows
 rather than as a quiet behaviour change in somebody's repository.
 
@@ -102,16 +102,16 @@ the set rather than one apiece.
 
 | Skipped | Cause |
 | --- | --- |
-| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--pin-style`, which Corepack has no equivalent for (§15.26, §15.27). |
+| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--pin-style`, which Corepack has no equivalent for (§03.1, §03.7). |
 | 7 | **Naming.** The `devEngines` warnings, the validation-warning prefix, and the download notice all name the running tool, and jup calls itself `jup` where Corepack says `Corepack`. Every other assertion in those rows holds; the jup text is asserted verbatim by `test/conformance/13-04-dev-engines.test.ts` and `13-05-environment.test.ts`. |
-| 6 | **§15.11** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
-| 5 | **§14.16 / §15.13** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
-| 5 | **§15.41** — Yarn Berry comes from `@yarnpkg/cli-dist` on the npm registry, whose 2.x line starts at 2.4.1. `yarn@2.0.0-rc.30` is unreachable, and upstream's two `3.0.0-rc.2` digests were taken over `repo.yarnpkg.com`'s single-file `yarn.js`, so they name bytes jup never downloads. `3.0.0-rc.2` without a digest still runs. |
-| 4 | **§15.23** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
+| 6 | **§06.1** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
+| 5 | **§10.6 / §10.5** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
+| 5 | **§02.5** — Yarn Berry comes from `@yarnpkg/cli-dist` on the npm registry, whose 2.x line starts at 2.4.1. `yarn@2.0.0-rc.30` is unreachable, and upstream's two `3.0.0-rc.2` digests were taken over `repo.yarnpkg.com`'s single-file `yarn.js`, so they name bytes jup never downloads. `3.0.0-rc.2` without a digest still runs. |
+| 4 | **§04.4** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
 | 4 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
-| 3 | **§15 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two of the three use that string to probe env-file discovery. |
-| 1 | **§14** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
-| 1 | **§15, #138** — `enable`'s default target set includes npm. |
+| 3 | **§12.6 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two of the three use that string to probe env-file discovery. |
+| 1 | **§02.5** — `yarn`'s built-in default is Berry, not Classic 1.22 (#812), and a custom registry serves it as `@yarnpkg/cli-dist` (§05.3). |
+| 1 | **§10.7, #138** — `enable`'s default target set includes npm. |
 | 1 | **Structurally unportable** — `should expose its root to spawned processes` asserts `COREPACK_ROOT` equals the tests' own parent directory, true only when the suite lives inside the tool's package. |
 
 ## Compat mode
@@ -121,11 +121,11 @@ broad to skip row by row:
 
 | Variable | Rows | Divergence |
 | --- | --- | --- |
-| `COREPACK_INTEGRITY_KEYS=0` | 20 | §14.4 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
-| `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §15.11 — a source with no signature and no pinned hash is refused: every URL reference, and (before §15.41 moved Berry onto npm) every Berry release from `repo.yarnpkg.com`. |
-| `COREPACK_QUIET_ADVISORIES=1` | 22 | §14.23 — the advisory `!` lines jup adds. |
+| `COREPACK_INTEGRITY_KEYS=0` | 20 | §06.5 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
+| `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §06.1 — a source with no signature and no pinned hash is refused: every URL reference, and (before §02.5 moved Berry onto npm) every Berry release from `repo.yarnpkg.com`. |
+| `COREPACK_QUIET_ADVISORIES=1` | 22 | §11.3 — the advisory `!` lines jup adds. |
 
-The per-variable splits were measured before §15.41; the total they add up to has
+The per-variable splits were measured before §02.5; the total they add up to has
 since fallen from 52 to 41, because Berry now arrives signed from npm like every
 other entry and no longer needs the second hatch.
 
@@ -147,7 +147,7 @@ Four levers were measured against the residual, and all four were taken:
 | Hand over with `Module.runMain`, not `import()` | +6 | **bug** — fixed, see below |
 | Leave `process.exitCode` undefined on a plain success | (1 of those 6) | **bug** — fixed, see below |
 | Accept trusted keys on curves other than P-256 | +13 | §06.3 scopes its P-256 assertion to *native* implementations; jup is not one |
-| Suppress jup's *extra* advisory `!` lines | +22 | `COREPACK_QUIET_ADVISORIES` (§11.5, §14.23) |
+| Suppress jup's *extra* advisory `!` lines | +22 | `COREPACK_QUIET_ADVISORIES` (§11.3) |
 | Scrub `YARN_*` / `npm_config_*` from the test environment | +6 | harness — a stray `YARN_NPM_MINIMAL_AGE_GATE` fails every row running an older Yarn |
 
 The advisory lever was the largest, and the one that could not be pulled

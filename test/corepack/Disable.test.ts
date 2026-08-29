@@ -17,7 +17,7 @@ beforeEach(async () => {
 });
 
 describe(`DisableCommand`, () => {
-  // SKIP (jup §15.13 + §14.16): two divergences at once — jup does not derive
+  // SKIP (jup §10.5 + §10.6): two divergences at once — jup does not derive
   // the directory from a `PATH` lookup, and it will not remove an entry it did
   // not install, which is what `makeBin` creates here.
   it.skip(`should remove the binaries from the folder found in the PATH`, async () => {
@@ -46,7 +46,7 @@ describe(`DisableCommand`, () => {
     });
   });
 
-  // SKIP (jup §14.16): the binaries here are empty files made by `makeBin`, not
+  // SKIP (jup §10.6): the binaries here are empty files made by `makeBin`, not
   // jup's own shims, and jup declines to remove what it did not install.
   it.skip(`should remove the binaries from the specified folder when used with --install-directory`, async () => {
     await xfs.mktempPromise(async cwd => {
@@ -67,7 +67,7 @@ describe(`DisableCommand`, () => {
     });
   });
 
-  // SKIP (jup §14.16): as above.
+  // SKIP (jup §10.6): as above.
   it.skip(`should remove binaries only for the requested package managers`, async () => {
     await xfs.mktempPromise(async cwd => {
       const binNames = new Set<string>();

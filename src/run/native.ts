@@ -68,9 +68,9 @@ function forwardHostRuntime(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
  *
  * The caller has already set `COREPACK_ROOT` on `process.env` (§08.7) and hands
  * `env` in as the child's environment: the ambient one wholesale, env-file
- * values included, plus §15.32's `PATH` entry — which is written *here* and
+ * values included, plus §08.7's `PATH` entry — which is written *here* and
  * never into `process.env`, so it cannot leak into the tool's own process.
- * §15.43's forwarded host runtime is added on the same terms; see
+ * §08.3's forwarded host runtime is added on the same terms; see
  * {@link forwardHostRuntime}.
  */
 export function execNative(
@@ -82,7 +82,7 @@ export function execNative(
   const childEnv = forwardHostRuntime(env);
 
   // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
-  // package manager's cwd (§08.3.2), and the child stays in our process group so
+  // package manager's cwd (§08.3), and the child stays in our process group so
   // terminal job control keeps working.
   const child = spawn(binPath, args, {
     stdio: "inherit",

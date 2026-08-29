@@ -44,7 +44,7 @@ describe("§13.2 spec parsing and discovery", () => {
     expect(result.stdout).toBe("");
   });
 
-  // Rows 3 and 4 are superseded by §15.23: a dist-tag and a semver range are both
+  // Rows 3 and 4 are superseded by §04.4: a dist-tag and a semver range are both
   // valid pins now, and what used to be their rejection is asserted here as
   // acceptance. Their §13 wording ("expected a semver version") survives only in
   // rows 2 and 5, where the pin names no version at all.
@@ -76,7 +76,7 @@ describe("§13.2 spec parsing and discovery", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
     expect(result.stderr).toBe("");
-    // §15.23 — the project's own file is a decision, and running yarn is not
+    // §04.4 — the project's own file is a decision, and running yarn is not
     // one: what a proxy run may write is the memo in `node_modules/.jup`.
     expect(fixture.exists("jup.lock")).toBe(false);
     // No `integrity`: this store entry was hand-planted with a placeholder hash
@@ -180,7 +180,7 @@ describe("§13.2 spec parsing and discovery", () => {
     expect(result.stdout).toBe("1.22.4\n");
   });
 
-  it("13: corepack use preserves the BOM in the rewritten manifest (§14.7)", async () => {
+  it("13: corepack use preserves the BOM in the rewritten manifest (§03.7)", async () => {
     const fixture = createFixture(`﻿{\n  "name": "bom",\n  "packageManager": "yarn@1.0.0"\n}\n`);
     seedPackageManager(fixture.home, "yarn", "1.22.4");
 

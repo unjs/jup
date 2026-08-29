@@ -100,11 +100,11 @@ export const CLI_SOURCE = "CLI arguments";
 const MANIFEST_FIELDS = ["packageManager", "devEngines"] as const;
 
 /**
- * §15.27 — the extra field a *mutating* walk needs, and only a mutating walk.
+ * §03.1 — the extra field a *mutating* walk needs, and only a mutating walk.
  *
  * `workspaces` on a real manifest is an array (sometimes a large one), and
  * {@link scanTopLevelFields} allocates a value for every field it is asked for.
- * The warm proxy path answers a two-field question (§16.3) and must keep
+ * The warm proxy path answers a two-field question (§16, Build shape) and must keep
  * answering exactly that, so the third field is requested only where the answer
  * is used.
  */
@@ -118,7 +118,7 @@ const PNPM_WORKSPACE_FILE = "pnpm-workspace.yaml";
  */
 export function stopsWalk(data: Manifest | undefined, field: DevEnginesField): boolean {
   if (data === undefined) return false;
-  // §15.39 — the top-level field speaks for package managers only, so a nested
+  // §02.3 — the top-level field speaks for package managers only, so a nested
   // manifest pinning `pnpm` says nothing about the runtime and must not stop a
   // runtime's walk. The `devEngines` member is the symmetric half.
   if (field === "packageManager" && Object.hasOwn(data, "packageManager")) return true;
@@ -162,7 +162,7 @@ function isProjectBoundary(dir: string): boolean {
  * At each directory: skip if it is a package dir inside `node_modules`; load the
  * env file if none has been loaded yet and the project boundary is not behind us
  * ({@link isProjectBoundary}); read `package.json`. The walk stops on a manifest
- * declaring either package-manager field ({@link stopsWalk}, §15.25), and the
+ * declaring either package-manager field ({@link stopsWalk}, §03.1), and the
  * **last** manifest seen is what gets recorded — which is why a monorepo with no
  * declaration anywhere yields `NoSpec` targeting the *root*.
  *
@@ -170,7 +170,7 @@ function isProjectBoundary(dir: string): boolean {
  * a *pin* from an ancestor is the documented monorepo behaviour (§03.1), while
  * an ancestor of the project supplying its whole environment is §03.2's hazard.
  *
- * `mutating` adds §15.27's workspace-boundary stop condition and `here` confines
+ * `mutating` adds §03.1's workspace-boundary stop condition and `here` confines
  * the selection to `cwd`'s own manifest; both are for commands that are about to
  * *write*, and neither affects what the proxy path reads.
  *
@@ -179,12 +179,12 @@ function isProjectBoundary(dir: string): boolean {
  * reading manifests: for commands given an explicit package-manager pattern on
  * the CLI.
  *
- * `tool` names the tool the answer is *for*, and §15.39 is the whole of what it
+ * `tool` names the tool the answer is *for*, and §02.3 is the whole of what it
  * changes: a `kind: "runtime"` name reads `devEngines.runtime` and nothing else,
  * where every other name reads `packageManager` / `devEngines.packageManager`.
  * An absent tool selects the package-manager field pair.
  *
- * §15.40 — a tool whose table entry declares a {@link VersionFileSpec} also has
+ * §03.1 — a tool whose table entry declares a {@link VersionFileSpec} also has
  * the nearest such file recorded on the way up, and it speaks only where the
  * manifest did not. It is not looked for on a `mutating` walk: §03.7 writes
  * `devEngines.runtime` and nothing else, so the file a command is about to edit
@@ -217,7 +217,7 @@ export function discoverProjectSpec(
   const tool = options?.tool;
   const field = tool === undefined ? "packageManager" : devEnginesFieldFor(tool);
   const fields = mutating ? MUTATING_MANIFEST_FIELDS : MANIFEST_FIELDS;
-  // §15.40 — `undefined` for every entry that declares no version file, which is
+  // §03.1 — `undefined` for every entry that declares no version file, which is
   // every package manager, and the walk then costs exactly what it always did.
   const versionFileSpec = tool === undefined || mutating ? undefined : versionFileFor(tool);
 
@@ -239,7 +239,7 @@ export function discoverProjectSpec(
     currentDir = nextDir;
     nextDir = dirname(currentDir);
 
-    // §15.27 — `--here` mutates the manifest the user is standing in, full stop.
+    // §03.1 — `--here` mutates the manifest the user is standing in, full stop.
     // The climb continues for the env file alone (which may carry the registry
     // settings the resolution needs), so from the second directory on this is
     // exactly `envOnly`.
@@ -268,7 +268,7 @@ export function discoverProjectSpec(
     // directory still applies, which is the case anyone writes deliberately.
     //
     // The boundary is tested only when the walk is about to climb past this
-    // directory, so the exact-pin fast path (§16.3, one directory, stop) pays
+    // directory, so the exact-pin fast path (§16, Build shape; one directory, stop) pays
     // nothing for it and every other run pays one `stat` on a dentry the
     // manifest read is about to want anyway.
     // {@link INSIDE_NODE_MODULES_RE} rather than the tail match above: a
@@ -300,7 +300,7 @@ export function discoverProjectSpec(
       continue;
     }
 
-    // §15.40 — before the manifest read, because that read `continue`s on ENOENT
+    // §03.1 — before the manifest read, because that read `continue`s on ENOENT
     // and a directory holding a version file and no `package.json` is an
     // ordinary shape. Only the nearest one is kept, as with the env file above.
     if (versionFileSpec !== undefined && versionFile === undefined) {
@@ -319,7 +319,7 @@ export function discoverProjectSpec(
       throw error;
     }
 
-    // §16.3 — the walk reads two fields, so scan for them rather than resolving
+    // §16, Build shape — the walk reads two fields, so scan for them rather than resolving
     // the whole manifest into a DOM: a 400-dependency `package.json` costs
     // several hundred allocations to answer a two-field question. The scan is
     // conservative and answers `null` for anything it cannot prove well-formed,
@@ -346,7 +346,7 @@ export function discoverProjectSpec(
     // selection when nothing on the way up declares a `packageManager`.
     selection = { data: data as Manifest, target };
 
-    // §15.27 — a mutating walk stops at the workspace root even when that
+    // §03.1 — a mutating walk stops at the workspace root even when that
     // manifest declares no package manager at all. Non-mutating discovery keeps
     // climbing, because *reading* a pin from further up is the documented
     // monorepo behaviour (§03.1); it is only *writing* one past the repository
@@ -359,7 +359,7 @@ export function discoverProjectSpec(
   const specDisabled = projectSpecFlag && envDisabled(ENV.ENABLE_PROJECT_SPEC);
 
   const result = ((): SpecResult => {
-    // §15.35d — the external file is the project's declaration and outranks the
+    // §03.1 — the external file is the project's declaration and outranks the
     // manifest. `COREPACK_ENABLE_PROJECT_SPEC=0` still wins over both: §11.1's
     // "never look at the project at all" covers a redirected spec too.
     if (specFile !== undefined && !specDisabled) {
@@ -376,7 +376,7 @@ export function discoverProjectSpec(
     return describe(selection.data, selection.target, initialCwd, envFilePath, field);
   })();
 
-  // §15.40 — the version file ranks strictly below the manifest and strictly
+  // §03.1 — the version file ranks strictly below the manifest and strictly
   // above §03.5's fallback, so it is consulted on exactly the two outcomes that
   // mean "this project said nothing about the requested tool". A `Found` is
   // never displaced: the `devEngines` member is jup's own field and is the one a
@@ -392,10 +392,10 @@ export function discoverProjectSpec(
 }
 
 /**
- * §15.40 — the `SpecResult` for a version file, in the `describe` shape.
+ * §03.1 — the `SpecResult` for a version file, in the `describe` shape.
  *
  * `hasPin` is false and no `devEngines` declaration is carried, which is the
- * truth about it: nothing here is a committed pin, so §15.23's `up` treats it as
+ * truth about it: nothing here is a committed pin, so §04.4's `up` treats it as
  * it treats a synthesised spec and §03.6's auto-pin — which fires on `NoSpec`
  * and this is not one — leaves it alone.
  *
@@ -426,7 +426,7 @@ function describeVersionFile(
 
 /**
  * The `SpecResult` for one already-read manifest — the walk's selection, or
- * §15.35d's external file, which get identical treatment. devEngines validation
+ * §03.1's external file, which get identical treatment. devEngines validation
  * is eager (a bad `onFail: "error"` must fail the run); `parseSpec` is deferred.
  */
 function describe(
@@ -443,7 +443,7 @@ function describe(
 
   // Messages name the manifest relative to where the user was standing.
   const source = relative(initialCwd, target);
-  // §15.39 — the runtime refusal is about the `packageManager` *field*, so it
+  // §03.4 — the runtime refusal is about the `packageManager` *field*, so it
   // applies exactly when `raw` came from it. A spec synthesised out of a
   // `devEngines` member did not, and neither did anything the user typed.
   const packageManagerField = field === "packageManager" && hasPin;
@@ -458,7 +458,7 @@ function describe(
   };
 }
 
-/** §15.35d — `COREPACK_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
+/** §03.1 — `COREPACK_SPEC_FILE` resolved against the initial cwd, or `undefined`. */
 function externalSpecFile(initialCwd: string): string | undefined {
   const configured = readEnv(ENV.SPEC_FILE);
   return configured === undefined || configured === ""
@@ -467,7 +467,7 @@ function externalSpecFile(initialCwd: string): string | undefined {
 }
 
 /**
- * §15.35d — the spec file's contents, in `package.json` shape.
+ * §03.1 — the spec file's contents, in `package.json` shape.
  *
  * A missing file is an error, not a fallback: quietly reverting to the manifest
  * on a typo would run the package manager the variable was set to override.
@@ -510,7 +510,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
     throw new UsageError(messages.invalidSpecNotString(source));
   }
 
-  // 2 — `yarn` or `yarn@`: a name with no version at all. §15.23 widened what a
+  // 2 — `yarn` or `yarn@`: a name with no version at all. §04.4 widened what a
   // version may *be*, not whether a pin has to carry one, so this is untouched:
   // a manifest that names no version at all is still §12.2's error.
   const atIndex = raw.indexOf("@");
@@ -523,7 +523,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
       // Name-only form reports the *name*, not the raw string.
       throw new UsageError(messages.unsupportedSpec(bareName));
     }
-    // §15.39 — the version-bearing form is checked below; a `packageManager`
+    // §03.4 — the version-bearing form is checked below; a `packageManager`
     // reading exactly `node` reaches this branch and is the same mistake.
     if (options.packageManagerField === true && isRuntime(bareName)) {
       throw new UsageError(messages.runtimeInPackageManager(bareName));
@@ -542,7 +542,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
   // an unsupported name, but the URL branch refuses only a *supported* one, so
   // an unsupported name carrying a URL reference — `../../tmp/x@https://…` — used
   // to reach the store unexamined and install attacker-served bytes at an
-  // attacker-chosen path (the `#sha512.…` fragment satisfies §15.11's tier, so
+  // attacker-chosen path (the `#sha512.…` fragment satisfies §06.1's tier, so
   // nothing later objected either). Checking here covers both branches and the
   // `devEngines` spellings that route through them; the name-only form in step 2
   // is already confined to the built-in table, which admits no such name.
@@ -552,7 +552,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
     throw new UsageError(messages.unsupportedSpec(raw));
   }
 
-  // §15.39 — a runtime is never a `packageManager` value. Checked here rather
+  // §03.4 — a runtime is never a `packageManager` value. Checked here rather
   // than in `readSpecFromManifest` because §03.1's laziness is load-bearing:
   // `jup use pnpm@9` must be able to overwrite a manifest saying `node@22`,
   // and it can only do that if reading the field is what fails, not discovery.
@@ -566,7 +566,7 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
       throw new UsageError(messages.illegalUrl(raw));
     }
   } else {
-    // §15.23 — exact versions, semver ranges, and dist-tags are valid; §04.1
+    // §04.4 — exact versions, semver ranges, and dist-tags are valid; §04.1
     // classifies them, and non-exact references use `jup.lock` resolution.
     // What is neither a version nor a range is a tag,
     // and a tag that names nothing fails later with §12.4's `Tag not found`,
@@ -587,12 +587,12 @@ export function parseSpec(raw: unknown, source: string, options: ParseSpecOption
  * Validation happens in a specific order because each failure has a different
  * outcome, and `packageManager` always wins when present.
  *
- * §15.39 — `field` selects which `devEngines` member speaks. For `"runtime"`
+ * §02.3 — `field` selects which `devEngines` member speaks. For `"runtime"`
  * there is no top-level counterpart, so `pm` is `undefined` throughout and the
  * function collapses to its last branch: the cross-checks never run (the two
  * members describe different tools and cannot disagree), `hasPin` is false, and
  * the answer is the declaration itself. Everything else — the four validations,
- * the `onFail` routing, §15.12's sidecar — is one rule over both members.
+ * the `onFail` routing, §03.7's sidecar — is one rule over both members.
  */
 export function readSpecFromManifest(
   manifest: unknown,
@@ -601,14 +601,14 @@ export function readSpecFromManifest(
 ): {
   raw: unknown;
   range?: DevEnginesRange;
-  /** §15.26 — the declaration itself, present even when it names no version. */
+  /** §03.7 — the declaration itself, present even when it names no version. */
   devEngines?: DevEnginesDeclaration;
   hasPin: boolean;
 } {
-  void manifestPath; // Reserved: §15.25/§15.26 need it to report *which* file is at fault.
+  void manifestPath; // Reserved: §03.1/§03.7 need it to report *which* file is at fault.
 
   const data = (manifest ?? {}) as Manifest;
-  // §15.39 — a runtime has no top-level field, so there is nothing here to win
+  // §02.3 — a runtime has no top-level field, so there is nothing here to win
   // over its `devEngines` member, and nothing for the cross-checks to compare.
   const pm = field === "packageManager" ? data.packageManager : undefined;
   const de = data.devEngines?.[field];
@@ -633,7 +633,7 @@ export function readSpecFromManifest(
   }
 
   const { name, version, onFail } = de as DevEnginesEntry;
-  // §15.12 — the sidecar spelling of the pin. Read here so the same `onFail`
+  // §03.7 — the sidecar spelling of the pin. Read here so the same `onFail`
   // routing governs it as governs every other field of the block.
   const integrity = (de as Record<string, unknown>).integrity;
 
@@ -652,7 +652,7 @@ export function readSpecFromManifest(
   const range: DevEnginesRange | undefined =
     typeof version === "string" ? { name, range: version, onFail: failure } : undefined;
 
-  // §15.26 — reported whether or not a version was declared. A block naming only
+  // §03.7 — reported whether or not a version was declared. A block naming only
   // a package manager still says which one the project is for, and `writePin`
   // has to honour that or it writes a pin §03.3 refuses to read.
   const devEngines: DevEnginesDeclaration = { name, onFail: failure };
@@ -663,11 +663,11 @@ export function readSpecFromManifest(
       warnOrThrow(messages.devEnginesNameMismatch(pm, name), onFail);
     } else if (
       typeof version === "string" &&
-      // §15.23 — the cross-check compares a *version* against a range, so it
+      // §04.4 — the cross-check compares a *version* against a range, so it
       // only applies when the pin carries one. Once the pin may itself be a
       // range or a tag (`pnpm@^11.0.0` beside a declared `>=11`), asking
       // `satisfies("^11.0.0", ">=11")` answers `false` for every input and would
-      // turn the pnpm-generated shape §15.23 exists to support into a hard
+      // turn the pnpm-generated shape §04.4 exists to support into a hard
       // error. Comparing two ranges properly means range containment, which
       // neither §03.3 nor §04.2 defines; the name check still applies, and the
       // resolved version still has to satisfy the pin's own range.
@@ -691,12 +691,12 @@ export function readSpecFromManifest(
 }
 
 /**
- * §15.12 — fold `devEngines.packageManager.integrity` into the spec string.
+ * §03.7 — fold `devEngines.packageManager.integrity` into the spec string.
  *
  * Both suffix and sidecar spellings MUST be accepted. An SRI beside a clean
  * `yarn@4.14.1` becomes `yarn@4.14.1+sha512.…`
  * here, and from that point §06.1 row 1 treats it exactly as it treats a
- * hand-written suffix — including §15.11's "a pinned hash is a verification
+ * hand-written suffix — including §06.1's "a pinned hash is a verification
  * tier".
  *
  * Three shapes are deliberately left alone:
@@ -705,7 +705,7 @@ export function readSpecFromManifest(
  *   and a *disagreeing* sidecar is reported through `onFail` rather than
  *   silently discarded, because two digests for one artifact means at most one
  *   of them describes what will run;
- * * a range or a dist-tag, which no single digest can describe. §15.23's
+ * * a range or a dist-tag, which no single digest can describe. §04.4's
  *   `jup.lock` is where a range's resolved digest lives, and it records
  *   one on the first resolve;
  * * a URL reference, which carries its hash in the fragment (§02.1).
@@ -719,7 +719,7 @@ function withSidecarIntegrity(
   if (integrity === undefined || integrity === null) return raw;
   if (typeof raw !== "string") return raw;
 
-  // §15.12 — the sidecar describes the `version` beside it, and only that. A
+  // §03.7 — the sidecar describes the `version` beside it, and only that. A
   // range describes no single release, so its digest cannot be folded into a
   // `packageManager` pin that outranks it (§03.3).
   if (typeof declared === "string" && !isValidVersion(declared)) return raw;
@@ -780,7 +780,7 @@ export function warnOrThrow(message: string, onFail?: unknown): void {
 }
 
 /**
- * §15.35k — manifests at or above the home directory are outside a project.
+ * §12.5 — manifests at or above the home directory are outside a project.
  * Path comparison, not `realpath`: this only decorates an error already being
  * thrown, so a `stat` per mismatch is not worth a symlinked home directory.
  */

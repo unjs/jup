@@ -42,7 +42,7 @@ export function loadVersionFile(dir: string, spec: VersionFileSpec): VersionFile
 }
 
 /**
- * §15.40 — the semver range a version file declares.
+ * §03.1 — the semver range a version file declares.
  *
  * `source` is the file's path relative to the initial cwd, matching what §03.4
  * reports for a manifest. Throws a {@link UsageError} rather than returning
@@ -122,7 +122,7 @@ function declaredVersion(content: string): string | null {
  * `latest` and `v4-lts` … `v20-lts`, and the LTS series tags stop there, so
  * `lts/*` cannot be answered at all and `lts/<codename>` would need a
  * compiled-in codename-to-major table growing by a release per LTS line. That
- * is the shape §15.21 exists to refuse. `iojs`, `system` and `default` name
+ * is the shape §03.1 exists to refuse. `iojs`, `system` and `default` name
  * machine state rather than a project's requirement, and `system` in particular
  * asks for a node jup did not install and cannot vouch for (§06).
  *

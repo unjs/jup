@@ -286,7 +286,7 @@ the stub each links to) and, failing that, from the stub folder of the running
 copy; a stub naming an absolute path answers for the set, and the relocatable
 spelling is used only when no stub carries anything else.
 
-That backstop is a symptom worth naming: §10.1 bakes an interpreter path into
+That backstop is a symptom worth naming: §10.2 bakes an interpreter path into
 generated files, and this command has to read those files back to know what it
 may delete. If the interpreter pin ever moves into a single state file, this
 section gets much smaller.
@@ -345,7 +345,7 @@ one thing uses it: an install script that finds no runtime on the machine
 downloads one into `<home>/node`. jup neither creates nor reads that directory,
 but it shares the consequence — **a runtime under `<home>` but outside the
 install folder is not a store runtime**, `cache clean` cannot take it away, and a
-shim may name it (§10.1). Answering that boundary question with "is it under
+shim may name it (§10.2). Answering that boundary question with "is it under
 `<home>`" rather than "is it under the install folder" is what leaves a
 bootstrapped machine with shims that all exit 127.
 

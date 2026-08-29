@@ -7,7 +7,7 @@
  *    then runs `yarn` proves nothing if the machine's own corepack is what ran
  *    it. Every fixture therefore runs a *copy* of the tool (`copyTool`) and the
  *    shim-execution row asserts `COREPACK_ROOT` points back at that copy.
- * 2. **The per-user default must be redirected.** §15.13 sends shims to
+ * 2. **The per-user default must be redirected.** §10.5 sends shims to
  *    `$XDG_BIN_HOME`/`~/.local/bin` by default, so a row that forgets to
  *    override `HOME` writes into the developer's own `PATH`.
  *
@@ -42,7 +42,7 @@ const IS_WINDOWS = process.platform === "win32";
 
 /**
  * `enable` installed the name — whatever shape this platform's `enable` uses.
- * §10.2 leaves one symlink; §10.3 leaves three regular files, and `readlink`
+ * §10.3 leaves one symlink; §10.4 leaves three regular files, and `readlink`
  * or `isSymbolicLink()` on those says nothing about the claim under test.
  */
 function expectInstalled(directory: string, binName: string): void {
@@ -56,16 +56,16 @@ function expectInstalled(directory: string, binName: string): void {
 }
 
 /**
- * A fixture whose per-user shim directory (§15.13) is inside the fixture, with
- * both it and a second candidate directory on `PATH` — so §15.29's verification
+ * A fixture whose per-user shim directory (§10.5) is inside the fixture, with
+ * both it and a second candidate directory on `PATH` — so §10.5's verification
  * is satisfied and a clean `enable` really does print nothing.
  */
 function shimFixture() {
   const fixture = createFixture();
-  // §15.13's per-user default, spelled for this platform — see `perUserShims`.
+  // §10.5's per-user default, spelled for this platform — see `perUserShims`.
   const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   // Not `<root>/bin`: `HOME` is the fixture root, so that name would be
-  // §15.13 point 6's `~/bin` alternate rather than the unrelated second
+  // §10.5 point 6's `~/bin` alternate rather than the unrelated second
   // directory these rows want.
   const binDir = join(fixture.root, "other-bin");
   mkdirSync(shimDir, { recursive: true });
@@ -94,7 +94,7 @@ function shimFixture() {
 afterAll(cleanupFixtures);
 
 describe("§13.11 enable / disable", () => {
-  // §15.13 and §15.16 both redirected this row: the default directory is no
+  // §10.5 and §10.7 both redirected this row: the default directory is no
   // longer "beside the tool" (#71) and npm is no longer excluded (#138).
   it("117: enable installs a shim for every package manager, npm included", async () => {
     const { shimDir, options } = shimFixture();
@@ -137,7 +137,7 @@ describe("§13.11 enable / disable", () => {
     "120: enable replaces a plain file that is one of our own stubs",
     async () => {
       const { shimDir, options } = shimFixture();
-      // A shim we wrote earlier, copied rather than linked — §14.16 recognises it
+      // A shim we wrote earlier, copied rather than linked — §10.6 recognises it
       // by its marker and replaces it; a *foreign* file is row 121's case.
       writeFileSync(
         join(shimDir, "yarn"),
@@ -153,7 +153,7 @@ describe("§13.11 enable / disable", () => {
   );
 
   it.skipIf(IS_WINDOWS)(
-    "121: enable refuses a foreign regular file unless --force (§14.16)",
+    "121: enable refuses a foreign regular file unless --force (§10.6)",
     async () => {
       const { shimDir, options } = shimFixture();
       const foreign = "#!/bin/sh\necho a real yarn\n";
@@ -203,7 +203,7 @@ describe("§13.11 enable / disable", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
     expect(readlinkSync(join(shimDir, "yarn"))).not.toBe(stray);
-    // §10.2 — the link names the name's own stub. What row 123 is about is that
+    // §10.3 — the link names the name's own stub. What row 123 is about is that
     // a wrong link is corrected at all.
     expect(readlinkSync(join(shimDir, "yarn"))).toContain(stubNameFor("yarn"));
   });
@@ -275,11 +275,11 @@ describe("§13.11 enable / disable", () => {
   it.skipIf(!IS_WINDOWS)(
     "128: on Windows the same entry is removed without a warning",
     async () => {
-      // Windows-only by construction (§10.2 makes the Switch guard POSIX-only).
+      // Windows-only by construction (§10.3 makes the Switch guard POSIX-only).
       // The platform-independent generator is asserted from POSIX by
       // test/unit/shims.test.ts::"128: Windows removal takes the same entry ...".
       //
-      // §15.15 redirected this row: `disable` now removes only what it created,
+      // §10.6 redirected this row: `disable` now removes only what it created,
       // so the fixture installs real shims rather than planting an empty file.
       const { shimDir, options } = shimFixture();
       expect((await run(["enable", "yarn"], options)).exitCode).toBe(0);

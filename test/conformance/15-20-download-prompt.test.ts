@@ -1,11 +1,11 @@
 /**
- * §15.20 — predictable download-prompt behaviour (row 180).
+ * §05.4 — predictable download-prompt behaviour (row 180).
  *
  * #550 is not "the variable does nothing". It is that the variable's *default*
  * is chosen by the entry point — `0` in `bin.ts`, `1` in a generated shim
  * (§10.1) — so the same project, the same store and the same command behave
  * differently depending on whether the user typed `corepack yarn` or `yarn`.
- * §15.20 leaves that default in place and makes the explicit value absolute:
+ * §05.4 leaves that default in place and makes the explicit value absolute:
  * `COREPACK_ENABLE_DOWNLOAD_PROMPT=0` suppresses both the notice and the
  * confirmation, from every entry point, unconditionally.
  *
@@ -22,7 +22,7 @@
  *   a throwaway copy of the tool (`copyTool`) and check that the shim resolves
  *   back into that copy before trusting a word it says.
  *
- * §15.20's third condition — the interactive confirmation additionally needs a
+ * §05.4's third condition — the interactive confirmation additionally needs a
  * TTY and an unset `CI` — is unreachable from here: `run()` gives the tool a
  * pipe for stdin, so `process.stdin.isTTY` is never true and the confirmation
  * branch cannot be entered at all. What is asserted instead is the notice, which
@@ -73,7 +73,7 @@ beforeEach(() => registry.reset());
 
 /**
  * A project pinned to an **uncached** package manager, with its own per-user
- * shim directory (§15.13) inside the fixture and on `PATH`.
+ * shim directory (§10.5) inside the fixture and on `PATH`.
  *
  * `perUserShims` is what redirects the default install directory, and which
  * variable does it is platform-specific; without the redirection `enable`
@@ -91,7 +91,7 @@ function shimFixture(): {
   };
 } {
   const fixture = createFixture({ name: "app", packageManager: `pnpm@${VERSION}` });
-  // §15.13's per-user default, spelled for this platform — see `perUserShims`.
+  // §10.5's per-user default, spelled for this platform — see `perUserShims`.
   const { dir: shimDir, env: shimEnv } = perUserShims(fixture.root);
   mkdirSync(shimDir, { recursive: true });
 
@@ -109,7 +109,7 @@ function shimFixture(): {
         ...shimEnv,
         PATH: `${shimDir}${delimiter}${process.env.PATH ?? ""}`,
         COREPACK_INTEGRITY_KEYS: registry.trustStore(),
-        // §05.5's third condition. Leaving the developer's own `CI` in place
+        // §05.4's third condition. Leaving the developer's own `CI` in place
         // would make the confirmation branch unreachable for a reason this file
         // did not choose.
         CI: undefined,
@@ -139,7 +139,7 @@ function servedPaths(): string[] {
   return registry.requests.map((request) => request.path);
 }
 
-describe.skipIf(IS_WINDOWS)("§15.20 the download prompt from a shim entry point", () => {
+describe.skipIf(IS_WINDOWS)("§05.4 the download prompt from a shim entry point", () => {
   it("180: the shim's own default is 1, so there is something to suppress", async () => {
     // The control. Without it row 180 cannot tell "the 0 was honoured" from
     // "this entry point never prints anything anyway", and #550 is precisely a
@@ -234,7 +234,7 @@ describe.skipIf(IS_WINDOWS)("§15.20 the download prompt from a shim entry point
     });
 
     expect(result.stderr).toBe("");
-    // `n` is the one answer that aborts the confirmation (§05.5). Reaching the
+    // `n` is the one answer that aborts the confirmation (§05.4). Reaching the
     // package manager at all proves the confirmation was never asked.
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`pnpm@${VERSION} install\n`);

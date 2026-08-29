@@ -13,7 +13,7 @@ const { fileURLToPath } = process.getBuiltinModule("node:url");
  * only the proxy entry, but `codeSplitting: false` had already made that a
  * distinction without a difference: the warm set statically reachable from
  * `index.ts` is *identical* to the one reachable from the old `shim.ts`, and the
- * two bundles differed by 338 of 168,000 bytes (§16.3). The second entry was one
+ * two bundles differed by 338 of 168,000 bytes (§16, Build shape). The second entry was one
  * more copy of the same file, and its cost was paid by everyone who installs us.
  */
 export const ENTRY_CANDIDATES = ["index.mjs", "index.js", "index.ts"];
@@ -33,7 +33,7 @@ export const DIST_FOLDER_NAME = "dist";
  * to `index.ts`. One directory over is the published install, where the shipped
  * files are {@link STUB_FOLDER_NAME} and the bundle lands in `dist/` — separate
  * because the bundler owns `dist/` and empties it on every build, and these
- * files are meant to survive that untouched (§10.7).
+ * files are meant to survive that untouched (§10.8).
  *
  * Beside first, so a source checkout that also happens to hold a build keeps
  * importing its own sources rather than a bundle that may be stale.
@@ -61,7 +61,7 @@ export const BUILT_ENTRY_SPECIFIER = ENTRY_FOLDERS[1]! + ENTRY_CANDIDATES[0]!;
  * `undefined` when there is no entry to reach.
  *
  * A specifier and not a path: the stub resolves it with `new URL` against its
- * own realpath, so the pair stays relocatable (§10.2 property 2).
+ * own realpath, so the pair stays relocatable (§10.3 property 2).
  */
 export function findEntrySpecifier(stubFolder: string): string | undefined {
   for (const folder of ENTRY_FOLDERS) {
@@ -150,13 +150,13 @@ export function findEntryModule(
  * Two layouts, and the entry's extension is what separates them. A published
  * install has a bundled `dist/index.mjs` with the shipped files beside it in
  * {@link STUB_FOLDER_NAME}; `enable` finds them already correct and writes
- * nothing, which is what lets §10.7's read-only installation work. A source
+ * nothing, which is what lets §10.8's read-only installation work. A source
  * checkout has `src/index.ts` and no shipped stubs, so `enable` writes its own
  * next to the entry, exactly as it always has.
  *
  * The extension test is not decoration: a checkout that has also been built has
  * both a `dist/` and a `bin/`, and pointing at the latter would have `enable`
- * rewrite tracked files — the stubs with specifiers naming `src/`, and §15.46's
+ * rewrite tracked files — the stubs with specifiers naming `src/`, and §10.2's
  * pin into `bin/jup.mjs` with an absolute shebang.
  */
 export function findStubFolder(module: { directory: string; entry: string }): string {
@@ -177,7 +177,7 @@ export const CLI_ENTRY_NAME = "jup.mjs";
  * **The names we answer to ourselves** — `package.json`'s two `bin` keys, and
  * therefore the two names §09.12's `self-install` puts on `PATH`.
  *
- * They are the exception §10.1 carves out of the shared POSIX stub: every other
+ * They are the exception §10.9 carves out of the shared POSIX stub: every other
  * name that reaches it is a package manager to be run, and these two are the
  * management CLI. The stub reads the list to decide which of the two it was
  * invoked as — see `shimSource` — so it lives here, beside {@link CLI_ENTRY_NAME},
@@ -195,7 +195,7 @@ export function isOwnBinName(binName: string): boolean {
 
 /**
  * Our own CLI entry for the installation whose stubs are in `stubFolder`, or
- * `undefined` when this installation has none — §15.46.
+ * `undefined` when this installation has none — §10.2.
  *
  * Takes the stub folder rather than finding it, because its one caller has
  * already resolved the same folder for the stub it writes, and the two must not

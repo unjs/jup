@@ -1,5 +1,5 @@
 /**
- * §15.27 — a predictable target for project-mutating commands (rows 191–192).
+ * §03.7 — a predictable target for project-mutating commands (rows 191–192).
  *
  * #607: `corepack use` in a nested directory of a monorepo updates the **root**
  * `package.json`. Corepack's author confirmed the behaviour is intentional,
@@ -53,7 +53,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.27 write targets", () => {
+describe("§03.7 write targets", () => {
   it("191: `use` in a nested dir updates the workspaces root, and prints its path", async () => {
     const fixture = createFixture({ name: "root", workspaces: ["packages/*"] });
     mkdirSync(fixture.path("packages/app"), { recursive: true });
@@ -70,7 +70,7 @@ describe("§15.27 write targets", () => {
     expect(pinAt("package.json", fixture)).toMatch(/^pnpm@11\.1\.2\+sha512\./);
     expect(pinAt("packages/app/package.json", fixture)).toBeUndefined();
 
-    // §15.35l — the line that makes the choice visible instead of surprising.
+    // §12.11 — the line that makes the choice visible instead of surprising.
     expect(result.stdout).toContain(
       `Updated ${fixture.path("package.json")} to use ${pinAt("package.json", fixture)}`,
     );
@@ -176,7 +176,7 @@ describe("§15.27 write targets", () => {
   });
 
   it("191: reading is unchanged — a nested package still inherits the root's pin", async () => {
-    // §15.27 is about *writing*. §03.1's documented monorepo read behaviour —
+    // §03.7 is about *writing*. §03.1's documented monorepo read behaviour —
     // a package with no pin of its own uses its ancestor's — is what makes a
     // monorepo work at all, and must not move.
     const fixture = createFixture({

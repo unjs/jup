@@ -27,8 +27,8 @@ const registry = new MockRegistry();
 
 /**
  * Berry, hash-pinned. The pin was load bearing while Berry came from
- * `repo.yarnpkg.com`, which published neither signatures nor digests; §15.41
- * moved it onto `@yarnpkg/cli-dist`, so the mock's signature clears §15.11 on
+ * `repo.yarnpkg.com`, which published neither signatures nor digests; §02.5
+ * moved it onto `@yarnpkg/cli-dist`, so the mock's signature clears §06.1 on
  * its own and the pin is only what these rows have always quoted. The URL in the
  * notice did change, and rows 46 and 50 say so.
  */
@@ -41,8 +41,8 @@ beforeAll(async () => {
     versionOf(YARN_DEFAULT),
     packageManagerTarball("yarn", versionOf(YARN_DEFAULT)),
   );
-  // §15.33 bullet 2 moved yarn's compiled-in `default` onto the Berry line, and
-  // §15.41 routes Berry through `@yarnpkg/cli-dist` unconditionally — which is
+  // §02.5 moved yarn's compiled-in `default` onto the Berry line, and
+  // §02.5 routes Berry through `@yarnpkg/cli-dist` unconditionally — which is
   // what row 49 is downloading.
   registry.publish(
     "@yarnpkg/cli-dist",
@@ -60,7 +60,7 @@ beforeAll(async () => {
       packageName: "@yarnpkg/cli-dist",
     }),
   );
-  // §15.41 — the artifact the prompt rows download. It used to be a single
+  // §02.5 — the artifact the prompt rows download. It used to be a single
   // `.js` on `repo.yarnpkg.com`, which is the URL row 46 quoted.
   publishBerry(registry, "3.0.0");
 });
@@ -224,9 +224,9 @@ describe("§13.5 environment variables", () => {
     expect(result.exitCode).toBe(0);
     const written = fixture.json("package.json") as { packageManager?: string };
     expect(written.packageManager).toMatch(/^yarn@/);
-    // §15.27/§15.35l added the last line: "it also covers the auto-pin case in
+    // §12.11 added the last line: "it also covers the auto-pin case in
     // §03.6". It stays on stderr because this is proxy mode and stdout belongs
-    // entirely to the package manager (§09.11).
+    // entirely to the package manager (§09.14).
     expect(result.stderr).toBe(
       `! The local project doesn't define a 'packageManager' field. jup will now add one referencing yarn@${written.packageManager!.slice("yarn@".length)}.\n` +
         `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
@@ -256,7 +256,7 @@ describe("§13.5 environment variables", () => {
     });
 
     expect(result.exitCode).toBe(1);
-    // §15.19 redirected this row. §12.6's bare "can't reach <url>" named a
+    // §12.6 redirected this row: its old bare "can't reach <url>" named a
     // tarball URL the user never typed and said nothing about how to fix it;
     // row 178 requires the airgapped failure to name the package manager and
     // the seeding command. "network access is disabled" survives inside it.
@@ -305,7 +305,7 @@ describe("§13.5 environment variables", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("3.0.0\n");
     // The file cannot turn the prompt on, and says nothing about having tried.
-    // §14.5's notice is reserved for the five security-relevant variables it
+    // §03.2's notice is reserved for the five security-relevant variables it
     // adds; this one corepack already refused silently, so announcing it would
     // break this row while telling the user nothing actionable.
     expect(result.stderr).toBe("");
@@ -328,7 +328,7 @@ describe("§13.5 environment variables", () => {
     // compiled-in default pins the digest of the *real* published yarn, which no
     // mock can reproduce, so only this stderr line is asserted here. The tarball
     // named is `@yarnpkg/cli-dist`'s because §05.3 switches Berry onto it over a
-    // configured npm registry, and §15.33 put the default on the Berry line.
+    // configured npm registry, and §02.5 put the default on the Berry line.
     expect(result.stderr).toMatch(
       new RegExp(
         `^! jup is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-${versionOf(
@@ -342,7 +342,7 @@ describe("§13.5 environment variables", () => {
   it("50: a Yarn Berry pin names the @yarnpkg/cli-dist tarball", async () => {
     // The mirror is incidental now. This row used to be about §05.2 rewrite 1 —
     // a configured npm registry being what moved Berry off `repo.yarnpkg.com`
-    // and onto `@yarnpkg/cli-dist` — and §15.41 made that the band itself, so the
+    // and onto `@yarnpkg/cli-dist` — and §02.5 made that the band itself, so the
     // tarball is what gets named whether or not one is configured. The digest
     // follows: it is the archive's, not the single file's.
     const digest = createHash("sha224")
@@ -382,7 +382,7 @@ describe("§13.5 environment variables", () => {
     // whatever the platform uses.
     const root = REPO_ROOT.replace(/[\\/]$/, "");
     expect(result.stdout).toContain(`COREPACK_ROOT=${root}\n`);
-    // §11.3 / §14.22 — a corepack-aware package manager looks for the first; one
+    // §11.4 — a corepack-aware package manager looks for the first; one
     // that has learnt this tool's name finds the second.
     expect(result.stdout).toContain(`JUP_ROOT=${root}\n`);
   });

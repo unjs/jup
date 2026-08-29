@@ -1,5 +1,5 @@
 /**
- * §15.38 row 153 — a registry behind an unknown certificate authority (§15.4).
+ * row 153 — a registry behind an unknown certificate authority (§05.1).
  *
  * Corepack has no TLS surface at all, so the single most common corporate
  * failure — a TLS-inspecting proxy re-signing everything with a CA the trust
@@ -52,7 +52,7 @@ interface TlsFront {
  *
  * `x-original-url` names the *https* URL the tool asked for, which is what the
  * mock writes `dist.tarball` against — so the artifact stays on the same host
- * and §14.9's check is satisfied, exactly as `intercept.ts` arranges for the
+ * and §05.2's check is satisfied, exactly as `intercept.ts` arranges for the
  * unencrypted rows.
  */
 async function startTlsFront(
@@ -121,7 +121,7 @@ afterAll(async () => {
 
 beforeEach(() => registry.reset());
 
-describe("§15.38 TLS (§15.4)", () => {
+describe("§05.1 TLS", () => {
   it("153: an unknown authority is named as such, and names COREPACK_CAFILE", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
@@ -138,9 +138,9 @@ describe("§15.38 TLS (§15.4)", () => {
       expect(result.stderr).toContain(
         `TLS certificate verification failed for ${host}: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.`,
       );
-      // §15.4 forbids surfacing a bare transport error for this case.
+      // §05.1 forbids surfacing a bare transport error for this case.
       expect(result.stderr).not.toContain("Error when performing the request");
-      // §15.5 — the runtime's own reason survives alongside it.
+      // §05.1 — the runtime's own reason survives alongside it.
       expect(result.stderr).toContain("Caused by:");
       // Nothing was installed.
       expect(result.stdout).toBe("");
@@ -170,7 +170,7 @@ describe("§15.38 TLS (§15.4)", () => {
   });
 
   /**
-   * §15.38 row 245 — a certificate outside its validity window (§15.4).
+   * row 245 — a certificate outside its validity window (§05.1).
    *
    * The row above and this one are the two halves of "name the cause". An
    * unknown authority and a stale clock produce the same bare transport error
@@ -214,7 +214,7 @@ describe("§15.38 TLS (§15.4)", () => {
         // remedy would be wrong advice and must not be what the user is given.
         expect(result.stderr).not.toContain(messages.tlsUnknownAuthority(host));
         expect(result.stderr).not.toContain("Error when performing the request");
-        // §15.5 — the runtime's own code survives alongside the sentence.
+        // §05.1 — the runtime's own code survives alongside the sentence.
         expect(result.stderr).toContain("Caused by:");
         expect(result.stdout).toBe("");
       } finally {
@@ -245,7 +245,7 @@ describe("§15.38 TLS (§15.4)", () => {
     }
   });
 
-  it("a project's .jup.env cannot disable verification or nominate a CA (§15.37)", async () => {
+  it("a project's .jup.env cannot disable verification or nominate a CA (§03.2)", async () => {
     const front = await startTlsFront(() => registry.origin);
     const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
     fixture.write(".jup.env", `COREPACK_STRICT_SSL=0\nCOREPACK_CAFILE=${caFile}\n`);

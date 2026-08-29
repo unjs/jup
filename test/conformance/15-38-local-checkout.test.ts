@@ -1,15 +1,15 @@
 /**
- * §15.38 row 207 — a store directory symlinked to a local checkout (#440).
+ * row 207 — a store directory symlinked to a local checkout (#440).
  *
  * #440 asks for the one workflow the store's design otherwise forbids: point the
  * cache entry for `pnpm@11.1.2` at a working tree, edit the package manager, run
  * it again, see the change. Corepack has no `--link` flag and this spec adds
- * none — §15.34 holds the scope line — so the whole feature is "do not get in
+ * none — §01.7 holds the scope line — so the whole feature is "do not get in
  * the way of a symlink", and this row is what says the tool does not.
  *
  * There is nothing to implement, which is exactly why the row is worth having:
  * every plausible hardening of the store would break it silently. Resolving
- * `<home>/v1/<name>/<version>` through `realpath` before the §14.13 containment
+ * `<home>/v1/<name>/<version>` through `realpath` before the §08.1 containment
  * check, listing the store with `withFileTypes` and an `isDirectory()` filter
  * (a symlink is not a directory to `Dirent`), or `lstat`-ing the marker's
  * directory — each is a reasonable-looking line of code, each passes every other
@@ -95,7 +95,7 @@ function offline(fixture: Fixture): {
 
 afterAll(cleanupFixtures);
 
-describe.skipIf(IS_WINDOWS)("§15.38 row 207 — a store entry that is a symlink", () => {
+describe.skipIf(IS_WINDOWS)("row 207 — a store entry that is a symlink", () => {
   it("207: an exactly-pinned version resolves and runs from the symlinked checkout", async () => {
     const { fixture, linked } = checkoutFixture();
 
@@ -167,7 +167,7 @@ describe.skipIf(IS_WINDOWS)("§15.38 row 207 — a store entry that is a symlink
   });
 
   it("207: `cache list` reports the linked version, so `info` can explain the run", async () => {
-    // §15.30 names #440 among its drivers: the reason to link a checkout in is to
+    // §09.9 names #440 among its drivers: the reason to link a checkout in is to
     // debug it, and a run whose provenance the tool cannot report is not much
     // better than no run.
     const { fixture } = checkoutFixture();

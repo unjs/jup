@@ -90,7 +90,7 @@ function installFake(home: string, name: string, reference: string, body?: strin
 
   writeFileSync(
     join(location, ".jup"),
-    // §15.11 — a cache hit is now checked against the pin, so a seeded install
+    // §06.1 — a cache hit is now checked against the pin, so a seeded install
     // has to record the digest the reference it stands for actually names.
     JSON.stringify({
       locator: { name, reference },
@@ -294,10 +294,10 @@ describe("isTransparentCommand — §01.4", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.31 — global flags, recognised positionally
+ * §01.4 — global flags, recognised positionally
  * ------------------------------------------------------------------ */
 
-describe("isGlobalInvocation — §15.31", () => {
+describe("isGlobalInvocation — §01.4", () => {
   it("recognises a global flag before the subcommand", () => {
     expect(isGlobalInvocation(["-g", "install", "corepack@latest"])).toBe(true);
     expect(isGlobalInvocation(["--global", "add", "x"])).toBe(true);
@@ -521,14 +521,14 @@ describe("runProxy — auto-pin (tests 43, 44)", () => {
     };
     expect(manifest.packageManager).toMatch(/^yarn@/);
     // The pin is hash-bearing, and the hash is the *installed* artifact's — the
-    // fixture's marker. Since §15.11 the marker must record the digest its own
+    // fixture's marker. Since §06.1 the marker must record the digest its own
     // reference names, so for a seeded compiled-in default the two coincide.
     const pinned = YARN_DEFAULT;
     expect(manifest.packageManager).toBe(`yarn@${pinned}`);
 
-    // Verbatim, on stderr, followed by a blank line — then §15.35l's line naming
+    // Verbatim, on stderr, followed by a blank line — then §12.11's line naming
     // the manifest that was modified. Everything stays on stderr because this is
-    // proxy mode and stdout belongs to the package manager (§09.11).
+    // proxy mode and stdout belongs to the package manager (§09.14).
     expect(result.stderr).toBe(
       `${messages.autoPinNotice("yarn", pinned)}\n${messages.autoPinDocs()}\n\n` +
         `${messages.updatedManifest(join(cwd, "package.json"), "yarn", pinned)}\n`,
@@ -651,10 +651,10 @@ describe("runProxy — .jup.env applies before the flags are read (test 52)", ()
 });
 
 /* ------------------------------------------------------------------ *
- * §15.23 — the expired memo, and what it is allowed to answer for
+ * §04.4 — the expired memo, and what it is allowed to answer for
  * ------------------------------------------------------------------ */
 
-describe("runProxy — the expired-memo fallback (§15.23)", () => {
+describe("runProxy — the expired-memo fallback (§04.4)", () => {
   /** The version the memo names, installed so a fallback run can hand over. */
   const STALE = "11.1.2";
 
@@ -747,7 +747,7 @@ describe("runProxy — the expired-memo fallback (§15.23)", () => {
       COREPACK_QUIET_ADVISORIES: "1",
     });
 
-    // §11.5 — the line is one jup adds, so the mute covers it (§14.23).
+    // §11.3 — the line is one jup adds, so the mute covers it.
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`pnpm@${STALE} --version\n`);
     expect(result.stderr).toBe("");
@@ -758,7 +758,7 @@ describe("runProxy — the expired-memo fallback (§15.23)", () => {
 
     const result = run(cwd, home, ["pnpm", "--version"], { COREPACK_ENABLE_NETWORK: "0" });
 
-    // §15.19's diagnostic, not a silent downgrade: a security control that
+    // §12.6's diagnostic, not a silent downgrade: a security control that
     // reports success without having been applied is worse than one that stops.
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
@@ -869,7 +869,7 @@ describe("the warm fast path — §01.3 (test 96)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §01.3 / §16.3 — what a warm run is allowed to *load*
+ * §01.3 / §16 — what a warm run is allowed to *load*
  *
  * The syscall budget above says nothing about the module graph, and a
  * single static `import` anywhere in the `main → resolve → install`
@@ -884,7 +884,7 @@ describe("the warm fast path — §01.3 (test 96)", () => {
  * verification and tar reader (§07, §06), plus the management command surface
  * (§09) and the shim writer (§10), which the proxy path already loads lazily.
  *
- * `proxy.ts` (§14.8) is on this list for the same reason as `http.ts`: it is
+ * `proxy.ts` (§05.1) is on this list for the same reason as `http.ts`: it is
  * reached only when a request is about to go out, and its socket stack is loaded
  * later still — only once a proxy has actually matched.
  */
@@ -897,25 +897,25 @@ const COLD_PATH_MODULES = [
   "cache/tar.ts",
   "commands/cli.ts",
   "commands/shims.ts",
-  // §15.30's report is management-mode only, and it reaches for the shim
+  // §09.9's report is management-mode only, and it reaches for the shim
   // resolver and a full store listing — none of which a `yarn --version` may pay
   // for.
   "commands/info.ts",
-  // §15.4's CA handling and failure classification. `http.ts` reaches it only
+  // §05.1's CA handling and failure classification. `http.ts` reaches it only
   // when a request is about to go out, and `tls.ts` itself defers `node:tls`
   // until something is actually configured.
   "net/tls.ts",
-  // §15.1's `.npmrc` reader. A cache hit must not read a single `.npmrc`, and
+  // §05.3's `.npmrc` reader. A cache hit must not read a single `.npmrc`, and
   // `strace` on the built binary confirms zero such syscalls — this list is what
   // keeps it that way.
   "net/npmrc.ts",
-  // §15.28's native handover, and with it `node:child_process`. A JavaScript
+  // §08.3's native handover, and with it `node:child_process`. A JavaScript
   // package manager is handed over to in-process (§08.2) and must not pay for
   // the machinery that exists for the ones that are not JavaScript.
   "run/native.ts",
   // §04.1's tag lookup, range fan-out and `lastKnownGood.json` fallback. An
   // exactly-pinned descriptor resolves to itself and the store marker is the
-  // probe (§14.1), so the whole of `resolve.ts` — and the registry entry points
+  // probe (§04.3), so the whole of `resolve.ts` — and the registry entry points
   // it reaches — belongs behind a dynamic import.
   "version/resolve.ts",
   // §09's synopsis and §12.1's usage lines. Both are error/`--help` output; a
@@ -927,7 +927,7 @@ const COLD_PATH_MODULES = [
   // warm path parsed and discarded. `main.ts` reaches it from two `catch`
   // blocks, both already behind the dynamic import whose failure they explain.
   "errors-cold.ts",
-  // §03.7's pin writer and, under it, §16.4's format-preserving JSON editor —
+  // §03.7's pin writer and, under it, §16's format-preserving JSON editor —
   // which reaches `node:os` for the platform line ending. Only `use`, `up` and
   // §03.6's auto-pin write a manifest; every other invocation on the machine
   // only reads one.
@@ -949,7 +949,7 @@ const COLD_PATH_MODULES = [
  * was 25 and had 24 of them spent: `node:util`, imported by `env.ts` for
  * `parseEnv`, was dragging in `internal/util/parse_args`, `internal/util/colors`
  * and `internal/util/diff` on every invocation to parse a `.jup.env` that
- * usually does not exist. The hand-rolled parser that replaced it (§16.2) is
+ * usually does not exist. The hand-rolled parser that replaced it (§16) is
  * what freed the headroom, and this is now a real ceiling again rather than one
  * a single import would breach.
  */
@@ -1028,7 +1028,7 @@ function harnessFloor(): number {
   return (JSON.parse(readFileSync(report, "utf8")) as { natives: number }).natives;
 }
 
-describe("the warm fast path — the module graph (§16.3)", () => {
+describe("the warm fast path — the module graph (§16)", () => {
   // Both entries a warm proxy run can arrive through: our own binary, and the
   // module the generated shims import (§10.1). They are the same file now —
   // `index.ts` is what the stubs and `bin/jup.mjs` both `import()`, and the
@@ -1110,7 +1110,7 @@ function staticGraph(entry: string): string[] {
   return [...seen].map((file) => relativePath(SRC, file).replaceAll("\\", "/")).sort();
 }
 
-describe("the warm fast path — the emitted chunk (§16.3)", () => {
+describe("the warm fast path — the emitted chunk (§16)", () => {
   it("reaches exactly the modules the build ships as one warm chunk", () => {
     // `index.ts` is the entry itself, so it is a file of its own either way.
     expect(staticGraph("index.ts")).toEqual(["index.ts", ...WARM_MODULES].sort());
@@ -1125,7 +1125,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
   });
 
   /**
-   * The invariant the single-file build rests on (§16.3).
+   * The invariant the single-file build rests on (§16).
    *
    * `build.config.ts` inlines each entry's whole graph into one file, so a
    * static `import` of a `node:` builtin anywhere in `src/` — cold module or not
@@ -1195,17 +1195,17 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * is the warm path that reads the environment.
    *
    * And once more, from 202,000 to 204,000, for `COREPACK_QUIET_ADVISORIES`
-   * (§11.5, §14.23): `errors.ts` gained `advisory()` and its import of
+   * (§11.3): `errors.ts` gained `advisory()` and its import of
    * `config/env-vars.ts` (+958 source bytes, most of it the comment explaining
    * *why* the mute is scoped by origin), `project/env.ts` its two deny-list
    * entries (+440) and `config/env-vars.ts` the name itself (+49). Source
    * +1,447; measured, `warm.mjs` went 79,056 -> 79,263, +207 bytes or +0.26%,
    * because the rest is prose. Neither half can move off the warm path: the
-   * gate reads the environment, and `env.ts`'s own §14.5 warning goes through
+   * gate reads the environment, and `env.ts`'s own §03.2 warning goes through
    * it. Held at 204,000 rather than the 203,432 this leaves, so the next
    * addition is still a change worth arguing for.
    *
-   * And once more, 204,000 -> 206,000, for §14.24's layout rename. Only one of
+   * And once more, 204,000 -> 206,000, for §03.2's layout rename. Only one of
    * the five names cost anything: the store root, the marker, the temp prefix
    * and `jup.tgz` are all string edits, but `.corepack.env` is a file that
    * exists in repositories today, so §03.2 keeps reading it — `.jup.env` first,
@@ -1219,9 +1219,9 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * than the 205,209 this leaves, on the same terms as the raise above.
    *
    * And once more, 206,000 -> 208,000, for three fixes that each land in a warm
-   * module. `errors.ts` +1,227: §06.5's expired-key acceptance warning (§14.4 —
-   * npm's 2025-01-29 rotation makes leniency the only workable policy, and the
-   * warning is what makes it safe) plus §15.4's two "the CA bundle did not take"
+   * module. `errors.ts` +1,227: §06.5's expired-key acceptance warning (npm's
+   * 2025-01-29 rotation makes leniency the only workable policy, and the
+   * warning is what makes it safe) plus §05.1's two "the CA bundle did not take"
    * messages. `utils/self.ts` +1,043: `getOwnVersion` reads a build-time
    * constant instead of locating and parsing our own manifest, so it cannot be
    * wrong about a version it could not find. Source +2,270; measured, `warm.mjs`
@@ -1233,7 +1233,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * rather than the 207,479 this leaves, on the same terms as the raises above.
    *
    * And once more, 208,000 -> 226,000 — by far the largest raise so far, and the
-   * only one where the measured cost is code rather than prose. §15.28's two
+   * only one where the measured cost is code rather than prose. §02.4's two
    * native entries, bun and deno, land in `config/table.ts` (+12,123) and
    * `project/lockfile.ts` (+3,767), with +731 in `errors.ts` and a few hundred
    * across `main.ts` and `run/exec.ts`. Source +16,904; measured, `warm.mjs`
@@ -1243,13 +1243,13 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * moved off:
    *
    * * ~2 kB is the table data itself — two entries, four bands, six host
-   *   targets each. Data in the compiled-in table is the one thing §15.21 says
+   *   targets each. Data in the compiled-in table is the one thing §03.1 says
    *   adding a package manager is allowed to cost.
-   * * The rest is §15.28's per-host machinery, and the warm path reads it. The
+   * * The rest is §02.4's per-host machinery, and the warm path reads it. The
    *   handover resolves the band's `url` (`getSpecUrl`, for the artifact
    *   extension) and its `bin` (the §08.1 fallback), and for a native entry both
    *   now carry `{target}`/`{exe}`; a lockfile *read* needs `hostTarget` to pick
-   *   its own key out of §15.28's integrity map. None of those can be deferred
+   *   its own key out of §04.4's integrity map. None of those can be deferred
    *   to the download path, because they run when there is no download.
    * * `resolveArtifactRegistry` is the one piece that is genuinely cold — only
    *   `cache/install.ts` calls it. It stays here anyway: it holds the identity
@@ -1260,8 +1260,8 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * Held at 226,000 rather than the 224,383 this leaves, on the same terms as
    * every raise above: the next addition is still a change worth arguing for.
    *
-   * And once more, 226,000 -> 234,000, for §15.21's third native entry, `aube`,
-   * and for the libc half of §15.28's host name that it forced. All of it lands
+   * And once more, 226,000 -> 234,000, for §03.1's third native entry, `aube`,
+   * and for the libc half of §02.4's host name that it forced. All of it lands
    * in `config/table.ts` (+6,757; nothing else on the warm path changed at all),
    * and the previous raise predicted most of that: the machinery was paid for,
    * so the entry itself is ~700 bytes of table data. Measured, `_warm.mjs` went
@@ -1271,7 +1271,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * The libc probe is the part that was not predicted, and it is worth naming
    * what it costs: two `existsSync` calls, memoised per architecture, reached
    * only from `hostTarget()` — which npm, pnpm and yarn never call, because
-   * neither a `targets` lookup nor §15.23's per-host integrity map exists for
+   * neither a `targets` lookup nor §04.4's per-host integrity map exists for
    * them. So the warm path grows in bytes and not in work. It cannot move off:
    * `hostTarget()` is read by a lockfile *read*, which happens when there is no
    * download to defer it to.
@@ -1279,9 +1279,9 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * Held at 234,000 rather than the 232,092 this leaves, on the same terms as
    * every raise above.
    *
-   * And once more, 234,000 -> 238,000, for §15.21's fourth native entry, `nub`.
+   * And once more, 234,000 -> 238,000, for §03.1's fourth native entry, `nub`.
    * Table data and nothing else: `config/table.ts` +3,647, no other warm module
-   * touched, and no new machinery at all — `nub` uses §15.28's per-host model
+   * touched, and no new machinery at all — `nub` uses §02.4's per-host model
    * exactly as the three before it do, and the identity `targets` map is eight
    * lines of it. Measured, `_warm.mjs` went 88,178 -> 89,097, **+919 bytes or
    * +1.04%**, which is the smallest per-entry cost so far and is what the
@@ -1293,14 +1293,14 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * Held at 238,000 rather than the 235,739 this leaves, on the same terms as
    * every raise above.
    *
-   * And once more, 238,000 -> 246,000, for §15.39's `node` — and this one breaks
+   * And once more, 238,000 -> 246,000, for §02.3's `node` — and this one breaks
    * the trend the last two established, because the entry is *not* where the
    * cost went. `config/table.ts` +4,275 is the fifth per-host entry at about the
    * price of the fourth; the other +4,739 is the `kind` branches, spread over
    * three modules that had no reason to grow before: `project/manifest.ts`
    * +2,762 (the walk, the read and the parse each taking a `devEngines` member
    * rather than assuming one), `errors.ts` +1,563 (four messages parameterised
-   * by that member, plus §12.12's runtime refusal) and `main.ts` +414 (passing
+   * by that member, plus §12.2's runtime refusal) and `main.ts` +414 (passing
    * the requested tool into discovery).
    *
    * Measured, `_warm.mjs` went 89,097 -> 90,862, **+1,765 bytes or +1.98%** —
@@ -1312,13 +1312,13 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * The number to watch next is not the second runtime — that is table data
    * again, on the aube-to-nub trend — but any requirement that makes `kind`
-   * readable from a fifth place. §15.39 caps it at four deliberately, and this
+   * readable from a fifth place. §02.3 caps it at four deliberately, and this
    * raise is what that cap costs when it is honoured.
    *
    * Held at 246,000 rather than the 244,753 this leaves, on the same terms as
    * every raise above.
    *
-   * And from 246,000 to 258,000 for §15.40's version file. Source +11,978:
+   * And from 246,000 to 258,000 for §03.1's version file. Source +11,978:
    * `project/version-file.ts` +6,859 (a new warm module — the reader, nvm's
    * content grammar, and the prose stating why the LTS aliases are refused on
    * the data rather than on principle), `project/manifest.ts` +3,153 (the read
@@ -1327,7 +1327,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * accessor).
    *
    * Measured, `_warm.mjs` went 90,862 -> 93,343, **+2,481 bytes or +2.73%** —
-   * a larger emitted delta than §15.39's for a source delta four times the size,
+   * a larger emitted delta than §02.3's for a source delta four times the size,
    * because this one adds actual executable code rather than a branch: a file
    * read, a line-by-line parse, and two long message strings. The ratio is the
    * thing to note. Source grew by 4.9% and the chunk by 2.7%, which is the usual
@@ -1344,8 +1344,8 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * And then **down**, 258,000 -> 238,000: the first lowering, and the answer to
    * the sentence every raise above ends with. `errors.ts` was 36.8 kB of source
    * and the largest single resident of the emitted chunk, nearly all of it text
-   * a warm run cannot print — §12.6's transport failures, §15.4's TLS
-   * sentences, §12.7's integrity refusals, §12.9's and §12.10's command output.
+   * a warm run cannot print — §12.6's transport failures, §05.1's TLS
+   * sentences, §12.7's integrity refusals, §12.10's and §12.11's command output.
    * The 62 builders no warm module can name moved to `errors-cold.ts`, along
    * with `redactUserinfo`, `networkError` and `explainFetchFailure`, which only
    * ever run with a URL in hand; that file re-exports `errors.ts` and merges the
@@ -1378,15 +1378,15 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * | Change | Module | Bytes |
    * |---|---|---|
    * | §04.2's version prefix and x-range grammar narrowed | `version/semver.ts` | +2,853 |
-   * | §14.5's three location variables denied in a project env file | `project/env.ts` | +2,055 |
+   * | §03.2's three location variables denied in a project env file | `project/env.ts` | +2,055 |
    * | §03.2's env-file search stopped at the project boundary | `project/manifest.ts` | +4,181 |
    * | §02.1's spec name refused when it cannot be a store directory | `project/manifest.ts` | +2,855 |
    * | §07.2's marker shape validated before it is trusted | `cache/store.ts` | +964 |
    * | §07.4's fixed mode ceiling on the extractor and the store | `cache/store.ts` | +964 |
-   * | §15.32's shim directory promoted only on our own banner | `run/exec.ts` | +2,637 |
-   * | §15.11's pin reasoning moved out to the spec | `cache/store.ts` | −1,705 |
-   * | §15.41's whole table moved onto the npm registry | `config/table.ts`, `run/exec.ts` | +2,341 |
-   * | §15.42's `node@lts` table constant | `config/table.ts` | +916 |
+   * | §08.3's shim directory promoted only on our own banner | `run/exec.ts` | +2,637 |
+   * | §06.1's pin reasoning moved out to the spec | `cache/store.ts` | −1,705 |
+   * | §02.5's whole table moved onto the npm registry | `config/table.ts`, `run/exec.ts` | +2,341 |
+   * | §02.3's `node@lts` table constant | `config/table.ts` | +916 |
    *
    * Eight of the ten are hardening: each replaces a check that trusted a shape,
    * a name or a boundary with one that verifies it, and every one of them sits
@@ -1407,16 +1407,16 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * Held at 256,000 rather than the 253,712 this leaves, on the same terms as
    * every raise above.
    *
-   * And then **up, 256,000 -> 260,000**, for one change: §15.43's rule that a
+   * And then **up, 256,000 -> 260,000**, for one change: §10.2's rule that a
    * shim never names an interpreter living inside the store. 255,986 -> 258,173,
    * **+2,187 or +0.9%** — the ceiling had 14 bytes of headroom left, so a change
    * this size could not have been absorbed at any wording.
    *
    * | Change | Module | Bytes |
    * |---|---|---|
-   * | §15.43's store-boundary test, `isInsideHome` | `cache/store.ts` | +1,158 |
-   * | §15.43's `COREPACK_HOST_RUNTIME`, and `writeEnvInto` to set it on a child | `config/env-vars.ts` | +570 |
-   * | §14.5's deny-list entry for that variable | `project/env.ts` | +337 |
+   * | §10.2's store-boundary test, `isInsideHome` | `cache/store.ts` | +1,158 |
+   * | §08.3's `COREPACK_HOST_RUNTIME`, and `writeEnvInto` to set it on a child | `config/env-vars.ts` | +570 |
+   * | §03.2's deny-list entry for that variable | `project/env.ts` | +337 |
    * | a pointer to where the child's environment is finished | `run/exec.ts` | +122 |
    *
    * The forwarding *itself* — the code that computes and writes the variable —
@@ -1426,7 +1426,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * could not follow it there. The boundary test is `store.ts`'s to answer,
    * because `<home>` is, and every other module that needs it is cold; and a
    * variable's name and env-file eligibility belong with the other forty, where
-   * §11.6's two spellings are resolved once (`env-vars.ts`) and §14.5's
+   * §11.6's two spellings are resolved once (`env-vars.ts`) and §03.2's
    * deny-list is one list (`env.ts`) rather than a predicate scattered per
    * variable. Both are the shape this codebase already argues for elsewhere, so
    * neither is worth undoing to buy back a kilobyte.
@@ -1435,7 +1435,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * every raise above — and the lowering the previous entry says is owed is
    * still owed.
    *
-   * And then **up, 260,000 -> 266,000**, for §15.23's split of the resolution
+   * And then **up, 260,000 -> 266,000**, for §04.4's split of the resolution
    * file in two: a committed `jup.lock` that only `use` and `up` write, and a
    * `node_modules/jup.lock` memo that ordinary runs write instead. 259,586 ->
    * 265,546, **+5,960 or +2.3%**.
@@ -1458,7 +1458,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * should have to argue for itself rather than land inside somebody else's
    * headroom. The lowering two entries above still stands owed.
    *
-   * And then **up, 266,000 -> 278,000**, for a review pass over §15.23 and the
+   * And then **up, 266,000 -> 278,000**, for a review pass over §04.4 and the
    * shim rules — six bug fixes and two seams, landing together across four warm
    * modules and measured together. Source 259,586 -> 277,687, **+18,101 or +7.0%**; measured,
    * `_warm.mjs` went 86,620 -> 90,478, **+3,858 bytes or +4.45%**.
@@ -1466,10 +1466,10 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * | Change | Module | Bytes |
    * |---|---|---|
    * | the memo moved to `node_modules/.jup/`, the `expires` upper bound, `readEntry`/`readCachedEntry`, `readKnownResolution`, `removeCachedResolution` | `project/lockfile.ts` | +10,201 |
-   * | §15.23's fallback scoped to transport failures and announced; `fromRegistry` in place of the identity test | `main.ts` | +6,637 |
-   * | §15.43's shim recogniser completed, and `WIN32_WRAPPER_HEADS` moved here to be its one definition | `run/exec.ts` | +898 |
-   * | §15.12's sidecar folded only when the version beside it is exact | `project/manifest.ts` | +519 |
-   * | §15.23's CI frozen default, already gone; small net trims elsewhere | `project/env.ts` and three others | -154 |
+   * | §04.4's fallback scoped to transport failures and announced; `fromRegistry` in place of the identity test | `main.ts` | +6,637 |
+   * | §10.6's shim recogniser completed, and `WIN32_WRAPPER_HEADS` moved here to be its one definition | `run/exec.ts` | +898 |
+   * | §03.7's sidecar folded only when the version beside it is exact | `project/manifest.ts` | +519 |
+   * | §04.4's CI frozen default, already gone; small net trims elsewhere | `project/env.ts` and three others | -154 |
    *
    * The ratio is the thing to read, on the terms this comment has used
    * throughout: source grew 6.8% and the chunk 4.33%, so this is nearer an
@@ -1479,7 +1479,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * swallowed `COREPACK_ENABLE_NETWORK=0` and a rotated credential alike, and a
    * recogniser blind to the very wrappers this tool writes. The other two are
    * the seams that stopped the fixes from being pasted twice:
-   * `readKnownResolution` is §15.23's precedence order in one place rather than
+   * `readKnownResolution` is §04.4's precedence order in one place rather than
    * in `main.ts` and `install` separately, and `WIN32_WRAPPER_HEADS` now has one
    * home rather than three.
    *
@@ -1507,9 +1507,9 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    *
    * | Change | Module | Bytes |
    * |---|---|---|
-   * | §15.28's `@pnpm/exe.<host>` band, its `targets` map, and why the wrapper is not the artifact | `config/table.ts` | +3,172 |
-   * | §15.28's bare digest, recorded before the band was per-host, dropped on read | `project/lockfile.ts` | +1,063 |
-   * | §15.28's `binArgs` prepended, for a `pnpx` its binary cannot read off `argv[0]` | `run/exec.ts` | +473 |
+   * | §02.4's `@pnpm/exe.<host>` band, its `targets` map, and why the wrapper is not the artifact | `config/table.ts` | +3,172 |
+   * | §04.4's bare digest, recorded before the band was per-host, dropped on read | `project/lockfile.ts` | +1,063 |
+   * | §02.4's `binArgs` prepended, for a `pnpx` its binary cannot read off `argv[0]` | `run/exec.ts` | +473 |
    * | the same, threaded from the band to the handover | `main.ts` | +197 |
    *
    * Measured, `_warm.mjs` went 51,064 -> 51,741, **+677 bytes or +1.33%** —
@@ -1525,13 +1525,13 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * largest resident by a wider margin than before, and a `yarn --version` still
    * reads past every pnpm band to reach it.
    *
-   * And **up, 283,000 -> 284,500**, for §15.13 point 8's system directory —
+   * And **up, 283,000 -> 284,500**, for §10.5 point 8's system directory —
    * `--system`, and the `/usr/local/bin` a `root` `enable` may reach when no
    * per-user candidate is on `PATH`. 282,592 -> 284,010, **+1,418 or +0.50%**:
    *
    * | Change | Module | Bytes |
    * |---|---|---|
-   * | §15.13 point 8's `systemShimDirectory`, and the candidate appended for uid 0 | `run/exec.ts` | +1,297 |
+   * | §10.5 point 8's `systemShimDirectory`, and the candidate appended for uid 0 | `run/exec.ts` | +1,297 |
    * | `ProgramData`, the one variable that directory reads, on Windows only | `config/env-vars.ts` | +121 |
    *
    * Measured, `_warm.mjs` 51,741 -> 51,975, **+234 bytes or +0.45%** — source
@@ -1540,8 +1540,8 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * the prose above them, which the chunk does not carry.
    *
    * It cannot move off the warm path for the reason the candidate list is here
-   * at all: §15.32's promotion reads that list on every proxy invocation, and
-   * `enable` must choose from the same one it later searches (§15.13 point 7).
+   * at all: §08.3's promotion reads that list on every proxy invocation, and
+   * `enable` must choose from the same one it later searches (§10.5 point 7).
    * What is owed is unchanged and now owed a fifth time, against the same
    * resident: `config/table.ts`, still 45,837, still read past one entry at a
    * time by every `yarn --version`.
@@ -1557,7 +1557,7 @@ describe("the warm fast path — the emitted chunk (§16.3)", () => {
    * every warm run, which is the thing that was ever worth bounding.
    *
    * The entry row became `index.ts` when `shim.ts` was deleted and its role
-   * passed to the library entry (§16.3): +1,151 bytes on a sum that has since
+   * passed to the library entry (§16): +1,151 bytes on a sum that has since
    * fallen well under this ceiling anyway. Nothing was added to the warm path —
    * the two files reach an identical module set, which is why one of them could
    * go — so this is the same code measured under a different entry, and the

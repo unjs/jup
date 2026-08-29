@@ -30,15 +30,15 @@ export interface CliResult {
  *
  * A large share of the upstream rows fail against jup only because jup declines
  * to install artifacts Corepack installs without question: the retired npm
- * signing key (§14.4), a registry that publishes no signature (§15.11), and the
+ * signing key (§06.5), a registry that publishes no signature (§06.1), and the
  * non-P-256 keys upstream's mock registry mints. All three are deliberate, and
  * all three are switched off by the escape hatches jup already documents. Set
  * this to see what is left once the known-intentional divergences are removed —
  * which is the useful signal when watching for a real regression.
  *
- * A third variable joins them, `COREPACK_QUIET_ADVISORIES` (§11.5): jup emits `!`
- * advisories corepack has no equivalent for — §15.4's disabled-TLS notice, §15.11's
- * "publishes no signatures", §15.13's shim diagnostics — and a row that asserts
+ * A third variable joins them, `COREPACK_QUIET_ADVISORIES` (§11.3): jup emits `!`
+ * advisories corepack has no equivalent for — §05.1's disabled-TLS notice, §06.1's
+ * "publishes no signatures", §10.5's shim diagnostics — and a row that asserts
  * stderr exactly fails on the extra text alone. The variable is scoped to the
  * lines jup *adds*, so corepack's own advisories, `devEngines` warnings
  * included, still print and the rows matching their text still hold.

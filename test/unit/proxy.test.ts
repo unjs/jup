@@ -1,5 +1,5 @@
 /**
- * Proxy support — §05.1 ("Proxies"), §14.8, §15.6, conformance rows 71/72 and
+ * Proxy support — §05.1 ("Proxies"), conformance rows 71/72 and
  * 156/157.
  *
  * Everything here runs against a **real** proxy: a `node:http` server that
@@ -242,7 +242,7 @@ const PROXY_KEYS = [
   "COREPACK_NPM_TOKEN",
   "COREPACK_NPM_USERNAME",
   "COREPACK_NPM_PASSWORD",
-  // §15.4 / §15.5 — the tunnel now consults both, and the retry default would
+  // §05.1 — the tunnel now consults both, and the retry default would
   // otherwise turn each failure assertion into three round trips.
   "COREPACK_CAFILE",
   "COREPACK_STRICT_SSL",
@@ -270,7 +270,7 @@ beforeEach(() => {
     delete process.env[key];
   }
   // Every assertion in this file is about the shape of a single attempt; the
-  // §15.5 retry schedule has its own tests in `http.test.ts`.
+  // §05.1 retry schedule has its own tests in `http.test.ts`.
   process.env.COREPACK_NETWORK_RETRIES = "0";
 });
 
@@ -289,7 +289,7 @@ const base64 = (value: string) => Buffer.from(value).toString("base64");
  * §05.1 — the two request shapes
  * ------------------------------------------------------------------ */
 
-describe("tunnelling (§05.1, §14.8)", () => {
+describe("tunnelling (§05.1)", () => {
   it("sends https:// through CONNECT, and the proxy sees no Authorization (rows 71, 156)", async () => {
     const origin = await startOrigin(true);
     const proxy = await startProxy(() => origin.port);
@@ -355,7 +355,7 @@ describe("tunnelling (§05.1, §14.8)", () => {
     process.env.HTTPS_PROXY = proxy.origin;
 
     const response = await httpGet("https://example.com/pkg");
-    // §16.5 — `install.ts` tees this stream to hash and extract in one pass, so
+    // §07.4 — `install.ts` tees this stream to hash and extract in one pass, so
     // a proxied response has to expose a real `ReadableStream`, not a promise of
     // bytes.
     expect(response.body).toBeInstanceOf(ReadableStream);
@@ -392,10 +392,10 @@ async function drain(stream: ReadableStream<Uint8Array>): Promise<string> {
 }
 
 /* ------------------------------------------------------------------ *
- * §14.8 — no second opt-in
+ * §05.1 — no second opt-in
  * ------------------------------------------------------------------ */
 
-describe("no second opt-in (§14.8, rows 72 and 156)", () => {
+describe("no second opt-in (§05.1, rows 72 and 156)", () => {
   it("proxies with HTTPS_PROXY alone — no NODE_USE_ENV_PROXY", async () => {
     const origin = await startOrigin(true);
     const proxy = await startProxy(() => origin.port);
@@ -484,10 +484,10 @@ describe("variable precedence (§05.1)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * NO_PROXY (§15.6)
+ * NO_PROXY (§05.1)
  * ------------------------------------------------------------------ */
 
-describe("NO_PROXY (§15.6)", () => {
+describe("NO_PROXY (§05.1)", () => {
   const bypasses = (noProxy: string, url: string): boolean => {
     process.env.NO_PROXY = noProxy;
     return bypassesProxy(new URL(url));
@@ -667,10 +667,10 @@ describe("proxy credentials", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §14.6 through the tunnel
+ * §05.1 through the tunnel
  * ------------------------------------------------------------------ */
 
-describe("§14.6 survives the tunnel", () => {
+describe("§05.1 survives the tunnel", () => {
   it("sends no credentials to an origin that is not the registry (row 70)", async () => {
     const origin = await startOrigin(true);
     const proxy = await startProxy(() => origin.port);
@@ -786,7 +786,7 @@ describe("failures (§12.6)", () => {
     expect(((error as Error).cause as Error).message).toBe(
       `The proxy at 127.0.0.1:${port} refused to tunnel to example.com:443 (HTTP 502)`,
     );
-    // §15.5 — and the reason is *visible*, not merely attached: `main.ts`
+    // §05.1 — and the reason is *visible*, not merely attached: `main.ts`
     // presents an unexpected error as its stack, and a stack says nothing about
     // `cause`. Before this, a CONNECT refused with 502 reached the user as
     // §12.6's generic sentence and nothing else.
@@ -797,7 +797,7 @@ describe("failures (§12.6)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §15.4 — TLS inside the tunnel
+ * §05.1 — TLS inside the tunnel
  *
  * A corporate interception proxy is where a custom CA and a CONNECT
  * tunnel meet: the certificate presented at the far end is the proxy's
@@ -807,7 +807,7 @@ describe("failures (§12.6)", () => {
  * unknown issuer.
  * ------------------------------------------------------------------ */
 
-describe("TLS inside the tunnel (§15.4)", () => {
+describe("TLS inside the tunnel (§05.1)", () => {
   beforeEach(() => {
     setDefaultCACertificates(trust);
   });

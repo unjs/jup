@@ -1,15 +1,15 @@
 /**
- * The HTTP layer — §05.1, §14.6, §14.9.
+ * The HTTP layer — §05.1, §05.2.
  *
  * Built on native `fetch`: `Response.body` is a web `ReadableStream`, which is
- * what the download pipeline tees (§16.5); `fetch` follows redirects and drops
- * `Authorization` on a cross-origin hop, which is exactly what §14.6 requires.
+ * what the download pipeline tees (§07.4); `fetch` follows redirects and drops
+ * `Authorization` on a cross-origin hop, which is exactly what §05.1 requires.
  *
  * Two things `fetch` cannot do on its own arrive as a dispatcher behind
- * {@link HttpOptions.transport}: proxying (§14.8) and a disabled certificate
- * check (§15.4). Both are decided per request from the environment alone, so a
+ * {@link HttpOptions.transport}: proxying and a disabled certificate
+ * check (§05.1). Both are decided per request from the environment alone, so a
  * machine that configures neither never loads a socket stack — and a custom CA
- * (§15.4) does not even need the dispatcher, because it is installed into the
+ * (§05.1) does not even need the dispatcher, because it is installed into the
  * process trust store that `fetch` already consults.
  *
  * Requests use connect and idle timeouts plus bounded, jittered retries for
@@ -37,19 +37,18 @@ import {
 import { getOwnVersion } from "../utils/self.ts";
 
 /**
- * §15.5 — connect **and** idle timeout, in milliseconds, overridable with
- * `COREPACK_NETWORK_TIMEOUT`. §05.1 leaves it as a SHOULD with 30 s suggested;
- * §15.5 raises it to a MUST and keeps the number.
+ * §05.1 — connect **and** idle timeout, in milliseconds, overridable with
+ * `COREPACK_NETWORK_TIMEOUT`; default 30 s.
  */
 const DEFAULT_TIMEOUT = 30_000;
 
 /**
- * §15.5 — "3 attempts, exponential backoff with jitter".
+ * §05.1 — "3 attempts, exponential backoff with jitter".
  *
  * The spec states both "3 attempts" and a `COREPACK_NETWORK_RETRIES` default of
  * `3`, which are only both true if the variable counts **attempts**, the first
  * one included. That is the reading taken here: `3` is three requests, `0`
- * disables retrying (as §15.37 requires), and so does `1`.
+ * disables retrying, and so does `1`.
  */
 const DEFAULT_ATTEMPTS = 3;
 
@@ -89,7 +88,7 @@ const MAX_DRAIN_BYTES = 64 * 1024;
 const MAX_JSON_BYTES = 32 * 1024 * 1024;
 
 /**
- * §15.5 — statuses worth trying again. Everything else in the 4xx range is a
+ * §05.1 — statuses worth trying again. Everything else in the 4xx range is a
  * statement about the request, and repeating it changes nothing.
  */
 function isRetryableStatus(status: number): boolean {
@@ -214,17 +213,17 @@ export const USER_AGENT = `jup/${getOwnVersion()} (+https://github.com/unjs/jup)
 export interface HttpOptions {
   headers?: Record<string, string>;
   /**
-   * The configured registry's origin. Credentials never leave it (§14.6), so
+   * The configured registry's origin. Credentials never leave it (§05.1), so
    * omitting this means "send no credentials".
    */
   registryOrigin?: string;
   /**
    * Connect + idle timeout in ms. Defaults to `COREPACK_NETWORK_TIMEOUT`, then
-   * to 30_000 (§15.5).
+   * to 30_000 (§05.1).
    */
   timeout?: number;
   /**
-   * §15.5 — total attempts, the first included. Defaults to
+   * §05.1 — total attempts, the first included. Defaults to
    * `COREPACK_NETWORK_RETRIES`, then to 3. `0` or `1` means "no retry".
    */
   attempts?: number;
@@ -236,14 +235,14 @@ export interface HttpOptions {
    * Send no credentials at all, whatever the environment and `.npmrc` hold.
    *
    * Omitting `registryOrigin` already withholds the `COREPACK_*` tier, but not
-   * §15.1's: an `.npmrc` entry names its own scope, so a request to a URL inside
+   * §05.3's: an `.npmrc` entry names its own scope, so a request to a URL inside
    * that scope is authenticated on the file's authority alone. That is right for
-   * a registry request and wrong for npm's public key document (§15.9), which
+   * a registry request and wrong for npm's public key document (§06.3), which
    * needs no credential and must not carry one.
    */
   anonymous?: boolean;
   /**
-   * Who chose {@link registryOrigin} — the user, or the repository (§15.37).
+   * Who chose {@link registryOrigin} — the user, or the repository (§11.2).
    *
    * Left undefined it is derived from the origin itself, which is what every
    * caller relies on: `install.ts` hands over a `dist.tarball` and a registry
@@ -257,15 +256,15 @@ export interface HttpOptions {
    *
    * Left undefined — which every caller does — the transport is chosen per
    * request: native `fetch` when no proxy applies and TLS needs no special
-   * handling (§05.1), and `proxy.ts`'s `node:https` dispatcher when a proxy
-   * applies (§14.8) or when verification has been switched off (§15.4).
+   * handling, and `proxy.ts`'s `node:https` dispatcher when a proxy
+   * applies or when verification has been switched off (§05.1).
    */
   transport?: typeof globalThis.fetch;
 }
 
 /**
- * §14.6 — the single credential rule for metadata requests and downloads, with
- * §15.1's `.npmrc` tier below the environment:
+ * §05.1 — the single credential rule for metadata requests and downloads, with
+ * §05.3's `.npmrc` tier below the environment:
  *
  *     userinfo present                        -> Basic from userinfo, stripped from the URL
  *     origin === registryOrigin, and the registry is the user's own choice:
@@ -281,14 +280,14 @@ export interface HttpOptions {
  *
  * The gate applies only to environment credentials. User-scoped `.npmrc`
  * credentials remain eligible under their host-and-path prefix, including when
- * the project selected the registry (§15.38 row 149).
+ * the project selected the registry (§05.3).
  *
  * The `.npmrc` tier is **not** gated on `registryOrigin`, and that is not a
  * relaxation: `//host/path/:_authToken` names its own scope, and
  * `npmrcAuthorizationFor` attaches it only to a URL whose host *and* path prefix
- * fall inside it (§15.1). That is strictly narrower than an origin check, which
- * is the reason §15.1 can read credentials out of a file at all without
- * reopening §14.6's leak. A user who wrote that prefix named the host they are
+ * fall inside it (§05.3). That is strictly narrower than an origin check, which
+ * is the reason §05.3 can read credentials out of a file at all without
+ * reopening §05.1's leak. A user who wrote that prefix named the host they are
  * willing to reach; a project can redirect us to it, but not to anywhere the
  * user has not already put a credential. Project-level files never contribute
  * one.
@@ -377,7 +376,7 @@ function userinfoOf(registryUrl: string | undefined): string | undefined {
 }
 
 /**
- * §14.9 — the URL must parse, its scheme must be exactly `https:` (or `http:`
+ * §05.2 — the URL must parse, its scheme must be exactly `https:` (or `http:`
  * when the configured registry is itself `http:`), and its host must equal the
  * configured registry's host unless the user opts in.
  *
@@ -448,7 +447,7 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
   }
 
   const headers = new Headers(options.headers);
-  // §14.6: `credentialsFor` owns this header. A caller cannot smuggle one past
+  // §05.1: `credentialsFor` owns this header. A caller cannot smuggle one past
   // the origin check by passing it in `options.headers`.
   headers.delete("authorization");
   if (authorization !== undefined) {
@@ -466,22 +465,22 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
   );
   const sleep = options.sleep ?? wait;
 
-  // §15.4 — read the PEM bundle and announce a disabled trust store once, here
+  // §05.1 — read the PEM bundle and announce a disabled trust store once, here
   // rather than at module load: a run that never reaches the network reads no
   // file and prints nothing.
   if (tlsConfigured()) applyTlsConfiguration();
 
-  // §14.8 — `HTTP_PROXY` and friends are honoured with no second opt-in flag,
+  // §05.1 — `HTTP_PROXY` and friends are honoured with no second opt-in flag,
   // which is the whole divergence. The check is pure environment parsing and the
   // answer is `undefined` for everyone who has no proxy configured, so the
-  // unproxied path is native `fetch`, byte for byte as it was. §15.4's
+  // unproxied path is native `fetch`, byte for byte as it was. §05.1's
   // verification switch is the one other thing `fetch` cannot express, and it
   // borrows the same dispatcher.
   const transport =
     options.transport ??
     (proxyForUrl(target) === undefined && !tlsTransportRequired() ? globalThis.fetch : nodeFetch);
 
-  // §15.5 — idempotent GETs only, which is every request this module makes.
+  // §05.1 — idempotent GETs only, which is every request this module makes.
   for (let attempt = 1; ; attempt++) {
     const last = attempt >= attempts;
 
@@ -513,7 +512,7 @@ export async function httpGet(url: string, options: HttpOptions = {}): Promise<R
       // to throw; the reason is the thing worth reporting.
       const cause = controller.signal.aborted ? (controller.signal.reason ?? error) : error;
 
-      // §15.4 — the three certificate failures replace the transport message
+      // §05.1 — the three certificate failures replace the transport message
       // instead of hiding underneath it, and are never retried.
       // The host named is always the *target's*: a failure against a proxy's own
       // certificate has already been classified, and wrapped, where the proxy's

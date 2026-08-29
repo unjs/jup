@@ -1,5 +1,5 @@
 /**
- * §15.30 — `corepack info` (row 196), and §15.19's `cache list` (row 179).
+ * §09.9 — `corepack info` (row 196), and §12.6's `cache list` (row 179).
  *
  * Both rows are about a command that has to work when nothing else does, so
  * every case here is asserted through a real process:
@@ -10,7 +10,7 @@
  * * **No failure on a broken project.** Every invalid-spec shape §03 and §12
  *   define is exercised, and each must exit 0 carrying the diagnosis.
  *
- * §15.18's `cache clean --all` rides along (row 177): it is the one other
+ * §07.9's `cache clean --all` rides along (row 177): it is the one other
  * command that touches the recorded defaults.
  */
 
@@ -29,8 +29,8 @@ import {
 const registry = new MockRegistry();
 
 /**
- * §15.30 reports the shim a `PATH` lookup actually turns up. On Windows that is
- * §10.3's `.cmd` wrapper: `PATHEXT` never contains the empty extension, so the
+ * §09.9 reports the shim a `PATH` lookup actually turns up. On Windows that is
+ * §10.4's `.cmd` wrapper: `PATHEXT` never contains the empty extension, so the
  * extensionless `<B>` beside it — the one Git Bash runs — is not what `cmd.exe`
  * or PowerShell would find. Spelled in capitals because `PATHEXT` is: the
  * lookup returns the candidate it built, not the name on disk, and Windows
@@ -133,7 +133,7 @@ async function info(
   return JSON.parse(result.stdout) as Report;
 }
 
-describe("§15.30 corepack info", () => {
+describe("§09.9 corepack info", () => {
   it("196: reports the file, the field and the resolution, and makes no request", async () => {
     const fixture = createFixture({ packageManager: "pnpm@11.1.2+sha512.abcd" });
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
@@ -144,7 +144,7 @@ describe("§15.30 corepack info", () => {
     expect(report.tool.name).toBe("jup");
     expect(report.project).toMatchObject({
       status: "found",
-      // Absolute (§15.30): a relative path is useless in a pasted report.
+      // Absolute (§09.9): a relative path is useless in a pasted report.
       manifest: join(fixture.cwd, "package.json"),
       field: "packageManager",
       spec: "pnpm@11.1.2+sha512.abcd",
@@ -224,7 +224,7 @@ describe("§15.30 corepack info", () => {
     expect(registry.requests).toEqual([]);
   });
 
-  it("196: reports a range as unresolved rather than resolving it (§15.23)", async () => {
+  it("196: reports a range as unresolved rather than resolving it (§04.4)", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
     const report = await info(fixture, { env: { CI: undefined } });
@@ -273,7 +273,7 @@ describe("§15.30 corepack info", () => {
   it("196: reports the frozen-lockfile state and where it came from", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
-    // §15.23 — CI no longer freezes anything on its own: with no implicit write
+    // §04.4 — CI no longer freezes anything on its own: with no implicit write
     // left to guard, the only writers are `use` and `up`, and only an explicit
     // `1` stops them.
     const ci = await info(fixture, { env: { CI: "1" } });
@@ -315,7 +315,7 @@ describe("§15.30 corepack info", () => {
   });
 
   it("196: reports neither file when its entry no longer satisfies the range", async () => {
-    // §15.23 — a recorded resolution or a memo that has fallen outside its range
+    // §04.4 — a recorded resolution or a memo that has fallen outside its range
     // is skipped by the run, which resolves around it. `info` reports what the
     // next run would use, so it has to apply the same gate: a hand edit, a bad
     // merge or a restored `node_modules` must not make this command name a
@@ -386,7 +386,7 @@ describe("§15.30 corepack info", () => {
       applied: ["COREPACK_ENABLE_STRICT"],
       // §11.6 — the real environment wins over the file.
       overridden: ["COREPACK_NPM_REGISTRY"],
-      // §14.5 — a project file may never supply a credential.
+      // §03.2 — a project file may never supply a credential.
       refused: ["COREPACK_NPM_TOKEN"],
       ignored: ["SHELL"],
     });
@@ -402,7 +402,7 @@ describe("§15.30 corepack info", () => {
       expect(entry.registry).toBe("https://registry.npmjs.org");
       expect(entry.registrySource).toBe("built-in");
     }
-    // §15.1 — no `.npmrc` is in scope for this fixture, and the report says so
+    // §05.3 — no `.npmrc` is in scope for this fixture, and the report says so
     // by listing nothing rather than by implying anything.
     expect(builtin.npmrc.registry).toBeNull();
     expect(builtin.npmrc.auth).toEqual([]);
@@ -460,27 +460,27 @@ describe("§15.30 corepack info", () => {
       "pnpx",
       "yarn",
       "yarnpkg",
-      // §15.28 — reported, but not installed by a bare `enable`; the assertions
+      // §02.5 — reported, but not installed by a bare `enable`; the assertions
       // below check exactly that asymmetry.
       "bun",
       "bunx",
       "deno",
-      // §15.21's aube is per-host too and is *not* in that group: it is a
+      // §03.1's aube is per-host too and is *not* in that group: it is a
       // package manager, so a bare `enable` claims its names like any other.
       "aube",
       "aubr",
       "aubx",
-      // §15.21's nub is back in the first group, and is why that group is not
+      // §03.1's nub is back in the first group, and is why that group is not
       // "the runtimes": nub is a package manager *and* a runtime, and what
-      // decides is that `nub` names something outside a project (§10.5).
+      // decides is that `nub` names something outside a project (§10.7).
       "nub",
       "nubx",
-      // §15.39 — a runtime is never in the default set (§10.5 requires it), so
+      // §02.3 — a runtime is never in the default set (§10.7 requires it), so
       // `node` joins the reported-but-not-installed group with bun and deno.
       "node",
     ]);
 
-    // §15.28 / §10.5 — `enable` with no names left these alone, so the report
+    // §02.5 / §10.7 — `enable` with no names left these alone, so the report
     // shows no shim for them while still showing the name.
     const bun = report.shims.entries.find((entry) => entry.binary === "bun")!;
     expect(bun.shim).toBeNull();
@@ -495,7 +495,7 @@ describe("§15.30 corepack info", () => {
     expect(yarn.ours).toBe(true);
     expect(yarn.shadowed).toBe(false);
 
-    // §15.16 redirected this row: `enable` with no names now shims npm too, so
+    // §10.7 redirected this row: `enable` with no names now shims npm too, so
     // the report must show it. `--exclude npm` is what leaves it absent.
     const npm = report.shims.entries.find((entry) => entry.binary === "npm")!;
     expect(npm.shim).toBe(join(shimDirectory, `npm${SHIM_ON_PATH}`));
@@ -544,10 +544,10 @@ describe("§15.30 corepack info", () => {
 });
 
 /* -------------------------------------------------------------------------- */
-/* §15.19 — cache list, and §15.18 — cache clean --all                         */
+/* §12.6 — cache list, and §07.9 — cache clean --all                         */
 /* -------------------------------------------------------------------------- */
 
-describe("§15.19 cache list", () => {
+describe("§12.6 cache list", () => {
   it("179: --json lists the installed pairs and the recorded defaults", async () => {
     const fixture = createFixture();
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
@@ -592,7 +592,7 @@ describe("§15.19 cache list", () => {
   });
 });
 
-describe("§15.18 cache clean --all", () => {
+describe("§07.9 cache clean --all", () => {
   it("177: the defaults survive a plain clean and are removed by --all", async () => {
     const fixture = createFixture();
     seedPackageManager(fixture.home, "pnpm", "11.1.2");
@@ -601,13 +601,13 @@ describe("§15.18 cache clean --all", () => {
     const first = await run(["cache", "clean"], { ...fixture, registry });
     expect(first.exitCode).toBe(0);
     expect(existsSync(join(fixture.home, "v1"))).toBe(false);
-    // §14.21 — a recorded default is a preference, not a cache entry.
+    // §06.1 — a recorded default is a preference, not a cache entry.
     expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(true);
 
     const second = await run(["cache", "clean", "--all"], { ...fixture, registry });
     expect(second.exitCode).toBe(0);
     expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(false);
-    // §15.35l — a command that deletes things must say what it deleted.
+    // §12.11 — a command that deletes things must say what it deleted.
     expect(second.stdout).toContain("Removed 0 cached version(s) and 1 recorded default(s)");
 
     const third = await run(["cache", "clean", "--all"], { ...fixture, registry });
