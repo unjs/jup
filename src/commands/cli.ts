@@ -49,7 +49,7 @@ import {
   createTempDir,
   getHomeFolder,
   getInstallFolder,
-  isInsideHome,
+  isInsideInstallFolder,
   listInstalled,
   MARKER_NAME,
   promote,
@@ -984,9 +984,10 @@ async function interpreterInStore(): Promise<
   const { bakedInterpreter } = await import("./shims.ts");
   const interpreter = await bakedInterpreter();
   // §15.43's boundary test answers the question first, and it is the same one
-  // `enable` refuses on, so the two halves cannot disagree about what "inside"
-  // means: `~/.cache/jup` does not contain `~/.cache/jupiter`.
-  if (interpreter === undefined || !isInsideHome(interpreter)) return undefined;
+  // `enable` refuses on, so the two halves cannot disagree about what this
+  // command is about to delete: `<home>/v1` does not contain `<home>/self`, and
+  // an interpreter parked outside it is not one `cache clean` can strand.
+  if (interpreter === undefined || !isInsideInstallFolder(interpreter)) return undefined;
 
   const installed = storeVersionOf(interpreter);
   return installed === undefined ? undefined : { interpreter, installed };

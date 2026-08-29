@@ -374,10 +374,20 @@ describe.skipIf(process.platform === "win32")("§15.43 — COREPACK_HOST_RUNTIME
   });
 
   it("passes an inherited value through when our own runtime is in the store", async () => {
-    // The position a store runtime is in, without a 126 MB copy of one: move
-    // `<home>` over the runtime this test is running under, and the boundary
-    // test answers exactly as it would for `<home>/v1/node/…`.
-    vi.stubEnv("COREPACK_HOME", dirname(dirname(realpathSync(process.execPath))));
+    // The position a store runtime is in, without a 126 MB copy of one: a
+    // `<home>` whose `v1` *is* the installation holding the runtime this test
+    // runs under. §15.43's boundary test resolves the install folder through
+    // `realpath`, so the link makes `process.execPath` answer exactly as
+    // `<home>/v1/node/22.14.0/bin/node` would.
+    //
+    // `<home>` on its own is no longer enough, and that is the point of the
+    // link: §07.11's `self/` — and a runtime an install script parks beside
+    // it — are siblings of `v1` that `cache clean` deliberately cannot reach,
+    // so a path under `<home>` but outside `v1` is *not* a store runtime.
+    const home = join(root, "store-home");
+    mkdirSync(home, { recursive: true });
+    symlinkSync(dirname(dirname(realpathSync(process.execPath))), join(home, "v1"));
+    vi.stubEnv("COREPACK_HOME", home);
 
     const inherited = "/opt/hostnode/bin/node";
     expect(

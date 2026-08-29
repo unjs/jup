@@ -5,7 +5,7 @@
 const { spawn } = process.getBuiltinModule("node:child_process");
 const { realpathSync } = process.getBuiltinModule("node:fs");
 const { constants } = process.getBuiltinModule("node:os");
-import { isInsideHome } from "../cache/store.ts";
+import { isInsideInstallFolder } from "../cache/store.ts";
 import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";
 
@@ -34,7 +34,7 @@ function forwardHostRuntime(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   } catch {
     own = process.execPath;
   }
-  if (isInsideHome(own)) return env;
+  if (isInsideInstallFolder(own)) return env;
 
   const forwarded = { ...env };
   writeEnvInto(forwarded, ENV.HOST_RUNTIME, own);

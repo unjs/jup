@@ -34,11 +34,23 @@ receive the wrapper's invocation name. Every generated stub and wrapper has mode
 > than whatever a lookup would answer later.
 >
 > **When it applies.** Windows always bakes it in. POSIX bakes it into the shared
-> stub's shebang only when the install directory claims the interpreter's own name —
-> either this run enables `node`, or an earlier one already installed a shim of ours
-> at that name. Otherwise the stub keeps `#!/usr/bin/env node`, so the shipped stubs
-> stay relocatable and §10.7's read-only stub folder is not rewritten for a user who
-> never asked for a `node` shim. A *foreign* `node` in the directory does not count.
+> stub's shebang under either of two conditions:
+>
+> 1. The install directory claims the interpreter's own name — either this run
+>    enables `node`, or an earlier one already installed a shim of ours at that
+>    name. A *foreign* `node` in the directory does not count.
+> 2. `PATH` holds no `node` at all that is not a shim of this tool's own. A generic
+>    shebang is then not a recursion but a dead file: the kernel finds no
+>    interpreter and the shim exits 127. This is the machine an install script
+>    bootstraps, whose runtime sits beside the store rather than on `PATH`, and
+>    naming the runtime is the only shebang that works on it.
+>
+> Otherwise the stub keeps `#!/usr/bin/env node`, so the shipped stubs stay
+> relocatable and §10.7's read-only stub folder is not rewritten for a user who
+> never asked for a `node` shim. Note what condition 2 does **not** say: a `node`
+> that is inside the install folder still satisfies it. Such a runtime runs today,
+> so the shebang is not dead, and baking it in is exactly what the requirement
+> below forbids; §15.44's `cache clean` backstop covers the day it goes away.
 >
 > **The stub's condition governs the tool's own CLI entry on every platform** — the
 > file named by `package.json`'s `bin`, which need not sit in the stub folder.
@@ -60,17 +72,17 @@ receive the wrapper's invocation name. Every generated stub and wrapper has mode
 > runtime `enable` may name. `node` is a table entry, so once `enable node`
 > has claimed that name on the prepended shim directory on `PATH`, the tool's own
 > entry point resolves through the shim, downloads the project's runtime and runs
-> under it — and `process.execPath` is then a path inside `<home>`, which
-> `cache clean` (§09.7) exists to delete. An implementation MUST NOT bake in an
-> interpreter that lies inside its own home directory. It selects one in this order:
+> under it — and `process.execPath` is then a path inside the **install folder**,
+> which `cache clean` (§09.7) exists to delete. An implementation MUST NOT bake in
+> an interpreter that lies inside the install folder. It selects one in this order:
 >
-> 1. `realpath(process.execPath)`, when that is **not** inside `<home>`.
+> 1. `realpath(process.execPath)`, when that is **not** inside the install folder.
 > 2. The forwarded host runtime — the value of `COREPACK_HOST_RUNTIME` (§11.5),
->    which a run outside `<home>` writes into the environment of every native child
->    it spawns (§08.3). It is used only when it names an executable file
->    that is neither inside `<home>` nor a shim of this tool's own.
-> 3. The first `node` on `PATH` that is neither inside `<home>` nor one of this
->    tool's shims, resolved through `realpath`.
+>    which a run outside the install folder writes into the environment of every
+>    native child it spawns (§08.3). It is used only when it names an executable
+>    file that is neither inside the install folder nor a shim of this tool's own.
+> 3. The first `node` on `PATH` that is neither inside the install folder nor one of
+>    this tool's shims, resolved through `realpath`.
 >
 > If none of the three yields a runtime, `enable` MUST **fail** and write nothing.
 > The message names the runtime it found, names `<home>`, and says that baking it
@@ -78,8 +90,16 @@ receive the wrapper's invocation name. Every generated stub and wrapper has mode
 > `#!/usr/bin/env node`, which is the exec loop above, and it MUST NOT bake the
 > store path, which is the failure this rule exists to prevent.
 >
-> The "is inside `<home>`" test is a path-boundary test on resolved paths, not a
-> string prefix: a `<home>` of `~/.cache/jup` does not contain `~/.cache/jupiter`.
+> **The boundary is the install folder, not `<home>`.** The question the rule asks
+> is "would `cache clean` take this runtime away", and §07.11 puts `self/` — along
+> with any runtime an installer parks beside it, such as `<home>/node` — outside
+> `v1` precisely so that a clean cannot reach them. A runtime under `<home>` but
+> outside the install folder is therefore as durable as one the user installed by
+> hand, and MUST be nameable; refusing it is what leaves a bootstrapped machine
+> holding shims that resolve to nothing.
+>
+> The test is a path-boundary test on resolved paths, not a string prefix: an
+> install folder of `~/.cache/jup/v1` does not contain `~/.cache/jup/v10`.
 
 ## 10.2 POSIX shim creation
 

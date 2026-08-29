@@ -92,7 +92,7 @@ import {
   OWN_BIN_NAMES,
   STUB_FOLDER_NAME,
 } from "../utils/self.ts";
-import { getHomeFolder, isInsideHome } from "../cache/store.ts";
+import { getHomeFolder, isInsideInstallFolder } from "../cache/store.ts";
 
 /** Our own binary name — what §15.29's `PATH` verification and §10.4's lookup search for. */
 const TOOL_NAME = "jup";
@@ -133,11 +133,19 @@ const INTERPRETER_NAME = "node";
  * for the shim directory to go *first* on `PATH`; from then on anything that
  * starts `#!/usr/bin/env node` — our own `bin/jup.mjs` included — resolves through
  * that shim, which downloads the project's runtime and spawns it. `enable` run
- * from inside that chain has a `process.execPath` under `<home>`, and baking it
- * in would tie every shim on the machine to a file `jup cache clean` exists to
- * delete: the next clean leaves every shim dying with `bad interpreter` (exit
- * 126), and `enable` cannot repair them because `env node` now finds only the
- * broken `node` shim (exit 127). §15.43 has the three tiers below instead.
+ * from inside that chain has a `process.execPath` under the *install folder*,
+ * and baking it in would tie every shim on the machine to a file `jup cache
+ * clean` exists to delete: the next clean leaves every shim dying with `bad
+ * interpreter` (exit 126), and `enable` cannot repair them because `env node`
+ * now finds only the broken `node` shim (exit 127). §15.43 has the three tiers
+ * below instead.
+ *
+ * The test is `isInsideInstallFolder` and not "inside `<home>`", because the two
+ * stopped being the same thing when §07.11 put `self/` beside `v1` rather than
+ * under it. `cache clean` empties `v1`; a runtime anywhere else under `<home>`
+ * survives it exactly as a runtime outside `<home>` does, and is therefore safe
+ * to name. That is what makes `<home>/node` — the runtime an install script
+ * downloads when the machine has neither Node nor bun — nameable at tier 0.
  *
  * Resolve at `enable` time; generated stubs keep `#!/usr/bin/env node` so build
  * artifacts remain relocatable.
@@ -151,7 +159,7 @@ export function interpreterPath(): string | undefined {
   const own = realpathOr(process.execPath);
   // Tier 0 — the ordinary case: whatever is running `enable` is outside the
   // store, so it is the runtime the user chose and the one to name.
-  if (!isInsideHome(own)) return own;
+  if (!isInsideInstallFolder(own)) return own;
 
   // Tier 1 — the forwarded host runtime. Whichever process in this chain was
   // last running outside the store recorded itself there (§15.43,
@@ -164,7 +172,7 @@ export function interpreterPath(): string | undefined {
     // reintroduce §14.26's exec loop.
     if (isExecutableFile(forwarded) && !isOurShim(forwarded, INTERPRETER_NAME)) {
       const resolved = realpathOr(forwarded);
-      if (!isInsideHome(resolved)) return resolved;
+      if (!isInsideInstallFolder(resolved)) return resolved;
     }
   }
 
@@ -180,18 +188,74 @@ export function interpreterPath(): string | undefined {
  *
  * Both exclusions are load-bearing and neither is redundant. A shim of ours is
  * refused because naming it is §14.26's exec loop written by hand; a runtime
- * inside `<home>` is refused because that is the whole of §15.43. The ownership
- * test is the same one `enable` uses to decide what it may overwrite, so a
- * directory holding *someone else's* `node` still answers.
+ * inside the install folder is refused because that is the whole of §15.43. The
+ * ownership test is the same one `enable` uses to decide what it may overwrite,
+ * so a directory holding *someone else's* `node` still answers.
+ *
+ * `undefined` here also answers a second question its callers ask: whether
+ * `#!/usr/bin/env node` resolves to anything at all. Nothing on `PATH` and no
+ * shebang worth leaving generic — see {@link pinsInterpreter}.
  */
 function hostRuntimeOnPath(): string | undefined {
   for (const candidate of whichAll(INTERPRETER_NAME)) {
     if (isOurShim(candidate, INTERPRETER_NAME)) continue;
     const resolved = realpathOr(candidate);
-    if (isInsideHome(resolved)) continue;
+    if (isInsideInstallFolder(resolved)) continue;
     return resolved;
   }
   return undefined;
+}
+
+/**
+ * §10.1 — does this run bake an absolute interpreter into the POSIX stub, and
+ * with it into our own CLI entry?
+ *
+ * One function because §10.1 states one condition, and the stub and the entry
+ * must not disagree about it: they carry the same shebang and are read by the
+ * same `execve`.
+ *
+ * The first clause is the original rule. An `enable node` — this run's, or an
+ * earlier one's — puts a shim of ours on the name `#!/usr/bin/env node` looks
+ * up, so leaving the shebang generic is §14.26's exec loop.
+ *
+ * The second is the case the first never covered: `env` finds no `node` **at
+ * all**. A generic shebang is then not a recursion but a dead file — exit 127 —
+ * and the machine it happens on is the one an install script has just
+ * bootstrapped, whose runtime sits beside the store rather than on `PATH`
+ * (§07.11). Naming the runtime is the only shebang that works there, and
+ * {@link interpreterPath} tier 0 already has it — whatever is running us.
+ *
+ * The test is {@link envFindsInterpreter} and deliberately **not**
+ * {@link hostRuntimeOnPath}: that one answers "is there a runtime `enable` may
+ * *name*", which is false for a `node` living in the store, and pinning one of
+ * those is precisely what §15.43 forbids. This asks the narrower question the
+ * shebang actually poses — will `env` reach anything at all — so an `enable`
+ * under a store runtime that is itself on `PATH` keeps its relocatable shebang
+ * and its §15.44 backstop, exactly as before.
+ *
+ * POSIX-only, because Windows reads no shebang. Its wrappers name the runtime
+ * unconditionally, and pinning the entry there would buy nothing while risking
+ * {@link cliEntryNotWritable} against a read-only package directory — the trade
+ * §15.46 already refused for that platform.
+ */
+function pinsInterpreter(claimsName: boolean): boolean {
+  return claimsName || (process.platform !== "win32" && !envFindsInterpreter());
+}
+
+/**
+ * Would `#!/usr/bin/env node` reach *something*?
+ *
+ * Our own shims are the one exclusion, and it is the same one
+ * {@link hostRuntimeOnPath} makes for the same reason: `env` finding a shim of
+ * ours on that name is §14.26's exec loop, which is a dead shebang by another
+ * route. Everything else counts, the store included — a runtime `cache clean`
+ * can take away still runs today, and §15.44 is what covers the day it cannot.
+ */
+function envFindsInterpreter(): boolean {
+  for (const candidate of whichAll(INTERPRETER_NAME)) {
+    if (!isOurShim(candidate, INTERPRETER_NAME)) return true;
+  }
+  return false;
 }
 
 /**
@@ -456,7 +520,7 @@ export const stubNotExecutable = (stub: string) =>
  * (§10.1, `claimsInterpreter`).
  */
 export const cliEntryNotWritable = (entry: string) =>
-  `Unable to update ${entry}: shimming ${INTERPRETER_NAME} puts ${TOOL_NAME}'s own ${INTERPRETER_NAME} shim ahead of the runtime on your PATH, so ${TOOL_NAME}'s entry point has to name its interpreter by absolute path — otherwise every ${TOOL_NAME} command re-enters that shim and downloads a runtime to run ${TOOL_NAME} itself. That file could not be rewritten: ${TOOL_NAME}'s own files are read-only or owned by another user. Install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`, or run \`${TOOL_NAME} disable ${INTERPRETER_NAME}\` and keep ${INTERPRETER_NAME} out of \`${TOOL_NAME} enable\`, which leaves this file untouched.`;
+  `Unable to update ${entry}: shimming ${INTERPRETER_NAME} puts ${TOOL_NAME}'s own ${INTERPRETER_NAME} shim ahead of the runtime on your PATH, so ${TOOL_NAME}'s entry point has to name its interpreter by absolute path — otherwise every ${TOOL_NAME} command re-enters that shim and downloads a runtime to run ${TOOL_NAME} itself. That file could not be rewritten: ${TOOL_NAME}'s own files are read-only or owned by another user. Install ${TOOL_NAME} somewhere writable and re-run \`${TOOL_NAME} enable\`, or run \`${TOOL_NAME} disable ${INTERPRETER_NAME}\` and keep ${INTERPRETER_NAME} out of \`${TOOL_NAME} enable\`, which leaves this file untouched. The same pin is required when \`PATH\` holds no ${INTERPRETER_NAME} at all, since a generic shebang then resolves to nothing — there the remedy is to install one.`;
 
 /**
  * §15.43 — every runtime `enable` can see lives in the store, so there is
@@ -2110,8 +2174,8 @@ export async function cmdEnable(
   // leaves both directories exactly as they were; the alternatives would be a
   // shebang that execs itself (§14.26) or one `cache clean` invalidates.
   const claimsName = await claimsInterpreter(installDirectory, binaries);
-  const interpreter =
-    process.platform === "win32" || claimsName ? requireInterpreterPath() : undefined;
+  const pin = pinsInterpreter(claimsName);
+  const interpreter = process.platform === "win32" || pin ? requireInterpreterPath() : undefined;
 
   // §15.46 — the same pin goes into our own CLI entry, but **not** under the
   // wrapper's "always on Windows" condition: under the *stub's*. The recursion
@@ -2126,7 +2190,7 @@ export async function cmdEnable(
   //
   // Before any shim is written, so a refusal here leaves the shim directory
   // exactly as it found it — the ordering §15.45 gives the execute-bit check.
-  if (claimsName && interpreter !== undefined) await pinCliEntry(distFolder, interpreter);
+  if (pin && interpreter !== undefined) await pinCliEntry(distFolder, interpreter);
 
   // §10.5 — all binaries are processed concurrently.
   const installed = await Promise.all(
@@ -2242,7 +2306,7 @@ export async function installSelfShims(
   // because a self-install claims none of the table's: only an *earlier*
   // `enable node` can have put our shim on the name the shebang looks up.
   const runtime =
-    isWindows || (await claimsInterpreter(installDirectory, []))
+    isWindows || pinsInterpreter(await claimsInterpreter(installDirectory, []))
       ? requireInterpreterPath()
       : undefined;
 

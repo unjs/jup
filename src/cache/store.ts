@@ -97,24 +97,32 @@ export function getSelfFolder(): string {
 }
 
 /**
- * §15.43 — does `file` live under the directory this tool owns?
+ * §15.43 — would `cache clean` delete `file`?
  *
- * The question is "would `cache clean` delete it?", so the answer has to be a
- * path-boundary test rather than a `startsWith` on the two strings: a `<home>`
- * of `~/.cache/jup` would otherwise swallow `~/.cache/jupiter/node`. `relative`
- * gives the boundary — empty or `..`-leading means "not below" — and handles
- * Windows's case-insensitive comparison on the way.
+ * That is the question every caller is actually asking, and the answer is the
+ * *install folder* rather than the whole of `<home>`. {@link cacheClean} removes
+ * `getInstallFolder()` and nothing else, and §07.11's `self/` is a sibling of
+ * `v1` precisely so that it cannot be reached; a runtime parked beside it —
+ * `<home>/node`, which an install script downloads when the machine has none —
+ * is as durable as one the user installed by hand. Refusing to name those is
+ * what leaves a machine with no host `node` holding shims that resolve to
+ * nothing, which is the opposite of what §15.43 is for.
  *
- * `file` is expected to be a realpath already; `<home>` is resolved here, and
+ * A path-boundary test rather than a `startsWith` on the two strings: an install
+ * folder of `~/.cache/jup/v1` would otherwise swallow `~/.cache/jup/v10`.
+ * `relative` gives the boundary — empty or `..`-leading means "not below" — and
+ * handles Windows's case-insensitive comparison on the way.
+ *
+ * `file` is expected to be a realpath already; the root is resolved here, and
  * falls back to its literal spelling when it does not exist yet, which cannot
  * answer wrongly since nothing is inside a directory that is not there.
  */
-export function isInsideHome(file: string): boolean {
-  return isBelow(getHomeFolder(), file);
+export function isInsideInstallFolder(file: string): boolean {
+  return isBelow(getInstallFolder(), file);
 }
 
 /**
- * Is `file` below `root`? The shared half of the two tests above.
+ * Is `file` below `root`? The shared half of the test above.
  *
  * `root` is resolved here and falls back to its literal spelling when it does
  * not exist yet, which cannot answer wrongly since nothing is inside a directory

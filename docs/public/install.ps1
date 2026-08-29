@@ -8,9 +8,18 @@
 # names go on PATH. Everything below is bootstrap.
 #
 # The runtime is whatever the machine already has. Only when there is neither a
-# recent enough Node.js nor a bun does this download one: bun, from the same
-# signed npm artifact jup's own table names (`@oven/bun-<target>`), into
-# <home>\bun beside the store rather than anywhere on the user's PATH.
+# recent enough Node.js nor a bun does this download one: Node.js, from the same
+# signed npm artifact jup's own table names (`node-<target>`), into <home>\node
+# beside the store rather than anywhere on the user's PATH.
+#
+# <home>\node is a sibling of the store's `v1`, so `jup cache clean` cannot take
+# it away, and section 10.1 therefore lets the wrappers name it.
+#
+# It is node and not bun for one measured reason: section 10.2's POSIX shims
+# dispatch on `basename(process.argv[1])`, and bun sets that to the realpath of
+# the script where node leaves the path as invoked. Windows wrappers do not read
+# argv that way, but the two installers download the same runtime rather than
+# disagreeing about it. A preinstalled bun still runs this script fine.
 #
 # PATH is left alone. `self-install` chooses the shim directory and prints the
 # exact line to add when it is not already there, and two things telling the
@@ -81,15 +90,17 @@ function Get-StoreHome {
   return Join-Path $root 'jup'
 }
 
-# The `{target}` half of `@oven/bun-{target}`, spelled the way bun spells it.
+# The `{target}` half of `node-{target}`, spelled the way node's per-host
+# packages spell it: `win`, not `win32`.
+#
 # RuntimeInformation reports the OS architecture rather than the process's, so
 # this is still right under a 32-bit or emulated PowerShell on an arm64 machine,
 # which PROCESSOR_ARCHITECTURE is not.
-function Get-BunTarget {
+function Get-NodeTarget {
   $osArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
-  if ($osArch -eq 'X64') { return 'windows-x64' }
-  if ($osArch -eq 'Arm64') { return 'windows-aarch64' }
-  Fail "unsupported architecture: $osArch (bun ships x64 and arm64 builds)"
+  if ($osArch -eq 'X64') { return 'win-x64' }
+  if ($osArch -eq 'Arm64') { return 'win-arm64' }
+  Fail "unsupported architecture: $osArch (node ships x64 and arm64 builds)"
 }
 
 # Is this Node new enough to run jup? Any failure to start is simply "no".
@@ -135,7 +146,7 @@ function Expand-Package([string] $package, [string] $spec, [string] $into, [stri
 
   $archive = Join-Path $stage ([System.IO.Path]::GetRandomFileName() + '.tgz')
   # The default progress bar makes Invoke-WebRequest an order of magnitude
-  # slower on files this size, and bun's is ~40 MB.
+  # slower on files this size, and node's is ~40 MB.
   $progress = $ProgressPreference
   $ProgressPreference = 'SilentlyContinue'
   try {
@@ -151,30 +162,31 @@ function Expand-Package([string] $package, [string] $spec, [string] $into, [stri
   if ($LASTEXITCODE -ne 0) { Fail "cannot unpack $package" }
 }
 
-# Download bun into <home>\bun. A sibling of `v1` and of `self`, for `self`'s
-# reason (section 7.11): `jup cache clean` frees cache entries, and a runtime the
-# installation depends on is not one.
+# Download Node.js into <home>\node. A sibling of `v1` and of `self`, for
+# `self`'s reason (section 7.11): `jup cache clean` frees cache entries, and a
+# runtime the installation depends on is not one. That placement is also what
+# makes the runtime nameable in a wrapper (section 10.1).
 #
 # `$storeRoot` rather than `$home`: PowerShell variable names are case
 # insensitive, so a parameter called `$home` is the automatic `$HOME`.
-function Install-Bun([string] $storeRoot, [string] $stage) {
-  $target = Get-BunTarget
-  Note "no Node.js $nodeMinMajor.$nodeMinMinor+ and no bun found; downloading bun for $target"
+function Install-Node([string] $storeRoot, [string] $stage) {
+  $target = Get-NodeTarget
+  Note "no Node.js $nodeMinMajor.$nodeMinMinor+ and no bun found; downloading node for $target"
 
-  $staged = Join-Path $stage 'bun'
-  Expand-Package "@oven/bun-$target" 'latest' $staged $stage
+  $staged = Join-Path $stage 'node'
+  Expand-Package "node-$target" 'latest' $staged $stage
 
-  $exe = Join-Path $staged 'bin\bun.exe'
-  if (-not (Test-Path -LiteralPath $exe)) { Fail "@oven/bun-$target did not contain bin\bun.exe" }
+  $exe = Join-Path $staged 'bin\node.exe'
+  if (-not (Test-Path -LiteralPath $exe)) { Fail "node-$target did not contain bin\node.exe" }
 
-  # Only reached when no usable bun was found at this path, so whatever is there
-  # is a failed or half-finished earlier attempt.
-  $dest = Join-Path $storeRoot 'bun'
+  # Only reached when no usable node was found at this path, so whatever is
+  # there is a failed or half-finished earlier attempt.
+  $dest = Join-Path $storeRoot 'node'
   New-Item -ItemType Directory -Path $storeRoot -Force | Out-Null
   if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
   Move-Item -LiteralPath $staged -Destination $dest
 
-  return (Join-Path $dest 'bin\bun.exe')
+  return (Join-Path $dest 'bin\node.exe')
 }
 
 # The runtime to run jup under: the user's own first, then one an earlier run of
@@ -187,7 +199,7 @@ function Find-Runtime([string] $storeRoot) {
   $bun = Get-Command bun.exe -ErrorAction SilentlyContinue
   if ($bun) { return $bun.Path }
 
-  $sidecar = Join-Path $storeRoot 'bun\bin\bun.exe'
+  $sidecar = Join-Path $storeRoot 'node\bin\node.exe'
   if (Test-Path -LiteralPath $sidecar) { return $sidecar }
 
   return $null
@@ -206,7 +218,7 @@ New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 
 try {
   $runtime = Find-Runtime $storeHome
-  if (-not $runtime) { $runtime = Install-Bun $storeHome $tmp }
+  if (-not $runtime) { $runtime = Install-Node $storeHome $tmp }
 
   $unpacked = Join-Path $tmp 'jup'
   Expand-Package 'jup' $Version $unpacked $tmp
@@ -214,9 +226,9 @@ try {
   $entry = Join-Path $unpacked 'bin\jup.mjs'
   if (-not (Test-Path -LiteralPath $entry)) { Fail 'the jup package did not contain bin\jup.mjs' }
 
-  # Section 15.43 — the runtime hosting a chain that is about to run out of the
-  # store, named here so `self-install` uses the one this script chose rather
-  # than re-deriving it from a PATH that may have no `node` on it at all.
+  # Section 15.43 tier 1 — the runtime hosting a chain that is about to run out
+  # of the store, named here so `self-install` uses the one this script chose
+  # rather than re-deriving it from a PATH that may have no `node` on it at all.
   $env:JUP_HOST_RUNTIME = $runtime
 
   $arguments = @('self-install')

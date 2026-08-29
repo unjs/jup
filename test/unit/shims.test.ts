@@ -1264,6 +1264,20 @@ describe.skipIf(process.platform === "win32")("§15.43/§15.44 — the baked-in 
     process.execPath = realExecPath;
   });
 
+  /**
+   * An ordinary machine has a `node` on `PATH`, and §10.1's second pinning
+   * condition — "`env` finds none at all" — makes that a precondition of every
+   * row below that expects the shipped `#!/usr/bin/env node` to survive. The
+   * fixture's `PATH` holds shim directories and nothing else, so a row that did
+   * not say this would be asserting the relocatable shebang on a machine where
+   * it resolves to nothing. Appended rather than prepended: `verifyOnPath` has
+   * to keep finding the shim directory these rows install into first, or every
+   * one of them collects §15.29's "another version manager may be shadowing it".
+   */
+  beforeEach(() => {
+    vi.stubEnv("PATH", [process.env.PATH, dirname(hostNode("on-path"))].join(delimiter));
+  });
+
   it("tier 0: names the runtime running `enable`, when that is outside the store", () => {
     expect(interpreterPath()).toBe(realpathSync(process.execPath));
   });
@@ -1555,6 +1569,19 @@ describe.skipIf(process.platform === "win32")("§15.46 — pinning jup's own CLI
   function firstLine(file: string): string {
     return readFileSync(file, "utf8").split("\n")[0]!;
   }
+
+  /**
+   * The same ordinary-machine precondition the §15.43 rows state: with no `node`
+   * on `PATH` at all, §10.1 pins unconditionally, and the rows below that expect
+   * an untouched `#!/usr/bin/env node` would be asserting a shebang that
+   * resolves to nothing.
+   */
+  beforeEach(() => {
+    const dir = join(root, "cli-entry-on-path");
+    mkdirSync(dir, { recursive: true });
+    write(join(dir, "node"), "#!/bin/sh\nexit 0\n", 0o755);
+    vi.stubEnv("PATH", [process.env.PATH, dir].join(delimiter));
+  });
 
   /** Everything from the first line ending on — the part that must not move. */
   function body(file: string): string {

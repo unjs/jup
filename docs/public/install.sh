@@ -9,9 +9,21 @@
 # names go on PATH. Everything below is bootstrap.
 #
 # The runtime is whatever the machine already has. Only when there is neither a
-# recent enough Node.js nor a bun does this download one: bun, from the same
-# signed npm artifact jup's own table names (`@oven/bun-<target>`), into
-# <home>/bun beside the store rather than anywhere on the user's PATH.
+# recent enough Node.js nor a bun does this download one: Node.js, from the same
+# signed npm artifact jup's own table names (`node-<target>`), into <home>/node
+# beside the store rather than anywhere on the user's PATH.
+#
+# <home>/node is a sibling of the store's `v1`, so `jup cache clean` cannot take
+# it away, and §10.1 therefore lets the shims name it — which is what makes a
+# machine with no runtime end up with a working install rather than one whose
+# `#!/usr/bin/env node` resolves to nothing.
+#
+# It is node and not bun for one measured reason: §10.2's shims are symlinks to
+# one shared stub that dispatches on `basename(process.argv[1])`, and bun sets
+# that to the *realpath* of the script where node leaves the path as invoked.
+# Every shim under a bun shebang therefore reads its own name as
+# `shim-proxy.mjs`. A preinstalled bun still runs this script and `self-install`
+# fine — it is only the shebang that cannot be bun.
 #
 # Environment:
 #   JUP_HOME                jup's store root (default: $XDG_CACHE_HOME/jup)
@@ -40,7 +52,7 @@ NODE_MIN_MINOR=18
 # machine that has to reach a mirror for everything, bootstrap included.
 REGISTRY="${JUP_INSTALL_REGISTRY:-${JUP_NPM_REGISTRY:-${COREPACK_NPM_REGISTRY:-https://registry.npmjs.org}}}"
 
-# Set by find_runtime or install_bun. A variable rather than a return value:
+# Set by find_runtime or install_node. A variable rather than a return value:
 # `err` inside a command substitution would only leave the subshell, and this
 # is the one result worth not routing through one.
 RUNTIME=
@@ -124,29 +136,35 @@ store_home() {
   fi
 }
 
-# The `{target}` half of `@oven/bun-{target}`, spelled the way bun spells it.
-# Linux is the one platform where <platform>-<arch> does not name an ABI, and
-# the musl test is §15.28's: musl wins only when it is the *only* loader
-# present, so a glibc distribution with musl merely installed stays glibc.
-bun_target() {
+# The `{target}` half of `node-{target}`, spelled the way node's per-host
+# packages spell it. On Apple Silicon the prefix is `node-bin-` rather than
+# `node-`, because `node-darwin-arm64` belongs to an unrelated publisher; that
+# rename is node's own (`node-bin-setup` makes it unconditionally), not this
+# script's invention.
+#
+# Status 2 is the musl answer, which the caller reports separately: node
+# publishes no musl build, so an Alpine host has to be told that rather than
+# handed a glibc binary. The test is §15.28's — musl wins only when it is the
+# *only* loader present, so a glibc distribution with musl merely installed
+# stays glibc.
+node_target() {
   case "$(uname -m)" in
   x86_64 | amd64) arch=x64 ;;
-  aarch64 | arm64) arch=aarch64 ;;
+  aarch64 | arm64) arch=arm64 ;;
   *) return 1 ;;
   esac
 
   case "$(uname -s)" in
-  Darwin) echo "darwin-$arch" ;;
+  Darwin)
+    if [ "$arch" = arm64 ]; then echo "bin-darwin-arm64"; else echo "darwin-x64"; fi
+    ;;
   Linux)
     case "$arch" in
-    aarch64) musl=/lib/ld-musl-aarch64.so.1 glibc=/lib/ld-linux-aarch64.so.1 ;;
+    arm64) musl=/lib/ld-musl-aarch64.so.1 glibc=/lib/ld-linux-aarch64.so.1 ;;
     *) musl=/lib/ld-musl-x86_64.so.1 glibc=/lib64/ld-linux-x86-64.so.2 ;;
     esac
-    if [ -e "$musl" ] && [ ! -e "$glibc" ]; then
-      echo "linux-$arch-musl"
-    else
-      echo "linux-$arch"
-    fi
+    if [ -e "$musl" ] && [ ! -e "$glibc" ]; then return 2; fi
+    echo "linux-$arch"
     ;;
   *) return 1 ;;
   esac
@@ -181,44 +199,47 @@ find_runtime() {
       return 0
     fi
   done
-  if [ -x "$1/bun/bin/bun" ]; then
-    RUNTIME="$1/bun/bin/bun"
+  if [ -x "$1/node/bin/node" ]; then
+    RUNTIME="$1/node/bin/node"
     return 0
   fi
   return 1
 }
 
-# Download bun into <home>/bun. A sibling of `v1` and of `self`, for `self`'s
-# reason (§07.11): `jup cache clean` frees cache entries, and a runtime the
-# installation depends on is not one.
-install_bun() {
+# Download Node.js into <home>/node. A sibling of `v1` and of `self`, for
+# `self`'s reason (§07.11): `jup cache clean` frees cache entries, and a runtime
+# the installation depends on is not one. That placement is also what makes the
+# runtime nameable in a shim's shebang (§10.1).
+install_node() {
   home=$1
   tmp=$2
 
-  target=$(bun_target) ||
-    err "no supported bun build for $(uname -s) $(uname -m); install Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR or newer and re-run"
-  package="@oven/bun-$target"
+  target=$(node_target) || case $? in
+  2) err "node publishes no musl build, so there is nothing to download on this host; install Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR or newer (\`apk add nodejs\`), then re-run" ;;
+  *) err "no supported node build for $(uname -s) $(uname -m); install Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR or newer, then re-run" ;;
+  esac
+  package="node-$target"
 
-  note "no Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR+ and no bun found; downloading bun for $target"
+  note "no Node.js $NODE_MIN_MAJOR.$NODE_MIN_MINOR+ and no bun found; downloading node for $target"
 
   meta=$(fetch "$REGISTRY/$package/latest") || err "cannot reach $REGISTRY/$package"
   tarball=$(echo "$meta" | json_string tarball)
   [ -n "$tarball" ] || err "$REGISTRY/$package/latest named no tarball"
 
-  download "$tarball" "$tmp/bun.tgz" || err "download failed: $tarball"
-  check_integrity "$tmp/bun.tgz" "$(echo "$meta" | json_string integrity)" "$package"
+  download "$tarball" "$tmp/node.tgz" || err "download failed: $tarball"
+  check_integrity "$tmp/node.tgz" "$(echo "$meta" | json_string integrity)" "$package"
 
-  mkdir -p "$tmp/bun"
-  tar -xzf "$tmp/bun.tgz" -C "$tmp/bun" --strip-components=1 || err "cannot unpack $package"
-  [ -f "$tmp/bun/bin/bun" ] || err "$package did not contain bin/bun"
-  chmod 755 "$tmp/bun/bin/bun"
+  mkdir -p "$tmp/node"
+  tar -xzf "$tmp/node.tgz" -C "$tmp/node" --strip-components=1 || err "cannot unpack $package"
+  [ -f "$tmp/node/bin/node" ] || err "$package did not contain bin/node"
+  chmod 755 "$tmp/node/bin/node"
 
-  # Only reached when no usable bun was found at this path, so whatever is there
-  # is a failed or half-finished earlier attempt.
+  # Only reached when no usable node was found at this path, so whatever is
+  # there is a failed or half-finished earlier attempt.
   mkdir -p "$home" || err "cannot create $home"
-  rm -rf "$home/bun"
-  mv "$tmp/bun" "$home/bun" || err "cannot write to $home"
-  RUNTIME="$home/bun/bin/bun"
+  rm -rf "$home/node"
+  mv "$tmp/node" "$home/node" || err "cannot write to $home"
+  RUNTIME="$home/node/bin/node"
 }
 
 main() {
@@ -263,7 +284,7 @@ main() {
   tmp=$(mktemp -d "${TMPDIR:-/tmp}/jup-install.XXXXXX") || err "cannot create a temporary directory"
   trap 'rm -rf "$tmp"' EXIT INT TERM
 
-  find_runtime "$home" || install_bun "$home" "$tmp"
+  find_runtime "$home" || install_node "$home" "$tmp"
 
   meta=$(fetch "$REGISTRY/jup/$version") || err "cannot reach $REGISTRY/jup/$version"
   tarball=$(echo "$meta" | json_string tarball)
@@ -277,9 +298,9 @@ main() {
   tar -xzf "$tmp/jup.tgz" -C "$tmp/jup" --strip-components=1 || err "cannot unpack jup"
   [ -f "$tmp/jup/bin/jup.mjs" ] || err "the jup package did not contain bin/jup.mjs"
 
-  # §15.43 — the runtime hosting a chain that is about to run out of the store,
-  # named here so `self-install` uses the one this script chose rather than
-  # re-deriving it from a PATH that may have no `node` on it at all.
+  # §15.43 tier 1 — the runtime hosting a chain that is about to run out of the
+  # store, named here so `self-install` uses the one this script chose rather
+  # than re-deriving it from a PATH that may have no `node` on it at all.
   JUP_HOST_RUNTIME="$RUNTIME"
   export JUP_HOST_RUNTIME
 

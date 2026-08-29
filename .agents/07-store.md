@@ -436,6 +436,17 @@ copy it holds is what the shims on the user's `PATH` execute, so a `cache clean`
 (§07.9) that reached it would not free a cache entry but uninstall the tool. Neither
 `cache clean` nor `cache clean --all` may remove it.
 
+The same placement is available to anything else that must outlive a clean, and one
+thing uses it: an install script that finds the machine has no runtime downloads one
+into `<home>/node` — a sibling of `v1` and `self`, for `self`'s reason. Nothing in
+this tool creates or reads that directory; what matters here is the consequence it
+shares with `self/`, which §10.1 states. A runtime under `<home>` but outside the
+install folder is **not** a store runtime: `cache clean` cannot take it away, so
+§15.43's refusal does not apply to it and a shim may name it. An implementation that
+answers §15.43's boundary question with "is it under `<home>`" rather than "is it
+under the install folder" gets this wrong, and the symptom is a bootstrapped machine
+whose shims all exit 127.
+
 `self-upgrade` (§09.13) writes the same layout from a downloaded package rather than
 a copied one, into a directory named after the version the registry resolved.
 

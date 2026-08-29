@@ -753,18 +753,25 @@ describe("§14.15 — one stub, dispatching on the name it was invoked under", (
  * running under a runtime out of `<home>` — baking in a path the next
  * `jup cache clean` deletes.
  *
- * Both rows put the tool in that position by moving `<home>` **over**
- * the runtime the suite is running under, rather than by copying a
- * 126 MB binary into the fixture. `JUP_HOME` is the user's to set, the
- * boundary test is the same one either way, and `enable` writes nothing
- * under `<home>` — so nothing here depends on that directory being ours.
+ * Both rows put the tool in that position by pointing a fixture
+ * `<home>`'s **install folder** at the directory holding the runtime the
+ * suite is running under, rather than by copying a 126 MB binary into
+ * the fixture. `JUP_HOME` is the user's to set, the boundary test is the
+ * same one either way, and `enable` writes nothing under `<home>` — so
+ * nothing here depends on that directory being ours.
+ *
+ * The link is `<home>/v1`, not `<home>`, and that is not a detail:
+ * §15.43's boundary is the folder `cache clean` empties, and §07.11 puts
+ * `self/` — along with any runtime an install script parks beside it —
+ * outside `v1` deliberately. A runtime merely somewhere under `<home>`
+ * is not one a clean can take away, and is therefore safe to bake in.
  * ------------------------------------------------------------------ */
 
-/** The runtime running this suite, and a `<home>` that would contain it. */
+/** The runtime running this suite, and the directory holding it. */
 const HOST_RUNTIME = realpathSync(process.execPath);
-const HOME_OVER_HOST = dirname(HOST_RUNTIME);
+const HOST_RUNTIME_DIR = dirname(HOST_RUNTIME);
 
-describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
+describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
   "§15.43 — the interpreter a shim names",
   () => {
     /**
@@ -774,6 +781,7 @@ describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
      */
     const PINNED = copyTool();
     const READ_ONLY = copyTool();
+    const BOOTSTRAPPED = copyTool();
 
     /** The stub `<shimDir>/<binName>` points at — §10.2's relative symlink. */
     function stubFor(shimDir: string, binName: string): string {
@@ -782,6 +790,19 @@ describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
 
     function shebangOf(file: string): string {
       return readFileSync(file, "utf8").split("\n")[0]!;
+    }
+
+    /**
+     * A `<home>` whose install folder *is* the directory holding this suite's
+     * runtime, so `process.execPath` sits inside it exactly as a real
+     * `<home>/v1/node/<version>/bin/node` would. `isBelow` resolves the install
+     * folder through `realpath`, which is what makes the link answer.
+     */
+    function storeOverHost(root: string): string {
+      const home = join(root, "store-home");
+      mkdirSync(home, { recursive: true });
+      symlinkSync(HOST_RUNTIME_DIR, join(home, "v1"));
+      return home;
     }
 
     /** An ordinary `node` outside `<home>`: a wrapper around the real one. */
@@ -798,7 +819,7 @@ describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
       const { fixture, shimDir, options } = shimFixture();
       const forwarded = decoyNode(fixture.root, "forwarded");
       const onPath = decoyNode(fixture.root, "on-path");
-      const inStore = { ...options.env, COREPACK_HOME: HOME_OVER_HOST };
+      const inStore = { ...options.env, COREPACK_HOME: storeOverHost(fixture.root) };
 
       // Tier 1. Nothing usable on `PATH` at all, so a run that ignored the
       // forwarded value would refuse rather than quietly pick something else.
@@ -827,26 +848,62 @@ describe.skipIf(IS_WINDOWS || HOME_OVER_HOST === dirname(HOME_OVER_HOST))(
       // The property both cases are for: what the shebang names is outside the
       // directory `cache clean` empties, so a clean cannot invalidate it.
       const baked = shebangOf(stubFor(shimDir, "node")).slice(2);
-      expect(baked.startsWith(HOME_OVER_HOST)).toBe(false);
+      expect(baked.startsWith(HOST_RUNTIME_DIR)).toBe(false);
       expect(existsSync(baked)).toBe(true);
+    });
+
+    it("250: pins when `PATH` holds no node at all, and leaves the shebang when it holds one", async () => {
+      const { fixture, shimDir, options } = shimFixture();
+
+      // An ordinary machine. `env` reaches a runtime, so the shipped relocatable
+      // shebang is what a `pnpm` shim keeps and §10.7's read-only stub folder is
+      // never written to.
+      const ordinary = await run(["enable", "pnpm"], {
+        ...options,
+        bin: BOOTSTRAPPED,
+        env: {
+          ...options.env,
+          PATH: [shimDir, dirname(decoyNode(fixture.root, "ordinary"))].join(delimiter),
+        },
+      });
+
+      expect(ordinary.exitCode).toBe(0);
+      expect(shebangOf(stubFor(shimDir, "pnpm"))).toBe("#!/usr/bin/env node");
+
+      // The machine an install script bootstraps: no `node` on `PATH` anywhere,
+      // because the runtime it downloaded lives beside the store and was never
+      // put on the user's `PATH`. A generic shebang there is not §14.26's
+      // recursion but exit 127, so §10.1's second condition pins the runtime
+      // even though nothing claims the name — and what it names is §15.43 tier
+      // 0, the runtime this very run is executing under.
+      const bootstrapped = await run(["enable", "pnpm"], {
+        ...options,
+        bin: BOOTSTRAPPED,
+        env: { ...options.env, PATH: shimDir },
+      });
+
+      expect(bootstrapped.exitCode).toBe(0);
+      expect(bootstrapped.stderr).toBe("");
+      expect(shebangOf(stubFor(shimDir, "pnpm"))).toBe(`#!${HOST_RUNTIME}`);
     });
 
     it.skipIf(IS_ROOT)(
       "251: refuses rather than baking one in, and names the stub it could not rewrite",
       async () => {
-        const { shimDir, options } = shimFixture();
+        const { fixture, shimDir, options } = shimFixture();
+        const home = storeOverHost(fixture.root);
 
-        // No runtime outside `<home>` by either route: nothing forwarded, and the
-        // only entry on `PATH` is the shim directory, which holds no `node` yet.
+        // No runtime outside the store by either route: nothing forwarded, and
+        // the only entry on `PATH` is the shim directory, which holds no `node`.
         const refused = await run(["enable", "node"], {
           ...options,
           bin: PINNED,
-          env: { ...options.env, COREPACK_HOME: HOME_OVER_HOST, PATH: shimDir },
+          env: { ...options.env, COREPACK_HOME: home, PATH: shimDir },
         });
 
         // §12 — a `UsageError` is reported on stdout, with the usage line after it.
         expect(refused.exitCode).toBe(1);
-        expect(refused.stdout).toContain(HOME_OVER_HOST);
+        expect(refused.stdout).toContain(home);
         expect(refused.stdout).toContain("cache clean");
         // Neither fallback was taken, and the name is still free.
         expect(refused.stdout).not.toContain("/usr/bin/env");
