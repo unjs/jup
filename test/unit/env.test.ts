@@ -86,8 +86,10 @@ describe("parseEnvFile", () => {
 
     expect(Object.getPrototypeOf(vars)).toBe(null);
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
-    // The key is kept, as `parseEnv` keeps it: on a null-prototype object it is
-    // an ordinary own property, and §03.2's prefix filter drops it downstream.
+    // The key is kept — on a null-prototype object it is an ordinary own
+    // property, and §03.2's prefix filter drops it downstream. Node's own
+    // `parseEnv` keeps it too, but only from v26: see `comparable`, which is
+    // where that moving target is held still.
     expect(Object.keys(vars)).toEqual(["__proto__", "COREPACK_ENABLE_AUTO_PIN"]);
     expect(vars["__proto__"]).toBe("polluted");
   });
@@ -273,14 +275,39 @@ function* generated(count: number): Generator<string> {
   }
 }
 
+/**
+ * One parser's output in the shape the comparison uses: sorted, and without
+ * `__proto__`.
+ *
+ * Two deliberate divergences, and no more.
+ *
+ * The **sort** is ours: `parseEnv` returns its keys sorted, ours returns them in
+ * the order the file declares. Nothing reads them in order — `applyEnvFile`
+ * filters and merges, `info.ts` sorts — so the order is not a behaviour worth
+ * matching.
+ *
+ * The **`__proto__` key** is Node's, and it moves. `parseEnv("__proto__=1")`
+ * returns `{ A: '2' }` on v24.19.0 and `{ A: '2', __proto__: '1' }` on v26.7.0,
+ * both of which `engines` admits, so whichever way this parser goes it disagrees
+ * with half the supported runtimes — the CI job on `lts/*` and a developer on
+ * current cannot both be right. It keeps the key, because that costs a branch
+ * fewer and §03.2's prefix filter is what makes the key inert, on every version.
+ * Dropping it from both sides here is what stops that from reading as drift.
+ */
+// `parseEnv` is typed `Dict<string>`, so the values are optional on the way in
+// and out; `toEqual` compares the objects, not the annotation.
+function comparable(vars: Record<string, string | undefined>): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(vars)
+      .filter(([key]) => key !== "__proto__")
+      .sort(),
+  );
+}
+
 /** Both parsers' output, compared key by key and independently of key order. */
 function agrees(input: string): void {
-  const expected = Object.fromEntries(Object.entries(parseEnv(input)).sort());
-  // `parseEnv` returns a null-prototype object with its keys sorted; ours
-  // returns them in the order the file declares. Nothing reads them in order —
-  // `applyEnvFile` filters and merges, `info.ts` sorts — so the sort here is the
-  // deliberate divergence, and it is the *only* one.
-  const actual = Object.fromEntries(Object.entries(parseEnvFile(input)).sort());
+  const expected = comparable(parseEnv(input));
+  const actual = comparable(parseEnvFile(input));
 
   expect(actual, `disagreed on ${JSON.stringify(input)}`).toEqual(expected);
 }
