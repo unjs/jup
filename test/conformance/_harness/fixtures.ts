@@ -242,6 +242,13 @@ export function seedPackageManager(
   // §08.3 — a native band is *spawned*, not loaded in-process, so its fake has
   // to be a real executable: a shebang, and the execute bit §07.4 rule 6 grants.
   // pnpm reaches this now that its default sits on the native `>=12.0.0` band.
+  //
+  // **This works on POSIX only.** On Windows `{exe}` resolves the band's `bin` to
+  // `pnpm.exe`, and `CreateProcess` wants a real PE image there — a script with a
+  // shebang is `spawn UNKNOWN`. Seeding still writes the file, because callers
+  // seed a native entry as scenery for rows that never execute it; a row that
+  // *does* execute one must be gated on POSIX, as `15-21`, `15-28` and `15-32`
+  // are.
   const native = spec.exec === "native";
   for (const relative of binPathsFor(name, version)) {
     const file = join(location, relative);

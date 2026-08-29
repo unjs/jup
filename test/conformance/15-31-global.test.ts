@@ -84,7 +84,14 @@ describe("§01.4 — a global invocation is transparent (row 197)", () => {
     expect(result.exitCode).toBe(0);
   });
 
-  it("197: the equivalent pnpm invocation too", async () => {
+  /**
+   * POSIX only, and not because the *scan* is: `pnpm add -g x` falls back to the
+   * compiled-in default, which sits on the native `>=12.0.0` band, and a native
+   * band's `bin` is a real `.exe` that a seeded fixture cannot stand in for on
+   * Windows (§08.3; the same reason `15-21` and `15-28` gate their native rows).
+   * npm's spelling of the same rule is covered above on every platform.
+   */
+  it.skipIf(process.platform === "win32")("197: the equivalent pnpm invocation too", async () => {
     const { options } = yarnProject();
 
     const result = await run(["pnpm", "add", "-g", "x"], options);

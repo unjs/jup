@@ -21,7 +21,14 @@ import {
 
 const YARN_DEFAULT = DEFINITIONS.yarn!.default;
 const YARN_TRANSPARENT = DEFINITIONS.yarn!.transparent.default!;
-const PNPM_DEFAULT = DEFINITIONS.pnpm!.default;
+/**
+ * npm, not pnpm, is row 40's foreign package manager. The row is about the
+ * *fallback*, which resolves the compiled-in default, and pnpm's now sits on the
+ * native `>=12.0.0` band whose `bin` is a real `.exe` — unfakeable on Windows.
+ * `npm --version` is not a transparent command either, so the path is identical
+ * and the row stays cross-platform.
+ */
+const NPM_DEFAULT = DEFINITIONS.npm!.default;
 
 const registry = new MockRegistry();
 
@@ -97,14 +104,14 @@ describe("§13.5 environment variables", () => {
   it("40: COREPACK_ENABLE_STRICT=0 falls back instead of failing", async () => {
     const fixture = createFixture({ packageManager: "yarn@1.0.0" });
     seedPackageManager(fixture.home, "yarn", "1.0.0");
-    seedPackageManager(fixture.home, "pnpm", PNPM_DEFAULT);
+    seedPackageManager(fixture.home, "npm", NPM_DEFAULT);
 
-    const foreign = await run(["pnpm", "--version"], {
+    const foreign = await run(["npm", "--version"], {
       ...fixture,
       env: { COREPACK_ENABLE_STRICT: "0" },
     });
     expect(foreign.exitCode).toBe(0);
-    expect(foreign.stdout).toBe(`${versionOf(PNPM_DEFAULT)}\n`);
+    expect(foreign.stdout).toBe(`${versionOf(NPM_DEFAULT)}\n`);
 
     const pinned = await run(["yarn", "--version"], {
       ...fixture,

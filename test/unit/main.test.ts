@@ -84,6 +84,9 @@ function installFake(home: string, name: string, reference: string, body?: strin
   // executable: a shebang, and the execute bit `install.ts` would have set.
   // pnpm reaches this path now that its default is on the native `>=12.0.0`
   // band; before that every default here was JS.
+  //
+  // POSIX only: on Windows `{exe}` makes this `pnpm.exe`, where a shebang script
+  // is `spawn UNKNOWN`. Seeding one is still fine — only *executing* it is not.
   const native = spec.exec === "native";
   const bin = resolveSpecBin(spec);
   const targets = Array.isArray(spec.bin)
@@ -492,11 +495,17 @@ describe("runProxy — the escape hatches (tests 40, 41)", () => {
   it("COREPACK_ENABLE_STRICT=0 downgrades a mismatch to the fallback (test 40)", () => {
     const { cwd, home } = makeProject({ packageManager: `yarn@1.0.0` });
     installFake(home, "yarn", "1.0.0");
-    installFake(home, "pnpm", PNPM_DEFAULT);
+    // npm, not pnpm, as the foreign manager: the row is about the *fallback*,
+    // which resolves the compiled-in default, and pnpm's now sits on the native
+    // `>=12.0.0` band. A native artifact cannot be faked on Windows — its `bin`
+    // is a real `.exe` — so seeding pnpm here would make this row POSIX-only for
+    // a reason that has nothing to do with what it tests. `npm --version` is not
+    // a transparent command either, so the path exercised is identical.
+    installFake(home, "npm", NPM_DEFAULT);
 
-    const foreign = run(cwd, home, ["pnpm", "--version"], { COREPACK_ENABLE_STRICT: "0" });
+    const foreign = run(cwd, home, ["npm", "--version"], { COREPACK_ENABLE_STRICT: "0" });
     expect(foreign.status).toBe(0);
-    expect(foreign.stdout).toBe(`pnpm@${versionOf(PNPM_DEFAULT)} --version\n`);
+    expect(foreign.stdout).toBe(`npm@${versionOf(NPM_DEFAULT)} --version\n`);
 
     // The project's *own* package manager still honours the pin.
     const own = run(cwd, home, ["yarn", "--version"], { COREPACK_ENABLE_STRICT: "0" });
