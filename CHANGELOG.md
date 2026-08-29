@@ -1,6 +1,36 @@
 # Changelog
 
 
+## v0.0.5
+
+[compare changes](https://github.com/unjs/jup/compare/v0.0.4...v0.0.5)
+
+### 🚀 Enhancements
+
+- Add --system, and let root reach /usr/local/bin ([b67ad16](https://github.com/unjs/jup/commit/b67ad16))
+- Improve dist ([bf7578e](https://github.com/unjs/jup/commit/bf7578e))
+- Better install method ([a4bd5ad](https://github.com/unjs/jup/commit/a4bd5ad))
+
+### 🩹 Fixes
+
+- Make CI-failing rows portable ([5367f8d](https://github.com/unjs/jup/commit/5367f8d))
+- Spell Bun's virtual root per platform in the binary-root row ([e12dd5d](https://github.com/unjs/jup/commit/e12dd5d))
+- Pack with `xz -T1` so it stops warning about threads it cannot use ([c09298c](https://github.com/unjs/jup/commit/c09298c))
+
+### 📖 Documentation
+
+- Add experimental note ([d24abc7](https://github.com/unjs/jup/commit/d24abc7))
+- Add native install instructions ([f4223b1](https://github.com/unjs/jup/commit/f4223b1))
+
+### 🏡 Chore
+
+- Compact comments ([2966e93](https://github.com/unjs/jup/commit/2966e93))
+- Compact agents docs ([70e9640](https://github.com/unjs/jup/commit/70e9640))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.0.4
 
 [compare changes](https://github.com/unjs/jup/compare/v0.0.3...v0.0.4)

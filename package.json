@@ -1,6 +1,6 @@
 {
   "name": "jup",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "A fast, small, zero-dependency version manager for package managers and runtimes.",
   "keywords": [
     "aube",
