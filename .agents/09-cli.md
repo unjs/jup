@@ -220,6 +220,20 @@ invocation and prints Yarn's version.
 
 ## 9.11 (retired) Deprecated commands
 
+**`install` under corepack's name.** The word `install` is reserved on jup's own
+surface and is a `UsageError` there. Invoked through `corepack` — meaning
+`bin/corepack.mjs` ran, which §10.9 makes the only reliable statement of that —
+`install` and `install -g` are rewritten to `cache install` and
+`cache install -g` before dispatch, so a Dockerfile or CI job written against
+corepack keeps working. The rewrite happens in `runMain`, ahead of both the
+dispatch switch and §12.1's presenter, so a failure inside prints the `cache`
+usage line rather than the generic one.
+
+It maps command spellings and nothing else. In particular it does not carry the
+hatches `test/corepack/_runCli.ts` sets: §06's verification and §05.4's download
+notice are the same under both names, because a security posture chosen by which
+symlink was typed is one nobody chose. See `RunOptions.corepackCompat`.
+
 `hydrate` and `prepare` were corepack's predecessors of `cache install -g
 <file>.tgz` and of `pack` + `cache install -g`. They were dropped before publication:
 they existed for scripts written against corepack, jup has no install base of its

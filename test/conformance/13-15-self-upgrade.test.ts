@@ -23,7 +23,11 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cliEntrySource, shimSource, stubNameFor } from "../../src/commands/shims.ts";
 import { NPM_FULL_ACCEPT_HEADER } from "../../src/net/registry.ts";
 import { lt } from "../../src/version/semver.ts";
-import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME } from "../../src/utils/self.ts";
+import {
+  BUILT_ENTRY_SPECIFIER,
+  CLI_ENTRY_NAME,
+  COREPACK_ENTRY_NAME,
+} from "../../src/utils/self.ts";
 import {
   cleanupFixtures,
   createFixture,
@@ -112,6 +116,11 @@ function publishedTool(version: string, entry: string): Uint8Array {
     // §07.4 — published unreadable to the kernel as programs; the command has
     // to grant the bit itself.
     { path: `package/bin/${CLI_ENTRY_NAME}`, content: cliEntrySource(), mode: 0o644 },
+    {
+      path: `package/bin/${COREPACK_ENTRY_NAME}`,
+      content: cliEntrySource(undefined, true),
+      mode: 0o644,
+    },
     {
       path: `package/bin/${stubNameFor("pnpm")}`,
       content: shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"),
@@ -235,7 +244,7 @@ describe("§09.13 self-upgrade", () => {
     expect(marker.hash).toBe(tarballHash(registry, VERSION));
     expect(marker.bin).toEqual({
       jup: `./bin/${CLI_ENTRY_NAME}`,
-      corepack: `./bin/${CLI_ENTRY_NAME}`,
+      corepack: `./bin/${COREPACK_ENTRY_NAME}`,
     });
 
     for (const binName of ["jup", "corepack"]) {
@@ -251,10 +260,12 @@ describe("§09.13 self-upgrade", () => {
 
       await run(["self-upgrade"], options);
 
-      // §10.9 points both of our names at the CLI entry, so it is the one file
-      // the command has to make executable; the per-name stubs beside it are a
+      // §10.9 points each of our names at its own CLI entry, so both are files
+      // the command has to make executable; the per-name stubs beside them are a
       // later `enable`'s business (§07.4).
-      expect(statSync(join(selfDir, "bin", CLI_ENTRY_NAME)).mode & 0o111).not.toBe(0);
+      for (const name of [CLI_ENTRY_NAME, COREPACK_ENTRY_NAME]) {
+        expect(statSync(join(selfDir, "bin", name)).mode & 0o111).not.toBe(0);
+      }
 
       // Both names, through the shims the command just wrote, answering out of
       // the copy in the store.
@@ -273,10 +284,13 @@ describe("§09.13 self-upgrade", () => {
 
     await run(["self-upgrade"], options);
 
-    // Byte for byte what the tarball carried. This is the file §10.9 points both
-    // of our names at, and an upgrade that regenerated it from the *running*
+    // Byte for byte what the tarball carried. These are the files §10.9 points
+    // our names at, and an upgrade that regenerated them from the *running*
     // version's source would put an old entry in front of a new bundle.
     expect(readFileSync(join(selfDir, "bin", CLI_ENTRY_NAME), "utf8")).toBe(cliEntrySource());
+    expect(readFileSync(join(selfDir, "bin", COREPACK_ENTRY_NAME), "utf8")).toBe(
+      cliEntrySource(undefined, true),
+    );
 
     // The per-name stubs travel untouched too: nothing links them until a later
     // `enable`, which is where §10.3 writes or repairs one.

@@ -166,12 +166,21 @@ export function findStubFolder(module: { directory: string; entry: string }): st
 }
 
 /**
- * **Our own CLI entry** — the file `package.json`'s `bin` points both `jup` and
- * `corepack` at, and therefore the file a user's `jup` on `PATH` executes. It
- * ships in {@link STUB_FOLDER_NAME}, beside the stubs, so the name alone locates
- * it from the folder its one caller already has.
+ * **Our own CLI entry** — the file `package.json`'s `jup` key points at, and
+ * therefore the file a user's `jup` on `PATH` executes. It ships in
+ * {@link STUB_FOLDER_NAME}, beside the stubs, so the name alone locates it from
+ * the folder its one caller already has. {@link COREPACK_ENTRY_NAME} is its
+ * twin, for the other name we answer to.
  */
 export const CLI_ENTRY_NAME = "jup.mjs";
+
+/**
+ * The same entry under corepack's name, differing in one argument —
+ * `corepackCompat`, which turns on §09.11's `install` alias. A second *file*
+ * rather than a name test, because §10.1's rule holds here too: `argv[1]` does
+ * not survive a pnpm `.bin` wrapper, a Windows `.cmd` or bun (§10.9).
+ */
+export const COREPACK_ENTRY_NAME = "corepack.mjs";
 
 /**
  * **The names we answer to ourselves** — `package.json`'s two `bin` keys, and
@@ -187,6 +196,14 @@ export const CLI_ENTRY_NAME = "jup.mjs";
  * replacement has to answer to the name the machine already types.
  */
 export const OWN_BIN_NAMES = ["jup", "corepack"] as const;
+
+/** The one of {@link OWN_BIN_NAMES} that is corepack's. */
+export const COREPACK_BIN_NAME = "corepack";
+
+/** The `bin/` file `binName` is pointed at — §10.9. */
+export function entryNameFor(binName: string): string {
+  return binName === COREPACK_BIN_NAME ? COREPACK_ENTRY_NAME : CLI_ENTRY_NAME;
+}
 
 /** Is `binName` one of {@link OWN_BIN_NAMES} rather than a package manager? */
 export function isOwnBinName(binName: string): boolean {

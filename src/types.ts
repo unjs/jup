@@ -472,6 +472,41 @@ export interface RunOptions {
    * number is the tool's real exit code rather than §08.4's placeholder `0`.
    */
   handover?: boolean;
+
+  /**
+   * Answer to corepack's command spellings as well as jup's (default `false`).
+   *
+   * Today that is one alias: corepack's `install` and `install -g`, which jup
+   * spells `cache install` and `cache install -g` (§09.2, §09.3). The word
+   * `install` is reserved on jup's own surface (§09.11), so the alias exists
+   * only for a caller that arrived under corepack's name.
+   *
+   * **Which entry point ran is what sets this**, never the invoked path:
+   * `bin/corepack.mjs` passes `true` and `bin/jup.mjs` passes nothing, for
+   * §10.1's reason — `process.argv[1]` does not survive a pnpm `.bin` wrapper, a
+   * Windows `.cmd`, or bun, so the name has to be carried by the file that runs.
+   *
+   * **It maps command spellings and nothing else.** The temptation is to hang
+   * the rest of the corepack-compatibility surface off it — the hatches
+   * `test/corepack/_runCli.ts` sets to make the ported suite green are sitting
+   * right there — and it must not carry them:
+   *
+   * * `JUP_ALLOW_UNVERIFIED` and `COREPACK_INTEGRITY_KEYS=0` are §06's
+   *   fail-closed verification, switched off. Deriving them from a file name
+   *   would mean the `corepack` symlink verifies downloads less than the `jup`
+   *   symlink beside it, chosen by nobody and visible in no command line. §11
+   *   keeps `JUP_ALLOW_UNVERIFIED` out of project env files for the same reason:
+   *   weakening verification is a per-run decision somebody makes on purpose.
+   * * `JUP_QUIET_ADVISORIES` and §05.4's download notice are what jup says about
+   *   a decision it has already made. Muting them under corepack's name would
+   *   hide precisely the sentences that explain a refusal corepack would not
+   *   have made.
+   *
+   * Those three exist in the harness to isolate *deliberate* divergences so a
+   * regression shows up as a new failure (`test/corepack/README.md`). They are a
+   * measuring instrument, not a compatibility mode.
+   */
+  corepackCompat?: boolean;
 }
 
 /**

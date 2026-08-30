@@ -47,6 +47,7 @@ import {
 } from "../net/registry.ts";
 import {
   CLI_ENTRY_NAME,
+  entryNameFor,
   DIST_FOLDER_NAME,
   findEntrySpecifier,
   getOwnVersion,
@@ -229,10 +230,10 @@ async function download(release: Release, dest: string): Promise<void> {
 
     writeMarker(tmp, {
       locator: { name: TOOL_NAME, reference: version },
-      // §09.12's shape. Both of our names run the CLI entry: on POSIX by a
-      // symlink straight at it, on Windows through §10.4's wrappers.
+      // §09.12's shape. Each of our names runs its own CLI entry (§10.9): on
+      // POSIX by a symlink straight at it, on Windows through §10.4's wrappers.
       bin: Object.fromEntries(
-        OWN_BIN_NAMES.map((binName) => [binName, `./${STUB_FOLDER_NAME}/${CLI_ENTRY_NAME}`]),
+        OWN_BIN_NAMES.map((binName) => [binName, `./${STUB_FOLDER_NAME}/${entryNameFor(binName)}`]),
       ),
       // §07.2's `hash`, meaning here what it means for every other download: the
       // digest of the artifact these files came out of.

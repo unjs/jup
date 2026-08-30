@@ -282,6 +282,12 @@ export async function runMain(argv: string[], run?: RunOptions): Promise<RunResu
     if (invocation.mode === "proxy") {
       return { code: await runProxy(invocation, run) };
     }
+    // §09.11 — corepack's `install` / `install -g`, rewritten to the `cache`
+    // spelling. Above the dispatch switch so `presentError` reads the same
+    // words and prints §09's `cache` usage line rather than the generic one.
+    if (run?.corepackCompat === true && invocation.args[0] === "install") {
+      invocation.args = ["cache", ...invocation.args];
+    }
     // Loaded lazily: the proxy path is the hot one and must not pay for the
     // command surface it never touches (§16, Build shape).
     const { runManagementCommand } = await import("./commands/cli.ts");

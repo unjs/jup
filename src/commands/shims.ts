@@ -86,6 +86,9 @@ import {
 import {
   BUILT_ENTRY_SPECIFIER,
   CLI_ENTRY_NAME,
+  COREPACK_BIN_NAME,
+  COREPACK_ENTRY_NAME,
+  entryNameFor,
   findCliEntry,
   findEntryModule,
   findEntrySpecifier,
@@ -384,7 +387,9 @@ async function ownStubInterpreter(distFolder: string): Promise<string | undefine
   // several pinned stubs answered; `readdir` order is the filesystem's.
   let relocatable: string | undefined;
   for (const name of entries.sort()) {
-    if (name === CLI_ENTRY_NAME || !name.endsWith(".mjs")) continue;
+    // Both CLI entries are skipped: they are not per-name stubs, and `enable`
+    // pins them through `pinCliEntry` rather than `pinStubFolder`.
+    if (name === CLI_ENTRY_NAME || name === COREPACK_ENTRY_NAME || !name.endsWith(".mjs")) continue;
     const head = await readHead(join(distFolder, name), 1024);
     if (head === undefined || !head.includes(SHIM_MARKER)) continue;
     const interpreter = shebangOf(head);
@@ -1172,10 +1177,20 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
  * name it was invoked under (§10.1); here that name *is* us, and `runMain` reads
  * §09's commands from position 0.
  *
+ * Two files come out of this, differing in one option: `jup.mjs` and
+ * `corepack.mjs` ({@link COREPACK_ENTRY_NAME}). They are one function rather
+ * than two so the eight lines they share cannot drift, and the *file* is what
+ * records which name ran — §10.1 rules out reading it back off `process.argv[1]`.
+ *
  * @param interpreter Absolute path for the shebang — §10.2's pin. Omitted,
  * `/usr/bin/env node`, which is how it ships.
+ * @param corepackCompat Emit the `corepack`-named entry, which turns on §09.2's
+ * `install` alias.
  */
-export function cliEntrySource(interpreter?: string): string {
+export function cliEntrySource(interpreter?: string, corepackCompat = false): string {
+  const options = corepackCompat
+    ? `{ handover: true, corepackCompat: true }`
+    : `{ handover: true }`;
   return [
     `#!${interpreter ?? RELOCATABLE_INTERPRETER}`,
     // {@link SHIM_MARKER}, because §10.9 now points `jup` and `corepack` at this
@@ -1192,7 +1207,7 @@ export function cliEntrySource(interpreter?: string): string {
     `nodeModule.enableCompileCache?.();`,
     `const entry = new URL(${JSON.stringify(BUILT_ENTRY_SPECIFIER)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
-    `const { code } = await runMain(process.argv.slice(2), { handover: true });`,
+    `const { code } = await runMain(process.argv.slice(2), ${options});`,
     `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");
@@ -1364,12 +1379,20 @@ async function ensureStub(
  * stop being executable — §10.3's failure, one file over.
  */
 async function pinCliEntry(distFolder: string, interpreter: string): Promise<void> {
-  const file = findCliEntry(distFolder);
   // An installation with no built CLI entry beside its stubs — a source
   // checkout — has nothing to pin. Nothing to do is a success here, not a gap:
   // `enable` must not fail for want of a build.
-  if (file === undefined) return;
-  await pinShebang(file, interpreter, cliEntryNotWritable);
+  if (findCliEntry(distFolder) === undefined) return;
+
+  // Both entries, because §10.9 now points our two names at two files and the
+  // recursion §10.2 is guarding against does not care which of them was run.
+  // `corepack.mjs` is asked for by `existsSync` rather than assumed: it is newer
+  // than the layout `self-upgrade` may have downloaded (§09.13).
+  for (const name of [CLI_ENTRY_NAME, COREPACK_ENTRY_NAME]) {
+    const file = join(distFolder, name);
+    if (!existsSync(file)) continue;
+    await pinShebang(file, interpreter, cliEntryNotWritable);
+  }
 }
 
 /**
@@ -2390,8 +2413,22 @@ export async function installSelfShims(
 ): Promise<[string, string][]> {
   const binFolder = join(directory, STUB_FOLDER_NAME);
   const isWindows = process.platform === "win32";
-  const entry = join(binFolder, CLI_ENTRY_NAME);
-  const rel = relative(installDirectory, entry);
+  // §10.9 — one entry per name, not one shared by both: `corepack.mjs` is what
+  // makes "invoked as corepack" a fact about which file ran, which is the only
+  // form of it that survives a Windows wrapper (§10.1).
+  //
+  // Falls back to `jup.mjs` when the payload has no `corepack.mjs`. The payload
+  // is not always ours to shape: §09.13 links a copy exactly as it was
+  // downloaded, and a release from before §09.11's alias carries only the one
+  // entry. Linking the name at a file that is not there would leave `corepack`
+  // dangling on `PATH` — strictly worse than the alias being absent, which is
+  // all this costs.
+  const entryFor = (binName: string): string => {
+    const preferred = join(binFolder, entryNameFor(binName));
+    return binName === COREPACK_BIN_NAME && !existsSync(preferred)
+      ? join(binFolder, CLI_ENTRY_NAME)
+      : preferred;
+  };
 
   // §10.2, unchanged: Windows wrappers always name the runtime, POSIX only when
   // this directory claims `node`. `claimsInterpreter` is asked with no names,
@@ -2412,20 +2449,23 @@ export async function installSelfShims(
   // are both about the same file §10.3 is about — no stub stands between them
   // any more.
   if (runtime !== undefined && !isWindows) await pinCliEntry(binFolder, runtime);
-  if (!isWindows) await ensureExecutable(entry, binFolder);
+  if (!isWindows) {
+    for (const binName of OWN_BIN_NAMES) await ensureExecutable(entryFor(binName), binFolder);
+  }
 
-  // §10.4's trio, built once and shared by both names — they differ only in the
-  // file each is written to. It is defined exactly when this is Windows, because
-  // that is the first half of `runtime`'s condition above, and standing in for
-  // `isWindows` below is what carries that fact into the wrappers' signature.
-  const wrappers = isWindows && runtime !== undefined ? selfWin32Wrappers(rel, runtime) : undefined;
-
+  // §10.4's trio, per name rather than shared: the wrappers name the file they
+  // invoke, and that file is now what distinguishes the two names.
   const installed = await Promise.all(
     OWN_BIN_NAMES.map(async (binName): Promise<[string, string] | undefined> => {
+      const target = entryFor(binName);
+      const wrappers =
+        isWindows && runtime !== undefined
+          ? selfWin32Wrappers(relative(installDirectory, target), runtime)
+          : undefined;
       const shim =
         wrappers !== undefined
           ? await writeWin32Entries(installDirectory, binName, wrappers, options)
-          : await linkPosixEntry(installDirectory, entry, binName, options);
+          : await linkPosixEntry(installDirectory, target, binName, options);
       return shim === undefined ? undefined : [binName, shim];
     }),
   );

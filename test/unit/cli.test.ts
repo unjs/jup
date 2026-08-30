@@ -78,6 +78,8 @@ import { create } from "../../src/cache/tar.ts";
 import { readInstalledSpec } from "../../src/cache/store.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 import { USAGE_LINES } from "../../src/commands/usage.ts";
+import { runMain } from "../../src/main.ts";
+import { getOwnVersion } from "../../src/utils/self.ts";
 
 /* ------------------------------------------------------------------ *
  * Harness
@@ -1480,6 +1482,66 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
 
   it("reports an unknown command as a usage error", async () => {
     await expect(runManagementCommand(["frobnicate"])).rejects.toBeInstanceOf(UsageError);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * §09.11 — corepack's `install`, under corepack's name only
+   * ---------------------------------------------------------------- */
+
+  describe("the corepack `install` alias (§09.11)", () => {
+    /**
+     * Through `runMain` rather than `runManagementCommand`, because the rewrite
+     * deliberately sits above the dispatch switch: `presentError` has to see the
+     * rewritten words too, and that is what the usage-line row below checks.
+     *
+     * What sets the flag in production is which of the two `bin/` entries ran —
+     * asserted byte-for-byte by `test/unit/shims.test.ts`, since no unit test can
+     * see a symlink's name.
+     */
+    const compat = { corepackCompat: true } as const;
+
+    it("routes `install` to `cache install`", async () => {
+      await manifest({ name: "no-spec" });
+
+      await expect(runMain(["install"], compat)).resolves.toEqual({ code: 1 });
+
+      // §09.2's project error, not `Unknown command "install"`.
+      expect(stdout).toContain(
+        `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field`,
+      );
+    });
+
+    it("routes `install -g` to `cache install -g`", async () => {
+      await expect(runMain(["install", "-g"], compat)).resolves.toEqual({ code: 1 });
+
+      expect(stdout).toContain(
+        `The 'jup cache install -g' command requires at least one package manager or archive`,
+      );
+    });
+
+    it("prints the cache usage line, not the generic one", async () => {
+      await expect(runMain(["install"], compat)).resolves.toEqual({ code: 1 });
+
+      expect(stdout).toContain("$ jup cache clean|clear|install|list");
+      expect(stdout).not.toContain("$ jup <command>");
+    });
+
+    it("leaves `install` reserved under jup's own name (§09.11)", async () => {
+      await expect(runMain(["install"])).resolves.toEqual({ code: 1 });
+
+      expect(stdout).toContain(`Usage Error: Unknown command "install"`);
+    });
+
+    it("rewrites the command word and nothing else", async () => {
+      // Not a general "corepack mode": an unknown command stays unknown, and a
+      // command jup already has is untouched.
+      await expect(runMain(["frobnicate"], compat)).resolves.toEqual({ code: 1 });
+      expect(stdout).toContain(`Usage Error: Unknown command "frobnicate"`);
+
+      stdout = "";
+      await expect(runMain(["--version"], compat)).resolves.toEqual({ code: 0 });
+      expect(stdout).toBe(`${getOwnVersion()}\n`);
+    });
   });
 
   it("keeps a usage line for every command it dispatches", () => {

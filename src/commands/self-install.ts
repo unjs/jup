@@ -47,7 +47,7 @@ import {
   verifyOnPath,
 } from "./shims.ts";
 import {
-  CLI_ENTRY_NAME,
+  entryNameFor,
   DIST_FOLDER_NAME,
   getOwnRoot,
   getOwnVersion,
@@ -515,7 +515,10 @@ export async function cmdSelfInstall(args: string[]): Promise<number> {
         // resolves `jup` through §04 — but a marker that describes its own
         // directory is what lets `promote` and every later run read it back.
         bin: Object.fromEntries(
-          OWN_BIN_NAMES.map((binName) => [binName, `./${STUB_FOLDER_NAME}/${CLI_ENTRY_NAME}`]),
+          OWN_BIN_NAMES.map((binName) => [
+            binName,
+            `./${STUB_FOLDER_NAME}/${entryNameFor(binName)}`,
+          ]),
         ),
         hash,
       });

@@ -27,6 +27,7 @@ import { DEFINITIONS, getBinariesFor } from "../../src/config/table.ts";
 import {
   BUILT_ENTRY_SPECIFIER,
   CLI_ENTRY_NAME,
+  COREPACK_ENTRY_NAME,
   findCliEntry,
   STUB_FOLDER_NAME,
 } from "../../src/utils/self.ts";
@@ -1948,6 +1949,25 @@ describe("the shipped static files", () => {
     expect(read(CLI_ENTRY_NAME)).toBe(cliEntrySource());
   });
 
+  it("the corepack entry is the same file with §09.11's alias turned on", () => {
+    expect(read(COREPACK_ENTRY_NAME)).toBe(cliEntrySource(undefined, true));
+  });
+
+  /**
+   * §10.9 — the whole point of the second file. If the two ever became
+   * byte-identical the alias would be off wherever `corepack` was invoked, and
+   * every other assertion here would still pass.
+   */
+  it("differs from the jup entry in the compat flag and nothing else", () => {
+    const jup = read(CLI_ENTRY_NAME).split("\n");
+    const corepack = read(COREPACK_ENTRY_NAME).split("\n");
+
+    expect(corepack).not.toEqual(jup);
+    expect(corepack.filter((line, index) => line !== jup[index])).toEqual([
+      `const { code } = await runMain(process.argv.slice(2), { handover: true, corepackCompat: true });`,
+    ]);
+  });
+
   it.for(SHIPPED_NAMES.map((name) => [name]))(
     "the stub for %s is what `shimSource()` writes for it",
     ([binName]) => {
@@ -1957,7 +1977,11 @@ describe("the shipped static files", () => {
 
   it("holds those and nothing else — a name left the table without its stub going too", () => {
     expect(readdirSync(shipped).sort()).toEqual(
-      [CLI_ENTRY_NAME, ...SHIPPED_NAMES.map((name) => stubNameFor(name))].sort(),
+      [
+        CLI_ENTRY_NAME,
+        COREPACK_ENTRY_NAME,
+        ...SHIPPED_NAMES.map((name) => stubNameFor(name)),
+      ].sort(),
     );
   });
 

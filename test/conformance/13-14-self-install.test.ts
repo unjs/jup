@@ -21,6 +21,7 @@ import {
   lstatSync,
   mkdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -34,7 +35,11 @@ import {
   SHIM_MARKER,
   shimSource,
 } from "../../src/commands/shims.ts";
-import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME } from "../../src/utils/self.ts";
+import {
+  BUILT_ENTRY_SPECIFIER,
+  CLI_ENTRY_NAME,
+  COREPACK_ENTRY_NAME,
+} from "../../src/utils/self.ts";
 import {
   cleanupFixtures,
   createFixture,
@@ -66,10 +71,16 @@ function builtTool(version: string = VERSION): { root: string; entry: string } {
   mkdirSync(join(root, "bin"), { recursive: true });
   const entry = join(root, "bin", CLI_ENTRY_NAME);
   writeFileSync(entry, cliEntrySource());
+  // §10.9's second entry, which `self-install` links `corepack` at. A payload
+  // without it is what a pre-alias release looks like, and is covered on its own
+  // below rather than here.
+  const corepackEntry = join(root, "bin", COREPACK_ENTRY_NAME);
+  writeFileSync(corepackEntry, cliEntrySource(undefined, true));
   // One §10.3 stub beside it, so the copied payload has the shape a published
-  // install has: `enable` links these, `self-install` links the entry above.
+  // install has: `enable` links these, `self-install` links the entries above.
   writeFileSync(join(root, "bin", stubNameFor("pnpm")), shimSource(BUILT_ENTRY_SPECIFIER, "pnpm"));
   chmodSync(entry, 0o755);
+  chmodSync(corepackEntry, 0o755);
   chmodSync(join(root, "bin", stubNameFor("pnpm")), 0o755);
 
   writeFileSync(
@@ -183,6 +194,34 @@ describe("§09.12 self-install", () => {
       expect(shim.stdout).toBe(`${VERSION}\n`);
     }
   });
+
+  // §10.9's fallback. `self-upgrade` links a downloaded copy exactly as it
+  // arrived, so a release predating §09.11's alias carries only `jup.mjs`; the
+  // `corepack` name must still land on something that runs.
+  it.skipIf(IS_WINDOWS)(
+    "links corepack at the jup entry when the payload has no corepack.mjs",
+    async () => {
+      const { shimDir, options, tool } = selfFixture();
+      rmSync(join(tool.root, "bin", COREPACK_ENTRY_NAME));
+
+      expect((await run(["self-install"], options)).exitCode).toBe(0);
+
+      const shim = spawnSync(join(shimDir, "corepack"), ["--version"], {
+        encoding: "utf8",
+        env: { ...process.env, COREPACK_HOME: options.home, PATH: options.env.PATH },
+      });
+      expect(shim.status).toBe(0);
+      expect(shim.stdout).toBe(`${VERSION}\n`);
+
+      // Degraded, and deliberately so: without its own entry the name cannot
+      // carry the alias, and a dangling link would be worse than losing it.
+      const aliased = spawnSync(join(shimDir, "corepack"), ["install"], {
+        encoding: "utf8",
+        env: { ...process.env, COREPACK_HOME: options.home, PATH: options.env.PATH },
+      });
+      expect(aliased.stdout).toContain(`Unknown command "install"`);
+    },
+  );
 
   it("is idempotent: an unchanged payload rewrites neither the store nor the shims", async () => {
     const { shimDir, selfDir, options } = selfFixture();

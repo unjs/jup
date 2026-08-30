@@ -19,7 +19,7 @@
   "license": "MIT",
   "repository": "unjs/jup",
   "bin": {
-    "corepack": "./bin/jup.mjs",
+    "corepack": "./bin/corepack.mjs",
     "jup": "./bin/jup.mjs"
   },
   "files": [

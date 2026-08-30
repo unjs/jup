@@ -14,7 +14,7 @@ import { ENV, readEnv, SYSTEM_ENV, writeEnv, writeEnvInto } from "../config/env-
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
 import type { BinSpec, Installation, RunOptions } from "../types.ts";
-import { CLI_ENTRY_NAME, getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
+import { entryNameFor, getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
  * §08.7 — walk to the installation root because bundled chunks may be nested.
@@ -170,8 +170,8 @@ function readHeadSync(file: string, length: number): string | undefined {
  * and are recognised by shebang plus the {@link stubNameFor} stub they invoke.
  *
  * Two names satisfy the dangling case, one per shape a link of ours can have:
- * the per-name stub §10.3 writes, and {@link CLI_ENTRY_NAME} for the two names
- * §10.9 points at the CLI entry itself.
+ * the per-name stub §10.3 writes, and the CLI entry §10.9 points this
+ * name at — `jup.mjs`, or `corepack.mjs` for corepack's own (§10.9).
  */
 export function isOurShim(file: string, binName: string): boolean {
   const head = readHeadSync(file, 1024);
@@ -184,7 +184,7 @@ export function isOurShim(file: string, binName: string): boolean {
       return false;
     }
     const target = basename(link);
-    return target === stubNameFor(binName) || target === CLI_ENTRY_NAME;
+    return target === stubNameFor(binName) || target === entryNameFor(binName);
   }
   if (head.includes(SHIM_MARKER)) return true;
   // All three shapes, and not gated on the platform — `isOurEntry` reads them

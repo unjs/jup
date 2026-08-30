@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { defineBuildConfig } from "obuild/config";
 import { DEFINITIONS, getBinariesFor } from "./src/config/table.ts";
 import { cliEntrySource, shimSource, stubNameFor } from "./src/commands/shims.ts";
-import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME, STUB_FOLDER_NAME } from "./src/utils/self.ts";
+import {
+  BUILT_ENTRY_SPECIFIER,
+  CLI_ENTRY_NAME,
+  COREPACK_ENTRY_NAME,
+  STUB_FOLDER_NAME,
+} from "./src/utils/self.ts";
 
 /** Our own version, taken from the manifest **once, here**, and baked in below. */
 const OWN_VERSION = (
@@ -120,6 +125,10 @@ export function writeStubFolder(folder: string): string[] {
   // absolute path only where §10.1 says it must.
   const sources = new Map<string, string>([
     [CLI_ENTRY_NAME, cliEntrySource()],
+    // §10.9 — the same entry under corepack's name, and the only durable way to
+    // know we were invoked as `corepack`: §10.1 rules out `process.argv[1]`,
+    // which a pnpm `.bin` wrapper, a Windows `.cmd` and bun each lose.
+    [COREPACK_ENTRY_NAME, cliEntrySource(undefined, true)],
     ...Object.keys(DEFINITIONS)
       .flatMap((name) => getBinariesFor(name))
       .map(

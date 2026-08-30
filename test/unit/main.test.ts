@@ -1594,6 +1594,14 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * the two files reach an identical module set, which is why one of them could
    * go — so this is the same code measured under a different entry, and the
    * ceiling stays where it was.
+   *
+   * Re-based to 285,700 for §09.11's `install` alias, which is the first thing
+   * in a while to add warm *code* rather than move it: `main.ts` rewrites the
+   * command word before dispatch (~300 bytes, four lines and a comment), and
+   * `utils/self.ts` gains the two entry names plus `entryNameFor` that
+   * `run/exec.ts` needs to recognise a dangling `corepack` link (~800). Almost
+   * all of it is prose that minifies away — the measure is source, deliberately,
+   * because source is what has to be read by whoever changes this next.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1605,7 +1613,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(284_500);
+    ).toBeLessThanOrEqual(285_700);
   });
 });
 

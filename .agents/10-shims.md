@@ -313,18 +313,27 @@ When the shim **directory** is unwritable, the error names the two real options:
 keys of the package's `bin` — pointing them at the copy in `<home>/self/<version>`.
 How a name is claimed is §10.3 and §10.4 unchanged: ownership, `--force`,
 displacement, the idempotent no-write, the directory chain, the `PATH`
-verification. Only the target differs, and both platforms name the same file: a
-relative symlink to the CLI entry on POSIX, §10.4's trio naming it on Windows.
+verification. Only the target differs: a relative symlink to a CLI entry on
+POSIX, §10.4's trio naming it on Windows.
+
+**Each name has its own entry** — `bin/jup.mjs` and `bin/corepack.mjs` — and they
+differ in one argument, the `corepackCompat` flag `runMain` takes. That flag is
+what turns on §09.2's `install` alias, and the *file* is what carries it because
+§10.1 says the invoked name cannot be recovered any other way. Measured, not
+assumed: a pnpm `.bin` wrapper `exec`s the runtime on the package's real path, a
+Windows `.cmd` never received the name to pass on, and bun rewrites
+`process.argv[1]` to the script's realpath. All three would report `jup`, which
+is the failure a compatibility switch can least afford — silent, and correlated
+with the platforms that need it most.
 
 Three consequences:
 
-1. **Neither name may be given a stub of its own.** A stub for `jup` would be
-   `jup.mjs`, which is the CLI entry's own name, and writing it would destroy the
-   entry. Pointing at the entry is also what these names want: argv passes
-   through unchanged rather than gaining a leading binary name — without which
-   `jup use pnpm@12` arrives as `["jup", "use", …]` and is rejected as an
-   unknown command.
-2. **The CLI entry carries the shim marker**, because it is the target the
+1. **Neither name may be given a *shim* stub.** These are CLI entries, not
+   §10.1 stubs: argv passes through unchanged rather than gaining a leading
+   binary name — without which `jup use pnpm@12` arrives as `["jup", "use", …]`
+   and is rejected as an unknown command. `jup`'s entry must also keep the name
+   `jup.mjs`, since a stub written at that name would destroy it.
+2. **Both CLI entries carry the shim marker**, because they are the targets the
    ownership test resolves to; without it `disable` would leave both names on
    `PATH`.
 3. **A copy the running version did not produce is linked as it arrived.**
