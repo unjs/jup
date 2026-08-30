@@ -16,13 +16,15 @@ is also a standing test that those two are enough to build on.
 
 ## What it does
 
-1. Points `JUP_HOME` at the runner's temp directory and restores that store from
-   the cache, keyed by OS, architecture, jup version and the project's pins. The
-   shim directory goes on `PATH` here, while it is still empty, so `enable` can
-   see that its install directory is reachable.
-2. Installs jup with the runner's own node — the only bootstrap step. `npm i -g`
-   needs `-f`, because jup's `bin` claims `corepack` and a bundled corepack
-   already holds that name in the runner's global prefix.
+1. Points `JUP_HOME` and `JUP_SHIM_DIRECTORY` at the runner's temp directory and
+   restores that store from the cache, keyed by OS, architecture, jup version
+   and the project's pins. The shim directory goes on `PATH` here, while it is
+   still empty, so `enable` can see that its install directory is reachable.
+2. Installs jup with the runner's own node — the only bootstrap step — into an
+   npm prefix of its own, beside the shim directory. On Windows that is load
+   bearing: a §10.4 wrapper names its stub relative to its own directory, and
+   there is no relative path from `D:\a\_temp\jup-bin` to a global install on
+   `C:`. `-f` covers the `corepack` name jup's `bin` also claims.
 3. `jup enable` writes the package-manager shims into that directory.
 4. `jup node --version` resolves, verifies and installs the runtime, and the
    real binary is linked beside those shims. `node` is a genuine executable, not
