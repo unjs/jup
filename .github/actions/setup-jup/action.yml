@@ -107,7 +107,13 @@ runs:
     # copy and the `jup`/`corepack` shims (§09.12). `--yes` prevents prompting;
     # `--force` safely replaces an existing `corepack` shim (§10.9). Reinstall
     # every run because the generated CLI entry embeds the runner's node (§10.2).
+    #
+    # Run outside the project: `npm exec` loads the nearest manifest and refuses
+    # with `EBADDEVENGINES` when `devEngines.packageManager` names another tool —
+    # which is every project this action exists to set up. `self-install` reads no
+    # project, so the directory it runs in carries no other meaning.
     - shell: bash
+      working-directory: ${{ runner.temp }}
       env:
         JUP_SPEC: ${{ inputs.jup-version }}
         BIN_DIR: ${{ steps.paths.outputs.bin }}
