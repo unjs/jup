@@ -1,6 +1,35 @@
 # Changelog
 
 
+## v0.4.0
+
+[compare changes](https://github.com/unjs/jup/compare/v0.3.0...v0.4.0)
+
+### 🚀 Enhancements
+
+- ⚠️  Rename `install` to `cache install`, drop the `upgrade` alias ([924f6c1](https://github.com/unjs/jup/commit/924f6c1))
+- Accept `-v` as an alias for `--version` ([e61a1d0](https://github.com/unjs/jup/commit/e61a1d0))
+- Answer to corepack's `install` under corepack's name ([9584678](https://github.com/unjs/jup/commit/9584678))
+
+### 🩹 Fixes
+
+- Exempt self-upgrade from the release-age cooldown ([d2ed610](https://github.com/unjs/jup/commit/d2ed610))
+- Windows support ([1dcec49](https://github.com/unjs/jup/commit/1dcec49))
+- Windows `node` shim exec'ing itself ([3afa857](https://github.com/unjs/jup/commit/3afa857))
+
+### 🤖 CI
+
+- Try setup-jup action ([b4c28c5](https://github.com/unjs/jup/commit/b4c28c5))
+- Fix action ([b4dd2d3](https://github.com/unjs/jup/commit/b4dd2d3))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Rename `install` to `cache install`, drop the `upgrade` alias ([924f6c1](https://github.com/unjs/jup/commit/924f6c1))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.3.0
 
 [compare changes](https://github.com/unjs/jup/compare/v0.2.0...v0.3.0)
