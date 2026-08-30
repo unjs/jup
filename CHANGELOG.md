@@ -1,6 +1,22 @@
 # Changelog
 
 
+## v0.3.0
+
+[compare changes](https://github.com/unjs/jup/compare/v0.2.0...v0.3.0)
+
+### 🩹 Fixes
+
+- ⚠️  Resolve yarn's global default from @yarnpkg/cli-dist ([ef42774](https://github.com/unjs/jup/commit/ef42774))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Resolve yarn's global default from @yarnpkg/cli-dist ([ef42774](https://github.com/unjs/jup/commit/ef42774))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.2.0
 
 [compare changes](https://github.com/unjs/jup/compare/v0.1.0...v0.2.0)
