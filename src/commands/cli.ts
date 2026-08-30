@@ -1237,6 +1237,10 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
     case "--help": {
       return cmdHelp();
     }
+    // `-v` alongside `--version` for the same reason `-h` sits beside `--help`:
+    // corepack has always taken both, and the short spellings are what fingers
+    // and CI scripts reach for. Neither is in the synopsis (§09.10).
+    case "-v":
     case "--version": {
       return cmdVersion();
     }

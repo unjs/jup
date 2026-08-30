@@ -1452,15 +1452,18 @@ describe("up (§09.4, tests 111-115)", () => {
  * ------------------------------------------------------------------ */
 
 describe("--version, --help and dispatch (§09.10, test 146)", () => {
-  it("prints the tool's own version", async () => {
+  it("prints the tool's own version for --version and -v", async () => {
     const own = JSON.parse(
       readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
     ) as { version: string };
 
-    await expect(runManagementCommand(["--version"])).resolves.toBe(0);
+    for (const args of [["--version"], ["-v"]]) {
+      stdout = "";
+      await expect(runManagementCommand(args)).resolves.toBe(0);
 
-    expect(stdout).toBe(`${own.version}\n`);
-    expect(stderr).toBe("");
+      expect(stdout).toBe(`${own.version}\n`);
+      expect(stderr).toBe("");
+    }
   });
 
   it("prints the command surface for --help, -h, help and no arguments", async () => {

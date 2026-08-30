@@ -100,10 +100,10 @@ describe("§13.13 CLI errors", () => {
     expect(result.stdout).toContain(`Usage Error: Tag not found (nosuchtag)`);
   });
 
-  it("146: --version prints the tool's own version", async () => {
+  it.for([["--version"], ["-v"]])("146: %s prints the tool's own version", async ([flag]) => {
     const fixture = createFixture();
 
-    const result = await run(["--version"], fixture);
+    const result = await run([flag!], fixture);
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`${OWN_VERSION}\n`);

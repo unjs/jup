@@ -211,9 +211,12 @@ shape change.
 
 ## 9.10 `--version`, `--help`
 
-`--version` prints jup's own version; `--help`/`-h`/`help` prints the surface
-above. Both are ordinary management commands and are shadowed by proxy mode:
-`jup yarn --version` is a *proxy* invocation and prints Yarn's version.
+`--version`/`-v` prints jup's own version; `--help`/`-h`/`help` prints the
+surface above. The synopsis lists only the long spelling of each; the short and
+bare forms are aliases corepack also accepts, kept so a hand or a script that
+reaches for `-v` is not met with `Unknown command`. Both are ordinary management
+commands and are shadowed by proxy mode: `jup yarn --version` is a *proxy*
+invocation and prints Yarn's version.
 
 ## 9.11 (retired) Deprecated commands
 
