@@ -36,7 +36,7 @@
  * load this file.
  */
 
-import { lstatSync, mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { isToolEnvName } from "../src/config/env-vars.ts";
@@ -56,12 +56,12 @@ for (const key of Object.keys(process.env)) {
  * `JUP_SHIM_DIRECTORY` named it — the default is a plain `~/.local/bin` that no
  * variable points at.
  *
- * `jup` and not also `corepack`, though `enable` writes both: Node.js ships a
- * `corepack` of its own in the directory it ships `node` in, so the wider test
- * drops the runtime's own directory off `PATH` — and §10.2 then bakes an
- * absolute interpreter into every shim, because `#!/usr/bin/env node` no longer
- * resolves. That is a whole class of row answering a question about the machine
- * again, so `node` is checked for first and its directory is never a candidate.
+ * `jup`, and none of the other names `enable` writes. Two of them are traps in
+ * opposite directions: Node.js ships a `corepack` beside its own `node`, so
+ * testing for that name drops the runtime's directory, and §02.3's table has
+ * `node` in it, so a machine whose jup manages its runtime has a `node` shim in
+ * the very directory that has to go. `jup` is the one name that means this and
+ * nothing else.
  *
  * `lstat`, not `exists`: a shim whose target has gone is still a shim, still on
  * `PATH`, and still something §10.7 reports on. `existsSync` follows the link
@@ -75,14 +75,12 @@ function has(entry: string, names: readonly string[]): boolean {
 
 function holdsAnInstallation(entry: string): boolean {
   if (entry === "") return false;
-  if (has(entry, ["node", "node.exe"])) return false;
   return entry === ambientShimDirectory || has(entry, ["jup", "jup.cmd", "jup.exe"]);
 }
 
-process.env.PATH = (process.env.PATH ?? "")
+const path = (process.env.PATH ?? "")
   .split(delimiter)
-  .filter((entry) => !holdsAnInstallation(entry))
-  .join(delimiter);
+  .filter((entry) => !holdsAnInstallation(entry));
 
 /**
  * One per worker, not one per test file: `setupFiles` is evaluated for each
@@ -93,6 +91,29 @@ process.env.PATH = (process.env.PATH ?? "")
 const HOME = mkdtempSync(`${tmpdir()}/jup-test-home-`);
 
 process.on("exit", () => rmSync(HOME, { recursive: true, force: true }));
+
+/**
+ * `node` has to survive the filtering above, and on a machine whose jup manages
+ * its runtime the only `node` on `PATH` may well have been in the directory
+ * that just went. §10.2 asks whether `#!/usr/bin/env node` reaches anything and
+ * bakes an absolute interpreter into every shim when it does not, so losing it
+ * silently rewrites what a whole class of row observes.
+ *
+ * A jup `node` shim does not count as the survivor, which is `envFindsInterpreter`'s
+ * own rule rather than one invented here: it discounts our shims when asking
+ * that question, so a `PATH` whose only `node` was one is a `PATH` with no
+ * interpreter. The runtime running the suite is offered under a directory of
+ * its own instead — the same answer `childPath` gives for §10.5 point 8, for
+ * the same reason. Its own directory, not `HOME`, which stays empty.
+ */
+if (!path.some((entry) => entry !== "" && has(entry, ["node", "node.exe"]))) {
+  const runtime = mkdtempSync(`${tmpdir()}/jup-test-runtime-`);
+  process.on("exit", () => rmSync(runtime, { recursive: true, force: true }));
+  symlinkSync(process.execPath, join(runtime, "node"));
+  path.push(runtime);
+}
+
+process.env.PATH = path.join(delimiter);
 
 // `os.homedir()` reads `HOME` on POSIX and `USERPROFILE` on Windows, so the
 // pair covers both the variables §07.1 reads directly and the platform default
