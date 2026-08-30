@@ -100,22 +100,6 @@ runs:
         # All installed commands, including jup itself, use this single entry.
         echo "$bin" >> "$GITHUB_PATH"
 
-    # `JUP_HOME` contains trusted executables: bind cache reuse to the host, jup,
-    # and runtime request, and pin the cache action by digest (docs/3.ci.md, §07).
-    - name: Cache jup's store
-      if: inputs.cache == 'true'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-      with:
-        # Do not restore jup's runner-specific absolute interpreter (§10.2).
-        # `self-install` checks the source digest, so it would not repair a stale
-        # cached copy; npx already downloads the source each run (§09.12).
-        path: |
-          ${{ steps.paths.outputs.home }}
-          !${{ steps.paths.outputs.home }}/self
-        key: setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package.json', inputs.working-directory), format('{0}/jup.lock', inputs.working-directory), format('{0}/.nvmrc', inputs.working-directory)) }}
-        restore-keys: |
-          setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-
-
     # Bootstrap with the runner's node, then let `self-install` own the permanent
     # copy and the `jup`/`corepack` shims (§09.12). `--force` safely replaces an
     # existing `corepack` shim (§10.9). Reinstall every run because the generated
@@ -210,34 +194,107 @@ runs:
         fi
         jup --version
 
+    # One `info --json`, and the only one. It runs before any shim exists, so it
+    # uses the runner's own node (§10.2), and before the store is restored,
+    # because nothing it reports depends on the store's contents. Two answers
+    # come out of it: what the cache key should be, and whether this project
+    # pins a manager at all.
+    - name: Read the project
+      id: project
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SETUP_JUP_INFO: ${{ steps.paths.outputs.info }}
+      run: |
+        set -euo pipefail
+        jup info --json > "$SETUP_JUP_INFO"
+        node -e '
+          const { createHash } = require("node:crypto");
+          const { readFileSync } = require("node:fs");
+          const report = require(process.env.SETUP_JUP_INFO);
+
+          // §09.9 - `inputs` is what a correct key is built from, and it arrived
+          // in jup 0.5.2. Refusing here beats falling back to a guessed file
+          // list, which is the bug this step exists to remove: a wrong key is
+          // not an error anyone sees, it is just a cache that never hits.
+          if (!Array.isArray(report.inputs)) {
+            throw new Error(
+              "setup-jup needs jup 0.5.2 or newer for the project inputs in `info --json`; " +
+                "raise the jup-version input, or pin an older ref of this action.",
+            );
+          }
+
+          // Every file §03.1 would consult, present or not. Absolute paths differ
+          // between runners and must not enter the digest, so only the kind of
+          // each entry, the tool it speaks for, and its contents do. An absent
+          // candidate contributes a marker of its own, which is what makes
+          // committing an .nvmrc or a .corepack.env move the key.
+          const digest = createHash("sha256");
+          for (const input of report.inputs) {
+            digest.update(`${input.kind}\0${input.tool ?? ""}\0`);
+            let mark = "absent";
+            if (input.present) {
+              try {
+                mark = createHash("sha256").update(readFileSync(input.path)).digest("hex");
+              } catch {
+                mark = "unreadable";
+              }
+            }
+            digest.update(`${mark}\n`);
+          }
+
+          const name = report.project.status === "found" ? report.project.name ?? "" : "";
+          process.stdout.write(`project-key=${digest.digest("hex")}\npackage-manager=${name}\n`);
+        ' >> "$GITHUB_OUTPUT"
+
+    # `JUP_HOME` contains trusted executables: bind cache reuse to the host, jup,
+    # and runtime request, and pin the cache action by digest (docs/3.ci.md, §07).
+    #
+    # The last segment is jup's own answer for which files decide a run (§09.9),
+    # not a guess at their names: a workspace root above `working-directory` is
+    # counted, the version file is whatever §02's table calls it, and a candidate
+    # that is merely absent still moves the key on the day it appears.
+    #
+    # Those files are hashed whole, so an unrelated dependency bump in a manifest
+    # still writes a new entry. That is churn and not a re-download: `restore-keys`
+    # falls back to the newest key sharing the prefix, and the store it restores
+    # is already complete. Narrowing the key to the pin-bearing fields would put
+    # knowledge of jup's manifest fields back into this file, which is the
+    # coupling the rest of this step exists to remove.
+    - name: Cache jup's store
+      if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        # Do not restore jup's runner-specific absolute interpreter (§10.2).
+        # `self-install` checks the source digest, so it would not repair a stale
+        # cached copy; npx already downloads the source each run (§09.12).
+        path: |
+          ${{ steps.paths.outputs.home }}
+          !${{ steps.paths.outputs.home }}/self
+        key: setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-${{ steps.project.outputs.project-key }}
+        restore-keys: |
+          setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-
+
     # Enable `node` and all requested managers together so every stub embeds the
-    # runner's stable interpreter (§10.2). `none` still enables `node`; `auto`
-    # reads the full table, including opt-in runtimes, from `info --json` (§10.7).
+    # runner's stable interpreter (§10.2). `none` still enables `node`; `auto` is
+    # §10.7's `--all`, which reaches the opt-in runtimes a bare `enable` leaves
+    # alone. The table is expanded inside jup, so no list of names crosses this
+    # file and a new entry needs no edit here.
     - name: Enable shims
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         BIN_DIR: ${{ steps.paths.outputs.bin }}
         NAMES: ${{ inputs.package-managers }}
-        SETUP_JUP_INFO: ${{ steps.paths.outputs.info }}
       run: |
         set -euo pipefail
-        # Read the table before `node` becomes an unprovisioned shim.
         case "$NAMES" in
-          # `packageManagers` is the whole table despite the key's name: the
-          # runtime entries are in it, so this branch appends no `node`.
-          auto)
-            jup info --json > "$SETUP_JUP_INFO"
-            names="$(node -e '
-              const report = require(process.env.SETUP_JUP_INFO);
-              process.stdout.write(report.packageManagers.map((entry) => entry.name).join(" "));
-            ')" ;;
-          none) names="node" ;;
+          auto) jup enable --install-directory "$BIN_DIR" --all ;;
+          none) jup enable --install-directory "$BIN_DIR" node ;;
           # §10.7 deduplicates names, including a caller-supplied `node`.
-          *)    names="$NAMES node" ;;
+          # shellcheck disable=SC2086
+          *)    jup enable --install-directory "$BIN_DIR" $NAMES node ;;
         esac
-        # shellcheck disable=SC2086
-        jup enable --install-directory "$BIN_DIR" $names
 
     # Record an explicit request as the global default (§09.3); project runtime
     # pins still win (§04). Ask the shim so the output reports the resolved winner.
@@ -272,50 +329,32 @@ runs:
           echo "path=$BIN_DIR/node"
         } >> "$GITHUB_OUTPUT"
 
-    # Warm the project-pinned manager; no project pin is valid (§09.2).
+    # Warm the project-pinned manager; no project pin is valid (§09.2). The name
+    # was read before any shim existed, so nothing here has to run `node` again.
     - name: Warm the pinned package manager
-      id: project
+      if: steps.project.outputs.package-manager != ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      env:
-        SETUP_JUP_INFO: ${{ steps.paths.outputs.info }}
       run: |
         set -euo pipefail
-        jup info --json > "$SETUP_JUP_INFO"
-        name="$(node -e '
-          const report = require(process.env.SETUP_JUP_INFO);
-          process.stdout.write(report.project.status === "found" ? report.project.name ?? "" : "");
-        ')"
-        echo "package-manager=$name" >> "$GITHUB_OUTPUT"
-        if [ -n "$name" ]; then jup cache install; fi
+        jup cache install
 
     # Cache manager packages separately from jup's program store.
+    #
+    # §09.9 owns every part of this that used to be spelled here: which command
+    # each manager answers with, Yarn Classic printing `undefined` for Berry's
+    # setting, and reading the last line past a manager's own notices. The
+    # contract is one absolute path or nothing, always exit 0, so an optional
+    # cache step cannot fail the job -- and the warm step above is what makes it
+    # answer, because the probe runs only what the store already holds.
     - name: Locate the package manager store
       id: store
       if: inputs.cache-dependencies == 'true' && steps.project.outputs.package-manager != ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      env:
-        PM: ${{ steps.project.outputs.package-manager }}
       run: |
         set -euo pipefail
-        # Cache discovery is optional; failures must not fail the job.
-        dir=""
-        case "$PM" in
-          pnpm) dir="$(jup pnpm store path --silent | tail -n1 || true)" ;;
-          npm)  dir="$(jup npm config get cache | tail -n1 || true)" ;;
-          yarn)
-            # Berry answers `cacheFolder`; Classic prints `undefined` for it.
-            dir="$(jup yarn config get cacheFolder 2>/dev/null | tail -n1 || true)"
-            case "$dir" in
-              "" | undefined) dir="$(jup yarn cache dir | tail -n1 || true)" ;;
-            esac ;;
-          bun)  dir="$(jup bun pm cache | tail -n1 || true)" ;;
-          # Other tools have no stable store command; skip their optional cache.
-          *) ;;
-        esac
-        if [ "$dir" = undefined ]; then dir=""; fi
-        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+        echo "dir=$(jup info --store-path)" >> "$GITHUB_OUTPUT"
 
     - name: Cache the package manager store
       if: steps.store.outputs.dir != ''
