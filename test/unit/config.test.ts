@@ -20,6 +20,7 @@ import {
   resolveSpecBin,
   resolveSpecUrl,
   shimsByDefault,
+  storeCommandsFor,
   SUPPORTED_NAMES,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
@@ -196,6 +197,29 @@ describe("registry table — shape (§02.5)", () => {
         expect(spec.commands?.use?.[0], `${name}@${range} commands.use`).toBeTypeOf("string");
         expect(spec.commands?.run?.[0], `${name}@${range} commands.run`).toBeTypeOf("string");
       }
+    }
+  });
+
+  /**
+   * §09.9 — `--store-path` runs `storeCommands[n][0]` through the same bin
+   * lookup a proxy invocation uses, so a candidate naming something the entry
+   * does not publish is a probe that can only ever throw. Nothing else in the
+   * suite would notice, and a new entry is exactly where it would happen.
+   */
+  it("names one of its own binaries in every store-path candidate", () => {
+    for (const name of SUPPORTED_NAMES) {
+      const binaries = getBinariesFor(name);
+      for (const candidate of storeCommandsFor(name)) {
+        expect(candidate.length, `${name} store command`).toBeGreaterThan(0);
+        expect(binaries, `${name} store command`).toContain(candidate[0]);
+      }
+    }
+  });
+
+  /** A runtime has no dependency store of its own to report (§09.9). */
+  it("declares no store-path command for a runtime", () => {
+    for (const name of SUPPORTED_NAMES) {
+      if (isRuntime(name)) expect(storeCommandsFor(name), name).toEqual([]);
     }
   });
 

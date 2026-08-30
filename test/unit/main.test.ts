@@ -946,6 +946,10 @@ const COLD_PATH_MODULES = [
   // package manager is handed over to in-process (§08.2) and must not pay for
   // the machinery that exists for the ones that are not JavaScript.
   "run/native.ts",
+  // §09.9's `--store-path` probe: the one place a tool is run for its *output*
+  // rather than handed the terminal. It borrows `exec.ts`'s child environment
+  // and §08.1's bin lookup, so the direction has to stay cold-imports-warm.
+  "run/capture.ts",
   // §04.1's tag lookup, range fan-out and `lastKnownGood.json` fallback. An
   // exactly-pinned descriptor resolves to itself and the store marker is the
   // probe (§04.3), so the whole of `resolve.ts` — and the registry entry points
@@ -1611,6 +1615,37 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * `run/exec.ts` needs to recognise a dangling `corepack` link (~800). Almost
    * all of it is prose that minifies away — the measure is source, deliberately,
    * because source is what has to be read by whoever changes this next.
+   *
+   * Re-based to 288,000 for §09.9's `--store-path`, which moves the store-path
+   * command of each package manager out of the CI action's YAML and into the
+   * table. 286,057 -> 287,569, **+1,512 or +0.53%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | §09.9's `storeCommands` on four entries, and `storeCommandsFor` beside `versionFileFor` | `config/table.ts` | +1,335 |
+   * | `childEnvironment` and `shimDirectoryFor` exported, and the note saying who to | `run/exec.ts` | +177 |
+   *
+   * Table data on the warm path on the same terms as `commands.run` above: the
+   * table is one structure read by band, and pulling a field only a cold command
+   * reads out of the entry a warm run already loads would buy nothing measurable
+   * while making a new manager stop being a data-only change (§02.3). About 270
+   * bytes of the table delta are the four fields themselves; the rest is the
+   * comment above each and the accessor's, and the long form of the argument —
+   * why the Yarn fallback is a chain rather than a per-band field — was written
+   * into `types.ts`, which is type-only and outside this sum.
+   *
+   * The warm *code* is two `export` keywords, 14 bytes. Everything the flag
+   * actually does is cold: `run/capture.ts` spawns the manager and
+   * `run/native.ts` reads its stdout, both reached only from `commands/info.ts`
+   * and both in `COLD_PATH_MODULES` above, so no proxy run parses a line of it.
+   * The two helpers could not follow them there — they are how §08.7's child
+   * environment and §10.5's shim directory are decided for *every* run, and a
+   * probe that built its own would be a second answer to a question this
+   * codebase deliberately has one of.
+   *
+   * Held at 288,000 rather than the 287,569 this leaves, on the same terms as
+   * every raise above — and the lowering owed since the 256,000 entry is owed
+   * still, against the same resident: `config/table.ts`, now 38,277.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1622,7 +1657,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(286_500);
+    ).toBeLessThanOrEqual(288_000);
   });
 });
 

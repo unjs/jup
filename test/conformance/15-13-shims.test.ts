@@ -630,6 +630,65 @@ describe("§10.7 — npm is shimmed by default", () => {
   });
 });
 
+describe("§10.7 — --all reaches the entries that opt out of the default set", () => {
+  /**
+   * Its own copy of the tool. `--all` claims the interpreter's own name, and
+   * §10.2 then pins an absolute interpreter into the stubs of whichever copy
+   * ran — the reason row 255 below keeps its copies apart too.
+   */
+  const ALL = copyTool();
+
+  it("shims the runtimes a bare enable leaves alone", async () => {
+    const bare = shimFixture();
+    expect((await run(["enable"], bare.options)).exitCode).toBe(0);
+    for (const name of ["bun", "deno", "nub", "node"]) {
+      expect(existsSync(join(bare.shimDir, name))).toBe(false);
+    }
+
+    const all = shimFixture();
+    const result = await run(["enable", "--all"], { ...all.options, bin: ALL });
+
+    expect(result.exitCode).toBe(0);
+    // The default set and §02.5's opt-outs, which is the whole difference.
+    for (const name of ["npm", "npx", "pnpm", "yarn", "bun", "bunx", "deno", "nub", "node"]) {
+      expect(existsSync(join(all.shimDir, name))).toBe(true);
+    }
+  });
+
+  it("still honours --exclude", async () => {
+    const { shimDir, options } = shimFixture();
+
+    const result = await run(["enable", "--all", "--exclude", "bun"], { ...options, bin: ALL });
+
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(join(shimDir, "deno"))).toBe(true);
+    expect(existsSync(join(shimDir, "bun"))).toBe(false);
+    expect(existsSync(join(shimDir, "bunx"))).toBe(false);
+  });
+
+  it("refuses an explicit name beside it, and writes nothing", async () => {
+    const { shimDir, options } = shimFixture();
+
+    const result = await run(["enable", "--all", "yarn"], { ...options, bin: ALL });
+
+    expect(result.exitCode).toBe(1);
+    // §12.10, byte for byte; management mode prints it on stdout (§09.14).
+    expect(result.stdout).toContain(
+      "Usage Error: Options --all and an explicit name both name a target set; pass one or the other",
+    );
+    expect(existsSync(join(shimDir, "yarn"))).toBe(false);
+  });
+
+  it("is enable's flag alone: disable with no names is already that set", async () => {
+    const { options } = shimFixture();
+
+    const result = await run(["disable", "--all"], options);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`Usage Error: Invalid package manager name '--all'`);
+  });
+});
+
 describe("§10.5 — enable verifies its own post-condition", () => {
   it.skipIf(IS_WINDOWS)(
     "195: warns, naming the winner, when another manager shadows the shim",

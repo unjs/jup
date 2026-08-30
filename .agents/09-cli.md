@@ -13,8 +13,9 @@ jup cache install
 jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
-jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
+jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
 jup info [--json]
+jup info --store-path [<name>]
 jup install [...args]
 jup pack [--json] [-o|--output <path>] [...name[@<version>]]
 jup run [...args]
@@ -186,11 +187,15 @@ ahead of these three because it carries its own flags and positionals.
 
 §10 defines directory selection, validation, target expansion, ownership,
 replacement, restoration, output and idempotency. `--exclude <name>` removes a
-name from the default set (`--exclude npm` being the common case).
+name from the default set (`--exclude npm` being the common case), and `enable
+--all` widens that set to every entry the table has, opt-outs included — the set
+a bare `disable` already covers (§10.7). `--all` takes no names beside it.
 
 ## 9.9 `info`
 
-Prints, with **no request of any kind**, what the next run would do and why:
+The report — every form of the command **except** `--store-path` below — prints,
+with **no request of any kind** and no process but this one, what the next run
+would do and why:
 
 * the project — which manifest or version file speaks, which field carries the
   pin, whether the spec is exact, a range, a tag or a URL, and why it cannot be
@@ -209,10 +214,65 @@ Prints, with **no request of any kind**, what the next run would do and why:
   what TLS verification the next request would do and who decided;
 * the environment snapshot, taken **before** the env file is applied. Credentials
   (`*_TOKEN`, `*_PASSWORD`, `*_USERNAME`) are reported as present, never printed;
-  long values are elided.
+  long values are elided;
+* the **project inputs** — every file §03.1's discovery consults, absolute, in
+  walk order, each labelled as a manifest, a version file, an env file or the
+  lockfile, with the tool it speaks for, whether it is there, and whether it is
+  the one of its kind the walk chose. Candidates that are **absent** are listed
+  too, and are the point rather than noise: this is the set a CI cache key is
+  built over, and such a key has to move when a file that was not there appears.
+  The version file's name comes from §02's table, so `.nvmrc` is not spelled
+  anywhere a cache key can drift from it, and the manifest listed as selected is
+  the one the walk climbed to — which in a workspace is not the one the job is
+  standing in. The walk reported runs from `cwd` out to that selection; above it
+  §03.1 had nothing left to find, and stopping there keeps a home directory out
+  of somebody's cache key. The memo under `node_modules` is not an input: it is
+  derived state, restored with `node_modules` or not at all.
 
 `--json` emits the same report with a `version` field, bumped only for a breaking
-shape change.
+shape change. Adding a field is not one, so a reader ignores what it does not
+know.
+
+### `--store-path [<name>]`
+
+A different command wearing `info`'s name, and the one part of §09.9 that is not
+the report. It answers where **the manager's own** dependency store is — the
+directory a CI job caches beside `JUP_HOME`, which holds jup's programs and not
+theirs. With no name it asks the tool §09.1's discovery selects; with one it asks
+that entry.
+
+```
+name    := <name> given, else §09.1's discovery
+    NoProject / NoSpec → §12.10's two project errors
+    a name the table does not know → §12.4's "isn't supported by this jup build"
+commands := the entry's storeCommands (§02.5), in order; none → print nothing
+version  := §04.1's order without step 5 — the recorded resolution or the memo,
+            else the store probed against the pin, else the recorded default,
+            else the built-in one. Not installed → print nothing
+for each command: run it, take stdout's last non-empty line
+    exit 0, and the line is an absolute path → print it, exit 0
+    anything else — including the literal `undefined` → the next command
+none answered → print nothing, exit 0
+```
+
+Three properties are the contract, and the shell script this replaced is what
+each is for:
+
+* **One absolute path on stdout, or nothing, and always exit 0.** Cache discovery
+  is optional; a job that asks must not fail because the answer is "there
+  isn't one". Only a request that cannot mean anything — an unknown name, or no
+  name where §09.1 finds no pin — is a `UsageError` (§12.1).
+* **The last line**, because a manager's own notices arrive before its answer.
+* **`undefined` is not a path.** Yarn Classic prints it for Berry's
+  `cacheFolder`, which is exactly why `storeCommands` is a chain: the sentinel
+  advances to the next candidate rather than being normalised by every caller.
+
+It **resolves and installs nothing**: the probe runs what the store already
+holds, so a cold machine prints nothing rather than downloading a package manager
+from a diagnostic command. `jup cache install` is the step that makes it answer,
+and the order the CI action uses. This is also why `--store-path` is refused
+together with `--json`: the report is a versioned document and this is one line
+for a shell, and there is no shape that is both.
 
 ## 9.10 `--version`, `--help`
 

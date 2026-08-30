@@ -12,8 +12,9 @@ import type { Palette } from "../utils/log.ts";
 export const USAGE_LINES: Record<string, string> = {
   cache: "$ jup cache clean|clear|install|list",
   disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
-  enable: "$ jup enable [--install-directory <path>|--system] [--exclude <name>] [--force] ...",
-  info: "$ jup info [--json]",
+  enable:
+    "$ jup enable [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] ...",
+  info: "$ jup info [--json] | jup info --store-path [<name>]",
   install: "$ jup install [...args]",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
   run: "$ jup run [...args]",
@@ -151,8 +152,9 @@ export const HELP_TEXT = `Usage: jup <command>
   jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
   jup cache list [--json]
   jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
-  jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
+  jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
   jup info [--json]
+  jup info --store-path [<name>]
   jup install [...args]
   jup pack [--json] [-o|--output <path>] [...name[@<version>]]
   jup run [...args]
@@ -179,6 +181,11 @@ run runs a script the same way: jup run build is jup pnpm run build. Any word
 that is not a command above is a script too, so jup lint runs the lint script.
 Neither claims a flag of its own; everything after the word is the manager's.
 
+info --store-path prints where the package manager keeps its own dependency
+store, one path and nothing else, for a CI job to cache. With no name it asks
+the project's manager. It runs only what is already installed and prints nothing
+when there is no answer, so it never fails a job; jup cache install first.
+
 --here limits project changes to the current directory's manifest. Otherwise,
 the search stops at a workspace root. Every mutating command prints each path
 it changed.
@@ -194,7 +201,9 @@ manifest. Pass --no-lockfile to pin the range alone and drop any entry already
 recorded for it. An exact pin never records one.
 
 With no names, enable and disable target every supported package manager,
-including npm. Pass --exclude npm to keep npm unchanged. Shims use a per-user
+including npm. Pass --exclude npm to keep npm unchanged. Pass --all to shim
+every supported name, including the runtimes a bare enable leaves alone; it
+takes no names of its own, and --exclude still applies. Shims use a per-user
 directory: JUP_SHIM_DIRECTORY, then $XDG_BIN_HOME or ~/.local/bin, or
 %LOCALAPPDATA%\\jup\\bin on Windows. If that directory is not on PATH, enable
 uses ~/bin or $XDG_BIN_HOME when either is on PATH, and reports the choice. It

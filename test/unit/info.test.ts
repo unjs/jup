@@ -9,10 +9,10 @@
 import { existsSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 
-import { DEFINITIONS } from "../../src/config/table.ts";
+import { DEFINITIONS, versionFileFor } from "../../src/config/table.ts";
 import { UsageError } from "../../src/errors.ts";
 import {
   buildReport,
@@ -25,6 +25,7 @@ import {
   formatReport,
   INFO_REPORT_VERSION,
   type InfoReport,
+  type ProjectInputFile,
 } from "../../src/commands/info.ts";
 import { findProjectSpec } from "../../src/project/manifest.ts";
 import { getRegistryUrl } from "../../src/net/registry.ts";
@@ -787,6 +788,202 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * The project inputs — §09.9's answer to "what should the cache key be?"
+ *
+ * Every file §03.1's walk consults, present or not. The absent ones are
+ * the ones a hand-written key forgets: a `.nvmrc` nobody has committed
+ * yet is exactly the file whose arrival has to move the key.
+ * ------------------------------------------------------------------ */
+
+describe("buildReport — the project inputs (§09.9)", () => {
+  /** The reported inputs of one kind, in the order the walk consults them. */
+  function inputs(kind: ProjectInputFile["kind"]): ProjectInputFile[] {
+    return report().inputs.filter((input) => input.kind === kind);
+  }
+
+  /** §02 owns the name; a test that spells it is a second copy of the table. */
+  const VERSION_FILE = versionFileFor("node")!.path;
+
+  it("names the workspace root's manifest, not the nearer one, from a nested directory", async () => {
+    // §03.1 — the walk climbs past a manifest declaring nothing, so the file
+    // that decides the run is not the one the job is standing in. A key built
+    // from `<working-directory>/package.json` alone hashes the wrong file.
+    await manifest({ packageManager: "pnpm@11.1.2", workspaces: ["packages/*"] });
+    const nested = join(project, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    await manifest({ name: "app" }, nested);
+    cwdSpy.mockReturnValue(nested);
+
+    expect(inputs("manifest")).toEqual([
+      {
+        kind: "manifest",
+        path: join(nested, "package.json"),
+        present: true,
+        tool: null,
+        selected: false,
+      },
+      {
+        kind: "manifest",
+        path: join(project, "packages", "package.json"),
+        present: false,
+        tool: null,
+        selected: false,
+      },
+      {
+        kind: "manifest",
+        path: join(project, "package.json"),
+        present: true,
+        tool: null,
+        selected: true,
+      },
+    ]);
+  });
+
+  it("reports the runtime's version file, which nothing else in the report names", async () => {
+    // The gap this closes: `resolution` answers for the package manager, and
+    // §02.3 makes the runtime a different question with a different answer.
+    await manifest({ packageManager: "pnpm@11.1.2" });
+    writeFileSync(join(project, VERSION_FILE), "20.11.0\n");
+
+    expect(inputs("version-file")).toEqual([
+      {
+        kind: "version-file",
+        path: join(project, VERSION_FILE),
+        present: true,
+        tool: "node",
+        selected: true,
+      },
+    ]);
+  });
+
+  it("reports an absent version file as a candidate", async () => {
+    await manifest({ packageManager: "pnpm@11.1.2" });
+
+    expect(inputs("version-file")).toEqual([
+      {
+        kind: "version-file",
+        path: join(project, VERSION_FILE),
+        present: false,
+        tool: "node",
+        selected: false,
+      },
+    ]);
+  });
+
+  it("stops selecting the version file when devEngines.runtime speaks (§03.1)", async () => {
+    await manifest({ devEngines: { runtime: { name: "node", version: "22.x" } } });
+    writeFileSync(join(project, VERSION_FILE), "20.11.0\n");
+
+    const [file] = inputs("version-file");
+
+    // Still an input — deleting it or editing it is still a change worth
+    // busting a cache for — but not the file that answers.
+    expect(file).toMatchObject({ present: true, selected: false });
+  });
+
+  it("reports both env-file spellings, and marks the one that was applied (§03.2)", async () => {
+    await manifest({ packageManager: "pnpm@11.1.2" });
+    writeFileSync(join(project, ".corepack.env"), "COREPACK_ENABLE_STRICT=0\n");
+
+    expect(inputs("env-file")).toEqual([
+      {
+        kind: "env-file",
+        path: join(project, ".jup.env"),
+        present: false,
+        tool: null,
+        selected: false,
+      },
+      {
+        kind: "env-file",
+        path: join(project, ".corepack.env"),
+        present: true,
+        tool: null,
+        selected: true,
+      },
+    ]);
+  });
+
+  it("carries the lockfile beside the manifest that selected it", async () => {
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    const info = report();
+
+    expect(info.inputs.filter((input) => input.kind === "lockfile")).toEqual([
+      { kind: "lockfile", path: info.lockfile.path, present: false, tool: null, selected: true },
+    ]);
+    // The memo under `node_modules` is derived state, not a project input.
+    expect(info.inputs.some((input) => input.path === info.lockfile.cache.path)).toBe(false);
+  });
+
+  it("reports absolute paths and makes no request (§09.9)", async () => {
+    await manifest({ packageManager: "pnpm@latest" });
+
+    for (const input of report().inputs) expect(isAbsolute(input.path)).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * The shape itself — `INFO_REPORT_VERSION` promises that a new field is
+ * not a breaking change, which only holds while the old ones stay put.
+ * ------------------------------------------------------------------ */
+
+describe("buildReport — the reported shape (§09.9)", () => {
+  it("still carries every field the schema version promised", async () => {
+    await manifest({ packageManager: "pnpm@^11.0.0" });
+    const info = report();
+
+    expect(INFO_REPORT_VERSION).toBe(1);
+    expect(Object.keys(info)).toEqual([
+      "version",
+      "tool",
+      "project",
+      "resolution",
+      "lockfile",
+      "envFile",
+      "environment",
+      "packageManagers",
+      "npmrc",
+      "tls",
+      "store",
+      "defaults",
+      "shims",
+      "inputs",
+    ]);
+    expect(Object.keys(info.project)).toEqual([
+      "status",
+      "manifest",
+      "field",
+      "spec",
+      "name",
+      "range",
+      "kind",
+      "problem",
+      "devEngines",
+    ]);
+    expect(Object.keys(info.resolution)).toEqual([
+      "status",
+      "name",
+      "version",
+      "hash",
+      "source",
+      "reason",
+      "installed",
+    ]);
+    expect(Object.keys(info.lockfile)).toEqual([
+      "path",
+      "present",
+      "key",
+      "resolution",
+      "frozen",
+      "frozenSource",
+      "cache",
+    ]);
+    expect(Object.keys(info.store)).toEqual(["home", "path", "writable", "versions"]);
+    expect(Object.keys(info.shims)).toEqual(["directory", "problem", "entries"]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * The commands and their output
  * ------------------------------------------------------------------ */
 
@@ -817,6 +1014,7 @@ describe("cmdInfo / cmdCacheList (§12.6, §09.9)", () => {
       "Package managers",
       "Store",
       "Shims",
+      "Project inputs",
     ]) {
       expect(text).toContain(`\n${heading}\n`);
     }

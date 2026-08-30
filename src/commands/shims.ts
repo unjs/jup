@@ -20,7 +20,8 @@
  *   by looking for the shims, never by reading `PATH`.
  * * **§10.6** — anything `enable` displaces is recorded in `<home>/shims.json`
  *   and put back by `disable`, which now removes only entries it created.
- * * **§10.7** — npm is shimmed by default; `--exclude npm` opts out.
+ * * **§10.7** — npm is shimmed by default; `--exclude npm` opts out, and
+ *   `enable --all` reaches the runtimes that opt out of the default set.
  * * **§10.5** — after writing, `enable` checks that the shims actually won on
  *   `PATH` and names whatever beat them.
  */
@@ -506,6 +507,19 @@ export const systemAndInstallDirectory = () =>
   `Options --system and --install-directory both name an install directory; pass one or the other`;
 
 /**
+ * §10.7 — `--all` and an explicit name both name a target set.
+ *
+ * The refusal above's reasoning, one flag over: `--all` says "every entry the
+ * table has" and a name says "this one and nothing else", and there is no
+ * reading of `jup enable --all yarn` that is obviously right. Honouring either
+ * half silently would shim a set the command line also said not to — and the
+ * names are exactly the opt-in `--all` replaces (§10.7), so there is no layer
+ * being asked for that the two spellings could combine into.
+ */
+export const allAndNames = () =>
+  `Options --all and an explicit name both name a target set; pass one or the other`;
+
+/**
  * §10.5 — `--system` on a Windows without `%ProgramData%`.
  *
  * The variable is set on every supported Windows, so this is the stripped
@@ -616,19 +630,27 @@ interface ParsedArgs {
   options: ShimOptions;
   names: string[];
   exclude: string[];
+  all: boolean;
 }
 
 /**
  * §09.8 — `[--install-directory <path>] [...name]`, plus §10.6's `--force` and
- * §10.7's `--exclude <name>`.
+ * §10.7's `--exclude <name>` and `--all`.
  *
  * `--exclude` is repeatable and accepts a comma-separated list, because that is
  * what a user who has just read "`--exclude npm`" will try next.
+ *
+ * `acceptAll` is `enable`'s alone (§10.7): a bare `disable` already covers every
+ * entry, so the flag would be a word with nothing left to say there. Unrecognised,
+ * `--all` falls through to the name list below and reports itself as `Invalid
+ * package manager name '--all'` — what every other flag `disable` does not know
+ * already does (§12.10), and the reason that fallthrough is written as it is.
  */
-function parseShimArgs(args: string[]): ParsedArgs {
+function parseShimArgs(args: string[], acceptAll: boolean = false): ParsedArgs {
   const options: ShimOptions = {};
   const names: string[] = [];
   const exclude: string[] = [];
+  let all = false;
 
   const valueOf = (arg: string, index: number): [string, number] => {
     const inline = arg.indexOf("=");
@@ -653,6 +675,8 @@ function parseShimArgs(args: string[]): ParsedArgs {
         if (name !== "") exclude.push(name);
       }
       index = next;
+    } else if (acceptAll && arg === "--all") {
+      all = true;
     } else if (arg === "--system") {
       options.system = true;
     } else if (arg === "--force") {
@@ -667,8 +691,14 @@ function parseShimArgs(args: string[]): ParsedArgs {
   if (options.system === true && options.installDirectory !== undefined) {
     throw new UsageError(systemAndInstallDirectory());
   }
+  // Beside the other contradictory pair, and for the same reason: both refusals
+  // land before a name is looked up or a directory resolved, so a command line
+  // that cannot mean one thing writes nothing.
+  if (all && names.length > 0) {
+    throw new UsageError(allAndNames());
+  }
 
-  return { options, names, exclude };
+  return { options, names, exclude, all };
 }
 
 function assertKnownName(name: string): void {
@@ -693,6 +723,11 @@ function assertKnownName(name: string): void {
  * chose. Naming the entry is the opt-in: `jup enable bun` installs its shims,
  * and `jup disable` with no names still removes whatever is installed, because
  * removal has no such hazard.
+ *
+ * `jup enable --all` is the deliberate act written once instead of per name. It
+ * passes the same `includeOptOut` switch `disable` does rather than introducing
+ * a second default set, so there is exactly one answer to "every entry the table
+ * has" and both commands read it; `--exclude` still subtracts from it.
  */
 export function targetBinaries(
   names: string[],
@@ -2260,10 +2295,15 @@ export async function cmdEnable(
   args: string[],
   distFolder: string = resolveStubFolder(),
 ): Promise<number> {
-  const { options, names, exclude } = parseShimArgs(args);
+  const { options, names, exclude, all } = parseShimArgs(args, true);
   // Validate before touching the filesystem, so a bad name reports itself even
   // when the install directory cannot be resolved (§12.10).
-  const binaries = targetBinaries(names, exclude);
+  //
+  // §10.7 — `--all` is `includeOptOut`, `disable`'s switch and not a second
+  // default set. `names` is empty here whenever it is set (`parseShimArgs`
+  // refuses the pair), so the selection is every entry the table has, minus
+  // whatever `--exclude` names.
+  const binaries = targetBinaries(names, exclude, { includeOptOut: all });
   // §10.5 — choose, announce, probe, then fall back; nothing is written before
   // the directory is known to be writable.
   const choice = chooseInstallDirectory(options);
@@ -2354,6 +2394,10 @@ export async function cmdDisable(args: string[]): Promise<number> {
   // the §02.5 entries a bare `enable` leaves alone. Otherwise `jup disable`
   // would silently decline to undo a `jup enable bun`, which is the one thing a
   // no-argument disable is for.
+  //
+  // It is also why `--all` is `enable`'s flag alone (§10.7): this line is
+  // already it, so the word is not passed to `parseShimArgs` and `jup disable
+  // --all` stays the unknown-flag report every other stray flag gets.
   const binaries = targetBinaries(names, exclude, { includeOptOut: true });
   // §10.5 — no realpath here: removal needs no relative-path computation.
   const installDirectory = resolveInstallDirectory(options, false);

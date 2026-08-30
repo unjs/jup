@@ -10,6 +10,62 @@ import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";
 
 /**
+ * §09.9 — run a tool and *read* what it printed, instead of handing it the
+ * terminal.
+ *
+ * The one caller is `--store-path`'s probe, and every difference from
+ * {@link execNative} below is that caller's contract:
+ *
+ * * **stdout is a pipe and stderr is discarded.** The answer is one path on our
+ *   own stdout, and the probe is allowed to fail — a manager complaining about a
+ *   subcommand it does not have (Berry, asked Classic's question) is not the
+ *   user's business, which is what the `2>/dev/null` this replaces was saying.
+ * * **No signal handling.** Nothing is handed over, so there is no death to die
+ *   (§08.5): a Ctrl-C reaches the child through the process group and this
+ *   process is free to fail normally.
+ * * **A timeout.** `info` is a command people run when something is already
+ *   wrong, and a manager that has not answered a one-word question by then is
+ *   not going to. The kill lands as a signal, which reads as no answer.
+ *
+ * Resolves with the exit code, or `null` for a child that never ran or was
+ * killed — a caller that cannot tell those apart from "answered nothing" is
+ * exactly what §09.9's "print nothing, exit 0" asks for.
+ */
+export function captureNative(
+  binPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  argv0: string | undefined,
+  timeoutMs: number,
+): Promise<{ code: number | null; stdout: string }> {
+  const child = spawn(binPath, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+    // Unlike a handover, nothing here is the user's session: a console window
+    // flashing up on Windows for a probe would be noise.
+    windowsHide: true,
+    env: forwardHostRuntime(env),
+    argv0,
+    timeout: timeoutMs,
+  });
+
+  const chunks: Buffer[] = [];
+  child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
+
+  return new Promise((resolve) => {
+    // `EACCES`, `ENOENT`, `ENOEXEC`: a store entry that cannot be run has not
+    // answered, and saying so is `info`'s job elsewhere in the report.
+    child.on("error", () => resolve({ code: null, stdout: "" }));
+    // `close` rather than `exit`, so the pipe is drained before it is read.
+    child.on("close", (code, signal) =>
+      resolve({
+        code: signal === null ? code : null,
+        stdout: Buffer.concat(chunks).toString("utf8"),
+      }),
+    );
+  });
+}
+
+/**
  * §08.5 — the signals forwarded to the child when *we* receive them directly.
  *
  * `SIGINT` is deliberately absent. A terminal delivers it to the entire

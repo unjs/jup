@@ -9,11 +9,32 @@ const {
   realpathSync,
   statSync,
 } = process.getBuiltinModule("node:fs");
-const { delimiter, dirname, join, resolve: resolvePath } = process.getBuiltinModule("node:path");
+const {
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  resolve: resolvePath,
+} = process.getBuiltinModule("node:path");
 import { ENV, envEntry, envSpellings, isToolEnvName, SYSTEM_ENV } from "../config/env-vars.ts";
-import { DEFINITIONS, getBinariesFor, hostTarget, SUPPORTED_NAMES } from "../config/table.ts";
-import { isEnvFileEligible, parseEnvFile } from "../project/env.ts";
-import { redactUserinfo, UsageError } from "../errors-cold.ts";
+import {
+  DEFINITIONS,
+  getBinariesFor,
+  getSpecFor,
+  hostTarget,
+  isSupportedPackageManager,
+  resolveSpecBin,
+  storeCommandsFor,
+  SUPPORTED_NAMES,
+  versionFileFor,
+} from "../config/table.ts";
+import {
+  DEFAULT_ENV_FILE_NAME,
+  isEnvFileEligible,
+  LEGACY_ENV_FILE_NAME,
+  parseEnvFile,
+} from "../project/env.ts";
+import { messages, redactUserinfo, UsageError } from "../errors-cold.ts";
 import { parseManifest } from "../utils/json.ts";
 import {
   CACHE_DIRECTORY,
@@ -21,6 +42,7 @@ import {
   LOCKFILE_NAME,
   readCachedEntry,
   readEntry,
+  readKnownResolution,
   readLockfile,
   type Resolution,
   resolutionKey,
@@ -38,6 +60,7 @@ import { out } from "../utils/log.ts";
 import { isValidRange, isValidVersion, parse } from "../version/semver.ts";
 import { resolveInstallDirectory } from "./shims.ts";
 import { isOurShim } from "../run/exec.ts";
+import { capturePackageManager } from "../run/capture.ts";
 import { tlsSettings } from "../net/tls.ts";
 import {
   defaultTtlMs,
@@ -47,11 +70,12 @@ import {
   LAST_KNOWN_GOOD_NAME,
   listInstalled,
   PINNED_STAMP,
+  readInstalledSpec,
   readLastKnownGood,
   readLastKnownGoodStamps,
 } from "../cache/store.ts";
 import type { LastKnownGoodStamp } from "../cache/store.ts";
-import type { Spec, Manifest } from "../types.ts";
+import type { ProjectSpec, Spec, Manifest } from "../types.ts";
 
 /**
  * The `--json` schema version.
@@ -142,6 +166,36 @@ export interface EnvFileInfo {
   refused: string[];
   /** Not `COREPACK_`-prefixed, so dropped before the merge. */
   ignored: string[];
+}
+
+/**
+ * One file §03.1's discovery consults on the way to deciding what a run
+ * installs — present or not.
+ *
+ * The absent ones are the reason this is a list of *candidates* rather than a
+ * list of files: a cache key has to move when a file that was not there appears,
+ * so `.nvmrc` in a project that has none is a fact about that project, not
+ * noise. {@link ProjectInputFile.present} is what tells the two apart.
+ */
+export interface ProjectInputFile {
+  /** What §03.1 would take this file for. */
+  kind: "manifest" | "version-file" | "env-file" | "lockfile";
+  /** Absolute, because a path is useless to a job standing somewhere else. */
+  path: string;
+  present: boolean;
+  /**
+   * The table entry this file speaks for — `node` for a `.nvmrc` — or `null` for
+   * one that speaks for the project as a whole.
+   */
+  tool: string | null;
+  /**
+   * Whether this is the file of its kind the walk **chose**: the manifest whose
+   * fields are read, the env file that is applied, the version file that speaks
+   * (§03.1 — a `devEngines.runtime` displaces it, and then no version file is
+   * selected). Every other entry was looked at and passed over, which for a
+   * cache key still counts: editing one can change which file gets chosen.
+   */
+  selected: boolean;
 }
 
 export interface PackageManagerInfo {
@@ -254,6 +308,15 @@ export interface InfoReport {
     ttlHours: number;
   };
   shims: { directory: string | null; problem: string | null; entries: ShimInfo[] };
+  /**
+   * §09.9 — every project file §03.1's discovery consults, in walk order,
+   * nearest first, with `jup.lock` last.
+   *
+   * Added after `shims` rather than beside `project`, where it reads better,
+   * because the shape above is a live consumer contract and nothing already in
+   * it moves for a new field (see {@link INFO_REPORT_VERSION}).
+   */
+  inputs: ProjectInputFile[];
 }
 /**
  * Collect everything, touching only the filesystem.
@@ -307,6 +370,7 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
       ttlHours: defaultTtlMs() / (60 * 60 * 1000),
     },
     shims: describeShims(),
+    inputs: describeInputs(cwd, project, envFile, lockfile),
   };
 }
 /**
@@ -546,6 +610,189 @@ function locateManifest(cwd: string): string | undefined {
   }
 
   return selected;
+}
+/**
+ * §09.9 — every project file §03.1's discovery consults, present or not.
+ *
+ * This exists for one job: a CI cache key over the inputs that decide what a run
+ * installs. Such a key is otherwise guessed, and a guess gets three things wrong
+ * that the walk already knows. It hashes the *whole* manifest, so an unrelated
+ * dependency bump evicts a store that did not change. It re-spells the version
+ * file's name, which §02's table keeps in one place precisely so nothing else
+ * has to. And it assumes the manifest that speaks is the one in the directory
+ * the job is standing in — which §03.1 says it need not be, since the walk
+ * climbs to a workspace root that may be several levels up.
+ *
+ * The absent candidates are the point rather than noise: a key must move when a
+ * file that was not there appears — an `.nvmrc` added to the repository, a
+ * `.corepack.env` committed — and a hasher that skips non-existent paths (which
+ * is what GitHub's `hashFiles` does) costs nothing for one.
+ *
+ * The range walked is `cwd` up to the outermost directory the walk actually
+ * reached: the manifest §03.1 selected, or the env file it applied. The
+ * selection is the *outermost* manifest found (§03.1), so above it there was
+ * nothing to find, and the env-file search stops at the project boundary, which
+ * is at or below it. Stopping there is also what keeps the list inside the
+ * project — enumerating absent candidates to the filesystem root would put
+ * `/package.json` and somebody's home directory into a cache key. A target that
+ * is not an ancestor of `cwd` at all — §03.1's `JUP_SPEC_FILE`, which replaces
+ * the manifest with a file anywhere — is reported on its own below, and leaves
+ * the walk one directory long, which is all an `envOnly` walk reads for certain.
+ *
+ * Nothing here resolves anything. It is `statSync` on paths the discovery walk
+ * was standing on anyway, which is exactly the bounded probing §09.9 allows.
+ */
+function describeInputs(
+  cwd: string,
+  project: ProjectInfo,
+  envFile: EnvFileInfo | null,
+  lockfile: LockfileInfo,
+): ProjectInputFile[] {
+  const inputs: ProjectInputFile[] = [];
+  const add = (
+    kind: ProjectInputFile["kind"],
+    path: string,
+    tool: string | null,
+    selected: boolean,
+  ): boolean => {
+    const present = exists(path);
+    inputs.push({ kind, path, present, tool, selected });
+    return present;
+  };
+
+  // §03.1 step 3 — the file's *name* comes from the table and only from the
+  // table, and the tool's own walk says whether it is the thing that speaks: a
+  // `devEngines.runtime` beside it outranks it, and then the manifest already
+  // listed below is the whole answer for that tool.
+  const versionFiles = SUPPORTED_NAMES.flatMap((name) => {
+    const spec = versionFileFor(name);
+    return spec === undefined ? [] : [{ name, file: spec.path, target: toolTarget(cwd, name) }];
+  });
+  const pendingVersionFiles = new Set(versionFiles.map((entry) => entry.name));
+
+  const envNames = envFileNames();
+  let envSearchOver = envNames.length === 0;
+
+  for (const dir of walkedDirectories(cwd, project, envFile)) {
+    // §03.1 step 1 — a vendored package speaks for nothing, so its files are not
+    // inputs either.
+    if (NODE_MODULES_RE.test(dir)) continue;
+
+    const manifest = join(dir, "package.json");
+    const hasManifest = add(`manifest`, manifest, null, manifest === project.manifest);
+
+    for (const entry of versionFiles) {
+      if (!pendingVersionFiles.has(entry.name)) continue;
+      const path = join(dir, entry.file);
+      if (add(`version-file`, path, entry.name, path === entry.target)) {
+        // §03.1 — only the nearest one is ever read, so the directories above
+        // this were never asked.
+        pendingVersionFiles.delete(entry.name);
+      }
+    }
+
+    if (envSearchOver) continue;
+    for (const name of envNames) {
+      // §03.2 — `resolve`, not `join`: a configured `JUP_ENV_FILE` may be an
+      // absolute path, and then it is that one file rather than one per level.
+      const path = resolvePath(dir, name);
+      if (add(`env-file`, path, null, path === envFile?.path)) {
+        envSearchOver = true;
+        break;
+      }
+    }
+    // §03.2 — the search stops at the project boundary, and this directory's own
+    // candidates were still tried before the walk climbed past it. The boundary
+    // is a `package.json` *or* a `.git` entry; only the first is tested here,
+    // which can leave a candidate or two in the list that the real search would
+    // not have reached. That is the safe direction for a cache key, and it is
+    // not worth a second spelling of `.git` outside `manifest.ts` to trim.
+    if (hasManifest) envSearchOver = true;
+  }
+
+  // §03.1 — the external spec file, which the walk never stood on. Also the
+  // backstop for any other target outside `cwd`'s ancestry: the file `info`
+  // named as the manifest is an input whether or not the walk enumerated it.
+  if (project.manifest !== null && !inputs.some((input) => input.path === project.manifest)) {
+    add(`manifest`, project.manifest, null, true);
+  }
+
+  // §04.4's recorded resolution, last because it is the one file here that is
+  // written rather than read: it is beside the selected manifest, and it is what
+  // makes a range reproducible between jobs. The memo under `node_modules` is
+  // deliberately not an input — it is derived state, restored with
+  // `node_modules` or not at all.
+  inputs.push({
+    kind: `lockfile`,
+    path: lockfile.path,
+    present: lockfile.present,
+    tool: null,
+    selected: true,
+  });
+
+  return inputs;
+}
+
+/** §03.2 — the env-file candidates tried in each directory, in order. */
+function envFileNames(): string[] {
+  const configured = envEntry(ENV.ENV_FILE)?.value;
+  // `0` disables env files entirely, so there is nothing to look for; a
+  // configured name is used as given, with no second candidate.
+  if (configured === `0`) return [];
+  return configured === undefined ? [DEFAULT_ENV_FILE_NAME, LEGACY_ENV_FILE_NAME] : [configured];
+}
+
+/**
+ * The directories §03.1's walk stood in, nearest first.
+ *
+ * The chain to the root is built from strings alone and then cut at whichever of
+ * the two selections is furthest out; a selection that is not an ancestor of
+ * `cwd` is not in the chain and cuts nothing, leaving the initial directory.
+ */
+function walkedDirectories(
+  cwd: string,
+  project: ProjectInfo,
+  envFile: EnvFileInfo | null,
+): string[] {
+  const chain: string[] = [];
+  let currentDir = "";
+  let nextDir = resolvePath(cwd);
+  while (nextDir !== currentDir) {
+    currentDir = nextDir;
+    nextDir = dirname(currentDir);
+    chain.push(currentDir);
+  }
+
+  const end = Math.max(
+    0,
+    project.manifest === null ? 0 : chain.indexOf(dirname(project.manifest)),
+    envFile === null ? 0 : chain.indexOf(dirname(envFile.path)),
+  );
+  return chain.slice(0, end + 1);
+}
+
+/**
+ * §03.1 — the file that speaks for one named tool, or `null`.
+ *
+ * A second walk, for the tool the report cannot otherwise say anything about:
+ * `describeProject` asks the package-manager question, and §02.3 makes the
+ * runtime's a different one — a different `devEngines` member, and the version
+ * file that answers where the member is silent. Failures are swallowed for the
+ * reason `describeProject` catches its own: a broken manifest is the diagnosis,
+ * not a reason to stop reporting.
+ */
+function toolTarget(cwd: string, name: string): string | null {
+  try {
+    const lookup = findProjectSpec(cwd, { tool: name });
+    return lookup.type === "Found" ? lookup.target : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A bounded probe: is this path there right now? */
+function exists(path: string): boolean {
+  return statSync(path, { throwIfNoEntry: false }) !== undefined;
 }
 /** §04.4 — the recorded resolution for this project's spec, and whether it may move. */
 function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
@@ -1179,6 +1426,21 @@ export function formatReport(report: InfoReport): string {
     out.push(line(entry.binary, `${state.padEnd(16)}${target}`));
   }
 
+  out.push(section(`Project inputs`));
+  for (const input of report.inputs) {
+    // The notes are what a reader is here for: which of several `package.json`
+    // files won, and which candidates are absent — the second being the set that
+    // would change the answer if somebody committed one.
+    const notes = [
+      input.present ? undefined : `absent`,
+      input.selected ? `selected` : undefined,
+      input.tool ?? undefined,
+    ].filter((note) => note !== undefined);
+    out.push(
+      line(input.kind, `${input.path}${notes.length === 0 ? `` : `  (${notes.join(`, `)})`}`),
+    );
+  }
+
   return out.join(``);
 }
 
@@ -1257,13 +1519,239 @@ function wantsJson(args: string[], command: string): boolean {
   return json;
 }
 
-/** §09.9 — `jup info [--json]`. Always exits 0 unless the CLI was misused. */
-// eslint-disable-next-line @typescript-eslint/require-await
+/** What `jup info` accepts, and the one shape the two flags cannot share. */
+interface InfoArgs {
+  json: boolean;
+  storePath: boolean;
+  /** `--store-path`'s optional positional: the entry to ask. */
+  name: string | undefined;
+}
+
+/**
+ * `--json`, `--store-path`, and one optional name for the latter.
+ *
+ * `--json` and `--store-path` are refused **together**, deliberately. The report
+ * is a document with a version on it and the flag's whole contract is one bare
+ * line of stdout for a shell to read; there is no JSON shape that is both, and
+ * inventing a one-field object would be a second output contract to keep. The
+ * refusal is spelled the way §12.10 spells `--system` against
+ * `--install-directory`: the two flags name different outputs, so pass one.
+ */
+function parseInfoArgs(args: string[]): InfoArgs {
+  const parsed: InfoArgs = { json: false, storePath: false, name: undefined };
+  const refuse = (): never => {
+    throw new UsageError(`The 'jup info' command only accepts --json and --store-path [<name>]`);
+  };
+
+  for (const arg of args) {
+    if (arg === `--json`) parsed.json = true;
+    else if (arg === `--store-path`) parsed.storePath = true;
+    // A positional belongs to `--store-path` alone, wherever it sits relative to
+    // the flag; anything else — a second name, a flag we do not have — is the
+    // sentence above rather than something quietly ignored.
+    else if (!arg.startsWith(`-`) && parsed.name === undefined) parsed.name = arg;
+    else refuse();
+  }
+
+  if (parsed.name !== undefined && !parsed.storePath) refuse();
+  if (parsed.json && parsed.storePath) {
+    throw new UsageError(
+      `Options --store-path and --json both name an output; pass one or the other`,
+    );
+  }
+
+  return parsed;
+}
+
+/**
+ * §09.9 — `jup info [--json] [--store-path [<name>]]`. Always exits 0 unless the
+ * CLI was misused.
+ */
 export async function cmdInfo(args: string[]): Promise<number> {
-  const json = wantsJson(args, `jup info`);
+  const parsed = parseInfoArgs(args);
+  // The one path in this command that is not {@link buildReport}: it runs a
+  // package manager, which is why it is kept out of the report and out of
+  // `INFO_REPORT_VERSION`'s shape entirely (§09.9).
+  if (parsed.storePath) return await printStorePath(parsed.name);
+
   const report = buildReport();
-  out(json ? `${JSON.stringify(report, undefined, 2)}\n` : formatReport(report));
+  out(parsed.json ? `${JSON.stringify(report, undefined, 2)}\n` : formatReport(report));
   return 0;
+}
+/**
+ * How long a probe is given to answer.
+ *
+ * A store path is a config read: every manager in the table prints one in the
+ * time it takes to start. The bound is here because `info` is run when something
+ * is already wrong — and because this one is called from CI, where a command
+ * that never returns is worse than one that answers nothing.
+ */
+const STORE_PROBE_TIMEOUT_MS = 10_000;
+
+/**
+ * §09.9 — `--store-path`: ask one table entry where **its own** dependency store
+ * is, and print that and nothing else.
+ *
+ * The contract is a shell's: one absolute path on stdout and exit 0, or nothing
+ * at all and exit 0. Nothing is the answer for an entry that declares no such
+ * command, for one that is not installed, and for a manager that answers
+ * something unusable — including Yarn Classic's literal `undefined`, which is
+ * normalised here rather than by every caller. Only a request that cannot mean
+ * anything is an error: an unknown name, or no name in a project that names no
+ * package manager.
+ *
+ * **It does not resolve, download or install.** `info` is the command people
+ * reach for when everything else is failing, and a diagnostic that reaches for
+ * the registry — or writes a store entry — is not one. So the probe runs what is
+ * already in the store and nothing else: a warm machine answers, a cold one
+ * prints nothing, and `jup cache install` is the step that turns the second into
+ * the first. That is also what the CI action does, in that order, and the same
+ * choice is what keeps §09.9's "no request of any kind" true of everything but
+ * the one spawn this flag exists for.
+ */
+async function printStorePath(requested: string | undefined): Promise<number> {
+  const lookup = requested === undefined ? requiredProjectLookup() : optionalProjectLookup();
+  // §09.1's own expression for "the tool this project runs". With no name given
+  // it is the request, so a pin that will not parse throws §12.2's sentence
+  // rather than being reported as no pin at all; with a name it is only used to
+  // choose a version, so an unreadable one leaves the fallbacks to decide.
+  const descriptor =
+    lookup === null ? null : requested === undefined ? specOf(lookup) : trySpecOf(lookup);
+
+  // A name on the command line outranks the project: `--store-path yarn` in a
+  // pnpm repository is a fair question, and the project still answers *which*
+  // yarn, when it happens to pin one.
+  const name = requested ?? descriptor!.name;
+  if (!isSupportedPackageManager(name)) throw new UsageError(messages.unsupportedByBuild(name));
+
+  const commands = storeCommandsFor(name);
+  if (commands.length === 0) return 0;
+
+  const reference = installedProbeVersion(name, lookup, descriptor);
+  if (reference === null) return 0;
+  const installation = readInstalledSpec({ name, reference });
+  if (installation === null) return 0;
+
+  const tableSpec = getSpecFor(name, parse(reference)?.version ?? reference);
+  const bin = resolveSpecBin(tableSpec);
+
+  for (const command of commands) {
+    const binName = command[0]!;
+    const { code, stdout } = await capturePackageManager(
+      binName,
+      installation,
+      command.slice(1),
+      bin,
+      tableSpec.exec,
+      tableSpec.binArgs?.[binName],
+      STORE_PROBE_TIMEOUT_MS,
+    );
+    // A command that failed has not answered, and the next candidate is what
+    // that means: Yarn Berry rejects Classic's `yarn cache dir` outright, while
+    // Classic answers Berry's question with `undefined` and exit 0 (§02.5).
+    if (code !== 0) continue;
+    const answer = storePathAnswer(stdout);
+    if (answer !== null) {
+      out(`${answer}\n`);
+      return 0;
+    }
+  }
+
+  return 0;
+}
+
+/**
+ * The last usable line of a probe's stdout, or `null`.
+ *
+ * **The last**, because a manager's own chatter — an update notice, a lifecycle
+ * line — arrives before the answer, never after it, which is the `tail -n1` the
+ * shell doing this today already relies on. **Usable**, because two answers mean
+ * "there is no path here": Yarn Classic's literal `undefined` for a setting it
+ * does not have, and anything that is not an absolute path, which is the cheap
+ * check that keeps a line of prose from being reported as a directory.
+ */
+function storePathAnswer(stdout: string): string | null {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== ``);
+
+  const last = lines.at(-1);
+  if (last === undefined || last === `undefined`) return null;
+  return isAbsolute(last) ? last : null;
+}
+
+/** §09.1 — the project's spec, with the two sentences it fails with. */
+function requiredProjectLookup(): Extract<ProjectSpec, { type: "Found" }> {
+  const lookup = findProjectSpec(process.cwd());
+  if (lookup.type === `NoProject`) throw new UsageError(messages.couldntFindProject());
+  if (lookup.type === `NoSpec`) throw new UsageError(messages.noSpecInProject());
+  return lookup;
+}
+
+/**
+ * The same walk for a caller that already knows the name it wants.
+ *
+ * A named entry is a complete request, so a project that is missing, silent or
+ * unparseable is not a failure here — it only means the fallbacks below decide
+ * which installed version to ask.
+ */
+function optionalProjectLookup(): Extract<ProjectSpec, { type: "Found" }> | null {
+  try {
+    const lookup = findProjectSpec(process.cwd());
+    return lookup.type === `Found` ? lookup : null;
+  } catch {
+    return null;
+  }
+}
+
+/** §09.1's order: a declared `devEngines` range outranks the top-level pin. */
+function specOf(lookup: Extract<ProjectSpec, { type: "Found" }>): Spec {
+  return lookup.range ?? lookup.getSpec({ requireVersion: false });
+}
+
+/** {@link specOf} for a caller the pin only informs: `null` when it will not parse. */
+function trySpecOf(lookup: Extract<ProjectSpec, { type: "Found" }>): Spec | null {
+  try {
+    return specOf(lookup);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which installed version to ask — §04.1's order with step 5, the registry,
+ * simply left out.
+ *
+ * The project answers first, and through §09.2's own two lines, so the version
+ * probed is the one `jup <name> …` would run right now: the recorded resolution
+ * or the memo, else §04.1 step 4's probe of the store against the pin as
+ * written. A project that does not name this tool — `--store-path yarn` in a
+ * pnpm repository, or no project at all — falls to §04.5's recorded default and
+ * then §02.5's built-in one, which is what that invocation would run too.
+ *
+ * `null` means the store has nothing to ask, which §09.9 prints as nothing.
+ */
+function installedProbeVersion(
+  name: string,
+  lookup: Extract<ProjectSpec, { type: "Found" }> | null,
+  descriptor: Spec | null,
+): string | null {
+  if (lookup !== null && descriptor !== null && descriptor.name === name) {
+    const known = usesLockfile(descriptor)
+      ? readKnownResolution(dirname(lookup.target), descriptor).locator
+      : null;
+    const installed = findInstalledVersion(name, known?.reference ?? descriptor.range);
+    if (installed !== null) return installed;
+  }
+
+  for (const reference of [readLastKnownGood()[name], DEFINITIONS[name]?.default]) {
+    if (reference === undefined) continue;
+    const installed = findInstalledVersion(name, reference);
+    if (installed !== null) return installed;
+  }
+
+  return null;
 }
 
 /** §09.7 / §09.9 — `jup cache list [--json]`, the aliased subset. */

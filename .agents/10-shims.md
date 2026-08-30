@@ -273,6 +273,21 @@ false`; npm is included, and `--exclude <name>` opts a name out. `disable` with
 no names covers **every** entry, opt-outs included: removal has no such hazard,
 and a `disable` that declined to undo an `enable bun` would be the surprising one.
 
+`enable --all` asks for that same set on the install side. It is `disable`'s own
+switch reused rather than a second notion of "everything": one answer to what the
+table holds, read by both commands, so an entry that changes sides cannot be in
+the set removal covers and out of the set installation covers. What it buys is
+the machine that genuinely wants all of it — a container image, a dotfiles
+bootstrap — where the alternative is a written-out `bun deno nub node` that has
+to be edited every time the table grows. `--exclude` still subtracts from it, so
+`enable --all --exclude bun` needs no list either.
+
+`--all` beside explicit names is refused (§12.10). Names are the opt-in `--all`
+replaces, so `enable --all yarn` has no obviously right reading, and honouring
+either half would shim a set the command line also said not to. `disable` has no
+such flag: with no names it is already that set, so the word would have nothing
+to say, and passed anyway it is an unrecognised name and reports itself as one.
+
 Each name expands to every binary it declares across all bands, deduped (§02.5).
 All binaries are processed concurrently. `info` reports every binary name
 regardless of the default set.

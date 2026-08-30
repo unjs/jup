@@ -253,6 +253,7 @@ The 'jup run' command isn't supported for <name>@<reference>
 Assertion failed: The stub folder doesn't exist
 Unable to determine where to install the shims; pass --install-directory
 Options --system and --install-directory both name an install directory; pass one or the other
+Options --all and an explicit name both name a target set; pass one or the other
 --system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead
 <binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)
 <binName> is already installed in <file> and points to a Yarn Switch install - skipping

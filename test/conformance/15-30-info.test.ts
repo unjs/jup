@@ -15,7 +15,7 @@
  */
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, isAbsolute, join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupFixtures,
@@ -100,6 +100,13 @@ interface Report {
     verifySource: string | null;
   };
   store: { home: string; path: string; writable: boolean; versions: Array<Record<string, string>> };
+  inputs: Array<{
+    kind: string;
+    path: string;
+    present: boolean;
+    tool: string | null;
+    selected: boolean;
+  }>;
   defaults: { path: string; entries: Record<string, string> };
   shims: { directory: string | null; entries: Array<Record<string, unknown>> };
 }
@@ -548,6 +555,185 @@ describe("§09.9 corepack info", () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* §09.9 — --store-path                                                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A fake manager that answers one argv with `output` and fails every other.
+ *
+ * Failing the rest is the point of the shape: it is how a row proves *which*
+ * candidate answered, which is the whole of the Yarn fallback below.
+ */
+function answering(argv: string, output: string): string {
+  return [
+    `const asked = process.argv.slice(2).join(" ");`,
+    `if (asked === ${JSON.stringify(argv)}) process.stdout.write(${JSON.stringify(output)});`,
+    `else { process.stderr.write("unknown command: " + asked + "\\n"); process.exit(1); }`,
+    ``,
+  ].join("\n");
+}
+
+describe("§09.9 info --store-path", () => {
+  it("prints the path the pinned manager reports, and nothing else", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    const dir = join(fixture.root, "pnpm-store");
+    seedPackageManager(fixture.home, "pnpm", "11.1.2", {
+      script: answering("store path --silent", `${dir}\n`),
+    });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${dir}\n`);
+    expect(result.stderr).toBe("");
+    // The probe runs what is installed; nothing about it reaches a registry.
+    expect(registry.requests).toEqual([]);
+  });
+
+  it("takes the last line, so the manager's own chatter cannot corrupt it", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    const dir = join(fixture.root, "pnpm-store");
+    seedPackageManager(fixture.home, "pnpm", "11.1.2", {
+      script: answering("store path --silent", `Update available! 11.1.2 -> 11.2.0\n${dir}\n`),
+    });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${dir}\n`);
+  });
+
+  it("asks Berry for cacheFolder and stops there", async () => {
+    const fixture = createFixture({ packageManager: "yarn@4.0.0" });
+    const dir = join(fixture.root, "berry-cache");
+    seedPackageManager(fixture.home, "yarn", "4.0.0", {
+      script: answering("config get cacheFolder", `${dir}\n`),
+    });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${dir}\n`);
+  });
+
+  it("reads Classic's `undefined` as no answer and falls through to `cache dir`", async () => {
+    const fixture = createFixture({ packageManager: "yarn@1.22.4" });
+    const dir = join(fixture.root, "classic-cache");
+    // Classic exits 0 for a setting it does not have, printing the word: the
+    // sentinel §09.9 normalises rather than reporting as a directory.
+    seedPackageManager(fixture.home, "yarn", "1.22.4", {
+      script: [
+        `const asked = process.argv.slice(2).join(" ");`,
+        `if (asked === "config get cacheFolder") process.stdout.write("undefined\\n");`,
+        `else if (asked === "cache dir") process.stdout.write(${JSON.stringify(`${dir}\n`)});`,
+        `else process.exit(1);`,
+        ``,
+      ].join("\n"),
+    });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${dir}\n`);
+  });
+
+  it("prints nothing and exits 0 for an entry that declares no store command", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+
+    const result = await run(["info", "--store-path", "deno"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe("");
+  });
+
+  it("prints nothing and exits 0 when the manager is not in the store", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+    // A cold machine is answered with silence, not with an install (§09.9).
+    expect(registry.requests).toEqual([]);
+    expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);
+  });
+
+  it("prints nothing and exits 0 when the manager answers nothing usable", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    seedPackageManager(fixture.home, "pnpm", "11.1.2", {
+      script: answering("store path --silent", "\n"),
+    });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("");
+  });
+
+  it("answers for a named entry the project does not pin, from the recorded default", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+    const dir = join(fixture.root, "classic-cache");
+    seedPackageManager(fixture.home, "yarn", "1.22.4", {
+      script: answering("config get cacheFolder", `${dir}\n`),
+    });
+    writeFileSync(join(fixture.home, "lastKnownGood.json"), `{"yarn":"1.22.4"}\n`);
+
+    const result = await run(["info", "--store-path", "yarn"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`${dir}\n`);
+  });
+
+  it("refuses --store-path together with --json", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+
+    const result = await run(["info", "--store-path", "--json"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Usage Error: Options --store-path and --json both name an output; pass one or the other`,
+    );
+    expect(result.stdout).toContain(`$ jup info [--json]`);
+  });
+
+  it("refuses a name the table does not know", async () => {
+    const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
+
+    const result = await run(["info", "--store-path", "vlt"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(
+      `Usage Error: This package manager (vlt) isn't supported by this jup build`,
+    );
+  });
+
+  it("gives a bare --store-path the pin's own diagnosis when it cannot be read", async () => {
+    // Not "the project features no packageManager field": it features one, and
+    // §12.2's sentence is what says why it cannot be used.
+    const fixture = createFixture({ packageManager: "vlt@1.0.0" });
+
+    const result = await run(["info", "--store-path"], { ...fixture, registry });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`Unsupported package manager specification (vlt@1.0.0)`);
+  });
+
+  it("refuses a bare --store-path with no project, and with no pin (§09.1)", async () => {
+    const nothing = createFixture();
+    const unpinned = createFixture({ name: "demo" });
+
+    const noProject = await run(["info", "--store-path"], { ...nothing, registry });
+    const noSpec = await run(["info", "--store-path"], { ...unpinned, registry });
+
+    expect(noProject.exitCode).toBe(1);
+    expect(noProject.stdout).toContain(`Couldn't find a project in the local directory`);
+    expect(noSpec.exitCode).toBe(1);
+    expect(noSpec.stdout).toContain(`The local project doesn't feature a 'packageManager' field`);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /* §12.6 — cache list, and §07.9 — cache clean --all                         */
 /* -------------------------------------------------------------------------- */
 
@@ -628,5 +814,72 @@ describe("§07.9 cache clean --all", () => {
     expect(result.stdout).toContain(
       `Usage Error: The 'jup cache clean' command does not accept --json`,
     );
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §09.9 — the project inputs, which exist so a CI job can build a
+ * cache key over the files that decide what a run installs rather
+ * than guessing at them.
+ * ------------------------------------------------------------------ */
+
+describe("§09.9 corepack info — the project inputs", () => {
+  it("196: names every file the walk consults, absolute, present or not", async () => {
+    // §03.1 — the manifest that speaks is the workspace root's, two levels up
+    // from where the job is standing, and the version file beside it is a file
+    // no other part of the report names.
+    const fixture = createFixture({
+      packageManager: "pnpm@11.1.2+sha512.abcd",
+      workspaces: ["packages/*"],
+    });
+    fixture.write(".nvmrc", "20.11.0\n");
+    const nested = dirname(fixture.write("packages/app/package.json", `{"name":"app"}\n`));
+
+    const report = await info(fixture, { cwd: nested });
+
+    const selected = report.inputs.filter((input) => input.selected);
+    expect(selected).toContainEqual({
+      kind: "manifest",
+      path: join(fixture.cwd, "package.json"),
+      present: true,
+      tool: null,
+      selected: true,
+    });
+    // The gap this closes: `.nvmrc` was hashed by the CI action and reported
+    // nowhere, so nothing but the action's own guess knew where to look.
+    expect(selected).toContainEqual({
+      kind: "version-file",
+      path: join(fixture.cwd, ".nvmrc"),
+      present: true,
+      tool: "node",
+      selected: true,
+    });
+    expect(selected).toContainEqual({
+      kind: "lockfile",
+      path: join(fixture.cwd, "jup.lock"),
+      present: false,
+      tool: null,
+      selected: true,
+    });
+
+    // The nearer manifest is consulted and passed over: still an input, since
+    // adding a pin to it would change the answer.
+    expect(report.inputs).toContainEqual({
+      kind: "manifest",
+      path: join(nested, "package.json"),
+      present: true,
+      tool: null,
+      selected: false,
+    });
+    // Absent candidates are reported for the same reason: committing one has
+    // to move the key.
+    expect(report.inputs).toContainEqual({
+      kind: "env-file",
+      path: join(nested, ".corepack.env"),
+      present: false,
+      tool: null,
+      selected: false,
+    });
+    expect(report.inputs.every((input) => isAbsolute(input.path))).toBe(true);
   });
 });

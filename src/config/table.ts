@@ -173,6 +173,8 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["npm", "init"], ["npx"]],
     },
+    // §09.9 — one candidate; see {@link ToolDefinition.storeCommands}.
+    storeCommands: [["npm", "config", "get", "cache"]],
     ranges: [
       [
         "*",
@@ -192,6 +194,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
     },
+    // §09.9 — `--silent` keeps pnpm's reporter from wrapping the answer in an
+    // update notice; reading the last line is the belt, not the braces.
+    storeCommands: [["pnpm", "store", "path", "--silent"]],
     ranges: [
       [
         "<6.0.0",
@@ -265,6 +270,14 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
         ["yarn", "dlx"],
       ],
     },
+    // §09.9 — the entry the chain exists for: Berry keeps the directory in
+    // `cacheFolder`, Classic has no such setting and prints `undefined`, then
+    // answers `yarn cache dir`. Asked in this order, neither band has to be
+    // identified first.
+    storeCommands: [
+      ["yarn", "config", "get", "cacheFolder"],
+      ["yarn", "cache", "dir"],
+    ],
     ranges: [
       [
         "<2.0.0",
@@ -299,6 +312,8 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
     },
+    // §09.9 — bun's package manager keeps a cache of its own.
+    storeCommands: [["bun", "pm", "cache"]],
     shimByDefault: false,
     // Version bands encode Bun's supported host set at each boundary.
     // Reversed, the newest is tested first (§02.3), so a version gets the
@@ -486,6 +501,18 @@ export function isRuntime(name: string): boolean {
  */
 export function versionFileFor(name: string): VersionFileSpec | undefined {
   return getDefinition(name)?.versionFile;
+}
+
+/**
+ * §09.9 — this entry's store-path candidates, in the order to try them.
+ *
+ * The only reader of the field, and what keeps `store path` and `cache dir` from
+ * appearing outside this file — {@link versionFileFor}'s argument, for
+ * {@link ToolDefinition.storeCommands}, which carries the rest of it. Empty for
+ * an entry that declares none, and the caller prints nothing for one.
+ */
+export function storeCommandsFor(name: string): string[][] {
+  return getDefinition(name)?.storeCommands ?? [];
 }
 
 /**

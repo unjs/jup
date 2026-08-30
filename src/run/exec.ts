@@ -235,7 +235,7 @@ export function isOurShim(file: string, binName: string): boolean {
  * pays for the loop below, which reads the same directories and returns the same
  * directory. Nothing about correctness rests on which runtime is reading this.
  */
-function shimDirectoryFor(binName: string): string | undefined {
+export function shimDirectoryFor(binName: string): string | undefined {
   const configured = readEnv(ENV.SHIM_DIRECTORY);
   const candidates =
     configured !== undefined && configured !== ""
@@ -333,8 +333,14 @@ export function resolveBinPath(binName: string, spec: Installation, fallbackBin?
  * is not the tool's, which is §08.7's "does not leak its own per-run bookkeeping
  * into the parent process" applied to the one caller that has a parent left to
  * leak into.
+ *
+ * Exported, with {@link shimDirectoryFor}, for `run/capture.ts` — §09.9's probe
+ * spawns a manager and must hand it the child a real run would get.
  */
-function childEnvironment(prepend: string | undefined, handover: boolean): NodeJS.ProcessEnv {
+export function childEnvironment(
+  prepend: string | undefined,
+  handover: boolean,
+): NodeJS.ProcessEnv {
   const env = { ...process.env };
   if (!handover) writeEnvInto(env, ENV.ROOT, getOwnRoot());
 

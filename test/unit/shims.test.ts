@@ -62,6 +62,7 @@ import {
   SHIM_MARKER,
   stubNameFor,
   systemAndInstallDirectory,
+  allAndNames,
   stubNotExecutable,
   stubNotWritable,
   targetBinaries,
@@ -244,6 +245,32 @@ describe("target set (§10.7)", () => {
       "aubr",
       "aubx",
     ]);
+  });
+
+  it("--all reaches the entries that opt out of the default set", () => {
+    // §10.7 — `--all` is `disable`'s own `includeOptOut`, so "everything the
+    // table has" has one answer and both commands read it. Asserted against the
+    // table rather than a literal for exactly that reason: an entry that
+    // changes sides must not be able to move one of the two.
+    const everything = targetBinaries([], [], { includeOptOut: true });
+
+    expect(everything).toEqual([
+      ...new Set(Object.keys(DEFINITIONS).flatMap((name) => getBinariesFor(name))),
+    ]);
+    expect(everything).toEqual(expect.arrayContaining(targetBinaries([])));
+    // §02.5's opt-outs, which are the whole point of the flag.
+    for (const binName of ["bun", "deno", "nub", "node"]) {
+      expect(targetBinaries([])).not.toContain(binName);
+      expect(everything).toContain(binName);
+    }
+  });
+
+  it("--all still honours --exclude", () => {
+    const everything = targetBinaries([], ["bun"], { includeOptOut: true });
+
+    expect(everything).toContain("deno");
+    expect(everything).not.toContain("bun");
+    expect(everything).not.toContain("bunx");
   });
 
   it("expands a single name to its full binary set", () => {
@@ -572,6 +599,45 @@ describe("enable (§10.3)", () => {
     expect(existsSync(join(perUserBin, "yarn"))).toBe(true);
     expect(existsSync(join(perUserBin, "npm"))).toBe(false);
     expect(existsSync(join(perUserBin, "pnpm"))).toBe(false);
+  });
+
+  it("--all shims the runtimes a bare enable leaves alone", async () => {
+    expect(await cmdEnable(["--all"], dist)).toBe(0);
+
+    // The default set, still there…
+    for (const binName of ["npm", "npx", "pnpm", "yarn", "yarnpkg"]) {
+      expectShim(perUserBin, binName);
+    }
+    // …and §10.7's opt-outs, which is what the flag adds.
+    for (const binName of ["bun", "bunx", "deno", "nub", "node"]) {
+      expectShim(perUserBin, binName);
+    }
+  });
+
+  it("--all --exclude bun leaves that name alone", async () => {
+    expect(await cmdEnable(["--all", "--exclude", "bun"], dist)).toBe(0);
+
+    expectShim(perUserBin, "deno");
+    expect(existsSync(join(perUserBin, "bun"))).toBe(false);
+    expect(existsSync(join(perUserBin, "bunx"))).toBe(false);
+  });
+
+  it("refuses --all together with an explicit name, before writing anything", async () => {
+    await expect(
+      cmdEnable([`--install-directory=${binDir}`, "--all", "yarn"], dist),
+    ).rejects.toThrow(UsageError);
+    await expect(cmdEnable(["--all", "yarn"], dist)).rejects.toThrow(allAndNames());
+
+    expect(existsSync(join(binDir, "yarn"))).toBe(false);
+    expect(existsSync(join(perUserBin, "yarn"))).toBe(false);
+  });
+
+  it("keeps --all off disable, where a bare run is already that set", async () => {
+    // §10.7 — the flag is `enable`'s alone, so `disable` sees an unrecognised
+    // word and reports it the way it reports any other stray flag (§12.10).
+    await expect(cmdDisable(["--all"])).rejects.toThrow(
+      messages.invalidPackageManagerName("--all"),
+    );
   });
 
   it("118: honours --install-directory", async () => {

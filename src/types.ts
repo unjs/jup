@@ -277,14 +277,39 @@ export interface ToolDefinition {
    */
   versionFile?: VersionFileSpec;
   /**
+   * §09.9 — how to ask this entry where **its own** dependency store lives.
+   *
+   * An ordered list of candidate argv, each in `commands.use`'s shape, tried in
+   * order until one answers a usable absolute path. Per **entry**, so the words
+   * `store path` and `cache dir` are a table fact and appear nowhere else: this
+   * is the same rule {@link VersionFileSpec} states for `.nvmrc`, and "if the
+   * tool is pnpm, run `pnpm store path`" written into §09 would be exactly the
+   * name-in-the-structure §02.3 forbids. A CI job caching the manager's store
+   * asks jup rather than carrying that table in YAML.
+   *
+   * The list is where an ecosystem's *own* disagreement is spelled: Yarn Berry
+   * answers `config get cacheFolder` and Classic prints the literal `undefined`
+   * for it, so Classic's real answer, `yarn cache dir`, follows as a second
+   * candidate. That is a chain rather than a per-band field on purpose — the
+   * fallback is decided by what the tool *answers*, and §09.9 must not resolve a
+   * version (a request, in general) to find out which band is speaking.
+   *
+   * Absent for an entry with no stable command for it — every runtime, and any
+   * manager whose spelling has not settled. Absent means `--store-path` prints
+   * nothing rather than guessing.
+   */
+  storeCommands?: string[][];
+  /**
    * §10.7 — whether a bare `jup enable` installs this entry's shims.
    *
    * Absent means yes. `false` is for an
    * entry whose binary name is routinely a *system* install the user chose
    * deliberately — bun and deno are runtimes first and package managers second —
    * so silently taking the name over on upgrade would be a change nobody asked
-   * for. Naming the entry (`jup enable bun`) still installs it; `--all` in
-   * `cache clean` is unaffected, because that is about the cache, not `PATH`.
+   * for. Naming the entry (`jup enable bun`) still installs it, and so does
+   * `jup enable --all`, which is the same opt-in written once (§10.7); `--all`
+   * in `cache clean` is a different flag and is unaffected either way, because
+   * that one is about the cache, not `PATH`.
    *
    * Required to be `false` when {@link ToolDefinition.kind} is `"runtime"`.
    */
