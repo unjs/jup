@@ -9,13 +9,13 @@
 
 > Pin and run the right package manager or runtime for every project.
 
-**jup** (pronounced “yup”) is a fast, small, zero-dependency version manager for
-package managers and runtimes. It supports npm, pnpm, Yarn, aube, Bun, Deno, nub,
-and Node.js.
+**jup** (can be pronounced “yup” too!) manages versions of package managers and runtimes.
+It is fast, small, and has no dependencies. It supports npm, pnpm, Yarn, aube,
+Bun, Deno, nub, and Node.js.
 
-A project chooses a version. jup downloads it, verifies it, keeps it in a local
-store, and runs it. Once an exact version is installed, jup can start it without
-the network.
+Each project can choose a version. jup downloads and checks that version, saves
+it on your computer, and runs it. After the exact version is installed, jup can
+run it without an internet connection.
 
 > [!WARNING]
 > jup is experimental. Its behavior may change between releases.
@@ -85,7 +85,7 @@ jup node@^22 script.js
 Run `jup info` at any time to inspect the selected project, version, local store,
 network settings, and shims.
 
-[Read the introduction and complete quick start →](https://jup.unjs.io)
+[Read the complete getting-started guide →](https://jup.unjs.io)
 
 ## Why jup?
 
@@ -121,7 +121,7 @@ top-level `packageManager` pins remain supported.
 
 ## Documentation
 
-- [Introduction and quick start](https://jup.unjs.io)
+- [Get started](https://jup.unjs.io)
 - [Projects, pins, ranges, and workspaces](https://jup.unjs.io/projects)
 - [CI, containers, and offline installs](https://jup.unjs.io/ci)
 - [Registries, authentication, TLS, and proxies](https://jup.unjs.io/registry)
