@@ -20,7 +20,8 @@ jobs:
       - uses: actions/checkout@v6
       # jup replaces `setup-node` and `corepack enable` in one step: it installs
       # the runtime, shims the pinned package manager, and warms both stores.
-      - uses: ./.github/actions/setup-jup
+      - name: Setup jup
+        uses: ./.github/actions/setup-jup
         with: { node-version: lts }
       - run: pnpm install
       - if: runner.os == 'Linux'

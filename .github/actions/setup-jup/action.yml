@@ -21,8 +21,9 @@ inputs:
   package-managers:
     description: >-
       Package managers to shim, space-separated. `auto` (the default) is every
-      entry in jup's table, the opt-in runtimes included. `none` shims no
-      manager. `node` is not governed by this input and is always shimmed.
+      entry in jup's table, the opt-in runtimes included, so `npm`, `bun` and
+      `deno` are all shimmed. `none` shims no manager. `node` is not governed by
+      this input and is always shimmed.
     required: false
     default: auto
   cache:
@@ -65,7 +66,8 @@ runs:
     #
     # Both directories derive from `RUNNER_TEMP`: Windows wrappers use paths
     # relative to the shim directory and cannot cross drives (§10.4, §10.9).
-    - id: paths
+    - name: Resolve jup paths
+      id: paths
       shell: bash
       run: |
         set -euo pipefail
@@ -90,7 +92,8 @@ runs:
 
     # `JUP_HOME` contains trusted executables: bind cache reuse to the host, jup,
     # and runtime request, and pin the cache action by digest (docs/3.ci.md, §07).
-    - if: inputs.cache == 'true'
+    - name: Cache jup's store
+      if: inputs.cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         # Do not restore jup's runner-specific absolute interpreter (§10.2).
@@ -104,28 +107,104 @@ runs:
           setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-
 
     # Bootstrap with the runner's node, then let `self-install` own the permanent
-    # copy and the `jup`/`corepack` shims (§09.12). `--yes` prevents prompting;
-    # `--force` safely replaces an existing `corepack` shim (§10.9). Reinstall
-    # every run because the generated CLI entry embeds the runner's node (§10.2).
+    # copy and the `jup`/`corepack` shims (§09.12). `--force` safely replaces an
+    # existing `corepack` shim (§10.9). Reinstall every run because the generated
+    # CLI entry embeds the runner's node (§10.2).
     #
-    # Run outside the project: `npm exec` loads the nearest manifest and refuses
-    # with `EBADDEVENGINES` when `devEngines.packageManager` names another tool —
-    # which is every project this action exists to set up. `self-install` reads no
-    # project, so the directory it runs in carries no other meaning.
-    - shell: bash
+    # The payload comes straight from the registry rather than through `npx`.
+    # `self-install` copies whichever bytes are already running, so npm was only
+    # ever delivering them — and it charged six seconds on Linux and nineteen on
+    # Windows to run a full install of a zero-dependency 200 KB package into its
+    # own `_npx` tree. Two requests and a `tar` replace that, checking the same
+    # sha512 from the same manifest npm would have read.
+    #
+    # `npx` stays as the fallback for everything one request cannot answer: a
+    # range, a mirror, a private registry whose credentials live in npm's
+    # configuration and not here. Every such case falls back rather than failing,
+    # so the fast path never narrows what `jup-version` accepts.
+    #
+    # Both routes run outside the project: `npm exec` loads the nearest manifest
+    # and refuses with `EBADDEVENGINES` when `devEngines.packageManager` names
+    # another tool — which is every project this action exists to set up.
+    # `self-install` reads no project, so the directory it runs in carries no
+    # other meaning.
+    - name: Install jup
+      shell: bash
       working-directory: ${{ runner.temp }}
       env:
         JUP_SPEC: ${{ inputs.jup-version }}
         BIN_DIR: ${{ steps.paths.outputs.bin }}
       run: |
         set -euo pipefail
-        npx --yes "jup@$JUP_SPEC" self-install --install-directory "$BIN_DIR" --force
+
+        # npm's own environment spelling, in both of npm's cases. A registry
+        # configured only in `.npmrc` is not read here; it lands on the fallback.
+        registry="${npm_config_registry:-${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org}}"
+
+        # A dist-tag or an exact version is one path segment on the registry, and
+        # this charset is what keeps it one: no slash, no leading dot, nothing
+        # that could reach another path or another host. A range, a URL or a
+        # local path fails the test and takes the fallback.
+        entry=""
+        case "$JUP_SPEC" in
+          "" | .* | *[!A-Za-z0-9._-]*) ;;
+          *) entry="$JUP_SPEC" ;;
+        esac
+
+        # A directory of our own, so the fetch and the extraction can name bare
+        # files and keep MSYS out of the way on the Windows runner.
+        work="$(mktemp -d)"
+        cd "$work"
+
+        # Stays empty unless every step below succeeded; that is the fallback's
+        # only cue. `-f` makes 404 and 401 alike a non-zero exit, which is how a
+        # range or a registry that wants credentials arrives here.
+        payload=""
+        if [ -n "$entry" ] && curl -fsL "${registry%/}/jup/$entry" -o manifest.json; then
+          # Both fields or neither: a manifest without `dist.integrity` is one
+          # this step cannot check, and an unchecked tarball is not installable.
+          spec="$(node -e '
+            const { dist } = require("./manifest.json");
+            if (typeof dist?.tarball === "string" && typeof dist?.integrity === "string") {
+              process.stdout.write(`${dist.tarball} ${dist.integrity}`);
+            }
+          ')"
+          url="${spec%% *}"
+          integrity="${spec#* }"
+          if [ -n "$url" ] && [ -n "$integrity" ] && curl -fsSL "$url" -o jup.tgz; then
+            # The check npm would have made, against the manifest npm would have
+            # read. A mismatch is fatal and never a fallback: bytes that fail
+            # here are not bytes to hand to another installer.
+            node -e '
+              const { createHash } = require("node:crypto");
+              const { readFileSync } = require("node:fs");
+              const [expected] = process.argv.slice(1);
+              const actual = `sha512-${createHash("sha512").update(readFileSync("jup.tgz")).digest("base64")}`;
+              if (actual !== expected) {
+                throw new Error(`jup tarball integrity mismatch: got ${actual}, expected ${expected}`);
+              }
+            ' "$integrity"
+            tar -xzf jup.tgz
+            payload="$work/package"
+          fi
+        fi
+
+        if [ -n "$payload" ]; then
+          node "$payload/bin/jup.mjs" self-install --install-directory "$BIN_DIR" --force
+        else
+          # Said in our own words, because the registry probe above is quiet:
+          # reaching npm is an expected outcome, not a failure to debug.
+          echo "Installing jup@$JUP_SPEC through npm; the registry did not answer that spec directly."
+          # `--yes` prevents prompting.
+          npx --yes "jup@$JUP_SPEC" self-install --install-directory "$BIN_DIR" --force
+        fi
         jup --version
 
     # Enable `node` and all requested managers together so every stub embeds the
     # runner's stable interpreter (§10.2). `none` still enables `node`; `auto`
     # reads the full table, including opt-in runtimes, from `info --json` (§10.7).
-    - shell: bash
+    - name: Enable shims
+      shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         BIN_DIR: ${{ steps.paths.outputs.bin }}
@@ -135,6 +214,8 @@ runs:
         set -euo pipefail
         # Read the table before `node` becomes an unprovisioned shim.
         case "$NAMES" in
+          # `packageManagers` is the whole table despite the key's name: the
+          # runtime entries are in it, so this branch appends no `node`.
           auto)
             jup info --json > "$SETUP_JUP_INFO"
             names="$(node -e '
@@ -150,7 +231,8 @@ runs:
 
     # Record an explicit request as the global default (§09.3); project runtime
     # pins still win (§04). Ask the shim so the output reports the resolved winner.
-    - id: node
+    - name: Set up Node.js
+      id: node
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -181,7 +263,8 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     # Warm the project-pinned manager; no project pin is valid (§09.2).
-    - id: project
+    - name: Warm the pinned package manager
+      id: project
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
@@ -197,7 +280,8 @@ runs:
         if [ -n "$name" ]; then jup cache install; fi
 
     # Cache manager packages separately from jup's program store.
-    - id: store
+    - name: Locate the package manager store
+      id: store
       if: inputs.cache-dependencies == 'true' && steps.project.outputs.package-manager != ''
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -223,7 +307,8 @@ runs:
         if [ "$dir" = undefined ]; then dir=""; fi
         echo "dir=$dir" >> "$GITHUB_OUTPUT"
 
-    - if: steps.store.outputs.dir != ''
+    - name: Cache the package manager store
+      if: steps.store.outputs.dir != ''
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.store.outputs.dir }}
