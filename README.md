@@ -85,7 +85,7 @@ jup node@^22 script.js
 Run `jup info` at any time to inspect the selected project, version, local store,
 network settings, and shims.
 
-[Read the introduction and complete quick start →](https://jup.unjs.io/docs)
+[Read the introduction and complete quick start →](https://jup.unjs.io)
 
 ## Why jup?
 
@@ -121,16 +121,16 @@ top-level `packageManager` pins remain supported.
 
 ## Documentation
 
-- [Introduction and quick start](https://jup.unjs.io/docs)
-- [Projects, pins, ranges, and workspaces](https://jup.unjs.io/docs/projects)
-- [CI, containers, and offline installs](https://jup.unjs.io/docs/ci)
-- [Registries, authentication, TLS, and proxies](https://jup.unjs.io/docs/registry)
-- [Command reference](https://jup.unjs.io/docs/commands)
-- [Integrity and security model](https://jup.unjs.io/docs/security)
-- [Environment and settings](https://jup.unjs.io/docs/settings)
-- [Moving from Corepack](https://jup.unjs.io/docs/corepack)
-- [Troubleshooting](https://jup.unjs.io/docs/troubleshooting)
-- [Programmatic API](https://jup.unjs.io/docs/api)
+- [Introduction and quick start](https://jup.unjs.io)
+- [Projects, pins, ranges, and workspaces](https://jup.unjs.io/projects)
+- [CI, containers, and offline installs](https://jup.unjs.io/ci)
+- [Registries, authentication, TLS, and proxies](https://jup.unjs.io/registry)
+- [Command reference](https://jup.unjs.io/commands)
+- [Integrity and security model](https://jup.unjs.io/security)
+- [Environment and settings](https://jup.unjs.io/settings)
+- [Moving from Corepack](https://jup.unjs.io/corepack)
+- [Troubleshooting](https://jup.unjs.io/troubleshooting)
+- [Programmatic API](https://jup.unjs.io/api)
 
 ## Corepack compatibility
 
@@ -138,7 +138,7 @@ jup provides a `corepack` command and supports existing Corepack project pins an
 workflows. New package-manager pins are written to `devEngines.packageManager`,
 which Corepack itself does not read.
 
-[Read the migration guide →](https://jup.unjs.io/docs/corepack)
+[Read the migration guide →](https://jup.unjs.io/corepack)
 
 ## Credits
 
