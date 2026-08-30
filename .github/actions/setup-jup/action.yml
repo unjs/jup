@@ -75,6 +75,14 @@ runs:
     # node is still the only `node` on `PATH`, which is what keeps §10.2 from
     # baking an absolute interpreter into the stubs.
     #
+    # `JUP_SHIM_DIRECTORY` says out loud what `--install-directory` only tells
+    # the command that gets the flag: this job's shims live there. A bare
+    # `jup disable` or `jup info` in a later step then agrees with `enable`
+    # (§10.5), and anything that has to reason about the machine it is running
+    # on can find the directory rather than infer it — jup's own suite scrubs
+    # exactly this variable's directory off `PATH`, so its rows keep asking
+    # about their own fixtures instead of about the job hosting them.
+    #
     # jup gets its own npm prefix, in the same temp directory, for one reason
     # that only shows on Windows: a §10.4 wrapper names its stub relative to its
     # own directory, and there is no relative path from `D:\a\_temp\jup-bin`
@@ -97,6 +105,7 @@ runs:
         if [ "$RUNNER_OS" = Windows ]; then npm_bin="$prefix"; fi
         {
           echo "JUP_HOME=$home"
+          echo "JUP_SHIM_DIRECTORY=$bin"
           echo "SETUP_JUP_INFO=$temp/jup-info.json"
         } >> "$GITHUB_ENV"
         {
