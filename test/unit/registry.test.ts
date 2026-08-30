@@ -1301,4 +1301,24 @@ describe("fetchLatestStableVersion under the gate (§04.1, §04.6)", () => {
     expect(await fetchLatestStableVersion(npm("pnpm"))).toBe(`9.2.0+sha512.${hex}`);
     expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm/latest"]);
   });
+
+  it("`releaseAgeGate: false` asks for `latest` and never reads the variable", async () => {
+    // §09.13's exemption. The value is one `minimumReleaseAge` refuses, so a
+    // caller that consulted the variable at all would throw here rather than
+    // resolve — which is what makes this row about *not reading* it, not merely
+    // about the answer coinciding.
+    const { sri, hex } = sriFor("tarball bytes", "sha512");
+    const server = await startServer({
+      "/pnpm": datedPackument({ "9.0.0": 500, "9.2.0": 1 }),
+      "/pnpm/latest": { name: "pnpm", version: "9.2.0", dist: { integrity: sri } },
+    });
+    process.env.COREPACK_NPM_REGISTRY = server.origin;
+    process.env.COREPACK_INTEGRITY_KEYS = "0";
+    process.env.JUP_MINIMUM_RELEASE_AGE = "not-a-number";
+
+    expect(await fetchLatestStableVersion(npm("pnpm"), { releaseAgeGate: false })).toBe(
+      `9.2.0+sha512.${hex}`,
+    );
+    expect(server.requests.map((request) => request.url)).toStrictEqual(["/pnpm/latest"]);
+  });
 });

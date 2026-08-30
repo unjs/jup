@@ -38,7 +38,7 @@ import {
   writeMarker,
 } from "../cache/store.ts";
 import { extract } from "../cache/tar.ts";
-import { messages, UsageError } from "../errors-cold.ts";
+import { messages, redactUserinfo, UsageError } from "../errors-cold.ts";
 import { out } from "../utils/log.ts";
 import {
   fetchLatestStableVersion,
@@ -49,11 +49,12 @@ import {
   CLI_ENTRY_NAME,
   DIST_FOLDER_NAME,
   findEntrySpecifier,
+  getOwnVersion,
   OWN_BIN_NAMES,
   STUB_FOLDER_NAME,
 } from "../utils/self.ts";
 import { shouldSkipIntegrityCheck } from "../verify/integrity.ts";
-import { parse } from "../version/semver.ts";
+import { lt, parse } from "../version/semver.ts";
 import {
   installedHash,
   linkSelf,
@@ -78,9 +79,22 @@ const SELF_PACKAGE: NpmRegistrySpec = { type: "npm", package: TOOL_NAME };
  *
  * `latest` is what the publisher points at the release they want installed, and
  * §04.6 already knows how to read it: one request, resolved server-side, coming
- * back with the digest the registry signed. `JUP_MINIMUM_RELEASE_AGE`
- * applies to it exactly as it does everywhere else (§04.1), so an organisation
- * that quarantines fresh releases quarantines ours too.
+ * back with the digest the registry signed.
+ *
+ * `JUP_MINIMUM_RELEASE_AGE` is **not** applied to it. The gate is §04.1's
+ * answer to an implicit choice among *engine* payloads — a range or a tag
+ * silently picking up a package manager published minutes ago — and this is
+ * neither implicit nor a table entry: a user typed the command, and what it
+ * fetches is jup. `install.sh` bootstraps this same `latest` without consulting
+ * the gate, so applying it here would make the upgrade path disagree with the
+ * installer that wrote the copy it replaces, and — because the gated selector
+ * is the newest *eligible* release rather than a cap on the running one — would
+ * resolve backwards on any machine whose cooldown outlives a release, repoint
+ * the shims at the older copy and prune the newer one (§07.11).
+ *
+ * The exemption is about the age of the release, and nothing else: everything
+ * §06 asks of an artifact is asked of this one, and {@link cmdSelfUpgrade}
+ * refuses a resolution below the running version outright.
  */
 const UPGRADE_TAG = "latest";
 
@@ -115,6 +129,22 @@ export const notAnInstallation = (version: string, url: string) =>
 export const implausiblePublishedVersion = (reference: string) =>
   `Unable to upgrade ${TOOL_NAME}: the registry resolved \`${UPGRADE_TAG}\` to ${JSON.stringify(reference)}, which is not a version a store directory can be named after.`;
 
+/**
+ * The registry's newest release is older than the copy running this command.
+ *
+ * Not an error, and not a failure of anything: the user asked for the newest
+ * jup and they are already running something newer than it. What makes it worth
+ * a line of its own is what the alternative would be — §09.12's second half
+ * repointing both names at the older copy and §07.11's prune deleting what it
+ * replaced, reported as a successful upgrade.
+ *
+ * The registry is named because it is the fact that explains the answer: a
+ * mirror lagging behind the registry it copies, or a rolled-back `latest`, look
+ * exactly like this from here, and neither is visible in the version numbers.
+ */
+export const runningAheadOfLatest = (own: string, latest: string, registry: string) =>
+  `${TOOL_NAME} ${own} is newer than ${TOOL_NAME}@${latest}, the newest release ${registry} publishes; nothing to upgrade.`;
+
 /* -------------------------------------------------------------------------- */
 /* The download                                                                */
 /* -------------------------------------------------------------------------- */
@@ -130,15 +160,19 @@ interface Release {
 /**
  * Resolve `latest` into a version and the digest that must arrive with it.
  *
- * §04.6's own lookup, unchanged and unwrapped: it verifies the registry's
- * signature over `<name>@<version>:<integrity>` (§06.3), honours §06.1's tiers,
- * §06.3's fallback and §04.1's release-age gate, and hands back
- * `<version>+<algo>.<hex>`. Reusing it rather than reading the packument here is
- * the point — an upgrade path with its own idea of what a trustworthy version
- * looks like is an upgrade path that can be weaker than the install path.
+ * §04.6's own lookup, unwrapped: it verifies the registry's signature over
+ * `<name>@<version>:<integrity>` (§06.3), honours §06.1's tiers and §06.3's
+ * fallback, and hands back `<version>+<algo>.<hex>`. Reusing it rather than
+ * reading the packument here is the point — an upgrade path with its own idea
+ * of what a trustworthy version looks like is an upgrade path that can be
+ * weaker than the install path.
+ *
+ * The single thing it is asked to do differently is {@link UPGRADE_TAG}'s
+ * exemption from §04.1's release-age gate. Nothing about *verification*
+ * changes with it.
  */
 async function resolveRelease(): Promise<Release> {
-  const reference = await fetchLatestStableVersion(SELF_PACKAGE);
+  const reference = await fetchLatestStableVersion(SELF_PACKAGE, { releaseAgeGate: false });
 
   const parsed = parse(reference);
   if (parsed === null) throw new UsageError(implausiblePublishedVersion(reference));
@@ -273,6 +307,22 @@ export async function cmdSelfUpgrade(args: string[], command: string): Promise<n
   const options = parseSelfArgs(args, command);
 
   const release = await resolveRelease();
+
+  // An upgrade never resolves backwards. `latest` is normally ahead of us, but a
+  // rolled-back dist-tag, a mirror lagging behind the registry it copies, or a
+  // build that is simply not published yet all put it below the running version,
+  // and installing it from here is a downgrade the user did not ask for: the
+  // shims would point at the older copy and §07.11's prune would take the newer
+  // one with it.
+  //
+  // The *equal* case is deliberately not this case. Re-installing the running
+  // version is what makes this command a repair, as the note above says, and it
+  // stays.
+  const own = getOwnVersion();
+  if (lt(release.version, own)) {
+    out(`${runningAheadOfLatest(own, release.version, redactUserinfo(release.registryUrl))}\n`);
+    return 0;
+  }
 
   const selfFolder = getSelfFolder();
   sweepSuperseded(selfFolder);

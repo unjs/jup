@@ -264,8 +264,11 @@ artifact is not a table entry.
 
 ```
 version+digest := §04.6's `latest` lookup for jup's own package
-    signature-verified, release-age gated, refused outright with no verification tier
+    signature-verified, refused outright with no verification tier
+    NOT release-age gated (§04.1) — the gate filters implicit choices among table
+      entries, and this is an explicit request for jup's own release
     a non-semver answer → UsageError naming what the registry said
+version older than the running one → say so on stdout, exit 0, install nothing
 stdout: `Installing jup@<version>...`
 unless <home>/self/<version> holds a readable marker:
     metadata → tarball URL (§07.3), download notice (§05.4)
@@ -287,6 +290,13 @@ Two differences are load-bearing:
    regenerating it from the running version's source would put an old entry in
    front of a new bundle. The only permitted edit is §10.2's shebang pin, under
    the condition that already governs it.
+3. **It never resolves backwards.** `JUP_MINIMUM_RELEASE_AGE` is not applied
+   here — `install.sh` does not apply it either, and its gated selector is the
+   newest *eligible* release rather than a cap on the running one, so a cooldown
+   outliving a release would turn an upgrade into a downgrade. Independently of
+   that, a `latest` below the running version (a rolled-back tag, a lagging
+   mirror) is reported and nothing is installed: the equal case still reinstalls,
+   which is what makes the command a repair.
 
 `upgrade` is an accepted spelling. It is deliberately not `up`, which writes the
 project's pin; the usage line names whichever word was typed.

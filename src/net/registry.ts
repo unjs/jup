@@ -301,12 +301,35 @@ export async function fetchAvailableTags(spec: RegistrySpec): Promise<Record<str
   return stringMap(body?.["dist-tags"]);
 }
 
+/** What a caller of {@link fetchLatestStableVersion} may decide for itself. */
+export interface LatestOptions {
+  /**
+   * §04.1's release-age gate, on by default.
+   *
+   * `false` is for the one lookup that is not about a table entry: §09.13
+   * resolving **jup's own** newest release. The gate exists to keep a
+   * freshly-published *engine* out of an implicit choice, and jup's version is
+   * neither — `install.sh` bootstraps the same `latest` without consulting it,
+   * so an upgrade that did would disagree with the installer that wrote the
+   * copy it is replacing, and would resolve *backwards* from the running
+   * version on any machine whose cooldown outlives a release. Every other
+   * caller leaves this alone.
+   *
+   * When it is `false` the variable is not read at all, which is deliberate:
+   * an exempt command must not fail on a value it would never have acted on.
+   */
+  releaseAgeGate?: boolean;
+}
+
 /**
  * §04.6 — reads `{registry}/{package}/latest` and returns a hash-bearing
  * reference. Any failure is re-thrown wrapped in
  * `messages.cannotDownloadLatest`.
  */
-export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<string> {
+export async function fetchLatestStableVersion(
+  spec: RegistrySpec,
+  options: LatestOptions = {},
+): Promise<string> {
   const registryUrl = registryUrlFor(spec);
 
   try {
@@ -319,8 +342,11 @@ export async function fetchLatestStableVersion(spec: RegistrySpec): Promise<stri
     // gate is set. (Taking the eligible semver maximum rather than capping at
     // `dist-tags.latest` is the same choice the release-age gate was decided on
     // here — §04.1 step 6 unions bands, a dist-tag names one.)
-    const selector =
-      minimumReleaseAge() === undefined ? "latest" : await capToReleaseAge(spec, undefined);
+    //
+    // `releaseAgeGate: false` is §09.13's exemption, and short-circuits before
+    // the variable is read at all.
+    const gated = options.releaseAgeGate !== false && minimumReleaseAge() !== undefined;
+    const selector = gated ? await capToReleaseAge(spec, undefined) : "latest";
     const metadata = asRecord(await npmGetJson(`${spec.package}/${selector}`, spec));
     const version = asString(metadata?.version);
     if (version === undefined) {

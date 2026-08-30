@@ -52,7 +52,11 @@ already installed.
 `JUP_MINIMUM_RELEASE_AGE` (hours) filters implicit choices: step 6's candidates
 and step 3's dist-tag target, which is the registry choosing on the user's
 behalf. An exact pin and a compiled-in tag are exempt — those are the user, or
-this table, choosing.
+this table, choosing. So is §09.13's lookup for **jup's own** release: it is not
+a table entry, `install.sh` bootstraps the same `latest` ungated, and the gated
+selector — the newest eligible release, not a cap on the running one — would
+downgrade a machine whose cooldown outlives a release. `self-upgrade` refuses to
+resolve below the version running it, gate or no gate.
 
 It changes one request: the candidate list is fetched with `Accept:
 application/json` instead of the abbreviated packument, because only the full
@@ -364,9 +368,10 @@ compiled-in default becomes unreachable, and a machine with nothing recorded
 silently defaults to a different major from the one a transparent command
 (below) or an offline run would use. `test/unit/config.test.ts` sweeps this.
 
-`JUP_MINIMUM_RELEASE_AGE` applies here as it does to any tag. With no recorded
-entry to fall back on, failure in the npm path is rethrown wrapped in the message
-naming both escape hatches (§12).
+`JUP_MINIMUM_RELEASE_AGE` applies here as it does to any tag — for a table
+entry. The one caller that opts out is §09.13, which asks the same function for
+jup's own newest release. With no recorded entry to fall back on, failure in the
+npm path is rethrown wrapped in the message naming both escape hatches (§12).
 
 ### Transparent-command fallback
 

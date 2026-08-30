@@ -21,6 +21,8 @@ import { delimiter, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { cliEntrySource, shimSource, stubNameFor } from "../../src/commands/shims.ts";
+import { NPM_FULL_ACCEPT_HEADER } from "../../src/net/registry.ts";
+import { lt } from "../../src/version/semver.ts";
 import { BUILT_ENTRY_SPECIFIER, CLI_ENTRY_NAME } from "../../src/utils/self.ts";
 import {
   cleanupFixtures,
@@ -44,6 +46,28 @@ const PREVIOUS = "9.9.8";
 const registry = new MockRegistry();
 /** A second registry, for the one row about a mirror publishing something else. */
 const impostor = new MockRegistry();
+/** A third, whose `latest` is behind the jup running the suite. */
+const rollback = new MockRegistry();
+
+/**
+ * A release older than any jup that can run this file.
+ *
+ * The rows about resolving backwards need a `latest` below the *running*
+ * version, and the running version is this checkout's — the suite executes
+ * `src/`, so `--version` reads the manifest beside it. `0.0.1` is below every
+ * version that manifest has ever carried and below every one it can acquire,
+ * since a release only goes up; the row asserts that premise rather than
+ * assuming it.
+ */
+const OLDER = "0.0.1";
+
+/** The version the suite's own jup reports — what a downgrade would replace. */
+const OWN = String(
+  (JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { version: string })
+    .version,
+);
+
+const HOUR = 60 * 60 * 1000;
 
 /**
  * The sources the published bundle re-exports, as a checkout of their own.
@@ -134,11 +158,26 @@ function downloads(mock: MockRegistry): number {
 beforeAll(async () => {
   await registry.start();
   await impostor.start();
+  await rollback.start();
 
   const entry = publishedSources();
-  registry.publish("jup", PREVIOUS, publishedTool(PREVIOUS, entry));
+  // Dated a month apart on purpose: §04.1's gate, if it applied here, would
+  // resolve `latest` to whichever release is old enough — which is PREVIOUS —
+  // so a row that sets the variable can tell "the gate was applied" from "the
+  // gate was skipped" by which version lands in the store.
+  registry.publish("jup", PREVIOUS, publishedTool(PREVIOUS, entry), {
+    time: new Date(Date.now() - 30 * 24 * HOUR),
+  });
   registry.publish("jup", VERSION, publishedTool(VERSION, entry), {
     distTags: { latest: VERSION },
+    time: new Date(Date.now() - 1 * HOUR),
+  });
+
+  // A registry whose newest jup is behind the running one: a rolled-back
+  // `latest`, or a mirror that has not caught up.
+  rollback.publish("jup", OLDER, publishedTool(OLDER, entry), {
+    distTags: { latest: OLDER },
+    time: new Date(Date.now() - 400 * 24 * HOUR),
   });
 
   // A mirror publishing *something else* under our name: correctly signed, and
@@ -158,11 +197,13 @@ afterAll(async () => {
   cleanupFixtures();
   await registry.stop();
   await impostor.stop();
+  await rollback.stop();
 });
 
 beforeEach(() => {
   registry.reset();
   impostor.reset();
+  rollback.reset();
 });
 
 describe("§09.13 self-upgrade", () => {
@@ -329,6 +370,60 @@ describe("§09.13 self-upgrade", () => {
     expect(result.stdout).toContain(
       "$ jup upgrade [--install-directory <path>|--system] [--force]",
     );
+  });
+
+  it("§04.1 — the release-age cooldown does not gate jup's own version", async () => {
+    // The gate is about an implicit choice among *engine* payloads. jup's own
+    // release is neither implicit nor a table entry, `install.sh` bootstraps
+    // this same `latest` without consulting it, and applying it here would
+    // resolve to PREVIOUS — the only release a 24-hour cooldown leaves eligible
+    // — repoint both names at it and prune the copy it replaced.
+    const { fixture, shimDir, selfDir, options } = upgradeFixture();
+
+    const result = await run(["self-upgrade"], {
+      ...options,
+      env: { ...options.env, JUP_MINIMUM_RELEASE_AGE: "24" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(
+      [
+        `Installing jup@${VERSION}...`,
+        `jup ${VERSION} -> ${selfDir}`,
+        `jup, corepack -> ${shimDir}`,
+        "",
+      ].join("\n"),
+    );
+    expect(existsSync(selfDir)).toBe(true);
+    expect(existsSync(join(fixture.home, "self", PREVIOUS))).toBe(false);
+
+    // And the variable was not merely out-voted: the full packument is the only
+    // document carrying `time`, so a run that never asks for one never consulted
+    // the gate at all (§04.1's one changed request).
+    expect(registry.requests.some((request) => request.accept === NPM_FULL_ACCEPT_HEADER)).toBe(
+      false,
+    );
+  });
+
+  it("never resolves backwards from the running version", async () => {
+    // A rolled-back `latest`, or a mirror behind the registry it copies. Either
+    // way the newest release the registry offers is older than the jup asking,
+    // and installing it would be a downgrade reported as an upgrade.
+    expect(lt(OLDER, OWN)).toBe(true);
+
+    const { fixture, shimDir, options } = upgradeFixture(rollback);
+
+    const result = await run(["self-upgrade"], options);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(
+      `jup ${OWN} is newer than jup@${OLDER}, the newest release ${rollback.origin} publishes; nothing to upgrade.\n`,
+    );
+
+    // Nothing was fetched, nothing was stored, and no name was repointed.
+    expect(downloads(rollback)).toBe(0);
+    expect(existsSync(join(fixture.home, "self", OLDER))).toBe(false);
+    expect(existsSync(join(shimDir, IS_WINDOWS ? "jup.cmd" : "jup"))).toBe(false);
   });
 
   it("--install-directory puts the names where it says", async () => {

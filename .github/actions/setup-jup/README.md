@@ -17,13 +17,17 @@ is also a standing test that those two are enough to build on.
 ## What it does
 
 1. Points `JUP_HOME` at the runner's temp directory and restores that store from
-   the cache, keyed by OS, architecture, jup version and the project's pins.
-2. Installs jup with the runner's own node — the only bootstrap step.
-3. `jup enable` writes the package-manager shims into one directory.
-4. `jup node --version` resolves, verifies and installs the runtime, then the
-   real binary is linked beside those shims and that single directory goes on
-   `PATH`. `node` is a genuine executable, not a shim: no per-invocation cost,
-   and `process.execPath` is what any tool would expect.
+   the cache, keyed by OS, architecture, jup version and the project's pins. The
+   shim directory goes on `PATH` here, while it is still empty, so `enable` can
+   see that its install directory is reachable.
+2. Installs jup with the runner's own node — the only bootstrap step. `npm i -g`
+   needs `-f`, because jup's `bin` claims `corepack` and a bundled corepack
+   already holds that name in the runner's global prefix.
+3. `jup enable` writes the package-manager shims into that directory.
+4. `jup node --version` resolves, verifies and installs the runtime, and the
+   real binary is linked beside those shims. `node` is a genuine executable, not
+   a shim: no per-invocation cost, and `process.execPath` is what any tool would
+   expect.
 5. `jup install` warms the pinned package manager, so the first `pnpm install`
    of the job is already a store hit.
 6. The manager's *own* store is cached separately — jup keeps programs, the
@@ -61,5 +65,6 @@ Outputs: `node-version`, `node-path`, `package-manager`, `bin-directory`,
 
 A restored `JUP_HOME` is executable code trusted on a cache hit
 ([CI docs](../../../docs/3.ci.md)). The key carries the host triple and the
-`restore-keys` prefix stops at the same jup and the same runtime request. Do not
-let an untrusted fork populate a cache a release job reads.
+`restore-keys` prefix stops at the same jup and the same runtime request, and
+`actions/cache` is pinned by digest for the same reason. Do not let an untrusted
+fork populate a cache a release job reads.

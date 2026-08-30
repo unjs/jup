@@ -67,6 +67,7 @@ const {
   join,
   relative,
   resolve: resolvePath,
+  win32: win32Path,
 } = process.getBuiltinModule("node:path");
 const { fileURLToPath } = process.getBuiltinModule("node:url");
 import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
@@ -414,8 +415,13 @@ function shebangOf(head: string): string | undefined {
  * same shape with `"%~dp0\node.exe"` in the interpreter's place — the relocatable
  * case, where the shim directory *is* a Node install and there is no absolute
  * path to read.
+ *
+ * The stub is `%~dp0`-relative in the ordinary case and absolute where
+ * {@link win32ScriptPath} could not spell a relative one, so both are accepted;
+ * the lookahead, not the stub's spelling, is what picks the fallback branch.
  */
-const WIN32_CMD_INTERPRETER_RE = /^\s*"((?!%~dp0)[^"\n]+)"\s\s"%~dp0[\\/]/m;
+const WIN32_CMD_INTERPRETER_RE =
+  /^\s*"((?!%~dp0)[^"\n]+)"\s\s"(?:%~dp0[\\/]|[A-Za-z]:[\\/]|\\\\)/m;
 
 /**
  * {@link bakedInterpreter} on Windows, where the answer lives in the shim
@@ -1869,6 +1875,31 @@ export async function removePosixLink(
   );
 }
 /**
+ * The script path a Windows wrapper names — relative to the wrapper's own
+ * directory wherever that can be spelled at all.
+ *
+ * `relative` cannot express a path that crosses Windows drive letters and
+ * returns the absolute target instead. That is not an exotic case: a shim
+ * directory under `RUNNER_TEMP` on `D:` beside a global install on `C:` is the
+ * ordinary shape of a Windows CI job. Pasting the answer after `%~dp0\` then
+ * builds `D:\shims\C:\…\pnpm.mjs`, and the wrapper fails to load its own
+ * stub.
+ *
+ * So an absolute answer is emitted as it stands. Such a wrapper is not
+ * relocatable, which is not a loss: there is no relative path to be relocatable
+ * *with*, and the alternative is a wrapper that does not run.
+ *
+ * `win32Path` explicitly, not the platform's `isAbsolute` — §10.4's generator
+ * is invoked from POSIX build machines and by the unit test, where `C:\…` is
+ * not an absolute path unless it is asked in Windows terms.
+ */
+export function win32ScriptPath(rel: string, style: "cmd" | "posix"): string {
+  const spelled = style === "cmd" ? rel.replaceAll("/", "\\") : rel.replaceAll("\\", "/");
+  if (win32Path.isAbsolute(rel)) return spelled;
+  return style === "cmd" ? `%~dp0\\${spelled}` : `$basedir/${spelled}`;
+}
+
+/**
  * The `.cmd` body of §10.4, byte for byte.
  *
  * The double spaces are real — an empty interpolated argument slot — and the
@@ -1884,14 +1915,14 @@ export async function removePosixLink(
  * shim directory that *is* the Node install directory relocatable.
  */
 function win32CmdSource(rel: string, interpreter: string): string {
-  const windowsRel = rel.replaceAll("/", "\\");
+  const script = win32ScriptPath(rel, "cmd");
   return [
     `@SETLOCAL`,
     `@IF EXIST "%~dp0\\node.exe" (`,
-    `  "%~dp0\\node.exe"  "%~dp0\\${windowsRel}" %*`,
+    `  "%~dp0\\node.exe"  "${script}" %*`,
     `) ELSE (`,
     `  @SET PATHEXT=%PATHEXT:;.JS;=;%`,
-    `  "${interpreter}"  "%~dp0\\${windowsRel}" %*`,
+    `  "${interpreter}"  "${script}" %*`,
     `)`,
     ``,
   ].join("\n");
@@ -1906,7 +1937,7 @@ function win32CmdSource(rel: string, interpreter: string): string {
  * for a Windows path.
  */
 function win32ShSource(rel: string, interpreter: string): string {
-  const posixRel = rel.replaceAll("\\", "/");
+  const script = win32ScriptPath(rel, "posix");
   const posixInterpreter = interpreter.replaceAll("\\", "/");
   return [
     `#!/bin/sh`,
@@ -1917,9 +1948,9 @@ function win32ShSource(rel: string, interpreter: string): string {
     `esac`,
     ``,
     `if [ -x "$basedir/node" ]; then`,
-    `  exec "$basedir/node"  "$basedir/${posixRel}" "$@"`,
+    `  exec "$basedir/node"  "${script}" "$@"`,
     `else`,
-    `  exec "${posixInterpreter}"  "$basedir/${posixRel}" "$@"`,
+    `  exec "${posixInterpreter}"  "${script}" "$@"`,
     `fi`,
     ``,
   ].join("\n");
@@ -1932,7 +1963,7 @@ function win32ShSource(rel: string, interpreter: string): string {
  * takes the absolute path instead, which already carries its own.
  */
 function win32Ps1Source(rel: string, interpreter: string): string {
-  const posixRel = rel.replaceAll("\\", "/");
+  const script = win32ScriptPath(rel, "posix");
   return [
     `#!/usr/bin/env pwsh`,
     `$basedir=Split-Path $MyInvocation.MyCommand.Definition -Parent`,
@@ -1947,16 +1978,16 @@ function win32Ps1Source(rel: string, interpreter: string): string {
     `if (Test-Path "$basedir/node$exe") {`,
     `  # Support pipeline input`,
     `  if ($MyInvocation.ExpectingInput) {`,
-    `    $input | & "$basedir/node$exe"  "$basedir/${posixRel}" $args`,
+    `    $input | & "$basedir/node$exe"  "${script}" $args`,
     `  } else {`,
-    `    & "$basedir/node$exe"  "$basedir/${posixRel}" $args`,
+    `    & "$basedir/node$exe"  "${script}" $args`,
     `  }`,
     `  $ret=$LASTEXITCODE`,
     `} else {`,
     `  if ($MyInvocation.ExpectingInput) {`,
-    `    $input | & "${interpreter}"  "$basedir/${posixRel}" $args`,
+    `    $input | & "${interpreter}"  "${script}" $args`,
     `  } else {`,
-    `    & "${interpreter}"  "$basedir/${posixRel}" $args`,
+    `    & "${interpreter}"  "${script}" $args`,
     `  }`,
     `  $ret=$LASTEXITCODE`,
     `}`,
@@ -2410,8 +2441,8 @@ export async function installSelfShims(
  */
 export function selfWin32Wrappers(rel: string, interpreter: string): Win32Wrappers {
   const banner = `${SHIM_MARKER} — generated by \`${TOOL_NAME} self-install\`; edits are overwritten.`;
-  const windowsRel = rel.replaceAll("/", "\\");
-  const posixRel = rel.replaceAll("\\", "/");
+  const cmdScript = win32ScriptPath(rel, "cmd");
+  const script = win32ScriptPath(rel, "posix");
   const posixInterpreter = interpreter.replaceAll("\\", "/");
 
   return {
@@ -2424,7 +2455,7 @@ export function selfWin32Wrappers(rel: string, interpreter: string): Win32Wrappe
       `    *CYGWIN*) basedir=\`cygpath -w "$basedir"\`;;`,
       `esac`,
       ``,
-      `exec "${posixInterpreter}"  "$basedir/${posixRel}" "$@"`,
+      `exec "${posixInterpreter}"  "${script}" "$@"`,
       ``,
     ].join("\n"),
 
@@ -2434,7 +2465,7 @@ export function selfWin32Wrappers(rel: string, interpreter: string): Win32Wrappe
       // `.JS` out of `PATHEXT` for {@link win32CmdSource}'s reason: it is what
       // keeps a `node` beside these wrappers resolving to `node.exe`.
       `@SET PATHEXT=%PATHEXT:;.JS;=;%`,
-      `"${interpreter}"  "%~dp0\\${windowsRel}" %*`,
+      `"${interpreter}"  "${cmdScript}" %*`,
       ``,
     ].join("\n"),
 
@@ -2445,9 +2476,9 @@ export function selfWin32Wrappers(rel: string, interpreter: string): Win32Wrappe
       ``,
       `$ret=0`,
       `if ($MyInvocation.ExpectingInput) {`,
-      `  $input | & "${interpreter}"  "$basedir/${posixRel}" $args`,
+      `  $input | & "${interpreter}"  "${script}" $args`,
       `} else {`,
-      `  & "${interpreter}"  "$basedir/${posixRel}" $args`,
+      `  & "${interpreter}"  "${script}" $args`,
       `}`,
       `$ret=$LASTEXITCODE`,
       `exit $ret`,
