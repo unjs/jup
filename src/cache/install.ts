@@ -9,7 +9,7 @@
 const { readFileSync } = process.getBuiltinModule("node:fs");
 const { chmod, open, rm, stat } = process.getBuiltinModule("node:fs/promises");
 const { join, posix, resolve, sep } = process.getBuiltinModule("node:path");
-import { ENV, SYSTEM_ENV } from "../config/env-vars.ts";
+import { ENV } from "../config/env-vars.ts";
 import {
   getSpecFor,
   hasRangeBand,
@@ -22,7 +22,7 @@ import {
 } from "../config/table.ts";
 import { envFlag } from "../project/env.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
-import { err, errColors, warn } from "../utils/log.ts";
+import { debugNote, err, errColors } from "../utils/log.ts";
 import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
@@ -566,26 +566,6 @@ function confine(
   return bin;
 }
 
-/**
- * A note for whoever maintains the embedded table, on the debug channel.
- *
- * `DEBUG=jup` and `DEBUG=corepack` enable this compatibility channel (§11.5),
- * as a debugging aid, not a substitute for command output — so this is the one
- * place a message is allowed to be conditional on it. Both names are honoured,
- * for the same reason §11.6 keeps both env-var prefixes.
- *
- * Not routed through `advisory()`: `DEBUG=jup` is a request for *more* output,
- * and the more specific ask wins over §11.3's blanket mute.
- */
-function debugNote(message: string): void {
-  const debug = process.env[SYSTEM_ENV.DEBUG];
-  if (
-    debug === "*" ||
-    (debug !== undefined && (debug.includes("jup") || debug.includes("corepack")))
-  ) {
-    warn(`⚠ ${errColors.dim(message)}`);
-  }
-}
 /**
  * §06.1 rows 2–5 — the expected digest the *registry* vouches for, or
  * `undefined` when nothing is to be checked.

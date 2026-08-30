@@ -136,7 +136,8 @@ Managed state lives under `JUP_HOME` (§07.1):
 
 ```
 <home>/
-├── lastKnownGood.json     # {"<tool>": "<reference>"} — the global default per tool
+├── lastKnownGood.json     # {"<tool>": "<reference>"} — the global default per tool,
+│                          # plus "#stamps" (§04.5), which §04.6's TTL reads
 ├── shims.json             # entries displaced by `enable --force` (§10.6)
 ├── self/<version>/        # jup's own copy, installed by self-install (§07.11)
 └── v1/                    # the store, versioned by layout revision

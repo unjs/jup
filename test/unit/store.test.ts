@@ -21,13 +21,15 @@ import {
   getInstallFolder,
   getVersionDir,
   promote,
-  readLastKnownGood,
   readHashPin,
   readInstalledSpec,
+  readLastKnownGood,
+  readLastKnownGoodStamps,
   readMarker,
+  recordLastKnownGood,
   referenceWithHash,
-  UNATTRIBUTABLE_HASH,
   resolveInstallTarget,
+  UNATTRIBUTABLE_HASH,
   writeLastKnownGood,
   writeMarker,
 } from "../../src/cache/store.ts";
@@ -714,6 +716,47 @@ describe("writeLastKnownGood — §04.5, atomic", () => {
     writeLastKnownGood({ yarn: "1.22.22", pnpm: "9.0.0" });
     expect(readLastKnownGood()).toEqual({ yarn: "1.22.22", pnpm: "9.0.0" });
     expect(readdirSync(home)).toEqual(["lastKnownGood.json"]);
+  });
+
+  /**
+   * §04.5 — the file carries the stamps too, so a whole-map write that says
+   * nothing about them must not drop them. `writeLastKnownGood` is exported and
+   * the entries are the only thing most callers hold; silently clearing
+   * `#stamps` would turn every recorded default back into "never checked".
+   */
+  it("keeps the stamps a whole-map write did not mention", () => {
+    recordLastKnownGood("yarn", "1.0.0", "pinned");
+    writeLastKnownGood({ yarn: "1.22.22", pnpm: "9.0.0" });
+
+    expect(readLastKnownGood()).toEqual({ yarn: "1.22.22", pnpm: "9.0.0" });
+    expect(readLastKnownGoodStamps()).toEqual({ yarn: "pinned" });
+    // ...and an explicit empty map is how a caller asks to clear them.
+    writeLastKnownGood({ yarn: "1.22.22" }, {});
+    expect(readLastKnownGoodStamps()).toEqual({});
+    expect(readFileSync(lkgPath(), "utf8")).not.toContain("#stamps");
+  });
+
+  /**
+   * There is no lock (§07.5). `recordLastKnownGood` re-reads immediately before
+   * writing so that a caller holding a map from before a network round-trip
+   * cannot resurrect entries another process has since recorded.
+   */
+  it("records one entry without disturbing the others, or their stamps", () => {
+    recordLastKnownGood("yarn", "1.0.0", 111);
+    recordLastKnownGood("pnpm", "9.0.0", "pinned");
+    recordLastKnownGood("yarn", "1.22.22", 222);
+
+    expect(readLastKnownGood()).toEqual({ yarn: "1.22.22", pnpm: "9.0.0" });
+    expect(readLastKnownGoodStamps()).toEqual({ yarn: 222, pnpm: "pinned" });
+  });
+
+  /** Omitting the stamp changes which version is recorded and nothing else. */
+  it("leaves the stamp alone when it is not given", () => {
+    recordLastKnownGood("yarn", "1.0.0", "pinned");
+    recordLastKnownGood("yarn", "1.22.22");
+
+    expect(readLastKnownGood()).toEqual({ yarn: "1.22.22" });
+    expect(readLastKnownGoodStamps()).toEqual({ yarn: "pinned" });
   });
 
   it("creates the home folder on demand (test 104)", () => {

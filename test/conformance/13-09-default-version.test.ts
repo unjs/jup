@@ -6,7 +6,7 @@
  * fixture and run in order.
  */
 
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -39,7 +39,47 @@ function trusted(extra?: Record<string, string | undefined>): Record<string, str
 
 function lastKnownGood(fixture: Fixture): Record<string, string> {
   const file = join(fixture.home, "lastKnownGood.json");
-  return existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, string>) : {};
+  if (!existsSync(file)) return {};
+  const { "#stamps": _stamps, ...entries } = JSON.parse(readFileSync(file, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  return entries as Record<string, string>;
+}
+
+/** §04.5 — the reserved key that decides whether the entries above are due. */
+function stamps(fixture: Fixture): Record<string, number | "pinned"> {
+  const file = join(fixture.home, "lastKnownGood.json");
+  if (!existsSync(file)) return {};
+  const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+  return (raw["#stamps"] ?? {}) as Record<string, number | "pinned">;
+}
+
+/**
+ * A recorded default written by hand, with no stamp — the file every release
+ * before §04.6's TTL left behind, which reads as due for a re-check.
+ */
+function recordUnstamped(fixture: Fixture, entries: Record<string, string>): void {
+  writeFileSync(
+    join(fixture.home, "lastKnownGood.json"),
+    `${JSON.stringify(entries, undefined, 2)}\n`,
+  );
+}
+
+/**
+ * `install -g`, then the pin scrubbed off: a warm store holding the version,
+ * with a recorded default that reads as due. The rows below need both, because
+ * a default that cannot be *run* offline would fail on the download rather than
+ * on the question they are asking.
+ */
+async function warmUnstampedDefault(fixture: Fixture, reference: string): Promise<void> {
+  const installed = await run(["install", "-g", `yarn@${reference}`], {
+    ...fixture,
+    registry,
+    env: trusted(),
+  });
+  expect(installed.exitCode).toBe(0);
+  recordUnstamped(fixture, { yarn: reference });
 }
 
 /** The store shared by rows 97–100. */
@@ -210,5 +250,91 @@ describe("§13.9 default version and last-known-good", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.4\n");
     expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(true);
+  });
+
+  /* ---------------------------------------------------------------- *
+   * §04.6 — the recorded default's TTL
+   * ---------------------------------------------------------------- */
+
+  it("re-checks a recorded default that carries no stamp, and stamps what it finds", async () => {
+    const fixture = createFixture({});
+    recordUnstamped(fixture, { yarn: "1.0.0" });
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      registry,
+      env: trusted({ COREPACK_DEFAULT_TO_LATEST: "1" }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.22.4\n");
+    expect(lastKnownGood(fixture).yarn).toMatch(/^1\.22\.4/);
+    expect(typeof stamps(fixture).yarn).toBe("number");
+  });
+
+  it("leaves an unstamped default alone when the TTL is switched off", async () => {
+    const fixture = createFixture({});
+    await warmUnstampedDefault(fixture, "1.0.0");
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { ...DEAD, COREPACK_DEFAULT_TO_LATEST: "1", JUP_DEFAULT_TTL: "0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.0.0\n");
+  });
+
+  it("install -g pins the default, and the TTL never moves it", async () => {
+    const fixture = createFixture({});
+
+    expect(
+      (await run(["install", "-g", "yarn@1.0.0"], { ...fixture, registry, env: trusted() }))
+        .exitCode,
+    ).toBe(0);
+    expect(stamps(fixture).yarn).toBe("pinned");
+
+    // A dead registry proves the point twice over: the run needed no network,
+    // so the pin was never even re-checked, let alone moved to 1.22.4.
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { ...DEAD, COREPACK_DEFAULT_TO_LATEST: "1" },
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.0.0\n");
+  });
+
+  it("keeps a stale default when the re-check cannot reach the registry", async () => {
+    const fixture = createFixture({});
+    // The version has to be in the store, or the fallback would only get as far
+    // as a download this row has deliberately made impossible.
+    await warmUnstampedDefault(fixture, "1.0.0");
+
+    const result = await run(["yarn", "--version"], {
+      ...fixture,
+      env: { ...DEAD, COREPACK_DEFAULT_TO_LATEST: "1" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("1.0.0\n");
+    // Not stamped: the entry is still due, and the next run asks again.
+    expect(stamps(fixture).yarn).toBeUndefined();
+  });
+
+  /**
+   * §04.5 — the stamps ride inside the file, under a key entry lookups cannot
+   * see, so `cache clean` keeps them and `--all` takes them with the entries.
+   */
+  it("keeps the stamps in the file itself, so cache clean --all takes both", async () => {
+    const fixture = createFixture({});
+    expect(
+      (await run(["install", "-g", "yarn@1.0.0"], { ...fixture, registry, env: trusted() }))
+        .exitCode,
+    ).toBe(0);
+    expect(lastKnownGood(fixture)).toEqual({ yarn: expect.stringMatching(/^1\.0\.0/) });
+    expect(stamps(fixture).yarn).toBe("pinned");
+
+    expect((await run(["cache", "clean", "--all"], { ...fixture, registry })).exitCode).toBe(0);
+    expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(false);
   });
 });

@@ -23,7 +23,7 @@ rather than migrating them.
 
 ```
 <home>/
-├── lastKnownGood.json     # global default per tool (§04.5) — outside v1
+├── lastKnownGood.json     # global default per tool, plus §04.5's `#stamps` — outside v1
 ├── keys.json              # refreshed npm trust keys (§06.3) — outside v1
 ├── shims.json             # entries displaced by `enable --force` (§10.6)
 ├── self/<version>/        # jup's own copy (§7.11) — outside v1
@@ -225,6 +225,17 @@ and continue as if we had won. Anything else propagates.
 same version are content-identical and the loser discards its work; installs of
 different versions never collide. A lock would add stale-lock failures to solve a
 problem the rename already solves, and would cost the fast-path budget.
+
+The same rule governs the home-level JSON — `lastKnownGood.json`, `keys.json`
+(§04.5, §06.3). Each is replaced by a temp-then-rename in its own directory, so a
+reader sees one whole version or another and never a truncated file, which
+matters because these readers treat a damaged file as empty and would otherwise
+lose a default rather than notice. What the rename does **not** give is a guarded
+read-modify-write: two processes recording different tools can interleave, and
+the later rename wins. That costs at worst a dropped entry, and the next run
+resolves it again — so the mitigation is to read as late as possible rather than
+to lock. `recordLastKnownGood` is the one place that write happens for
+last-known-good, and it re-reads immediately before writing for that reason.
 
 A directory already present with **no** marker is not a lost race — it is an
 incomplete install — and is reported rather than reused or silently overwritten.

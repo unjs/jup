@@ -24,6 +24,7 @@ A real environment variable always beats the file.
 | `JUP_ENABLE_STRICT` | `0` | Do not error when the invoked tool differs from the project's; behave as if every command were transparent | yes |
 | `JUP_ENABLE_AUTO_PIN` | `1` | On `NoSpec`, resolve and write a pin before running (§03.6) | yes |
 | `JUP_DEFAULT_TO_LATEST` | `0` | Never query "latest", never auto-bump the last-known-good; use the compiled-in default | yes |
+| `JUP_DEFAULT_TTL` | hours, default `24` | How long a recorded global default stands before it is re-checked; `0` never expires, and `install -g` / `pack` pins are exempt (§04.6) | yes |
 | `JUP_ENABLE_NETWORK` | `0` | Refuse every network request | yes |
 | `JUP_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* tool. Unknown names may always use URLs | **no** |
 | `JUP_ENABLE_PRERELEASES` | `1` | Allow prereleases in implicit resolution | yes |

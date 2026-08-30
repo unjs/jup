@@ -29,6 +29,7 @@
 // resolves without loading anything. The stream getters below are not, which is
 // why they stay behind a function.
 const { styleText } = process.getBuiltinModule("node:util");
+import { SYSTEM_ENV } from "../config/env-vars.ts";
 
 type Format = Parameters<typeof styleText>[0];
 
@@ -203,4 +204,25 @@ export function err(text: string): void {
  */
 export function warn(message: string): void {
   console.warn(markers(message, errColors));
+}
+
+/**
+ * A note for whoever is debugging, on the debug channel.
+ *
+ * `DEBUG=jup` and `DEBUG=corepack` enable this compatibility channel (§11.5),
+ * as a debugging aid, not a substitute for command output — so this is the one
+ * place a message is allowed to be conditional on it. Both names are honoured,
+ * for the same reason §11.6 keeps both env-var prefixes.
+ *
+ * Not routed through `advisory()`: `DEBUG=jup` is a request for *more* output,
+ * and the more specific ask wins over §11.3's blanket mute.
+ */
+export function debugNote(message: string): void {
+  const debug = process.env[SYSTEM_ENV.DEBUG];
+  if (
+    debug === "*" ||
+    (debug !== undefined && (debug.includes("jup") || debug.includes("corepack")))
+  ) {
+    warn(`⚠ ${errColors.dim(message)}`);
+  }
 }

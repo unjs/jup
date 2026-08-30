@@ -53,12 +53,13 @@ import {
   isInsideInstallFolder,
   listInstalled,
   MARKER_NAME,
+  PINNED_STAMP,
   promote,
   readLastKnownGood,
   readMarker,
+  recordLastKnownGood,
   referenceWithHash,
   UNATTRIBUTABLE_HASH,
-  writeLastKnownGood,
   writeMarker,
 } from "../cache/store.ts";
 import { create, extract, listEntries } from "../cache/tar.ts";
@@ -123,10 +124,12 @@ async function installOrExplain(
  * default even when the current default is 4.x.
  */
 function setLastKnownGood(name: string, reference: string): void {
-  const lkg = readLastKnownGood();
-  lkg[name] = reference;
+  // §04.5 — *pinned*, not merely current: the user named this version, so
+  // §04.6's TTL leaves it alone until they name another. Every entry these two
+  // commands did not write ages out and is re-checked.
+  //
   // Swallows `EROFS` itself (§07.8): recording a default must never fail a run.
-  writeLastKnownGood(lkg);
+  recordLastKnownGood(name, reference, PINNED_STAMP);
 }
 
 function fileStream(path: string): ReadableStream<Uint8Array> {

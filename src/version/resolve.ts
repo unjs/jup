@@ -12,7 +12,13 @@ import {
   rcompare,
   satisfiesWithPrereleases,
 } from "./semver.ts";
-import { findInstalledVersion, readLastKnownGood, writeLastKnownGood } from "../cache/store.ts";
+import {
+  findInstalledVersion,
+  isDefaultFresh,
+  readLastKnownGood,
+  recordLastKnownGood,
+} from "../cache/store.ts";
+import { debugNote } from "../utils/log.ts";
 import type { Spec, LazyResolvedSpec, ResolvedSpec } from "../types.ts";
 
 export interface ResolveOptions {
@@ -172,9 +178,11 @@ export async function resolveSpec(
 /**
  * §04.6 — the global default, consulted only when the project has no usable spec.
  *
- * Step 1 (a last-known-good hit) returns with **no network**, which is why a
- * machine that has ever run online keeps working offline. `COREPACK_DEFAULT_TO_LATEST=0`
- * returns the compiled-in default, also with no network.
+ * Step 1 (a fresh last-known-good hit) returns with **no network**, which is why
+ * a machine that has ever run online keeps working offline.
+ * `COREPACK_DEFAULT_TO_LATEST=0` returns the compiled-in default, also with no
+ * network. An entry the TTL has aged out is re-checked but never *discarded*: it
+ * stands as the answer whenever the check cannot be made.
  */
 export async function getDefaultVersion(name: string): Promise<string> {
   const definition = getDefinition(name);
@@ -182,49 +190,83 @@ export async function getDefaultVersion(name: string): Promise<string> {
     throw new UsageError(messages.unsupportedByBuild(name));
   }
 
-  // 1 — the recorded default wins outright, and reading it is the only I/O on
-  // this path.
+  // 1 — the recorded default answers, unless §04.6's TTL has aged it out. The
+  // repair happens before the freshness test, not inside it, so a stale entry
+  // that fails to refresh still falls back to a *healed* reference.
   const lkg = readLastKnownGood();
-  const recorded = lkg[name];
-  if (recorded !== undefined) {
-    // §02.4 — recorded per-host references cannot carry digests. Treat such an
-    // LKG entry as damaged derived state: retain the version and drop the suffix.
-    const parsed = parse(recorded);
-    if (parsed !== null && parsed.build.length > 0 && isPerHost({ name, reference: recorded })) {
-      const healed = parsed.version;
-      // Rewrite it, so the repair is paid once rather than on every run and so
-      // `info` stops reporting a digest that means nothing. Best-effort for the
-      // same reason the write below is (§07.8): an unwritable store must still
-      // be able to *run*.
-      try {
-        writeLastKnownGood({ ...lkg, [name]: healed });
-      } catch {
-        // Intentionally ignored — the in-memory repair is what this run needs.
-      }
-      return healed;
-    }
+  const recorded = healRecordedDefault(name, lkg);
+  if (recorded !== undefined && isDefaultFresh(name)) {
     return recorded;
   }
 
-  // 2 — the compiled-in, hash-pinned version. Still no network.
+  // 2 — the compiled-in, hash-pinned version. Still no network. A recorded entry
+  // outranks it even when stale: turning the TTL's re-check into a silent switch
+  // to a different version is the one thing this step was never asked to do.
   if (envDisabled(ENV.DEFAULT_TO_LATEST)) {
-    return definition.default;
+    return recorded ?? definition.default;
+  }
+
+  // The refresh is the only reason to be here, and it needs the network. Ask
+  // before dialling so §11.1's switch reads as "keep what you have", not as a
+  // failure this function then has to swallow.
+  if (recorded !== undefined && envDisabled(ENV.ENABLE_NETWORK)) {
+    return recorded;
   }
 
   // 3 — the only branch that reaches the registry.
-  const { fetchLatestStableVersion } = await loadRegistry();
-  const reference = await fetchLatestStableVersion(definition.fetchLatestFrom);
+  let reference: string;
+  try {
+    const { fetchLatestStableVersion } = await loadRegistry();
+    reference = await fetchLatestStableVersion(definition.fetchLatestFrom);
+  } catch (error) {
+    // An entry that is merely *stale* is still an answer, and until §04.6 grew a
+    // TTL this path was never even reached for it. Falling back on **any**
+    // failure — not just §04.4's availability set — is what keeps that promise:
+    // a rotated token, a proxy that 403s, a registry that lost the package must
+    // not start failing runs that worked yesterday. With no entry there is
+    // nothing to fall back to and the failure is the answer.
+    if (recorded === undefined) throw error;
+    debugNote(`kept the recorded default ${name}@${recorded}: ${String(error)}`);
+    return recorded;
+  }
 
   // Recording is bookkeeping: an unwritable store must degrade (the next run
   // asks the registry again), never fail the run. `writeLastKnownGood` already
-  // swallows filesystem errors, so this only guards the unexpected.
+  // swallows filesystem errors, so this only guards the unexpected. The
+  // reference and its stamp are one `rename`, so no crash can separate them.
   try {
-    writeLastKnownGood({ ...lkg, [name]: reference });
+    recordLastKnownGood(name, reference, Date.now());
   } catch {
     // Intentionally ignored — see above.
   }
 
   return reference;
+}
+
+/**
+ * §02.4 — recorded per-host references cannot carry digests. Treat such an LKG
+ * entry as damaged derived state: retain the version and drop the suffix.
+ */
+function healRecordedDefault(name: string, lkg: Record<string, string>): string | undefined {
+  const recorded = lkg[name];
+  if (recorded === undefined) return undefined;
+
+  const parsed = parse(recorded);
+  if (parsed === null || parsed.build.length === 0) return recorded;
+  if (!isPerHost({ name, reference: recorded })) return recorded;
+
+  const healed = parsed.version;
+  // Rewrite it, so the repair is paid once rather than on every run and so
+  // `info` stops reporting a digest that means nothing. The stamp is left as it
+  // was: this changes the reference's *spelling*, not when it was last checked.
+  // Best-effort for the same reason §04.6's own write is (§07.8): an unwritable
+  // store must still be able to *run*.
+  try {
+    recordLastKnownGood(name, healed);
+  } catch {
+    // Intentionally ignored — the in-memory repair is what this run needs.
+  }
+  return healed;
 }
 
 /**

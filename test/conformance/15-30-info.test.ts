@@ -432,6 +432,10 @@ describe("§09.9 corepack info", () => {
     expect(report.defaults).toEqual({
       path: join(fixture.home, "lastKnownGood.json"),
       entries: { yarn: "1.22.4" },
+      // §04.6 — a hand-written file has no stamp, so the entry is due for a
+      // re-check.
+      stamps: {},
+      ttlHours: 24,
     });
     expect(report.packageManagers.find((entry) => entry.name === "yarn")?.recordedDefault).toBe(
       "1.22.4",
@@ -572,6 +576,8 @@ describe("§12.6 cache list", () => {
       defaults: {
         path: join(fixture.home, "lastKnownGood.json"),
         entries: { yarn: "1.22.4" },
+        stamps: {},
+        ttlHours: 24,
       },
     });
     expect(registry.requests).toEqual([]);

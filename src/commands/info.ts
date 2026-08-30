@@ -40,13 +40,17 @@ import { resolveInstallDirectory } from "./shims.ts";
 import { isOurShim } from "../run/exec.ts";
 import { tlsSettings } from "../net/tls.ts";
 import {
+  defaultTtlMs,
   findInstalledVersion,
   getHomeFolder,
   getInstallFolder,
   LAST_KNOWN_GOOD_NAME,
   listInstalled,
+  PINNED_STAMP,
   readLastKnownGood,
+  readLastKnownGoodStamps,
 } from "../cache/store.ts";
+import type { LastKnownGoodStamp } from "../cache/store.ts";
 import type { Spec, Manifest } from "../types.ts";
 
 /**
@@ -236,7 +240,19 @@ export interface InfoReport {
     writable: boolean;
     versions: Array<{ name: string; version: string }>;
   };
-  defaults: { path: string; entries: Record<string, string> };
+  defaults: {
+    path: string;
+    entries: Record<string, string>;
+    /**
+     * §04.5 — when each entry above was last taken from the registry, or
+     * `"pinned"` for one the user chose outright. A name missing here is due
+     * for a re-check (§04.6). Stored inside the file at `path`, under a
+     * reserved key that entry lookups cannot see.
+     */
+    stamps: Record<string, LastKnownGoodStamp>;
+    /** §04.6 — the window an entry stands for. `0` disables the re-check. */
+    ttlHours: number;
+  };
   shims: { directory: string | null; problem: string | null; entries: ShimInfo[] };
 }
 /**
@@ -284,7 +300,12 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
       writable: isWritable(installFolder),
       versions,
     },
-    defaults: { path: join(getHomeFolder(), LAST_KNOWN_GOOD_NAME), entries: defaults },
+    defaults: {
+      path: join(getHomeFolder(), LAST_KNOWN_GOOD_NAME),
+      entries: defaults,
+      stamps: readLastKnownGoodStamps(),
+      ttlHours: defaultTtlMs() / (60 * 60 * 1000),
+    },
     shims: describeShims(),
   };
 }
@@ -1141,7 +1162,9 @@ export function formatReport(report: InfoReport): string {
   if (defaults.length === 0) {
     out.push(line(``, `(none recorded)`));
   } else {
-    for (const name of defaults) out.push(line(``, `${name}: ${report.defaults.entries[name]!}`));
+    for (const name of defaults) {
+      out.push(line(``, `${name}: ${report.defaults.entries[name]!}${stampNote(report, name)}`));
+    }
   }
 
   out.push(section(`Shims`));
@@ -1197,11 +1220,33 @@ export function formatCacheList(report: InfoReport): string {
   if (defaults.length === 0) {
     out.push(line(``, `(none recorded)`));
   } else {
-    for (const name of defaults) out.push(line(``, `${name}: ${report.defaults.entries[name]!}`));
+    for (const name of defaults) {
+      out.push(line(``, `${name}: ${report.defaults.entries[name]!}${stampNote(report, name)}`));
+    }
   }
 
   return out.join(``);
 }
+/**
+ * §04.6 — why a recorded default is or is not about to be re-checked.
+ *
+ * Silent for the ordinary case (stamped, inside its window): a report is read to
+ * find the *unexpected*, and annotating every healthy line hides the one that
+ * matters. `(pinned)` and `(expired)` are the two answers to "why did this move,
+ * or why will it not".
+ */
+function stampNote(report: InfoReport, name: string): string {
+  if (report.defaults.ttlHours === 0) return ``;
+
+  const stamp = report.defaults.stamps[name];
+  if (stamp === PINNED_STAMP) return `  (pinned)`;
+
+  const now = Date.now();
+  const ttl = report.defaults.ttlHours * 60 * 60 * 1000;
+  if (stamp === undefined || !(stamp + ttl > now && stamp <= now)) return `  (expired)`;
+  return ``;
+}
+
 /** `--json`, and nothing else. A typo must not be silently ignored. */
 function wantsJson(args: string[], command: string): boolean {
   let json = false;

@@ -164,10 +164,22 @@ const CLI_DIST_PACKUMENT = {
   "dist-tags": { latest: "4.9.0", stable: "4.9.0", canary: "4.10.0-rc.1" },
 };
 
-async function startYarnServers(): Promise<{ npm: TestServer; berry: TestServer }> {
+async function startYarnServers(options?: {
+  /** §04.6 — what `/<name>/latest` answers, for the rows about a failed refresh. */
+  latestStatus?: number;
+}): Promise<{ npm: TestServer; berry: TestServer }> {
+  const latest: Route =
+    options?.latestStatus === undefined
+      ? { version: "1.22.9", dist: { shasum: "deadbeef" } }
+      : (response: ServerResponse) => {
+          response.writeHead(options.latestStatus!, { "content-type": "application/json" });
+          response.end(`{"error":"nope"}`);
+        };
+
   const npm = await startServer({
     "/yarn": YARN_PACKUMENT,
-    "/yarn/latest": { version: "1.22.9", dist: { shasum: "deadbeef" } },
+    "/yarn/latest": latest,
+    "/deno/latest": latest,
     "/pnpm": { versions: { "10.0.0": {} }, "dist-tags": { latest: "10.0.0" } },
     "/@yarnpkg/cli-dist": CLI_DIST_PACKUMENT,
   });
@@ -204,14 +216,43 @@ function seedInstalled(name: string, version: string, hash?: string): void {
   );
 }
 
-function seedLastKnownGood(entries: Record<string, string>): void {
-  writeFileSync(join(home, "lastKnownGood.json"), `${JSON.stringify(entries, null, 2)}\n`);
+/**
+ * A recorded default, stamped fresh unless the caller says otherwise.
+ *
+ * Fresh is the right default: §04.6 step 3 writes the reference and its stamp
+ * together, so an entry jup itself recorded always has one. `stamps: {}` is how
+ * a row asks for the *unstamped* file an older release left behind.
+ */
+function seedLastKnownGood(
+  entries: Record<string, string>,
+  stamps?: Record<string, number | "pinned">,
+): void {
+  const now = Date.now();
+  const written =
+    stamps ?? Object.fromEntries(Object.keys(entries).map((name) => [name, now] as const));
+  const file = Object.keys(written).length === 0 ? entries : { ...entries, "#stamps": written };
+  writeFileSync(join(home, "lastKnownGood.json"), `${JSON.stringify(file, null, 2)}\n`);
 }
 
+function readStamps(): Record<string, number | "pinned"> {
+  return (rawLastKnownGoodFile()?.["#stamps"] ?? {}) as Record<string, number | "pinned">;
+}
+
+/** One TTL window, in ms — §04.6's default of 24 hours. */
+const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** The recorded defaults, without §04.5's reserved stamps key. */
 function readLastKnownGoodFile(): Record<string, string> | null {
+  const raw = rawLastKnownGoodFile();
+  if (raw === null) return null;
+  const { "#stamps": _stamps, ...entries } = raw;
+  return entries as Record<string, string>;
+}
+
+function rawLastKnownGoodFile(): Record<string, unknown> | null {
   const path = join(home, "lastKnownGood.json");
   if (!existsSync(path)) return null;
-  return JSON.parse(readFileSync(path, "utf8")) as Record<string, string>;
+  return JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -688,6 +729,125 @@ describe("getDefaultVersion (§04.6)", () => {
   it("rejects an unknown package manager", async () => {
     const error = await rejection(getDefaultVersion("cutlery"));
     expect(error.message).toBe(messages.unsupportedByBuild("cutlery"));
+  });
+
+  /* ---------------------------------------------------------------- *
+   * §04.6 — the recorded default's TTL
+   * ---------------------------------------------------------------- */
+
+  it("re-checks an entry whose stamp has aged out, and re-stamps it", async () => {
+    const { npm } = await startYarnServers();
+    seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - DEFAULT_TTL_MS - 1 });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.9+sha1.deadbeef" });
+    expect(readStamps().yarn).toBeGreaterThan(Date.now() - 60_000);
+  });
+
+  /**
+   * The upgrade path: every `lastKnownGood.json` written before the stamps
+   * sidecar existed has no stamp at all, and a stamp that is missing reads as
+   * expired (§04.6). Without this row an 11.x default recorded years ago would
+   * stand forever, which is the bug the TTL was added for.
+   */
+  it("treats an entry with no stamp at all as expired", async () => {
+    const { npm } = await startYarnServers();
+    seedLastKnownGood({ yarn: "1.0.0" }, {});
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+  });
+
+  /** A home restored from an image, or written under a fast clock (§04.6). */
+  it("treats a stamp further out than one window as expired", async () => {
+    const { npm } = await startYarnServers();
+    seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() + DEFAULT_TTL_MS * 3 });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+  });
+
+  it("never expires a pinned entry, however old the stamp", async () => {
+    const { npm, berry } = await startYarnServers();
+    seedLastKnownGood({ yarn: "1.0.0" }, { yarn: "pinned" });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("never expires anything when JUP_DEFAULT_TTL is 0", async () => {
+    const { npm, berry } = await startYarnServers();
+    process.env.JUP_DEFAULT_TTL = "0";
+    seedLastKnownGood({ yarn: "1.0.0" }, {});
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("honours a shorter JUP_DEFAULT_TTL", async () => {
+    const { npm } = await startYarnServers();
+    process.env.JUP_DEFAULT_TTL = "1";
+    seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - 2 * 60 * 60 * 1000 });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+  });
+
+  /** §04.1's rule for every numeric variable that is not a supply-chain control. */
+  it("falls back to 24 hours on an unparseable JUP_DEFAULT_TTL", async () => {
+    const { npm, berry } = await startYarnServers();
+    process.env.JUP_DEFAULT_TTL = "24h";
+    seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - 60 * 60 * 1000 });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  /**
+   * The promise the TTL must not break: before it existed this path never asked
+   * the registry at all, so a failure of *any* kind — not just §04.4's
+   * availability set — keeps the recorded answer rather than failing a run that
+   * worked yesterday.
+   */
+  it("keeps the stale entry when the refresh fails", async () => {
+    const { npm } = await startYarnServers({ latestStatus: 403 });
+    seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - DEFAULT_TTL_MS - 1 });
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect(npm.requests).toEqual(["/yarn/latest"]);
+    // Not re-stamped: the entry is still due, and the next run asks again.
+    expect(readStamps().yarn).toBeLessThan(Date.now() - DEFAULT_TTL_MS);
+  });
+
+  it("keeps a stale entry rather than the compiled-in default under DEFAULT_TO_LATEST=0", async () => {
+    const { npm, berry } = await startYarnServers();
+    process.env.COREPACK_DEFAULT_TO_LATEST = "0";
+    seedLastKnownGood({ yarn: "1.0.0" }, {});
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  it("keeps a stale entry without dialling when the network is disabled", async () => {
+    const { npm, berry } = await startYarnServers();
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+    seedLastKnownGood({ yarn: "1.0.0" }, {});
+
+    await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
+    expect([...npm.requests, ...berry.requests]).toEqual([]);
+  });
+
+  /** §02.4's repair happens before the freshness test, so it survives a failed refresh. */
+  it("still heals a per-host entry whose refresh fails", async () => {
+    await startYarnServers({ latestStatus: 500 });
+    seedLastKnownGood(
+      { deno: "2.9.5+sha512.26dfc0709884aed516f64ac6c25c140ec9b572836d99fb61890e09b52085f8936" },
+      {},
+    );
+
+    await expect(getDefaultVersion("deno")).resolves.toBe("2.9.5");
+    expect(readLastKnownGoodFile()).toEqual({ deno: "2.9.5" });
   });
 
   /**

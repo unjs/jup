@@ -593,9 +593,49 @@ export function findInstalledVersion(name: string, range: string): string | null
 
 /**
  * §04.5 — maximally forgiving. Every failure mode returns `{}` rather than
- * erroring, and entries whose value is not a string are dropped.
+ * erroring, and entries whose value is not a string are dropped — which is what
+ * makes {@link STAMPS_KEY}'s object value invisible here, and to every older
+ * build that reads this file.
  */
 export function readLastKnownGood(): Record<string, string> {
+  return readLastKnownGoodParts().entries;
+}
+
+/**
+ * §04.5 — the whole file, parsed once.
+ *
+ * Callers that want both halves take them from **one** read. There is no lock
+ * here (§07.5) and a write commits with a single `rename`, so each read is
+ * self-consistent but two of them can straddle a concurrent write and pair one
+ * version's entries with another's stamps. The cost of that would only ever be a
+ * stamp attached to a reference it did not describe — one stale answer or one
+ * extra request — but it is avoidable for the price of not reading twice.
+ */
+function readLastKnownGoodParts(): {
+  entries: Record<string, string>;
+  stamps: Record<string, LastKnownGoodStamp>;
+} {
+  const data = readLastKnownGoodFile() as Record<string, unknown>;
+
+  const entries: Record<string, string> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === "string") entries[key] = value;
+  }
+
+  const stamps: Record<string, LastKnownGoodStamp> = {};
+  const raw = data[STAMPS_KEY];
+  if (raw && typeof raw === "object") {
+    for (const [key, value] of Object.entries(raw)) {
+      if (value === PINNED_STAMP) stamps[key] = PINNED_STAMP;
+      else if (typeof value === "number" && Number.isFinite(value)) stamps[key] = value;
+    }
+  }
+
+  return { entries, stamps };
+}
+
+/** The parsed file, or `{}` for every way it can fail to be one. */
+function readLastKnownGoodFile(): object {
   let text: string;
   try {
     text = readFileSync(join(getHomeFolder(), LAST_KNOWN_GOOD_NAME), "utf8");
@@ -614,19 +654,31 @@ export function readLastKnownGood(): Record<string, string> {
 
   // Arrays deliberately pass; their numeric keys are harmless.
   if (!data || typeof data !== "object") return {};
-
-  const lkg: Record<string, string> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (typeof value === "string") lkg[key] = value;
-  }
-  return lkg;
+  return data;
 }
 
-/** §04.5 — write to a temp file in the same directory and rename over. `EROFS` is swallowed. */
-export function writeLastKnownGood(lkg: Record<string, string>): void {
+/**
+ * §04.5 — write to a temp file in the same directory and rename over. `EROFS` is
+ * swallowed.
+ *
+ * Omitting `stamps` **keeps** the ones already on disk: a caller changing which
+ * version is recorded is not thereby saying anything about when it was last
+ * checked, and the safe default for a whole-map write is not to silently drop a
+ * key it never mentioned. Pass `{}` to clear them.
+ *
+ * An empty stamp map writes **no** {@link STAMPS_KEY} at all, so a store that
+ * has never needed one keeps a file byte-identical to what every earlier release
+ * wrote.
+ */
+export function writeLastKnownGood(
+  lkg: Record<string, string>,
+  stamps?: Record<string, LastKnownGoodStamp>,
+): void {
   const home = getHomeFolder();
   const target = join(home, LAST_KNOWN_GOOD_NAME);
-  const content = `${JSON.stringify(lkg, null, 2)}\n`;
+  const kept = stamps ?? readLastKnownGoodStamps();
+  const data = Object.keys(kept).length === 0 ? lkg : { ...lkg, [STAMPS_KEY]: kept };
+  const content = `${JSON.stringify(data, null, 2)}\n`;
 
   let tmp: string | undefined;
   try {
@@ -646,6 +698,118 @@ export function writeLastKnownGood(lkg: Record<string, string>): void {
     if (errorCode(error) !== undefined) return;
     throw error;
   }
+}
+
+/**
+ * §04.5 — the stamp for one recorded default: when it was last taken from the
+ * registry, or {@link PINNED_STAMP} for a default the user chose outright.
+ */
+export type LastKnownGoodStamp = number | typeof PINNED_STAMP;
+
+/**
+ * §04.5 — `install -g` and `pack` write this instead of a timestamp.
+ *
+ * `jup install -g yarn@1.22.22` is a statement about what the user wants to run,
+ * not a cache of what the registry last said, so §04.6's TTL must not quietly
+ * carry it to 4.x overnight. A sentinel rather than a far-future timestamp: the
+ * distinction is "explicit", not "expires late", and a clock that jumps must not
+ * be able to turn one into the other.
+ */
+export const PINNED_STAMP = "pinned";
+
+/**
+ * §04.5 — where the stamps live *inside* `lastKnownGood.json`.
+ *
+ * One file, not two. The reference and its stamp are one fact and land in one
+ * `rename`, so no crash can leave a recorded default whose stamp says something
+ * else, and there is no second file to drift, race or clean up.
+ *
+ * A **reserved key** rather than a richer value, because the file's shape —
+ * `{"<tool>": "<reference>"}` — is what {@link readLastKnownGood} and any
+ * corepack sharing this `COREPACK_HOME` read. Both look entries up *by tool
+ * name* and never enumerate, so a key that cannot be one is invisible to them:
+ * this build's reader already drops every non-string value, and an older one
+ * does the same. Tool names come from the compiled-in table (§02.5), so `#` at
+ * the front makes the collision impossible rather than merely unlikely.
+ */
+export const STAMPS_KEY = "#stamps";
+
+/**
+ * §04.5 — as forgiving as {@link readLastKnownGood}, and for the same reason.
+ *
+ * A stamp this function drops reads as expired (§04.6), so corruption costs one
+ * registry request, never a wrong answer.
+ */
+export function readLastKnownGoodStamps(): Record<string, LastKnownGoodStamp> {
+  return readLastKnownGoodParts().stamps;
+}
+
+/**
+ * §04.5 — record one default and, optionally, restamp it.
+ *
+ * Read-modify-write, so the other tools' entries and every stamp this call is
+ * not about survive. Omitting `stamp` leaves the existing one alone: §02.4's
+ * repair and §04.8's bump both change *which version* is recorded without
+ * changing when it was last taken from the registry.
+ */
+export function recordLastKnownGood(
+  name: string,
+  reference: string,
+  stamp?: LastKnownGoodStamp,
+): void {
+  // One read, and it happens as late as possible. There is no lock (§07.5), so
+  // this is a read-modify-write whose loser is whoever renames first; keeping
+  // the window to the two statements below is the whole of the mitigation, and
+  // it is why the caller does not hand its own much older map back to us.
+  const { entries, stamps } = readLastKnownGoodParts();
+  entries[name] = reference;
+  if (stamp !== undefined) stamps[name] = stamp;
+  writeLastKnownGood(entries, stamps);
+}
+
+/**
+ * §04.6 — how long a recorded default stands before it is re-checked, in hours.
+ *
+ * `0` disables the TTL, which is the behaviour every version before this one
+ * had: the entry stands until `install -g`, `pack`, §04.8's bump or a hand edit
+ * replaces it. Unlike `JUP_MINIMUM_RELEASE_AGE`, garbage falls back to the
+ * default instead of being refused — §04.1's rule for every numeric variable
+ * that is not a supply-chain control. A mistyped TTL costs one request a day; it
+ * cannot turn a protection off, because it is not one.
+ */
+export function defaultTtlMs(): number {
+  const raw = readEnv(ENV.DEFAULT_TTL);
+  const hours = raw === undefined || raw.trim() === "" ? DEFAULT_TTL_HOURS : Number(raw.trim());
+  if (!Number.isFinite(hours) || hours < 0) return DEFAULT_TTL_HOURS * 60 * 60 * 1000;
+  return hours * 60 * 60 * 1000;
+}
+
+/** §04.6 — the TTL a machine gets when it says nothing. */
+const DEFAULT_TTL_HOURS = 24;
+
+/**
+ * §04.6 — whether the recorded default may answer without asking the registry.
+ *
+ * A **missing** stamp reads as expired, exactly as §04.4's memo does with a
+ * missing `expires`, and so does one further out than a whole TTL window from
+ * now — a home restored from an image, or written under a fast clock, would
+ * otherwise pin a default for as long as its stamp claimed. That also makes the
+ * upgrade to a stamped store self-healing: every default already on disk is
+ * re-checked once, which is the whole point of the feature.
+ *
+ * {@link PINNED_STAMP} never expires: §04.5's sentinel marks a default the user
+ * stated outright, and a TTL is a statement about *derived* state.
+ */
+export function isDefaultFresh(name: string): boolean {
+  const ttl = defaultTtlMs();
+  if (ttl === 0) return true;
+
+  const stamp = readLastKnownGoodStamps()[name];
+  if (stamp === PINNED_STAMP) return true;
+  if (stamp === undefined) return false;
+
+  const now = Date.now();
+  return stamp + ttl > now && stamp <= now;
 }
 
 /**
@@ -684,8 +848,9 @@ export function bumpLastKnownGood(locator: ResolvedSpec): void {
     return;
   }
 
-  lkg[locator.name] = locator.reference;
-  writeLastKnownGood(lkg);
+  // No restamp: §04.6's stamp records when the *registry* last chose, and an
+  // install is not that. A pinned entry advanced here stays pinned.
+  recordLastKnownGood(locator.name, locator.reference);
 }
 
 /**

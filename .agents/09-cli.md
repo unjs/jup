@@ -196,6 +196,9 @@ Prints, with **no request of any kind**, what the next run would do and why:
 * every installed version, every shim and what each name on `PATH` currently
   resolves to — including entries that are not shimmed by default, because for
   `bun` the interesting answer is usually someone else's install;
+* the recorded global defaults, each annotated `(pinned)` or `(expired)` when
+  §04.6's TTL has something to say about it — a healthy entry is annotated with
+  nothing, because a report is read to find the unexpected;
 * the effective `.npmrc` settings with the file and key that supplied each, and
   what TLS verification the next request would do and who decided;
 * the environment snapshot, taken **before** the env file is applied. Credentials

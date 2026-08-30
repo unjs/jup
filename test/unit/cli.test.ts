@@ -285,9 +285,17 @@ async function memo(resolutions: Record<string, unknown>, dir = project): Promis
 }
 
 function lastKnownGood(): Record<string, string> {
-  const file = join(home, "lastKnownGood.json");
+  return entriesOf(join(home, "lastKnownGood.json"));
+}
+
+/** The recorded defaults, without §04.5's reserved stamps key. */
+function entriesOf(file: string): Record<string, string> {
   if (!existsSync(file)) return {};
-  return JSON.parse(readFileSync(file, "utf8")) as Record<string, string>;
+  const { "#stamps": _stamps, ...entries } = JSON.parse(readFileSync(file, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  return entries as Record<string, string>;
 }
 
 async function writeLastKnownGood(value: Record<string, string>): Promise<void> {
@@ -645,11 +653,10 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     expect(requested).toEqual([]);
 
     // §07.10 — activation unless `--cache-only`.
-    const lkg = JSON.parse(readFileSync(join(fresh, "lastKnownGood.json"), "utf8")) as Record<
-      string,
-      string
-    >;
-    expect(lkg).toEqual({ yarn: "2.2.2", pnpm: "5.8.0" });
+    expect(entriesOf(join(fresh, "lastKnownGood.json"))).toEqual({
+      yarn: "2.2.2",
+      pnpm: "5.8.0",
+    });
 
     // Nothing is left behind in the install folder besides the two subtrees.
     await rm(fresh, { recursive: true, force: true });

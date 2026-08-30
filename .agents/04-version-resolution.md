@@ -258,19 +258,89 @@ the value is unchanged. A plain truncating write would let two concurrent
 processes interleave into a truncated file; because reads tolerate corruption,
 the failure would be silent, and the global default would simply vanish.
 
+### The stamps
+
+`#stamps`, a reserved key **inside** the same file, holding
+`{"<name>": <ms>|"pinned"}`: when each default was last taken from the registry,
+which is what §4.6's TTL reads.
+
+```jsonc
+{ "pnpm": "12.1.0",
+  "yarn": "4.18.0+sha512.…",
+  "#stamps": { "pnpm": 1767225600000, "yarn": "pinned" } }
+```
+
+One file, not two: a reference and its stamp are one fact and land in one
+`rename`, so no crash leaves a default whose stamp says otherwise, and there is
+no second file to drift, race or clean up.
+
+A reserved **key** rather than a richer **value**, because the file's shape is
+`{"<tool>": "<reference>"}` and its readers — this build's, an older build's, a
+corepack sharing the `COREPACK_HOME` — look entries up by tool name and never
+enumerate. Every one of them already drops a non-string value, so the key is
+invisible to all of them, and a default stays readable exactly where it has
+always been. Tool names come from the compiled-in table (§02.5), so `#` at the
+front makes a collision impossible rather than merely unlikely. A file with no
+stamps is written without the key at all.
+
+| Value | Written by | Meaning |
+|---|---|---|
+| a timestamp | §4.6 step 3 | last taken from the registry; expires one TTL later |
+| `"pinned"` | `install -g`, `pack` | the user named this version; never expires |
+| absent | anything else | due for a re-check |
+
+Reading is as forgiving as the rest of the file: anything unparseable reads as
+absent, which costs one request and never a wrong answer. Entries and stamps come
+from **one** parse, so a concurrent write cannot pair one version's entries with
+another's stamps. §4.8's bump and §02.4's
+repair both leave the stamp alone — neither is a `latest` fetch, and a pinned
+entry either one advances stays pinned.
+
 ## 4.6 Default version selection
 
 Consulted lazily, only when the project has no usable spec:
 
 ```
-1. lastKnownGood has an entry for this tool → return it            [NO NETWORK]
-2. JUP_DEFAULT_TO_LATEST=0 → return the compiled-in default        [NO NETWORK]
-3. fetch the latest stable version                                 [NETWORK]
-   record it as the new last-known-good, swallowing any error
+0. lastKnownGood has an entry carrying a per-host digest → repair it in place
+1. lastKnownGood has an entry and its stamp is fresh → return it    [NO NETWORK]
+2. JUP_DEFAULT_TO_LATEST=0 → return the entry, else the compiled-in default
+                                                                    [NO NETWORK]
+2b. an entry exists and COREPACK_ENABLE_NETWORK=0 → return it       [NO NETWORK]
+3. fetch the latest stable version                                  [NETWORK]
+   success → record it and stamp it, swallowing any filesystem error
+   failure → return the recorded entry; with no entry, the failure is the answer
 ```
 
 Step 1 is why a machine that has ever run online keeps working offline without a
-project spec.
+project spec. Step 0 is §02.4's repair, and it happens *before* the freshness
+test so that a stale entry whose refresh fails still falls back to a healed
+reference.
+
+### The TTL
+
+`JUP_DEFAULT_TTL` (hours, default `24`, `0` disables) is how long a recorded
+default stands before step 1 stops answering. A **missing** stamp reads as
+expired, as §4.4's memo does with a missing `expires`, and so does one further
+out than a whole window from now — a home restored from an image, or written
+under a fast clock, would otherwise pin a default for as long as its stamp
+claimed. The missing-stamp rule is also the upgrade path: every
+`lastKnownGood.json` written before `#stamps` existed is re-checked once.
+
+Unlike `JUP_MINIMUM_RELEASE_AGE`, an unparseable or negative value falls back to
+the default rather than being refused. §4.1's rule applies because this is not a
+supply-chain control: a mistyped TTL costs one request a day, and cannot turn a
+protection off.
+
+An expired entry is **re-checked, never discarded**. Steps 2 and 2b return it
+rather than the compiled-in default, and a failed step 3 returns it whatever the
+failure was — a wider fallback than §4.4's availability-only rule, because until
+the TTL existed this path made no request at all, and a rotated token or a
+proxy that 403s must not start failing runs that worked yesterday. The stamp is
+not advanced, so the next run asks again. `DEBUG=jup` names what went wrong.
+
+`install -g` and `pack` write `"pinned"` instead of a timestamp: they record a
+version the user named, and a TTL is a statement about derived state. §4.8's
+bump can still advance such an entry, within its major, and it stays pinned.
 
 `fetchLatestStableVersion` by registry type:
 
@@ -285,14 +355,18 @@ project spec.
   bare for such an entry.
 * **url** — `GET spec.url` and return `data[fields.tags].stable`. No hash.
 
-`JUP_MINIMUM_RELEASE_AGE` applies here as it does to any tag. Failure in the npm
-path is rethrown wrapped in the message naming both escape hatches (§12).
+`JUP_MINIMUM_RELEASE_AGE` applies here as it does to any tag. With no recorded
+entry to fall back on, failure in the npm path is rethrown wrapped in the message
+naming both escape hatches (§12).
 
 ### Transparent-command fallback
 
 When the invocation is transparent (§01.4) and the entry declares
 `transparent.default`, that literal is the fallback and `getDefaultVersion` is not
-consulted at all — no LKG read, no network. It is a **floor**, applied major-wise:
+consulted at all — so no TTL, no re-check and no network; the recorded entry is
+read and believed however old it is, because §01.4's path is offline by contract
+and any ordinary run refreshes the entry it shares. It is a **floor**, applied
+major-wise:
 a recorded default of `4.0.0` meets a `4.2.0` floor, `3.99.99` does not. This
 preserves the user's major without forcing minor upgrades.
 
