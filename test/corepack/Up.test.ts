@@ -17,10 +17,12 @@ beforeEach(async () => {
 });
 
 describe(`UpCommand`, () => {
-  // SKIP (jup §09.4): every row asserts the exact stdout of `up`, which carries
-  // jup's extra `Updated <path> to use <ref>` line that Corepack does not
-  // print. The field each row is really about is written correctly, and
-  // 13-10-use-up.test.ts covers it.
+  // SKIP (jup §09.4, §03.7): every row asserts the exact stdout of `up`, which
+  // carries jup's extra `Updated <path> to use <ref>` line that Corepack does not
+  // print, and then reads the pin back out of the top-level `packageManager` —
+  // the field jup retires once `devEngines.packageManager` carries the pin. The
+  // release each row is really about is the one jup lands on, and
+  // 13-10-use-up.test.ts (111, 112, 113, 114) covers it.
   describe.skip(`should update the "packageManager" field from the current project`, () => {
     it(`to the same major if no devEngines range`, async () => {
       await xfs.mktempPromise(async cwd => {

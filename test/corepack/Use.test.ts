@@ -18,9 +18,12 @@ beforeEach(async () => {
 
 describe(`UseCommand`, () => {
   describe(`should set the package manager in the current project`, () => {
-    // SKIP (jup §09.4): `use` prints an extra `Updated <path> to use <ref>`
-    // line, so stdout no longer matches `/^Installing … in the project\.\.\.\n\n/`.
-    // The pin it writes is correct and is covered by 13-10-use-up.
+    // SKIP (jup §09.4, §03.7): `use` prints an extra `Updated <path> to use
+    // <ref>` line, so stdout no longer matches
+    // `/^Installing … in the project\.\.\.\n\n/`; and the pin goes to
+    // `devEngines.packageManager`, which retires the top-level field this row
+    // reads back rather than refreshing it. Both are covered by 13-10-use-up
+    // (105, 116) and 15-26-atomic-pin (190).
     it.skip(`With an existing 'packageManager' field`, async () => {
       await xfs.mktempPromise(async cwd => {
         await xfs.writeJsonPromise(ppath.join(cwd, `package.json`), {
@@ -48,7 +51,10 @@ describe(`UseCommand`, () => {
     // SKIP (jup §09): the usage line printed with the error carries
     // jup's extra flags — `$ corepack use [--here] [--no-integrity] [--no-lockfile]
     // <pattern>` — where Corepack has `$ corepack use <pattern>`. The refusal
-    // itself, and its message, match.
+    // itself, and its message, match. The second half of the row diverges twice
+    // more under §03.7: the declared `2.x` is replaced by the version pinned
+    // rather than preserved, and no top-level `packageManager` is created beside
+    // it. 13-10-use-up (110) and 15-26-atomic-pin (189) assert the jup shape.
     it.skip(`with 'devEngines.packageManager' field`, async () => {
       await xfs.mktempPromise(async cwd => {
         process.env.NO_COLOR = `1`;
@@ -84,7 +90,10 @@ describe(`UseCommand`, () => {
       });
     });
 
-    // SKIP (jup §09.4): the extra `Updated …` line again.
+    // SKIP (jup §09.4, §03.7): the extra `Updated …` line again, and the row
+    // reads both fields back after the write — where jup leaves the pin in the
+    // member alone, having retired the top-level copy. 15-26-atomic-pin (190) is
+    // this row in jup's spelling.
     it.skip(`with 'devEngines.packageManager' and 'packageManager' fields`, async () => {
       await xfs.mktempPromise(async cwd => {
         process.env.NO_COLOR = `1`;
@@ -161,9 +170,12 @@ describe(`UseCommand`, () => {
     });
   });
 
-  // SKIP (jup §09.4): all four rows assert the exact stdout of `use`, which
-  // carries jup's extra `Updated <path> to use <ref>` line. They agree with jup
-  // on the point being made — an invalid incumbent value is not an obstacle.
+  // SKIP (jup §09.4, §03.7): all four rows assert the exact stdout of `use`,
+  // which carries jup's extra `Updated <path> to use <ref>` line, and then read
+  // the invalid value back as a refreshed `packageManager` — where jup writes the
+  // member and takes the malformed field out with the pin it used to hold. They
+  // agree with jup on the point being made, though: an invalid incumbent value is
+  // not an obstacle, which is 13-10-use-up (109).
   describe.skip(`should not care if packageManager is set to an invalid value`, () => {
     for (const {description, packageManager} of [
       {

@@ -87,7 +87,7 @@ made with `NOCK_ENV=record`; the file is gitignored.
 
 **146 rows: 91 pass, 54 skipped, 1 expected fail, 0 failing.**
 
-> Measured 2026-08-29. The per-cause table below accounts for all 54.
+> Measured 2026-08-30. The per-cause table below accounts for all 54.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
 which green means green. Without it, 65 rows fail — see *Compat mode* below.
@@ -105,12 +105,12 @@ the set rather than one apiece.
 
 | Skipped | Cause |
 | --- | --- |
-| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--no-integrity` / `--no-lockfile`, which Corepack has no equivalent for (§03.1, §03.7). |
+| 12 | **Message shape.** `use` / `up` print an extra `Updated <path> to use …` line (§09.4), and `use`'s usage line carries `--here` / `--no-integrity` / `--no-lockfile`, which Corepack has no equivalent for (§03.1, §03.7). Eleven of the twelve also read the pin back out of the top-level `packageManager` after the write, where §03.7 has retired it — they are counted here because the message is what fails first. |
 | 7 | **Naming.** The `devEngines` warnings, the validation-warning prefix, and the download notice all name the running tool, and jup calls itself `jup` where Corepack says `Corepack`. Every other assertion in those rows holds; the jup text is asserted verbatim by `test/conformance/13-04-dev-engines.test.ts` and `13-05-environment.test.ts`. |
 | 6 | **§06.1** — a registry that publishes no signature is a warning and a fall back to integrity-only verification, not the hard failure Corepack raises. |
 | 5 | **§10.6 / §10.5** — `enable` and `disable` will not touch a file jup did not install, and the install directory is `$XDG_BIN_HOME`/`~/.local/bin` rather than a `PATH` lookup of jup's own name. |
 | 5 | **§02.5** — Yarn Berry comes from `@yarnpkg/cli-dist` on the npm registry, whose 2.x line starts at 2.4.1. `yarn@2.0.0-rc.30` is unreachable, and upstream's two `3.0.0-rc.2` digests were taken over `repo.yarnpkg.com`'s single-file `yarn.js`, so they name bytes jup never downloads. `3.0.0-rc.2` without a digest still runs. |
-| 5 | **§03.3 / §03.7** — a `devEngines.packageManager` that names a version outranks the top-level `packageManager`, and it is also the field a pin is written to. Three rows read the top-level field where jup obeys the member; two read it back after an auto-pin or a `use` that wrote the member. `test/conformance/13-04-dev-engines.test.ts`, `13-05-environment.test.ts` and `13-10-use-up.test.ts` assert the jup behaviour. |
+| 5 | **§03.3 / §03.7** — a `devEngines.packageManager` that names a version outranks the top-level `packageManager`; it is also the field a pin is written to, and writing one now *retires* the top-level field rather than refreshing it beside the member. Three rows read the top-level field where jup obeys the member; two read it back after an auto-pin or a `use` that wrote the member. `test/conformance/13-04-dev-engines.test.ts`, `13-05-environment.test.ts`, `13-10-use-up.test.ts` and `15-26-atomic-pin.test.ts` assert the jup behaviour. |
 | 4 | **§04.4** — ranges and tags (`yarn@stable`, `pnpm@6.x`, `npm@^6.14.2`) resolve where Corepack demands an exact version. |
 | 4 | **§12.1** — `Signature does not match` and `Mismatch hashes` are `Error`, not `UsageError`, so they print on stderr with a stack. Corepack presented every error as a usage error until 0.31.0; §12.1 requires keeping the distinction. |
 | 3 | **§12.6 / errors.ts:270** — with the network off and nothing cached, jup names the seeding commands instead of Corepack's bare `Network access disabled by the environment`. Two of the three use that string to probe env-file discovery. |
