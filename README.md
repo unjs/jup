@@ -7,78 +7,149 @@
 
 <!-- /automd -->
 
-**jup (pronounced “yup”) makes sure every developer, CI job, and container runs the tool version selected by the project.**
+> Pin and run the right package manager or runtime for every project.
+
+**jup** (pronounced “yup”) is a fast, small, zero-dependency version manager for
+package managers and runtimes. It supports npm, pnpm, Yarn, aube, Bun, Deno, nub,
+and Node.js.
+
+A project chooses a version. jup downloads it, verifies it, keeps it in a local
+store, and runs it. Once an exact version is installed, jup can start it without
+the network.
 
 > [!WARNING]
 > jup is experimental. Its behavior may change between releases.
 
-jup is a fast, small tool version manager and a safer, more capable alternative to [Corepack](https://github.com/nodejs/corepack). It supports npm, pnpm, Yarn, aube, Bun, Deno, nub, and Node.js.
-
-Pin a tool once, then keep using its normal command:
-
-```sh
-jup enable        # set up the familiar tool commands once
-cd my-project
-jup use pnpm@12   # pin pnpm 12 and run its install command
-pnpm add lodash   # later commands use the pinned release
-```
-
-This prevents different machines from silently using different versions. Existing exact Corepack pins for npm, pnpm, and Yarn usually work without changes.
-
-## How it works
-
-With jup's command shims enabled, a familiar command such as `pnpm install` passes through jup first:
-
-```mermaid
-flowchart LR
-    command["pnpm install"] --> pin["Read the project pin"]
-    pin --> cached{"Version cached?"}
-    cached -- Yes --> run["Run the pinned pnpm"]
-    cached -- No --> download["Download and verify"]
-    download --> run
-```
-
-The command and its arguments stay the same. jup reads the version selected by the project, caches it for later offline use, and hands control to that version of the tool.
-
-Package managers are declared in `devEngines.packageManager`, which is where `jup use` and `jup up` write the pin; an existing `packageManager` field is still read when no version is declared beside it, and is kept up to date when the manifest already has one. Node.js is declared in `devEngines.runtime` or, as a fallback, `.nvmrc`. Bun, Deno, nub, and Node shims are opt-in so jup does not unexpectedly replace commands already installed on your machine.
-
 ## Quick start
 
-Follow the [Start guide](./docs/1.start.md) to install jup, or use these commands after installation:
+### 1. Install jup
+
+```sh
+curl -fsSL https://jup.unjs.io/install.sh | sh
+```
+
+On Windows:
+
+```powershell
+irm https://jup.unjs.io/install.ps1 | iex
+```
+
+With an existing Node.js installation:
+
+```sh
+npx jup self-install
+```
+
+### 2. Enable familiar commands
 
 ```sh
 jup enable
-cd my-project
-jup use pnpm@12
+```
+
+This creates shims so commands such as `pnpm`, `yarn`, and `npm` pass through
+jup.
+
+### 3. Pin a tool
+
+From your project directory:
+
+```sh
+jup use pnpm@^12
+```
+
+This keeps the range in `package.json` and records the selected release in
+`jup.lock`. To keep the range without committing a lockfile:
+
+```sh
+jup use --no-lockfile pnpm@^12
+```
+
+Without a project `jup.lock`, each checkout chooses a matching release
+independently. When `node_modules` already exists, jup may reuse that registry
+answer for 24 hours from the disposable `node_modules/.jup/jup.lock` cache.
+
+Then keep using the normal command:
+
+```sh
+pnpm install
+pnpm --version
 ```
 
 Without shims, put `jup` before the tool command:
 
 ```sh
 jup pnpm install
+jup node@^22 script.js
 ```
 
-Run `jup info` to inspect the selected project, version, cache, and shims.
+Run `jup info` at any time to inspect the selected project, version, local store,
+network settings, and shims.
+
+[Read the introduction and complete quick start →](https://jup.unjs.io/docs)
+
+## Why jup?
+
+- **One version for the whole team.** The project records the tool it needs.
+- **Normal commands.** Keep typing `pnpm`, `yarn`, or `npm` after enabling shims.
+- **Checked downloads.** Artifacts are checked against pinned digests or trusted
+  registry metadata before installation.
+- **Useful offline behavior.** Already-installed exact versions run without a
+  registry request.
+- **Reproducible ranges.** Keep a range in the project and commit its selected
+  version in `jup.lock`.
+- **No plugins or telemetry.** The supported tool table is built into jup.
+
+## How it works
+
+```mermaid
+flowchart LR
+  command["pnpm install"] --> project["Read the project"]
+  project --> select["Select a version"]
+  select --> cached{"Already installed?"}
+  cached -- Yes --> run["Run pnpm"]
+  cached -- No --> verify["Download and verify"]
+  verify --> run
+```
+
+jup passes arguments, input, output, exit codes, and signals through to the
+selected tool. It manages the tool itself, not your project dependencies:
+`pnpm install` still installs those dependencies.
+
+Package-manager pins live in `devEngines.packageManager` in `package.json`.
+Node.js pins live in `devEngines.runtime`; jup can also read `.nvmrc`. Existing
+top-level `packageManager` pins remain supported.
 
 ## Documentation
 
-- [Introduction](./docs/0.index.md)
-- [Getting started](./docs/1.start.md)
-- [Projects and workspaces](./docs/2.projects.md)
-- [CI and offline](./docs/3.ci.md)
-- [Registries and networking](./docs/4.registry.md)
-- [Commands](./docs/5.commands.md)
-- [Security](./docs/6.security.md)
-- [Environment](./docs/7.settings.md)
-- [Moving from Corepack](./docs/8.corepack.md)
-- [Troubleshooting](./docs/9.troubleshooting.md)
+- [Introduction and quick start](https://jup.unjs.io/docs)
+- [Projects, pins, ranges, and workspaces](https://jup.unjs.io/docs/projects)
+- [CI, containers, and offline installs](https://jup.unjs.io/docs/ci)
+- [Registries, authentication, TLS, and proxies](https://jup.unjs.io/docs/registry)
+- [Command reference](https://jup.unjs.io/docs/commands)
+- [Integrity and security model](https://jup.unjs.io/docs/security)
+- [Environment and settings](https://jup.unjs.io/docs/settings)
+- [Moving from Corepack](https://jup.unjs.io/docs/corepack)
+- [Troubleshooting](https://jup.unjs.io/docs/troubleshooting)
+- [Programmatic API](https://jup.unjs.io/docs/api)
+
+## Corepack compatibility
+
+jup provides a `corepack` command and supports existing Corepack project pins and
+workflows. New package-manager pins are written to `devEngines.packageManager`,
+which Corepack itself does not read.
+
+[Read the migration guide →](https://jup.unjs.io/docs/corepack)
 
 ## Credits
 
-jup builds on the work of [Corepack](https://github.com/nodejs/corepack) and its contributors. Its behavior is modeled on Corepack v0.35.0, so existing `packageManager` pins, commands, and messages keep working — though jup now records new pins in `devEngines.packageManager`, which Corepack itself does not read. Thanks to the Corepack contributors for the design jup started from.
+jup builds on the work of
+[Corepack](https://github.com/nodejs/corepack) and its contributors. Its
+compatibility behavior is modeled on Corepack v0.35.0.
 
 ## License
 
-Published under the [MIT](./LICENSE) license.
+Published under the [MIT License](./LICENSE).
 
-Portions derived from [Corepack](https://github.com/nodejs/corepack), Copyright © Corepack contributors, also MIT licensed. See [LICENSE](./LICENSE) for the full notice.
+Portions derived from [Corepack](https://github.com/nodejs/corepack), Copyright
+© Corepack contributors, are also MIT licensed. See [LICENSE](./LICENSE) for the
+full notice.

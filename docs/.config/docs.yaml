@@ -1,7 +1,7 @@
 # yaml-language-server: $schema=https://unpkg.com/undocs/schema/config.json
 
 name: "jup"
-shortDescription: "Run the tool version your project pinned."
+shortDescription: "Pin and run the right package manager or runtime for every project."
 description: "A fast, small, zero-dependency version manager for package managers and runtimes."
 github: "unjs/jup"
 url: "https://jup.unjs.io"
