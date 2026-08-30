@@ -668,6 +668,8 @@ describe("§04.4 ranges and jup.lock", () => {
 
   it("up refuses to refresh under an explicit JUP_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
+    record(fixture, "pnpm@^11.0.0", "11.0.0");
+    const before = fixture.read("jup.lock");
 
     const frozen = await run(["up"], {
       ...fixture,
@@ -679,11 +681,62 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(frozen.stdout).toContain(
       `Usage Error: pnpm@^11.0.0 is not resolved in jup.lock and lockfile updates are disabled.`,
     );
+    expect(fixture.read("jup.lock")).toBe(before);
 
     // But CI on its own does not block a command the user ran *to* refresh it.
     const inCI = await run(["up"], { ...fixture, registry, env: env({ CI: "1" }) });
     expect(inCI.exitCode).toBe(0);
     expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+  });
+
+  // §04.4 — the flag governs the *file*, and on a project with no committed file
+  // `up` writes none: there is nothing to freeze, and refusing here would break
+  // every `up` in a frozen job over a file that does not exist.
+  it("up under JUP_FROZEN_LOCKFILE=1 runs where it would commit nothing", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+
+    const result = await run(["up"], {
+      ...fixture,
+      registry,
+      env: env({ JUP_FROZEN_LOCKFILE: "1" }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Installing pnpm@11.1.2 in the project...");
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+  });
+
+  // The rule the user keeps a lockfile-free project by: `use` creates the
+  // committed file, `up` only refreshes one that is already there.
+  it("up leaves a project with no jup.lock without one, and memoes instead", async () => {
+    const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
+    // A memo an ordinary run left behind, still well inside its window: it is
+    // the same key, so the refresh replaces it rather than leaving the
+    // superseded version to answer.
+    fixture.write(
+      MEMO,
+      `${JSON.stringify({
+        version: 1,
+        resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0", expires: Date.now() + 3_600_000 } },
+      })}\n`,
+    );
+
+    const result = await run(["up"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("Installing pnpm@11.1.2 in the project...");
+    // §12.11 names the paths a command changed; this one changed no committed file.
+    expect(result.stdout).not.toContain("jup.lock");
+    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
+    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
+
+    // And the run that follows uses it, without going back to the registry.
+    registry.requests.length = 0;
+    const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    expect(rerun.stdout).toBe("11.1.2\n");
+    expect(registry.requests).toEqual([]);
   });
 
   it("use replaces a range with an exact pin and retires its resolution", async () => {

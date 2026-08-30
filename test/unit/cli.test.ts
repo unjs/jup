@@ -270,6 +270,11 @@ function lockfile(dir = project): Record<string, unknown> {
     .resolutions;
 }
 
+/** §04.4 — a committed resolution, i.e. the file `up` refreshes rather than creates. */
+async function record(resolutions: Record<string, unknown>, dir = project): Promise<void> {
+  await writeFile(join(dir, "jup.lock"), `${JSON.stringify({ version: 1, resolutions })}\n`);
+}
+
 /** §04.4 — the memo an ordinary run leaves in `node_modules/.jup`. */
 async function memo(resolutions: Record<string, unknown>, dir = project): Promise<void> {
   await mkdir(join(dir, "node_modules", ".jup"), { recursive: true });
@@ -1221,6 +1226,7 @@ describe("up (§09.4, tests 111-115)", () => {
       packageManager: "yarn@1.1.0",
       devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x" } },
     });
+    await record({ "yarn@1.x || 2.x": { resolved: "1.1.0" } });
 
     await expect(cmdUp([])).resolves.toBe(0);
 
@@ -1238,6 +1244,7 @@ describe("up (§09.4, tests 111-115)", () => {
         packageManager: { name: "yarn", version: "1.x || 2.x", onFail: "ignore" },
       },
     });
+    await record({ "yarn@1.x || 2.x": { resolved: "1.1.0" } });
 
     await cmdUp([]);
 
@@ -1309,6 +1316,33 @@ describe("up (§09.4, tests 111-115)", () => {
     expect(stdout).toContain(`Updated ${join(project, "jup.lock")} to use yarn@2.4.3`);
   });
 
+  // §04.4 — `up` refreshes a committed resolution; it does not start the file.
+  // A project that has never committed one has chosen the memo, and a command
+  // asked to move a range forward is not jup's invitation to add a file to a
+  // tree the user keeps deliberately without one.
+  it("does not create jup.lock, and memoes what it resolved instead", async () => {
+    mockYarnRegistry();
+    await seed("yarn", "2.4.3");
+    await manifest({ name: "demo", packageManager: "yarn@2.x" });
+    // The memo goes only where `node_modules` already is (§04.4).
+    await mkdir(join(project, "node_modules"), { recursive: true });
+
+    await expect(cmdUp([])).resolves.toBe(0);
+
+    expect(existsSync(join(project, "jup.lock"))).toBe(false);
+    // §12.11 names the paths a command changed, and this run changed no file
+    // anybody commits.
+    expect(stdout).not.toContain("jup.lock");
+    // The range is still the pin, and the version `up` chose is where an
+    // ordinary run would have put it — so the next proxy run uses it.
+    expect(readManifest().packageManager).toBe("yarn@2.x");
+    const memoed = JSON.parse(
+      readFileSync(join(project, "node_modules", ".jup", "jup.lock"), "utf8"),
+    ) as { resolutions: Record<string, { resolved: string; expires?: number }> };
+    expect(memoed.resolutions["yarn@2.x"]?.resolved).toBe("2.4.3");
+    expect(memoed.resolutions["yarn@2.x"]?.expires).toBeGreaterThan(Date.now());
+  });
+
   // §03.3 — two ranges, and the member is the one that answers. Both fields are
   // left exactly as written; what the refreshed resolution is keyed on is the
   // range jup actually read.
@@ -1320,6 +1354,7 @@ describe("up (§09.4, tests 111-115)", () => {
       packageManager: "yarn@2.x",
       devEngines: { packageManager: { name: "yarn", version: ">=2" } },
     });
+    await record({ "yarn@>=2": { resolved: "2.1.0" } });
 
     await expect(cmdUp([])).resolves.toBe(0);
 
@@ -1337,6 +1372,7 @@ describe("up (§09.4, tests 111-115)", () => {
     mockYarnRegistry();
     await seed("yarn", "2.4.3");
     await manifest({ name: "demo", packageManager: "yarn@2.x" });
+    await record({ "yarn@2.x": { resolved: "2.1.0" } });
     // A memo an ordinary run left behind, still well inside its 24-hour window.
     await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
 
@@ -1362,6 +1398,7 @@ describe("up (§09.4, tests 111-115)", () => {
       packageManager: 42,
       devEngines: { packageManager: { name: "yarn", version: "2.x", onFail: "warn" } },
     });
+    await record({ "yarn@2.x": { resolved: "2.1.0" } });
 
     await expect(cmdUp([])).resolves.toBe(0);
 

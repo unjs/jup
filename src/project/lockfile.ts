@@ -101,6 +101,25 @@ export function usesLockfile(descriptor: Spec): boolean {
   return !URL.canParse(range);
 }
 
+/**
+ * §04.4 — does the project in `dir` commit a `jup.lock` at all?
+ *
+ * The question `up` asks before recording: a project that has never committed
+ * one has chosen the memo, and refreshing a range is no reason for jup to start
+ * a file the user did not ask for. Existence, not readability — a file too
+ * damaged to parse is still the project's, and one `use` away from being written
+ * to.
+ */
+export function hasLockfile(dir: string): boolean {
+  try {
+    return statSync(join(dir, LOCKFILE_NAME), { throwIfNoEntry: false })?.isFile() === true;
+  } catch {
+    // An unreadable path answers "no file to refresh", as every other read here
+    // degrades to "no resolutions".
+    return false;
+  }
+}
+
 /** §04.4 — `<name>@<the range as written>`, the key the file is indexed by. */
 export function resolutionKey(descriptor: Spec): string {
   return `${descriptor.name}@${descriptor.range}`;

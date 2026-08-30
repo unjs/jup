@@ -86,8 +86,13 @@ refreshes the recorded resolution in `jup.lock` and leaves the field alone. The
 range is the user's statement of intent, and there is no second, major-confining
 resolve because a range already says how far the user will move. `^2.0.0` derived
 from a `~2.1.0` pin would pick a version the pin itself rejects. The memo for
-that key is retired at the same time. A dist-tag pin is refused, and
-`JUP_FROZEN_LOCKFILE=1` makes the refresh a hard error.
+that key is retired at the same time.
+
+`up` refreshes that file; it never creates it (§04.4). On a project with no
+`jup.lock` the resolution goes to the memo instead, no path is printed — nothing
+committed changed — and `JUP_FROZEN_LOCKFILE=1` does not bind a run that writes
+nothing. Where the file *is* there, the flag makes the refresh a hard error. A
+dist-tag pin is refused either way.
 
 **Otherwise** — an exact pin — two resolves, both with `useCache: false` and tags
 **not** allowed:

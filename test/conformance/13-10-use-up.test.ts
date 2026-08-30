@@ -45,6 +45,23 @@ function topLevelPinOf(fixture: { json(relative: string): unknown }): unknown {
 }
 
 /** §03.7 — the pin lives here for a project that declares only `devEngines`. */
+/**
+ * §04.4 — a committed resolution, hand-written the way `use` would have left it.
+ *
+ * The rows below refresh it: `up` writes into a `jup.lock` the project already
+ * has, and creates none where there is none (the memo carries that case).
+ */
+function record(
+  fixture: { write(relative: string, content: string): void },
+  key: string,
+  resolved: string,
+): void {
+  fixture.write(
+    "jup.lock",
+    `${JSON.stringify({ version: 1, resolutions: { [key]: { resolved } } })}\n`,
+  );
+}
+
 function devEnginesOf(fixture: { json(relative: string): unknown }): unknown {
   return (fixture.json("package.json") as { devEngines?: { packageManager?: unknown } }).devEngines
     ?.packageManager;
@@ -229,6 +246,7 @@ describe("§13.10 use / up", () => {
       packageManager: "yarn@1.1.0",
       devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x", onFail: "warn" } },
     });
+    record(fixture, "yarn@1.x || 2.x", "1.1.0");
 
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
@@ -244,6 +262,7 @@ describe("§13.10 use / up", () => {
       packageManager: "yarn@1.1.0",
       devEngines: { packageManager: { name: "yarn", version: "1.x || 2.x", onFail: "ignore" } },
     });
+    record(fixture, "yarn@1.x || 2.x", "1.1.0");
 
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 
@@ -287,10 +306,11 @@ describe("§13.10 use / up", () => {
   // writes exactly this shape on a project with no top-level field (§03.7), so
   // an `up` that read only `packageManager` would collapse the range it had just
   // written and delete its own record along with it.
-  it("114: up on a devEngines-only range keeps the range and records the resolution", async () => {
+  it("114: up on a devEngines-only range keeps the range and refreshes the resolution", async () => {
     const fixture = createFixture({
       devEngines: { packageManager: { name: "yarn", version: "2.x" } },
     });
+    record(fixture, "yarn@2.x", "2.1.0");
 
     const result = await run(["up"], { ...fixture, registry, env: trusted() });
 

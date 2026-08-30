@@ -30,6 +30,7 @@ import { advisory, explainFetchFailure, messages, UsageError } from "../errors-c
 import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
 import {
+  hasLockfile,
   LOCKFILE_NAME,
   readKnownResolution,
   readLockfile,
@@ -37,6 +38,7 @@ import {
   removeResolution,
   resolutionKey,
   usesLockfile,
+  writeCachedResolution,
   writeResolution,
 } from "../project/lockfile.ts";
 import { CLI_SOURCE, findProjectSpec, parseSpec } from "../project/manifest.ts";
@@ -501,10 +503,17 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
       throw new UsageError(messages.upNotSemver());
     }
     const dir = dirname(lookup.target);
-    // §04.4's flag governs the *file*. Under `--no-lockfile` this run writes
-    // nothing to it, so it is refused only where it would still change it — the
-    // removal below, on the projects that actually hold the entry.
-    if (isFrozenLockfile() && (lockfile || holdsResolution(dir, pin))) {
+    // §04.4 — `up` refreshes a committed resolution; it does not start the file.
+    // A project that has never committed one has chosen the memo, and a command
+    // asked to move the range forward is not the moment to add a file to the
+    // user's tree — `use` is what creates one. The memo below carries the
+    // decision instead.
+    const commit = lockfile && hasLockfile(dir);
+
+    // §04.4's flag governs the *file*. It is refused only where this run would
+    // still change it: the refresh above, and — under `--no-lockfile`, which
+    // writes nothing — the removal below, on the projects that hold the entry.
+    if (isFrozenLockfile() && (commit || (!lockfile && holdsResolution(dir, pin)))) {
       throw new UsageError(messages.lockfileUnresolved(pin.name, pin.range));
     }
 
@@ -522,8 +531,9 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
     return applyToProject(
       refreshed,
       (reference, spec) => {
-        if (lockfile) {
-          writeResolution(dir, pin, { name: pin.name, reference }, spec.hash, isPerHost(refreshed));
+        const locator = { name: pin.name, reference };
+        if (commit) {
+          writeResolution(dir, pin, locator, spec.hash, isPerHost(refreshed));
           // The memo under `node_modules` answers the same key and now holds the
           // version this command just superseded — and it answers *alone* wherever
           // the recorded file is not visible: an `up` not yet committed, a `git
@@ -533,6 +543,14 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
           removeCachedResolution(dir, resolutionKey(pin));
           // §12.11 — the resolution file is what changed, so that is what is named.
           out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
+        } else if (lockfile) {
+          // Nothing committed to refresh: the answer came from the registry, so
+          // it goes where an ordinary proxy run would have put it (§04.4). The
+          // stale entry it replaces is the same key, so this overwrites it rather
+          // than leaving the superseded version to answer. No path is named —
+          // §12.11 names what changed in the project, and the memo is host-local
+          // derived state no command announces.
+          writeCachedResolution(dir, pin, locator, spec.hash, isPerHost(refreshed));
         } else {
           dropRecordedResolution(dir, pin);
         }
