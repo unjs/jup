@@ -1,6 +1,40 @@
 # Changelog
 
 
+## v0.2.0
+
+[compare changes](https://github.com/unjs/jup/compare/v0.1.0...v0.2.0)
+
+### 🚀 Enhancements
+
+- ⚠️  Announce downloads instead of asking ([b681804](https://github.com/unjs/jup/commit/b681804))
+- ⚠️  Up refreshes jup.lock but never creates it ([87e97b9](https://github.com/unjs/jup/commit/87e97b9))
+- Better message dx ([cb68f84](https://github.com/unjs/jup/commit/cb68f84))
+- ⚠️  Re-check a recorded global default once a day ([a2ccbe1](https://github.com/unjs/jup/commit/a2ccbe1))
+- Improve install script ([6144076](https://github.com/unjs/jup/commit/6144076))
+
+### 🏡 Chore
+
+- Refresh table ([e7211b6](https://github.com/unjs/jup/commit/e7211b6))
+
+### ✅ Tests
+
+- Track the refreshed nub default, and assert what the row is about ([7ee101b](https://github.com/unjs/jup/commit/7ee101b))
+- Keep the JUP_NODE_EXECPATH row off Windows ([ab5ec07](https://github.com/unjs/jup/commit/ab5ec07))
+- Keep a developer's own jup out of the suite ([156e74f](https://github.com/unjs/jup/commit/156e74f))
+- Keep the machine's own shims off the suite's PATH ([f0aa3d5](https://github.com/unjs/jup/commit/f0aa3d5))
+- Drop the shim directory even when jup manages the runtime ([86c6d65](https://github.com/unjs/jup/commit/86c6d65))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Announce downloads instead of asking ([b681804](https://github.com/unjs/jup/commit/b681804))
+- ⚠️  Up refreshes jup.lock but never creates it ([87e97b9](https://github.com/unjs/jup/commit/87e97b9))
+- ⚠️  Re-check a recorded global default once a day ([a2ccbe1](https://github.com/unjs/jup/commit/a2ccbe1))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.1.0
 
 [compare changes](https://github.com/unjs/jup/compare/v0.0.5...v0.1.0)
