@@ -756,7 +756,7 @@ describe("verifyRegistryTrust (§06.1, §06.3)", () => {
 
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      `! ${server.origin} does not publish signatures for ${packageName}@9.1.0; falling back to integrity-only verification`,
+      `⚠ ${server.origin} does not publish signatures for ${packageName}@9.1.0; falling back to integrity-only verification`,
     );
     warn.mockRestore();
   });

@@ -309,7 +309,8 @@ jup's own lines may be coloured under three constraints:
 
 * **The text is unchanged.** Colour wraps characters a message already contains;
   an escape sequence may not add, drop or reorder one. What is styled is
-  decoration: the leading `!`, the `Usage Error:` label, and — in `--help` — the
+  decoration: the leading `⚠`, its `│` continuation gutter, the download
+  notice's `↓`, the `Usage Error:` label, and — in `--help` — the
   headings, the program name and command word, a trailing description, every
   flag, and every environment-variable name in the prose.
 * **Decided per stream, per write**, and only when that stream is a terminal

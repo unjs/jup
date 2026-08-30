@@ -159,7 +159,7 @@ describe("§13.3 version forms", () => {
     });
 
     expect(withoutDownloadNotices(result.stderr)).toBe(
-      `! Installing yarn@${url} from ${registry.origin} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
+      `⚠ Installing yarn@${url} from ${registry.origin} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
     );
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("1.22.21\n");

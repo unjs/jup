@@ -3,7 +3,7 @@
  *
  * These strings are part of the observable contract. Scripts, CI logs, and
  * support docs match on them, so they are reproduced byte for byte: the leading
- * `! `, the absent trailing periods, the trailing space on the prompt.
+ * `⚠ `, the absent trailing periods, the trailing space on the prompt.
  *
  * `<JSON x>` in the spec means `JSON.stringify(x)` — strings appear quoted.
  *
@@ -38,7 +38,7 @@ export class UsageError extends Error {
 const json = (value: unknown): string => JSON.stringify(value);
 
 /** §12.3 — prefix applied when a validation failure warns instead of throwing. */
-export const VALIDATION_WARNING_PREFIX = "! jup validation warning: ";
+export const VALIDATION_WARNING_PREFIX = "⚠ jup validation warning: ";
 
 /**
  * §11.3 — an advisory line **this** implementation adds, which
@@ -94,13 +94,13 @@ export const messages = {
    * `packageManager` versus its own `devEngines` half, and a runtime has no
    * top-level field to disagree with.
    */
-  /** Unconditional warning, regardless of `onFail`. Emitted with the `! ` already attached. */
+  /** Unconditional warning, regardless of `onFail`. Emitted with the `⚠ ` already attached. */
   devEnginesNotObject: (value: unknown, field: string = "packageManager") =>
-    `! jup only supports objects as valid value for devEngines.${field}. The current value (${json(value)}) will be ignored.`,
+    `⚠ jup only supports objects as valid value for devEngines.${field}. The current value (${json(value)}) will be ignored.`,
 
   /** Unconditional warning, regardless of `onFail`. */
   devEnginesArray: (field: string = "packageManager") =>
-    `! jup does not currently support array values for devEngines.${field}`,
+    `⚠ jup does not currently support array values for devEngines.${field}`,
 
   devEnginesBadName: (value: unknown, field: string = "packageManager") =>
     `The value of devEngines.${field}.name ${json(value)} is not a supported string value`,
@@ -166,10 +166,10 @@ export const messages = {
    * about what jup just did to the user's manifest.
    */
   autoPinNotice: (name: string, reference: string) =>
-    `! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing ${name}@${reference}.`,
+    `⚠ The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing ${name}@${reference}.`,
 
   autoPinDocs: () =>
-    `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
+    `│ For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager`,
 
   /** §12.11 — every mutating command names the file it touched. */
   updatedManifest: (path: string, name: string, reference: string) =>
@@ -266,5 +266,5 @@ export const messages = {
   devEnginesIntegrityMismatch: (packageManager: string, integrity: string) =>
     `The "packageManager" field (${packageManager}) and "devEngines.packageManager.integrity" (${integrity}) pin different hashes`,
   ignoringEnvVar: (name: string, path: string) =>
-    `! Ignoring ${name} from ${path}: this variable can only be set in the environment`,
+    `⚠ Ignoring ${name} from ${path}: this variable can only be set in the environment`,
 } as const;

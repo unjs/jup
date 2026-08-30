@@ -465,7 +465,7 @@ describe("applyEnvFile", () => {
       expect(process.env[name]).toBeUndefined();
       expect(warn).toHaveBeenCalledTimes(1);
       expect(warn).toHaveBeenCalledWith(
-        `! Ignoring ${name} from ${path}: this variable can only be set in the environment`,
+        `⚠ Ignoring ${name} from ${path}: this variable can only be set in the environment`,
       );
       expect(warn).toHaveBeenCalledWith(messages.ignoringEnvVar(name, path));
     });

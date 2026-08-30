@@ -7,6 +7,7 @@ import { ENV } from "./config/env-vars.ts";
 import { getSpecFor } from "./config/table.ts";
 import { messages as warm, UsageError } from "./errors.ts";
 import { CACHE_DIRECTORY, LOCKFILE_NAME } from "./project/lockfile.ts";
+import type { Palette } from "./utils/log.ts";
 import { lt } from "./version/semver.ts";
 
 export * from "./errors.ts";
@@ -233,7 +234,7 @@ export const messages = {
 
   /** Verbatim. `<source>` names where the setting came from, not what it does. */
   strictSslDisabled: (source: string) =>
-    `! TLS certificate verification is disabled (set by ${source})`,
+    `⚠ TLS certificate verification is disabled (set by ${source})`,
 
   /**
    * `<source>` names where the bundle came from, exactly as
@@ -302,7 +303,34 @@ export const messages = {
 
   allDone: () => `All done!`,
 
-  aboutToDownload: (url: string) => `! jup is about to download ${url_(url)}`,
+  /**
+   * §05.4 — the artifact download notice, one line on stderr.
+   *
+   * What a reader wants first is *what* is being fetched, so the entry leads
+   * and the URL trails: the name and version are the fact worth reading at a
+   * glance, the URL the fact worth auditing. Colour is passed in rather than
+   * reached for, because §12.11 still fixes the text: with the palette off
+   * (`NO_COLOR`, a pipe, an agent) every paint is identity, and what is left is
+   * §12.11's line byte for byte.
+   *
+   * `tool` is optional, and its version separately so, because a caller does
+   * not always know either: a URL reference carries no version, and an artifact
+   * the table never described carries no name.
+   *
+   * The line opens with `↓` rather than §12's `⚠ ` marker, and so is the one
+   * §12.11 string that does not: a download is not an advisory, it is not muted
+   * with the advisories (§11.3), and `⚠` in front of a routine fetch trains a
+   * reader to ignore the glyph that matters.
+   */
+  aboutToDownload: (url: string, colors: Palette, tool?: { name: string; version?: string }) => {
+    const what =
+      tool === undefined
+        ? ""
+        : tool.version === undefined
+          ? `${colors.cyan(tool.name)} from `
+          : `${colors.cyan(tool.name)} ${colors.yellow(tool.version)} from `;
+    return `${colors.cyan("↓")} Downloading ${what}${colors.dim(url_(url))}`;
+  },
 
   /** §07.9 — `cache clean` must distinguish a successful clean from a no-op. */
   removedFromCache: (count: number, path: string) =>
@@ -323,7 +351,7 @@ export const messages = {
    * outlive the cache, which §10.2 then pins outside `<home>` for good.
    */
   interpreterKept: (name: string, version: string, interpreter: string, home: string) =>
-    `! Kept ${name}@${version}: jup's shims name ${interpreter} as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside ${home} to repin them, then clean again.`,
+    `⚠ Kept ${name}@${version}: jup's shims name ${interpreter} as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside ${home} to repin them, then clean again.`,
 
   /**
    * §09.7 — one entry the clean could not delete.
@@ -335,7 +363,7 @@ export const messages = {
    * "removed" and "still there" from being invisible.
    */
   cacheEntryNotRemoved: (path: string) =>
-    `! Could not remove ${path}; it is still in the cache. Remove it by hand, or re-run with permission to delete it.`,
+    `⚠ Could not remove ${path}; it is still in the cache. Remove it by hand, or re-run with permission to delete it.`,
 
   /**
    * §04.4 — the memo stood in because the registry could not be reached.
@@ -349,25 +377,25 @@ export const messages = {
    * that already had to be taken to classify the failure.
    */
   staleResolutionUnreachable: (name: string, range: string, version: string) =>
-    `! Unable to reach the registry to resolve ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until the registry answers again.`,
+    `⚠ Unable to reach the registry to resolve ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until the registry answers again.`,
 
   /** The same notice for the other half of "degraded": it answered, with nothing usable. */
   staleResolutionUnmatched: (name: string, range: string, version: string) =>
-    `! The registry lists no release matching ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until a matching release is published.`,
+    `⚠ The registry lists no release matching ${name}@${range}; running ${name}@${version}, the expired resolution recorded in ${MEMO_FILE}. Its stamp is not extended, so this repeats until a matching release is published.`,
 
   /**
    * §07.9 — the `--all` counterpart. Present tense, because it is printed
    * *before* the removal: afterwards there is no working `jup` left to print it.
    */
   interpreterRemoved: (name: string, version: string, interpreter: string, home: string) =>
-    `! Removing ${name}@${version}, which jup's shims name as their interpreter (${interpreter}): they will fail with 'bad interpreter' until 'jup enable' is re-run under a node installed outside ${home}.`,
+    `⚠ Removing ${name}@${version}, which jup's shims name as their interpreter (${interpreter}): they will fail with 'bad interpreter' until 'jup enable' is re-run under a node installed outside ${home}.`,
 
   expiredKey: (keyid: string, expires: string) =>
     `The package was signed with an expired key (${keyid}, expired ${expires})`,
 
   /** §06.5 — report acceptance of a verified signature whose key expired. */
   expiredKeyAccepted: (name: string, version: string, keyid: string, expires: string) =>
-    `! jup integrity warning: ${name}@${version} carries a valid signature from ${keyid}, a key that expired ${expires}; accepting it`,
+    `⚠ jup integrity warning: ${name}@${version} carries a valid signature from ${keyid}, a key that expired ${expires}; accepting it`,
 
   noNodeRuntime: (binName: string) =>
     `Unable to locate a Node.js runtime to execute ${binName}; set JUP_NODE_EXECPATH to point at one`,
@@ -404,7 +432,7 @@ export const messages = {
    * registry's digest, but no signature covers that digest.
    */
   unsignedRegistry: (registry: string, packageName: string, version: string) =>
-    `! ${url_(registry)} does not publish signatures for ${packageName}@${version}; falling back to integrity-only verification`,
+    `⚠ ${url_(registry)} does not publish signatures for ${packageName}@${version}; falling back to integrity-only verification`,
   /**
    * A native `bin` target that could not be executed at all.
    *
@@ -432,7 +460,7 @@ export const messages = {
    * the verified path it replaces.
    */
   allowingUnverified: (name: string, version: string, source: string) =>
-    `! Installing ${name}@${version} from ${source} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)`,
+    `⚠ Installing ${name}@${version} from ${source} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)`,
 } as const;
 
 /**

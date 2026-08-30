@@ -160,7 +160,7 @@ describe.skipIf(IS_WINDOWS)("§05.4 the download notice from every entry point",
     expect(viaShim.stdout).toBe(`${VERSION}\n`);
     // "Exactly this" rather than `toContain`: a row that only looks for a
     // substring passes against an implementation that also asks a question.
-    expect(viaShim.stderr).toBe(downloadNotice(TARBALL_URL));
+    expect(viaShim.stderr).toBe(downloadNotice(TARBALL_URL, { name: "pnpm", version: VERSION }));
     expect(servedPaths()).toContain(TARBALL_PATH);
 
     // The other entry point, on a second, separate project so that it downloads
@@ -190,7 +190,9 @@ describe.skipIf(IS_WINDOWS)("§05.4 the download notice from every entry point",
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("STDIN:n\n");
-    expect(result.stderr).toBe(downloadNotice(ECHO_TARBALL_URL));
+    expect(result.stderr).toBe(
+      downloadNotice(ECHO_TARBALL_URL, { name: "pnpm", version: ECHO_VERSION }),
+    );
     expect(servedPaths()).toContain(ECHO_TARBALL_PATH);
   });
 });

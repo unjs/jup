@@ -238,7 +238,7 @@ describe("§05.1 TLS", () => {
       expect(result.stdout).toBe("6.6.2\n");
       // Loud, once, and byte for byte.
       expect(withoutDownloadNotices(result.stderr)).toBe(
-        "! TLS certificate verification is disabled (set by JUP_STRICT_SSL)\n",
+        "⚠ TLS certificate verification is disabled (set by JUP_STRICT_SSL)\n",
       );
       expect(withoutDownloadNotices(result.stderr)).toBe(
         `${messages.strictSslDisabled("JUP_STRICT_SSL")}\n`,
@@ -262,8 +262,8 @@ describe("§05.1 TLS", () => {
       // Both were refused, each announced, and the run still failed the way an
       // untrusted certificate should.
       expect(result.exitCode).toBe(1);
-      expect(result.stderr).toContain("! Ignoring JUP_STRICT_SSL from ");
-      expect(result.stderr).toContain("! Ignoring JUP_CAFILE from ");
+      expect(result.stderr).toContain("⚠ Ignoring JUP_STRICT_SSL from ");
+      expect(result.stderr).toContain("⚠ Ignoring JUP_CAFILE from ");
       expect(result.stderr).toContain("this variable can only be set in the environment");
       expect(result.stderr).toContain("TLS certificate verification failed for");
       expect(result.stderr).not.toContain("verification is disabled");

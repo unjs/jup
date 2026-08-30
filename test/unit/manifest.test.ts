@@ -722,7 +722,7 @@ describe("devEngines — §03.3", () => {
       fromPackageManagerField: true,
     });
     expect(warn).toHaveBeenCalledWith(
-      `! jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
+      `⚠ jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.`,
     );
 
     warn.mockClear();
@@ -732,7 +732,7 @@ describe("devEngines — §03.3", () => {
       fromPackageManagerField: false,
     });
     expect(warn).toHaveBeenCalledWith(
-      `! jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
+      `⚠ jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.`,
     );
   });
 

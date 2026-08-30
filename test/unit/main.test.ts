@@ -564,7 +564,7 @@ describe("runProxy — auto-pin (tests 43, 44)", () => {
     // stdout is the fake package manager's own output, unpolluted.
     expect(result.stdout).toBe(`yarn@${versionOf(YARN_DEFAULT)} --version\n`);
     expect(result.stderr).toContain(
-      "! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry",
+      "⚠ The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry",
     );
     expect(result.stderr).toContain("https://nodejs.org/api/packages.html#packagemanager");
   });

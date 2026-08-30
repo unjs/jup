@@ -222,7 +222,7 @@ describe("verifySignature — key expiry (§06.5, tests 82, 208)", () => {
 
     // "MUST NOT do so silently" — the whole of what makes the leniency safe.
     expect(warn).toHaveBeenCalledWith(
-      `! jup integrity warning: ${PACKAGE}@${VERSION} carries a valid signature from ${npm.keyid}, a key that expired ${expires}; accepting it`,
+      `⚠ jup integrity warning: ${PACKAGE}@${VERSION} carries a valid signature from ${npm.keyid}, a key that expired ${expires}; accepting it`,
     );
   });
 

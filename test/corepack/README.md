@@ -126,8 +126,8 @@ answers a divergence too broad to skip row by row:
 | --- | --- | --- |
 | `COREPACK_INTEGRITY_KEYS=0` | 20 | §06.5 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
 | `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §06.1 — a source with no signature and no pinned hash is refused: every URL reference, and (before §02.5 moved Berry onto npm) every Berry release from `repo.yarnpkg.com`. |
-| `COREPACK_QUIET_ADVISORIES=1` | 22 | §11.3 — the advisory `!` lines jup adds. |
-| `! jup is about to download …`, stripped in `_runCli.ts` | 26 | §05.4 — jup announces every artifact download; Corepack prints that line only when `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` asks for it. A strip rather than a fourth variable because §05.4 leaves no variable to set. |
+| `COREPACK_QUIET_ADVISORIES=1` | 22 | §11.3 — the advisory `⚠` lines jup adds. |
+| `↓ Downloading …`, stripped in `_runCli.ts` | 26 | §05.4 — jup announces every artifact download; Corepack prints its own such line only when `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` asks for it. A strip rather than a fourth variable because §05.4 leaves no variable to set. |
 
 The per-variable splits were measured before §02.5; the total they add up to
 fell from 52 to 39 there — Berry now arrives signed from npm like every other
@@ -153,7 +153,7 @@ Four levers were measured against the residual, and all four were taken:
 | Hand over with `Module.runMain`, not `import()` | +6 | **bug** — fixed, see below |
 | Leave `process.exitCode` undefined on a plain success | (1 of those 6) | **bug** — fixed, see below |
 | Accept trusted keys on curves other than P-256 | +13 | §06.3 scopes its P-256 assertion to *native* implementations; jup is not one |
-| Suppress jup's *extra* advisory `!` lines | +22 | `COREPACK_QUIET_ADVISORIES` (§11.3) |
+| Suppress jup's *extra* advisory `⚠` lines | +22 | `COREPACK_QUIET_ADVISORIES` (§11.3) |
 | Scrub `YARN_*` / `npm_config_*` from the test environment | +6 | harness — a stray `YARN_NPM_MINIMAL_AGE_GATE` fails every row running an older Yarn |
 
 The advisory lever was the largest, and the one that could not be pulled

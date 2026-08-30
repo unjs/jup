@@ -439,7 +439,7 @@ describe.skipIf(process.platform === "win32")("the PATH preference (§10.5)", ()
       preferredOver: perUserBin,
     });
     expect(shimDirectoryPreferred(perUserBin, homeBin)).toBe(
-      `! ${perUserBin} is not on your PATH; installing shims to ${homeBin} instead`,
+      `⚠ ${perUserBin} is not on your PATH; installing shims to ${homeBin} instead`,
     );
   });
 
@@ -900,7 +900,7 @@ describe.skipIf(process.platform === "win32")(
 
           expect(warn).toHaveBeenCalledWith(shimDirectoryFallback(readOnly, perUserBin));
           expect(shimDirectoryFallback(readOnly, perUserBin)).toBe(
-            `! ${readOnly} is not writable; installing shims to ${perUserBin} instead`,
+            `⚠ ${readOnly} is not writable; installing shims to ${perUserBin} instead`,
           );
           expectShim(perUserBin, "yarn");
           expect(existsSync(join(readOnly, "yarn"))).toBe(false);
@@ -980,7 +980,7 @@ describe("verifying that enable took effect (§10.5)", () => {
     expect(warn).toHaveBeenCalledWith(shimShadowed("yarn", rival, join(perUserBin, "yarn")));
     expect(warn).toHaveBeenCalledWith(rehashNotice());
     expect(shimShadowed("yarn", "/v/yarn", "/s/yarn")).toBe(
-      `! yarn on PATH resolves to /v/yarn, not the shim just installed at /s/yarn. Another version manager may be shadowing it.`,
+      `⚠ yarn on PATH resolves to /v/yarn, not the shim just installed at /s/yarn. Another version manager may be shadowing it.`,
     );
   });
 

@@ -251,10 +251,21 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
  * nothing is read back are `15-20-download-notice.test.ts`'s rows.
  */
 export function withoutDownloadNotices(stderr: string): string {
-  return stderr.replaceAll(/^! jup is about to download \S+\n/gm, "");
+  return stderr.replaceAll(/^↓ Downloading .+\n/gm, "");
 }
 
-/** §05.4's line for `url`, for the rows that assert it directly. */
-export function downloadNotice(url: string): string {
-  return `! jup is about to download ${url}\n`;
+/**
+ * §05.4's line for `url`, for the rows that assert it directly.
+ *
+ * `tool` mirrors the notice's own optionality: a URL reference names no
+ * version, and an artifact outside the table names neither.
+ */
+export function downloadNotice(url: string, tool?: { name: string; version?: string }): string {
+  const what =
+    tool === undefined
+      ? ""
+      : tool.version === undefined
+        ? `${tool.name} from `
+        : `${tool.name} ${tool.version} from `;
+  return `↓ Downloading ${what}${url}\n`;
 }

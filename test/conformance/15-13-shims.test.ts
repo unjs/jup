@@ -161,7 +161,7 @@ describe("§10.5 — never require elevation", () => {
       expect(result.exitCode).toBe(0);
       // Byte-exact (§10.5 point 2).
       expect(result.stderr).toBe(
-        `! ${readOnly} is not writable; installing shims to ${shimDir} instead\n`,
+        `⚠ ${readOnly} is not writable; installing shims to ${shimDir} instead\n`,
       );
       expect(existsSync(join(shimDir, "yarn"))).toBe(true);
       expect(existsSync(join(readOnly, "yarn"))).toBe(false);
@@ -235,7 +235,7 @@ describe("§10.5 — never require elevation", () => {
 
     // Exit 0 — a warning, not a failure — but never silence.
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain(`! ${shimDir} is not on your PATH`);
+    expect(result.stderr).toContain(`⚠ ${shimDir} is not on your PATH`);
     expect(result.stderr).toContain(`export PATH="${shimDir}:$PATH"`);
     expect(result.stderr).toContain("hash -r");
     expect(existsSync(join(shimDir, "yarn"))).toBe(true);
@@ -266,7 +266,7 @@ describe("§10.5 — never require elevation", () => {
       // Byte-exact (§10.5 point 6), and the *only* line: the chosen directory is
       // on `PATH` by construction, so point 3's advisory has nothing to say.
       expect(result.stderr).toBe(
-        `! ${shimDir} is not on your PATH; installing shims to ${alternate} instead\n`,
+        `⚠ ${shimDir} is not on your PATH; installing shims to ${alternate} instead\n`,
       );
       expect(existsSync(join(alternate, "yarn"))).toBe(true);
       expect(existsSync(join(shimDir, "yarn"))).toBe(false);
@@ -304,7 +304,7 @@ describe("§10.5 — never require elevation", () => {
       expect(existsSync(join(beside, "yarn"))).toBe(false);
       expect(existsSync(join(shimDir, "yarn"))).toBe(true);
       // No preference was available, so this is row 172's outcome unchanged.
-      expect(result.stderr).toContain(`! ${shimDir} is not on your PATH`);
+      expect(result.stderr).toContain(`⚠ ${shimDir} is not on your PATH`);
       expect(result.stderr).not.toContain("installing shims to");
     },
   );
@@ -326,7 +326,7 @@ describe("§10.5 — never require elevation", () => {
       expect(groupWritable.exitCode).toBe(0);
       expect(existsSync(join(alternate, "yarn"))).toBe(false);
       expect(existsSync(join(shimDir, "yarn"))).toBe(true);
-      expect(groupWritable.stderr).toContain(`! ${shimDir} is not on your PATH`);
+      expect(groupWritable.stderr).toContain(`⚠ ${shimDir} is not on your PATH`);
 
       // And absent altogether: a `PATH` entry naming a directory that is not
       // there is inert, and `enable` does not manufacture one.
@@ -403,7 +403,7 @@ describe("§10.5 — never require elevation", () => {
         expect(result.exitCode).toBe(0);
         // Point 6's line, unchanged: point 8 adds a candidate, not a message.
         expect(result.stderr).toBe(
-          `! ${shimDir} is not on your PATH; installing shims to ${SYSTEM_DIR} instead\n`,
+          `⚠ ${shimDir} is not on your PATH; installing shims to ${SYSTEM_DIR} instead\n`,
         );
         expect(existsSync(join(SYSTEM_DIR, "yarn"))).toBe(true);
         expect(existsSync(join(shimDir, "yarn"))).toBe(false);
@@ -441,7 +441,7 @@ describe("§10.5 — never require elevation", () => {
       expect(existsSync(join(shimDir, "yarn"))).toBe(true);
       // Row 172's outcome unchanged: no candidate was on `PATH`, so the advisory
       // fires and nothing was preferred over anything.
-      expect(result.stderr).toContain(`! ${shimDir} is not on your PATH`);
+      expect(result.stderr).toContain(`⚠ ${shimDir} is not on your PATH`);
       expect(result.stderr).not.toContain("installing shims to");
     },
   );
@@ -648,7 +648,7 @@ describe("§10.5 — enable verifies its own post-condition", () => {
       expect(result.exitCode).toBe(0);
       // Byte-exact (§10.5 point 2).
       expect(result.stderr).toContain(
-        `! yarn on PATH resolves to ${join(volta, "yarn")}, not the shim just installed at ${join(shimDir, "yarn")}. Another version manager may be shadowing it.`,
+        `⚠ yarn on PATH resolves to ${join(volta, "yarn")}, not the shim just installed at ${join(shimDir, "yarn")}. Another version manager may be shadowing it.`,
       );
       // §10.5 point 4.
       expect(result.stderr).toContain("hash -r");

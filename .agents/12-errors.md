@@ -1,7 +1,7 @@
 # 12 — Errors, Messages, Exit Codes
 
 These strings are asserted byte for byte by the test suite, including the leading
-`! `, the absent trailing periods, and the exact interpolation. `src/errors.ts`
+`⚠ `, the absent trailing periods, and the exact interpolation. `src/errors.ts`
 holds the ones the warm path can print; `src/errors-cold.ts` holds everything
 else and re-exports the first, so a warm run never parses the download and
 network vocabulary. Both are the authority; this page is the map.
@@ -9,6 +9,24 @@ network vocabulary. Both are the authority; this page is the map.
 Messages say `jup` and name `JUP_` variables. A message that reports *where* a
 value came from names the spelling the user set (§11.6), which is the only place
 `COREPACK_` appears in output.
+
+## 12.0 Markers
+
+A line jup adds to the terminal opens with one of three markers, each followed by
+a single space. They are part of the string — `src/utils/log.ts` colours them and
+changes nothing else — so a listing below that shows one prints it.
+
+| Marker | Meaning | Colour |
+|---|---|---|
+| `⚠ ` | An advisory, a warning or a notice: the first line of one | yellow |
+| `│ ` | A continuation of the `⚠ ` line above it, in the same write | dim |
+| `↓ ` | §05.4's download notice, and nothing else | cyan |
+
+A multi-line advisory takes the glyph once and the gutter thereafter, so a block
+reads as one advisory rather than as several alarms: §03.6's auto-pin is a `⚠ `
+sentence and a `│ ` link, §10.5's `PATH` advice a `⚠ ` sentence and three `│ `
+lines. `JUP_QUIET_ADVISORIES` (§11.3) mutes the advisories jup adds; it never
+mutes the download notice, auto-pin, validation warnings or errors.
 
 ## 12.1 Classes
 
@@ -59,8 +77,8 @@ would run a version the project explicitly did not ask for.
 Unconditional warnings, regardless of `onFail`, on stderr:
 
 ```
-! jup only supports objects as valid value for devEngines.<field>. The current value (<JSON>) will be ignored.
-! jup does not currently support array values for devEngines.<field>
+⚠ jup only supports objects as valid value for devEngines.<field>. The current value (<JSON>) will be ignored.
+⚠ jup does not currently support array values for devEngines.<field>
 ```
 
 Everything else routes through `warnOrThrow`, whose bodies are:
@@ -77,7 +95,7 @@ The "packageManager" field (<pm>) and "devEngines.packageManager.integrity" (<sr
 
 `<field>` is `packageManager` or `runtime`. Thrown, the body appears bare (proxy)
 or wrapped in `Usage Error:` (management); warned, it is prefixed
-`! jup validation warning: `. `<JSON>` means `JSON.stringify(value)`, so strings
+`⚠ jup validation warning: `. `<JSON>` means `JSON.stringify(value)`, so strings
 appear quoted.
 
 ## 12.4 Resolution (§04)
@@ -97,8 +115,8 @@ Stale-resolution advisories (§04.4), the only output a successful fallback
 produces:
 
 ```
-! Unable to reach the registry to resolve <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until the registry answers again.
-! The registry lists no release matching <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until a matching release is published.
+⚠ Unable to reach the registry to resolve <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until the registry answers again.
+⚠ The registry lists no release matching <name>@<range>; running <name>@<version>, the expired resolution recorded in <memo>. Its stamp is not extended, so this repeats until a matching release is published.
 ```
 
 Both name the memo's path, because the reader's next question is which file to
@@ -147,7 +165,7 @@ Refusing to download from <host>: it does not match the configured registry <reg
 TLS:
 
 ```
-! TLS certificate verification is disabled (set by <source>)
+⚠ TLS certificate verification is disabled (set by <source>)
 TLS certificate verification failed for <host>: the certificate was issued by an unknown authority. If your network uses a TLS-inspecting proxy, point JUP_CAFILE at its CA bundle.
 TLS certificate for <host> is expired or not yet valid (check the system clock).
 TLS certificate for <host> does not match that hostname.
@@ -175,9 +193,9 @@ Mismatch hashes. Expected <expected>, got <actual>
 Unsupported hash algorithm '<algo>' in the packageManager field
 The package was signed with an expired key (<keyid>, expired <expires>)
 Refusing to install <name>@<version>: <source> provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.
-! jup integrity warning: <name>@<version> carries a valid signature from <keyid>, a key that expired <expires>; accepting it
-! <registry> does not publish signatures for <package>@<version>; falling back to integrity-only verification
-! Installing <name>@<version> from <source> with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)
+⚠ jup integrity warning: <name>@<version> carries a valid signature from <keyid>, a key that expired <expires>; accepting it
+⚠ <registry> does not publish signatures for <package>@<version>; falling back to integrity-only verification
+⚠ Installing <name>@<version> from <source> with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)
 ```
 
 The hash-mismatch format is used operationally — users read the `got` value and
@@ -199,14 +217,14 @@ Unsupported package manager '<name>'
 Removed <n> cached version(s) from <path>
 Removed <n> cached version(s) and <m> recorded default(s) from <path>
 Nothing to remove
-! Could not remove <path>; it is still in the cache. Remove it by hand, or re-run with permission to delete it.
+⚠ Could not remove <path>; it is still in the cache. Remove it by hand, or re-run with permission to delete it.
 ```
 
 The interpreter guards of §07.9:
 
 ```
-! Kept <name>@<version>: jup's shims name <interpreter> as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside <home> to repin them, then clean again.
-! Removing <name>@<version>, which jup's shims name as their interpreter (<interpreter>): they will fail with 'bad interpreter' until 'jup enable' is re-run under a node installed outside <home>.
+⚠ Kept <name>@<version>: jup's shims name <interpreter> as their interpreter, so removing it would leave every one of them failing with 'bad interpreter'. Re-run 'jup enable' under a node installed outside <home> to repin them, then clean again.
+⚠ Removing <name>@<version>, which jup's shims name as their interpreter (<interpreter>): they will fail with 'bad interpreter' until 'jup enable' is re-run under a node installed outside <home>.
 ```
 
 ## 12.9 Hosts (§02.4)
@@ -236,10 +254,10 @@ Options --system and --install-directory both name an install directory; pass on
 --system has no directory on this platform: %ProgramData% is not set. Pass --install-directory <a writable directory on your PATH> instead
 <binName> already exists at <file> and was not installed by this tool - skipping (use --force to overwrite)
 <binName> is already installed in <file> and points to a Yarn Switch install - skipping
-! <directory> is not writable; installing shims to <fallback> instead
-! <fallback> is not on your PATH; installing shims to <chosen> instead
-! <name> on PATH resolves to <path>, not the shim just installed at <shim>. Another version manager may be shadowing it.
-! Unable to restore <path>: <reason>
+⚠ <directory> is not writable; installing shims to <fallback> instead
+⚠ <fallback> is not on your PATH; installing shims to <chosen> instead
+⚠ <name> on PATH resolves to <path>, not the shim just installed at <shim>. Another version manager may be shadowing it.
+⚠ Unable to restore <path>: <reason>
 ```
 
 `shims.ts`, `npmrc.ts`, `tls.ts` and `info.ts` keep their own longer diagnostic
@@ -255,10 +273,10 @@ Installing <name>@<reference> in the project...
 Updated <path> to use <name>@<reference>
 Removed <name>@<range> from <path>
 All done!
-! jup is about to download <url>
-! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing <name>@<reference>.
-! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
-! Ignoring <name> from <path>: this variable can only be set in the environment
+↓ Downloading <name> <version> from <url>
+⚠ The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing <name>@<reference>.
+│ For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
+⚠ Ignoring <name> from <path>: this variable can only be set in the environment
 ```
 
 `--no-lockfile` prints `Removed …` only when it removes an entry from the

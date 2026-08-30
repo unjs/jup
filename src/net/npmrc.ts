@@ -102,11 +102,11 @@ export interface NpmrcConfig {
 export const npmrcMessages = {
   /** §05.3 — a project file tried to supply auth or TLS. Say so; do not just drop it. */
   refusedProjectKey: (key: string, path: string) =>
-    `! Ignoring ${key} from ${path}: a project-level .npmrc may only set registry and @scope:registry`,
+    `⚠ Ignoring ${key} from ${path}: a project-level .npmrc may only set registry and @scope:registry`,
 
   /** A `${VAR}` the environment does not define. npm fails outright; we drop the key. */
   unresolvedVariable: (key: string, path: string, variable: string) =>
-    `! Ignoring ${key} from ${path}: it references \${${variable}}, which is not set`,
+    `⚠ Ignoring ${key} from ${path}: it references \${${variable}}, which is not set`,
 
   /**
    * A project-level file tried to expand `${VAR}`.
@@ -127,11 +127,11 @@ export const npmrcMessages = {
    * this tool rather than a refusal by it.
    */
   refusedProjectExpansion: (key: string, path: string) =>
-    `! Ignoring ${key} from ${path}: a project-level .npmrc may not expand \${...} from the environment`,
+    `⚠ Ignoring ${key} from ${path}: a project-level .npmrc may not expand \${...} from the environment`,
 
   /** Reject non-HTTP registry schemes at configuration selection, then use the lower tier. */
   refusedRegistryScheme: (source: string, scheme: string) =>
-    `! Ignoring ${source}: a registry must be an http: or https: URL, and this one is ${scheme}`,
+    `⚠ Ignoring ${source}: a registry must be an http: or https: URL, and this one is ${scheme}`,
 } as const;
 
 /** One warning per `<path>\0<key>`; a memoised load cannot repeat itself anyway. */

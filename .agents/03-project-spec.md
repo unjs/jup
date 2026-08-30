@@ -211,7 +211,7 @@ disagree, that is a `warnOrThrow`.
 warnOrThrow(message, onFail):
   "ignore"              → nothing
   "error" | undefined   → throw UsageError (exit 1)
-  anything else         → warn `! jup validation warning: <message>`
+  anything else         → warn `⚠ jup validation warning: <message>`
 ```
 
 The default is **error**, and an unrecognised value degrades to a warning. That

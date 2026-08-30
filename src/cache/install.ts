@@ -161,7 +161,7 @@ export async function ensureInstalled(
 
   // §05.4 — artifacts only. The metadata request above deliberately announces
   // nothing, which is also what makes tests 49/50 name the *tarball* URL.
-  announceDownload(source.url);
+  announceDownload(source.url, { name: locator.name, version });
 
   const tmp = createTempDir();
   try {
@@ -257,8 +257,8 @@ export async function ensureInstalled(
  * a pipe and with stdin closed, and buffered input the tool did not need is left
  * untouched for the package manager (§08.6).
  */
-export function announceDownload(url: string): void {
-  err(`${messages.aboutToDownload(url)}\n`);
+export function announceDownload(url: string, tool?: { name: string; version?: string }): void {
+  err(`${messages.aboutToDownload(url, errColors, tool)}\n`);
 }
 
 /**
@@ -583,7 +583,7 @@ function debugNote(message: string): void {
     debug === "*" ||
     (debug !== undefined && (debug.includes("jup") || debug.includes("corepack")))
   ) {
-    warn(`! ${errColors.dim(message)}`);
+    warn(`⚠ ${errColors.dim(message)}`);
   }
 }
 /**

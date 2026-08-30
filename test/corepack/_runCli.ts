@@ -36,7 +36,7 @@ export interface CliResult {
  * this to see what is left once the known-intentional divergences are removed —
  * which is the useful signal when watching for a real regression.
  *
- * A third variable joins them, `JUP_QUIET_ADVISORIES` (§11.3): jup emits `!`
+ * A third variable joins them, `JUP_QUIET_ADVISORIES` (§11.3): jup emits `⚠`
  * advisories corepack has no equivalent for — §05.1's disabled-TLS notice, §06.1's
  * "publishes no signatures", §10.5's shim diagnostics — and a row that asserts
  * stderr exactly fails on the extra text alone. The variable is scoped to the
@@ -84,7 +84,7 @@ function compatEnv(env: NodeJS.ProcessEnv, withCustomRegistry: boolean): NodeJS.
  * wording verbatim.
  */
 function stripDownloadNotices(stderr: string): string {
-  return COMPAT ? stderr.replaceAll(/^! jup is about to download \S+\n/gm, ``) : stderr;
+  return COMPAT ? stderr.replaceAll(/^↓ Downloading .+\n/gm, ``) : stderr;
 }
 
 export async function runCli(

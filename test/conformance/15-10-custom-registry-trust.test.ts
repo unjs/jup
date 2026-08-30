@@ -160,7 +160,7 @@ describe("§06.3 — trust keyed by registry origin", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain(
-      `! Ignoring COREPACK_INTEGRITY_KEYS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
+      `⚠ Ignoring COREPACK_INTEGRITY_KEYS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
     );
     expect(result.stderr).toContain("The package was not signed by any trusted keys");
     expect(existsSync(join(fixture.home, "v1", "pnpm"))).toBe(false);

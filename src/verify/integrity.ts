@@ -52,7 +52,7 @@ export function assertSupportedAlgo(algo: string, userPinned = false): HashAlgo 
   if (userPinned && WEAK_HASH_ALGOS.has(normalized) && !warnedWeakAlgos.has(normalized)) {
     warnedWeakAlgos.add(normalized);
     advisory(
-      `! jup integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
+      `⚠ jup integrity warning: '${normalized}' is a weak hash algorithm; prefer sha256 or stronger`,
     );
   }
   return normalized as HashAlgo;

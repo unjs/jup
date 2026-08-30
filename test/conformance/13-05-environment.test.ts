@@ -243,8 +243,8 @@ describe("§13.5 environment variables", () => {
     // §03.6". It stays on stderr because this is proxy mode and stdout belongs
     // entirely to the package manager (§09.14).
     expect(result.stderr).toBe(
-      `! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing yarn@${YARN_DEFAULT}.\n` +
-        `! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
+      `⚠ The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing yarn@${YARN_DEFAULT}.\n` +
+        `│ For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager\n\n` +
         `Updated ${fixture.path("package.json")} to use yarn@${versionOf(YARN_DEFAULT)}\n`,
     );
   });
@@ -286,7 +286,7 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup is about to download https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
+      `↓ Downloading yarn 3.0.0 from https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
     );
     expect(result.stdout).toBe("3.0.0\n");
   });
@@ -320,11 +320,10 @@ describe("§13.5 environment variables", () => {
     // mock can reproduce, so only this stderr line is asserted here. The tarball
     // named is `@yarnpkg/cli-dist`'s because §05.3 switches Berry onto it over a
     // configured npm registry, and §02.5 put the default on the Berry line.
+    const escaped = versionOf(YARN_DEFAULT).replaceAll(".", String.raw`\.`);
     expect(result.stderr).toMatch(
       new RegExp(
-        `^! jup is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-${versionOf(
-          YARN_DEFAULT,
-        ).replaceAll(".", String.raw`\.`)}\\.tgz$`,
+        `^↓ Downloading yarn ${escaped} from ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-${escaped}\\.tgz$`,
         "m",
       ),
     );
@@ -356,7 +355,7 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup is about to download ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz\n`,
+      `↓ Downloading yarn 3.0.0-rc.2 from ${registry.origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0-rc.2.tgz\n`,
     );
     expect(result.stdout).toBe("3.0.0-rc.2\n");
   });

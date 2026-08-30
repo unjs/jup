@@ -6,8 +6,9 @@
  *
  * 1. **The text is the contract.** §12 reproduces every user-facing string byte
  *    for byte, so colour may only wrap what a message already says. Nothing here
- *    adds, drops, or reorders a character; with colour off, every function is
- *    the plain `write`/`console.warn` it replaced.
+ *    adds, drops, or reorders a character — §12's `⚠ ` and `│ ` markers are part
+ *    of the messages themselves; with colour off, every function is the plain
+ *    `write`/`console.warn` it replaced.
  * 2. **The stream is chosen by the caller**, never inferred. Which of the two a
  *    line lands on is asserted by the suite — a proxy-mode `UsageError` on
  *    stderr, its management-mode form on **stdout** — and a helper that guessed
@@ -136,25 +137,49 @@ function paletteFor(target: Target): Palette {
 export const outColors: Palette = paletteFor("stdout");
 export const errColors: Palette = paletteFor("stderr");
 
-/** §12 — the marker every advisory, warning and notice opens with. */
-const MARKER = "! ";
+/**
+ * §12 — the two markers a line can open with, and what they mean.
+ *
+ * `⚠ ` opens an advisory, a warning or a notice; `│ ` continues one. They live
+ * in the message builders, not here: §12 reproduces every user-facing string
+ * byte for byte, so what a reader sees has to be what §12 lists. All this file
+ * does is paint them.
+ *
+ * Both characters are old and narrow — `⚠` is U+26A0, `│` is U+2502, a
+ * box-drawing character every terminal font carries — and neither is an emoji,
+ * so neither takes the double-width cell that would push a marked line out of
+ * alignment with the one above it.
+ */
+const WARNING_MARKER = "⚠ ";
+const CONTINUATION_MARKER = "│ ";
+
+/** Whether any line of a write opens with one of the two markers. */
+const MARKED = /^[⚠│] /m;
 
 /**
- * Colour the `! ` a line opens with, and only that.
+ * Colour the marker a line opens with, and only that.
  *
  * Line-wise, because a notice can be a paragraph: §03.6's auto-pin prints its
- * sentence and its documentation link as two marked lines in one write. Split
- * and rejoin on `\n` is byte-exact for everything else, including the download
- * prompt's deliberate lack of a trailing newline.
+ * sentence and its documentation link as two marked lines in one write, and
+ * §10.5's `PATH` advice is four. Only the first of them is the warning — the
+ * rest continue it, and their dim gutter is what makes the block read as one
+ * advisory rather than as four separate alarms. Split and rejoin on `\n` is
+ * byte-exact for everything else, including a write with no trailing newline.
  */
 function markers(text: string, colors: Palette): string {
-  if (!text.startsWith(MARKER) && !text.includes(`\n${MARKER}`)) return text;
+  if (!MARKED.test(text)) return text;
 
   return text
     .split("\n")
-    .map((line) =>
-      line.startsWith(MARKER) ? `${colors.yellow("!")} ${line.slice(MARKER.length)}` : line,
-    )
+    .map((line) => {
+      if (line.startsWith(WARNING_MARKER)) {
+        return `${colors.yellow("⚠")} ${line.slice(WARNING_MARKER.length)}`;
+      }
+      if (line.startsWith(CONTINUATION_MARKER)) {
+        return `${colors.dim("│")} ${line.slice(CONTINUATION_MARKER.length)}`;
+      }
+      return line;
+    })
     .join("\n");
 }
 

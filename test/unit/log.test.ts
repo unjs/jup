@@ -20,6 +20,7 @@ const USAGE = JSON.stringify(new URL("../../src/commands/usage.ts", import.meta.
 const ESC = String.fromCharCode(0x1b);
 const ANSI = new RegExp(`${ESC}\\[\\d+m`, "g");
 const YELLOW = `${ESC}[33m`;
+const DIM = `${ESC}[2m`;
 const RED = `${ESC}[31m`;
 const CYAN = `${ESC}[36m`;
 const GREEN = `${ESC}[32m`;
@@ -77,29 +78,31 @@ describe("the writers with colour off — §09.14", () => {
   });
 
   it("writes stderr verbatim", () => {
-    err("! jup is about to download https://example.test/y.tgz\n");
+    err("⚠ Downloading yarn 4.9.2 from https://example.test/y.tgz\n");
 
-    expect(stderr).toHaveBeenCalledWith("! jup is about to download https://example.test/y.tgz\n");
+    expect(stderr).toHaveBeenCalledWith(
+      "⚠ Downloading yarn 4.9.2 from https://example.test/y.tgz\n",
+    );
   });
 
   // The marker rewrite splits on `\n`, so a partial line — a caller writing a
   // prefix and finishing it later — has to survive it unchanged.
   it("preserves a write with no trailing newline", () => {
-    err("! jup is about to download ");
+    err("⚠ jup validation warning: ");
 
-    expect(stderr).toHaveBeenCalledWith("! jup is about to download ");
+    expect(stderr).toHaveBeenCalledWith("⚠ jup validation warning: ");
   });
 
   it("passes the message to console.warn unchanged", () => {
-    warn("! jup validation warning: lockfile ignored");
+    warn("⚠ jup validation warning: lockfile ignored");
 
-    expect(warned).toHaveBeenCalledWith("! jup validation warning: lockfile ignored");
+    expect(warned).toHaveBeenCalledWith("⚠ jup validation warning: lockfile ignored");
   });
 
-  // §03.6's auto-pin is two marked lines in one write.
+  // §03.6's auto-pin is a warning line and its continuation, in one write.
   it("leaves a multi-line notice byte for byte", () => {
     const notice =
-      "! The local project doesn't define a 'packageManager' field.\n! For more details, consult the documentation.\n\n";
+      "⚠ The local project doesn't define a 'packageManager' field.\n│ For more details, consult the documentation.\n\n";
 
     err(notice);
 
@@ -121,21 +124,24 @@ describe("the writers with colour off — §09.14", () => {
  */
 describe("the writers with colour on — §09.14", () => {
   it("colours the marker and nothing else", async () => {
-    const printed = await printWith(`log.out("! jup validation warning: nope\\n");`, {
+    const printed = await printWith(`log.out("⚠ jup validation warning: nope\\n");`, {
       FORCE_COLOR: "1",
     });
 
-    expect(printed).toContain(`${YELLOW}!`);
-    expect(printed.replaceAll(ANSI, "")).toBe("! jup validation warning: nope\n");
+    expect(printed).toContain(`${YELLOW}⚠`);
+    expect(printed.replaceAll(ANSI, "")).toBe("⚠ jup validation warning: nope\n");
   });
 
-  it("colours each marked line of a notice", async () => {
-    const printed = await printWith(`log.out("! one\\n! two\\nunmarked\\n");`, {
+  // §12 — the warning glyph opens an advisory, the gutter continues it, and an
+  // unmarked line is left alone. One write, all three.
+  it("colours a warning line and its continuations differently", async () => {
+    const printed = await printWith(`log.out("⚠ one\\n│ two\\nunmarked\\n");`, {
       FORCE_COLOR: "1",
     });
 
-    expect(printed.split(YELLOW)).toHaveLength(3);
-    expect(printed.replaceAll(ANSI, "")).toBe("! one\n! two\nunmarked\n");
+    expect(printed.split(YELLOW)).toHaveLength(2);
+    expect(printed.split(DIM)).toHaveLength(2);
+    expect(printed.replaceAll(ANSI, "")).toBe("⚠ one\n│ two\nunmarked\n");
   });
 
   it("leaves an unmarked line alone", async () => {
@@ -156,9 +162,9 @@ describe("the writers with colour on — §09.14", () => {
   });
 
   it("emits nothing under NO_COLOR", async () => {
-    const printed = await printWith(`log.out("! marked\\n");`, { NO_COLOR: "1" });
+    const printed = await printWith(`log.out("⚠ marked\\n");`, { NO_COLOR: "1" });
 
-    expect(printed).toBe("! marked\n");
+    expect(printed).toBe("⚠ marked\n");
   });
 });
 

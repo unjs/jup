@@ -473,7 +473,7 @@ export interface ShimOptions {
  * These live here rather than in `errors.ts` for the same reason `info.ts` keeps
  * its own: they are this command's vocabulary and nothing else refers to them.
  *
- * The two `!` lines quoted verbatim by §10.5 are byte-exact
+ * The two `⚠` lines quoted verbatim by §10.5 are byte-exact
  * contract; the rest are ours to word.
  */
 
@@ -574,15 +574,15 @@ export const interpreterOnlyInStore = (interpreter: string, home: string) =>
 
 /** §10.5 — verbatim. */
 export const shimDirectoryFallback = (directory: string, fallback: string) =>
-  `! ${directory} is not writable; installing shims to ${fallback} instead`;
+  `⚠ ${directory} is not writable; installing shims to ${fallback} instead`;
 
 /** §10.5 — verbatim. Deliberately shaped like the fallback line above. */
 export const shimDirectoryPreferred = (fallback: string, chosen: string) =>
-  `! ${fallback} is not on your PATH; installing shims to ${chosen} instead`;
+  `⚠ ${fallback} is not on your PATH; installing shims to ${chosen} instead`;
 
 /** §10.5 — verbatim. */
 export const shimShadowed = (name: string, path: string, shim: string) =>
-  `! ${name} on PATH resolves to ${path}, not the shim just installed at ${shim}. Another version manager may be shadowing it.`;
+  `⚠ ${name} on PATH resolves to ${path}, not the shim just installed at ${shim}. Another version manager may be shadowing it.`;
 
 const REHASH_ADVICE =
   "A shell that is already open may need `hash -r` before the change is visible.";
@@ -590,18 +590,18 @@ const REHASH_ADVICE =
 /** §10.5 — the exact line to add, for the detected shell. */
 export const shimDirectoryNotOnPath = (directory: string) =>
   [
-    `! ${directory} is not on your PATH, so the shims installed there will not be found.`,
-    `! Add it by running:`,
-    `!     ${pathExportLine(directory)}`,
-    `! ${REHASH_ADVICE}`,
+    `⚠ ${directory} is not on your PATH, so the shims installed there will not be found.`,
+    `│ Add it by running:`,
+    `│     ${pathExportLine(directory)}`,
+    `│ ${REHASH_ADVICE}`,
   ].join(`\n`);
 
 /** §10.5. */
-export const rehashNotice = () => `! ${REHASH_ADVICE}`;
+export const rehashNotice = () => `⚠ ${REHASH_ADVICE}`;
 
 /** §10.6 — "if a recorded entry can no longer be restored, say so and continue". */
 export const restoreFailed = (path: string, reason: string) =>
-  `! Unable to restore ${path}: ${reason}`;
+  `⚠ Unable to restore ${path}: ${reason}`;
 interface ParsedArgs {
   options: ShimOptions;
   names: string[];

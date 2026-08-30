@@ -693,7 +693,7 @@ describe("§06.1 registry metadata tiering", () => {
     expect(spec.hash).toBe(`sha512.${hashOf(tarball)}`);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      `! ${origin} does not publish signatures for pnpm@9.2.0; falling back to integrity-only verification`,
+      `⚠ ${origin} does not publish signatures for pnpm@9.2.0; falling back to integrity-only verification`,
     );
   });
 
@@ -918,7 +918,7 @@ describe("download notice (§05.4, tests 46, 47)", () => {
     await ensureInstalled({ name: "yarn", reference });
 
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
-      `! jup is about to download ${origin}/custom/yarn.js\n`,
+      `↓ Downloading yarn from ${origin}/custom/yarn.js\n`,
     ]);
     // §08.6 — stdin is never touched: there is no question to answer.
     expect(resume).not.toHaveBeenCalled();
@@ -947,7 +947,7 @@ describe("download notice (§05.4, tests 46, 47)", () => {
     // package manager (§08.6).
     expect(fake.read()).toEqual(Buffer.from("n\n"));
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
-      `! jup is about to download ${origin}/custom/yarn.js\n`,
+      `↓ Downloading yarn from ${origin}/custom/yarn.js\n`,
     ]);
   });
 
@@ -977,7 +977,7 @@ describe("download notice (§05.4, tests 46, 47)", () => {
     // The metadata request came first and printed nothing: the notice is for
     // artifacts only.
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
-      `! jup is about to download ${origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
+      `↓ Downloading yarn 3.0.0 from ${origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
     ]);
   });
 });

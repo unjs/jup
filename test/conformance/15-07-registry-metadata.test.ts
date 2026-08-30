@@ -77,7 +77,7 @@ describe("§06.1 / §06.3 registry metadata robustness", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
     // §06.1's soft-fail, worded verbatim and emitted exactly once.
-    const warning = `! ${registry.origin} does not publish signatures for pnpm@6.6.2; falling back to integrity-only verification`;
+    const warning = `⚠ ${registry.origin} does not publish signatures for pnpm@6.6.2; falling back to integrity-only verification`;
     expect(occurrences(result.stderr, warning)).toBe(1);
   });
 

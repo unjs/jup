@@ -169,7 +169,7 @@ describe("§07.7 — `bin` comes from the verified package", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain(
-      `! pnpm@11.9.9 declares "bin" {"pnpm":"./dist/pnpm.mjs","pnpx":"./dist/pnpx.mjs"}, but its range band says {"pnpm":"./bin/pnpm.mjs","pnpx":"./bin/pnpx.mjs"}. The package won; update the range band.`,
+      `⚠ pnpm@11.9.9 declares "bin" {"pnpm":"./dist/pnpm.mjs","pnpx":"./dist/pnpx.mjs"}, but its range band says {"pnpm":"./bin/pnpm.mjs","pnpx":"./bin/pnpx.mjs"}. The package won; update the range band.`,
     );
   });
 
@@ -187,7 +187,7 @@ describe("§07.7 — `bin` comes from the verified package", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("12.0.0\n");
     expect(result.stderr).toContain(
-      `! npm@12.0.0 matches no declared range band; reading "bin" from the verified package.`,
+      `⚠ npm@12.0.0 matches no declared range band; reading "bin" from the verified package.`,
     );
   });
 

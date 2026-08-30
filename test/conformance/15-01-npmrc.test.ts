@@ -164,7 +164,7 @@ describe("§05.3 — the .npmrc subset", () => {
     // Refused out loud, not silently — §03.2's precedent, and the one line that
     // explains a token which "should" have been picked up.
     expect(result.stderr).toContain(
-      `! Ignoring //${host}/:_authToken from ${join(fixture.cwd, ".npmrc")}: a project-level .npmrc may only set registry and @scope:registry`,
+      `⚠ Ignoring //${host}/:_authToken from ${join(fixture.cwd, ".npmrc")}: a project-level .npmrc may only set registry and @scope:registry`,
     );
   });
 

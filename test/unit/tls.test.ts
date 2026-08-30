@@ -415,7 +415,7 @@ describe("JUP_STRICT_SSL=0", () => {
     });
 
     expect(warn).toHaveBeenCalledWith(
-      "! TLS certificate verification is disabled (set by JUP_STRICT_SSL)",
+      "⚠ TLS certificate verification is disabled (set by JUP_STRICT_SSL)",
     );
     expect(warn).toHaveBeenCalledWith(messages.strictSslDisabled("JUP_STRICT_SSL"));
     // A standing property of the run, announced once — not once per request.

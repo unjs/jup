@@ -155,8 +155,16 @@ and key supplied each effective setting.
 Before streaming any **artifact** download — never before metadata:
 
 ```
-    stderr: `! jup is about to download <url>`
+    stderr: `↓ Downloading <name> <version> from <url>`
 ```
+
+The entry leads and the URL trails. `<name>` and `<version>` are dropped, in
+that order, only where the caller does not have them: a URL reference names no
+version (`↓ Downloading <name> from <url>`), and an artifact outside the table
+names neither (`↓ Downloading <url>`).
+
+Where the stream takes colour (§11.5), the name is cyan, the version yellow and
+the URL dim. Colour is decoration over the text above, never a change to it.
 
 The notice MUST be printed on every artifact download, from every entry point,
 with no setting to turn it off and no question attached. A cache hit downloads

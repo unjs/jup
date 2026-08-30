@@ -144,7 +144,7 @@ describe("§13.4 devEngines", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup does not currently support array values for devEngines.packageManager\n`,
+      `⚠ jup does not currently support array values for devEngines.packageManager\n`,
     );
     expect(result.stdout).toBe("6.6.2\n");
   });
@@ -156,7 +156,7 @@ describe("§13.4 devEngines", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.\n`,
+      `⚠ jup only supports objects as valid value for devEngines.packageManager. The current value ("pnpm@10.x") will be ignored.\n`,
     );
   });
 
@@ -167,7 +167,7 @@ describe("§13.4 devEngines", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.\n`,
+      `⚠ jup only supports objects as valid value for devEngines.packageManager. The current value (10) will be ignored.\n`,
     );
   });
 
@@ -188,7 +188,7 @@ describe("§13.4 devEngines", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `! jup validation warning: "packageManager" field is set to "${PIN}" which does not match the "devEngines.packageManager" field set to "yarn"\n`,
+      `⚠ jup validation warning: "packageManager" field is set to "${PIN}" which does not match the "devEngines.packageManager" field set to "yarn"\n`,
     );
     expect(result.stdout).toBe("6.6.2\n");
   });
@@ -222,7 +222,7 @@ describe("§13.4 devEngines", () => {
 
     expect(result.exitCode).toBe(0);
     expect(withoutDownloadNotices(result.stderr)).toBe(
-      `! jup validation warning: "packageManager" field is set to "${PIN}" which does not match the value defined in "devEngines.packageManager" for "pnpm" of "10.x"\n`,
+      `⚠ jup validation warning: "packageManager" field is set to "${PIN}" which does not match the value defined in "devEngines.packageManager" for "pnpm" of "10.x"\n`,
     );
     // §03.3 — the warning reports the disagreement; the member settles it. The
     // declared `10.x` is the pin, so that is what runs.

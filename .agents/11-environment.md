@@ -56,7 +56,7 @@ A real environment variable always beats the file.
 | `JUP_NODE_EXECPATH` | path | JavaScript runtime used to execute a spawned JS entry point (§08.3) | **no** |
 | `JUP_SHIM_DIRECTORY` | path | Default shim directory (§10.5) | **no** |
 | `JUP_HOST_RUNTIME` | path | A validated absolute runtime outside the install folder, forwarded through native child chains and read by `enable` (§10.2) | **no** |
-| `JUP_QUIET_ADVISORIES` | `1` | Silence added advisory `!` lines. Never silences errors, the download notice, auto-pin, validation warnings, or Yarn Switch notices | **no** |
+| `JUP_QUIET_ADVISORIES` | `1` | Silence added advisory `⚠` lines. Never silences errors, the download notice, auto-pin, validation warnings, or Yarn Switch notices | **no** |
 
 ## 11.4 Set by jup, read by others
 

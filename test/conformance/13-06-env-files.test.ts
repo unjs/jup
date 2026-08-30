@@ -168,7 +168,7 @@ describe("§13.6 env files", () => {
     // The embedded trust store is still in force, so the mock's key is untrusted.
     expect(result.stderr).toContain("The package was not signed by any trusted keys");
     expect(result.stderr).toContain(
-      `! Ignoring COREPACK_INTEGRITY_KEYS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
+      `⚠ Ignoring COREPACK_INTEGRITY_KEYS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
     );
   });
 
@@ -182,7 +182,7 @@ describe("§13.6 env files", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("Illegal use of URL for known package manager");
     expect(result.stderr).toContain(
-      `! Ignoring COREPACK_ENABLE_UNSAFE_CUSTOM_URLS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
+      `⚠ Ignoring COREPACK_ENABLE_UNSAFE_CUSTOM_URLS from ${join(fixture.cwd, ".jup.env")}: this variable can only be set in the environment`,
     );
   });
 

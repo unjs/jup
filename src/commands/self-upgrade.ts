@@ -176,7 +176,7 @@ async function download(release: Release, dest: string): Promise<void> {
   }
 
   // §05.4 — artifacts only, and after the metadata, exactly as §07.3 orders it.
-  announceDownload(url);
+  announceDownload(url, { name: TOOL_NAME, version });
 
   const tmp = createTempDir();
   try {

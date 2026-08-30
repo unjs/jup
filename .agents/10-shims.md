@@ -212,7 +212,7 @@ but still probe for writability, and never fall back.
 Only the default is created, explicitly at mode `0755` independent of umask, and
 then `realpath`'d. A bare `enable` that cannot write its initial selection falls
 back to the default and says so. Alternate selection and writability fallback each
-print their own `!` line. When the chosen directory is not on `PATH`, `enable`
+print their own `⚠` line. When the chosen directory is not on `PATH`, `enable`
 says so and prints the export line for the user's shell.
 
 For `disable`, `info`, and child `PATH` promotion, prefer the candidate that
