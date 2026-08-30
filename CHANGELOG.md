@@ -1,6 +1,23 @@
 # Changelog
 
 
+## v0.5.2
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5.1...v0.5.2)
+
+### 🚀 Enhancements
+
+- Add `enable --all`, `info --store-path` and project inputs ([97757b5](https://github.com/unjs/jup/commit/97757b5))
+
+### 🤖 CI
+
+- Improve ([745d7cc](https://github.com/unjs/jup/commit/745d7cc))
+- Install deps ([8a4282e](https://github.com/unjs/jup/commit/8a4282e))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.5.1
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5.0...v0.5.1)
