@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { messages } from "../../src/errors.ts";
+import { messages } from "../../src/errors-cold.ts";
 import { pathWith, resolveBinPath, SHIM_MARKER } from "../../src/run/exec.ts";
 import { execNative } from "../../src/run/native.ts";
 import type { BinSpec } from "../../src/types.ts";
@@ -855,23 +855,46 @@ describe("execPackageManager — the isolated path (§08.2, §08.3.1)", () => {
     expect(result.stdout).toContain("self:true");
   });
 
-  it("honours JUP_NODE_EXECPATH as the interpreter (§08.3.1)", () => {
-    const location = fixture("isolated-interpreter", { "bin/yarn.js": `\n` });
+  // A shell script standing in for a runtime: it can report that it was the
+  // thing spawned, and what it was handed, which no real interpreter can say
+  // about itself without ambiguity. Windows has nothing that plays the part —
+  // §08.3.1 spawns the named path with no `shell` (`run/native.ts`), so a
+  // `#!/bin/sh` file is unrunnable there and a `.cmd` one is refused by Node
+  // itself. The row below it makes the same claim without running anything.
+  it.skipIf(process.platform === "win32")(
+    "honours JUP_NODE_EXECPATH as the interpreter (§08.3.1)",
+    () => {
+      const location = fixture("isolated-interpreter", { "bin/yarn.js": `\n` });
 
-    // A shell script standing in for a runtime: it can report that it was the
-    // thing spawned, and what it was handed, which no real interpreter can say
-    // about itself without ambiguity.
-    const fake = join(root, "fake-node");
-    writeFileSync(fake, `#!/bin/sh\nprintf 'interpreter:%s\\n' "$1"\nexit 7\n`);
-    chmodSync(fake, 0o755);
+      const fake = join(root, "fake-node");
+      writeFileSync(fake, `#!/bin/sh\nprintf 'interpreter:%s\\n' "$1"\nexit 7\n`);
+      chmodSync(fake, 0o755);
+
+      const result = runIsolated(location, { yarn: "./bin/yarn.js" }, [], [], {
+        JUP_NODE_EXECPATH: fake,
+      });
+
+      expect(result.stdout).toContain(join(location, "bin", "yarn.js"));
+      // The interpreter's own status is the run's, exactly as a tool's would be.
+      expect(result.stdout).toContain("code:7");
+    },
+  );
+
+  it("takes JUP_NODE_EXECPATH at its word, and reports it by name (§08.3.1, §12.8)", () => {
+    const location = fixture("isolated-missing-interpreter", { "bin/yarn.js": `\n` });
+
+    // §08.3.1 does not `stat` the value it is given — a path that does not
+    // execute is the spawn's failure, not a pre-judged one — so a name that was
+    // never there proves the variable was used at all: nothing else could put
+    // it in §12.8's sentence.
+    const fake = join(root, "absent-node");
 
     const result = runIsolated(location, { yarn: "./bin/yarn.js" }, [], [], {
       JUP_NODE_EXECPATH: fake,
     });
 
-    expect(result.stdout).toContain(join(location, "bin", "yarn.js"));
-    // The interpreter's own status is the run's, exactly as a tool's would be.
-    expect(result.stdout).toContain("code:7");
+    expect(result.stderr).toContain(messages.cannotExecute(fake, "ENOENT"));
+    expect(result.stdout).not.toContain("code:");
   });
 
   /* §08.5 — the native path's other fatality. */

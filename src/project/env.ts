@@ -12,7 +12,6 @@ import {
   isToolEnvName,
   jupSpelling,
   readEnv,
-  SYSTEM_ENV,
 } from "../config/env-vars.ts";
 import { advisory, messages } from "../errors.ts";
 
