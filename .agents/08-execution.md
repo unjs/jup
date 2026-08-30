@@ -50,9 +50,8 @@ sets the real exit code from its own module body, which runs strictly after
 after its `await`, which is every entry point jup ships and no host application
 that embeds it. `runMain(argv, { handover: true })` selects it; the CLI entry and
 §10's stubs pass it, `RunOptions` defaults it off, and without it a JavaScript
-entry point is spawned under §8.3.1 instead. The entry point decides, exactly as
-it decides §5.4's download-prompt default, and for the same reason: the core
-cannot know whether it is the last thing that will run.
+entry point is spawned under §8.3.1 instead. The entry point decides because the
+core cannot know whether it is the last thing that will run.
 
 ## 8.3 The native path: spawn and wait
 
@@ -155,9 +154,9 @@ not regress it:
 ## 8.6 stdin
 
 Passed through untouched — tools prompt (`npm init`) and are used in pipelines
-(`echo … | npm publish`). jup itself reads stdin only for the download prompt
-(§05.4), strictly before handover, only when stdin is a TTY, and exactly one
-chunk.
+(`echo … | npm publish`). jup itself MUST NOT read stdin at all: §05.4's download
+notice announces and continues, so every byte the caller piped in reaches the
+package manager.
 
 ## 8.7 The child's environment
 

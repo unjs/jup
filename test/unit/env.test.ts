@@ -10,7 +10,6 @@ import {
   SECURITY_ONLY_FROM_ENVIRONMENT,
   envDisabled,
   envFlag,
-  isCI,
   isEnvFileEligible,
   isFrozenLockfile,
   LEGACY_ENV_FILE_NAME,
@@ -20,7 +19,6 @@ import {
 import {
   COMPATIBILITY_ENV,
   corepackSpelling,
-  defaultEnv,
   ENV,
   envEntry,
   envSpellings,
@@ -473,9 +471,8 @@ describe("applyEnvFile", () => {
     });
   });
 
-  // The two corepack already refuses are dropped without a word: conformance row
-  // 48 asserts stderr is empty when a project's env file tries to turn the
-  // download prompt on, and neither carries a security consequence to report.
+  // The ones corepack already refuses are dropped without a word: none of them
+  // carries a security consequence worth reporting to the user.
   describe.each([...ENV_FILE_INELIGIBLE].filter((n) => !SECURITY_ONLY_FROM_ENVIRONMENT.has(n)))(
     "%s",
     (name) => {
@@ -760,17 +757,9 @@ describe("envFlag / envDisabled", () => {
   });
 });
 
-describe("isCI / isFrozenLockfile — §04.4, §11.1", () => {
+describe("isFrozenLockfile — §04.4, §11.1", () => {
   beforeEach(() => {
     delete process.env.CI;
-  });
-
-  it("treats any non-empty CI value as CI, and an empty one as unset", () => {
-    expect(isCI()).toBe(false);
-    process.env.CI = "";
-    expect(isCI()).toBe(false);
-    process.env.CI = "true";
-    expect(isCI()).toBe(true);
   });
 
   it("is thawed by default, in CI as anywhere else", () => {
@@ -841,7 +830,6 @@ describe("the compatibility spelling (§11)", () => {
     expect([...COMPATIBILITY_ENV].sort()).toEqual([
       "JUP_DEFAULT_TO_LATEST",
       "JUP_ENABLE_AUTO_PIN",
-      "JUP_ENABLE_DOWNLOAD_PROMPT",
       "JUP_ENABLE_NETWORK",
       "JUP_ENABLE_PROJECT_SPEC",
       "JUP_ENABLE_STRICT",
@@ -929,16 +917,6 @@ describe("the compatibility spelling (§11)", () => {
 
     expect(forwarded).toEqual({ JUP_HOST_RUNTIME: "/usr/bin/node" });
   });
-
-  it("lets either spelling beat a default", () => {
-    defaultEnv(ENV.ENABLE_DOWNLOAD_PROMPT, "0");
-    expect(readEnv(ENV.ENABLE_DOWNLOAD_PROMPT)).toBe("0");
-
-    process.env.JUP_ENABLE_DOWNLOAD_PROMPT = "1";
-    delete process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT;
-    defaultEnv(ENV.ENABLE_DOWNLOAD_PROMPT, "0");
-    expect(readEnv(ENV.ENABLE_DOWNLOAD_PROMPT)).toBe("1");
-  });
 });
 
 describe("the JUP_ spelling in an env file (§03.2)", () => {
@@ -950,8 +928,8 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
   });
 
   // §03.2 / §11.6 — the deny-list is what stands between a cloned repository and
-  // the credentials, trust store, TLS settings, store root, prompt, shim
-  // directory and host runtime. Narrowing the *spelling* rule (§11) must not
+  // the credentials, trust store, TLS settings, store root, shim directory and
+  // host runtime. Narrowing the *spelling* rule (§11) must not
   // narrow this: every protected setting stays refused under **both** prefixes,
   // including the `COREPACK_` spelling of a name jup no longer reads, so an env
   // file cannot launder a refused variable into a sibling tool that does.
@@ -968,7 +946,6 @@ describe("the JUP_ spelling in an env file (§03.2)", () => {
       ENV.CAFILE,
       ENV.STRICT_SSL,
       ENV.HOME,
-      ENV.ENABLE_DOWNLOAD_PROMPT,
       ENV.SHIM_DIRECTORY,
       ENV.NODE_EXECPATH,
       ENV.HOST_RUNTIME,

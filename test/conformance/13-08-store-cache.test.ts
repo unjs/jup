@@ -29,6 +29,7 @@ import {
   publishBerry,
   run,
   seedPackageManager,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -76,7 +77,7 @@ describe("§13.8 store, cache and offline", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`Adding yarn@${BERRY} to the cache...\n`);
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
   });
 
@@ -147,7 +148,7 @@ describe("§13.8 store, cache and offline", () => {
       });
       expect(installed.exitCode).toBe(0);
       expect(installed.stdout).toBe(`Installing yarn@${BERRY}...\n`);
-      expect(installed.stderr).toBe("");
+      expect(withoutDownloadNotices(installed.stderr)).toBe("");
 
       // The recorded default is what makes this work with no project spec at all,
       // and a read-only home must not stop it being read.
@@ -293,7 +294,7 @@ describe("§13.8 store, cache and offline", () => {
     ]);
 
     for (const result of results) {
-      expect(result.stderr).toBe("");
+      expect(withoutDownloadNotices(result.stderr)).toBe("");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("2.2.2\n");
     }

@@ -28,6 +28,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 /**
@@ -72,7 +73,7 @@ describe("§06.3 — key refresh on an unknown keyid", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
 
     // Exactly one refresh, and — §06.3's anti-circularity rule — asked of npm's
     // own registry rather than of whatever registry served the package.

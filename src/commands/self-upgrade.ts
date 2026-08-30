@@ -29,7 +29,7 @@
 
 const { chmodSync, existsSync, rmSync } = process.getBuiltinModule("node:fs");
 const { join } = process.getBuiltinModule("node:path");
-import { assertDigest, confirmDownload, streamArtifact } from "../cache/install.ts";
+import { announceDownload, assertDigest, streamArtifact } from "../cache/install.ts";
 import {
   createTempDir,
   getSelfFolder,
@@ -176,7 +176,7 @@ async function download(release: Release, dest: string): Promise<void> {
   }
 
   // §05.4 — artifacts only, and after the metadata, exactly as §07.3 orders it.
-  await confirmDownload(url);
+  announceDownload(url);
 
   const tmp = createTempDir();
   try {

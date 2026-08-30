@@ -40,6 +40,7 @@ import {
   npmTarball,
   pmScript,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -131,7 +132,7 @@ describe("§07.7 — `bin` comes from the verified package", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.9.9\n");
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     // The path really is the package's: the band's is absent from the install.
     const location = join(fixture.home, "v1", "pnpm", "11.9.9");
     expect(existsSync(join(location, "dist", "pnpm.mjs"))).toBe(true);
@@ -195,7 +196,7 @@ describe("§07.7 — `bin` comes from the verified package", () => {
 
     const result = await run(["npm", "--version"], { ...fixture, registry, bin: unbanded });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
   });
 
   it("176: §08.1 — a `bin` that escapes the install directory is refused", async () => {

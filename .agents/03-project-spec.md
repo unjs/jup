@@ -159,8 +159,7 @@ file exists.
 Keys are canonicalised to their `COREPACK_` spelling before the check, so
 `JUP_ENV_FILE` is refused exactly as `COREPACK_ENV_FILE` is — otherwise the deny
 list would be one rename away from useless. §11 marks each variable's
-eligibility; the ineligible ones are those that select the file being read, set
-the download-prompt default (whose value depends on how jup was invoked),
+eligibility; the ineligible ones are those that select the file being read,
 configure credentials or trust, weaken TLS, or nominate a location code is loaded
 and run from. A denied *security* variable warns (§12); a denied compatibility
 variable is silently ignored.

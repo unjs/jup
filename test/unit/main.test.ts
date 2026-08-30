@@ -868,7 +868,6 @@ describe("the warm fast path — §01.3 (test 96)", () => {
         `};`,
         `syncBuiltinESMExports();`,
         ``,
-        `process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";`,
         `const { runMain } = await import(${JSON.stringify(pathToFileURL(join(REPO_ROOT, "src", "main.ts")).href)});`,
         // `handover: true` — §01.3's budget is the *shim's* budget, and a shim
         // is what this stands in for; the isolated path spawns and is measured
@@ -1020,7 +1019,6 @@ function moduleGraph(entry: string): ModuleGraph {
       `const loaded = [];`,
       `registerHooks({ load(url, context, next) { loaded.push(url); return next(url, context); } });`,
       ``,
-      `process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT ??= "0";`,
       `const { runMain } = await import(${JSON.stringify(pathToFileURL(join(REPO_ROOT, "src", entry)).href)});`,
       `const { code } = await runMain(process.argv.slice(2), { handover: true });`,
       `writeFileSync(${JSON.stringify(report)}, JSON.stringify({`,

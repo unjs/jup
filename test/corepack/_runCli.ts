@@ -69,6 +69,24 @@ function compatEnv(env: NodeJS.ProcessEnv, withCustomRegistry: boolean): NodeJS.
   return patched;
 }
 
+/**
+ * §05.4 — jup announces every artifact download, from every entry point and
+ * with no way to turn it off. Upstream Corepack prints the same line only when
+ * `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` asks for it, so every ported row that
+ * asserts stderr on a **cold** run now sees one extra line it never wrote.
+ *
+ * Compat mode drops the notice for exactly the reason it mutes jup's `!`
+ * advisories: it changes no outcome, only how much jup says about it. It is a
+ * harness strip rather than a fourth variable because §05.4 leaves no variable
+ * to set — that is the point of the section. The rows that assert the notice
+ * *itself* say `Corepack is about to download` and are skipped for the naming
+ * divergence; `test/conformance/15-20-download-notice.test.ts` asserts jup's
+ * wording verbatim.
+ */
+function stripDownloadNotices(stderr: string): string {
+  return COMPAT ? stderr.replaceAll(/^! jup is about to download \S+\n/gm, ``) : stderr;
+}
+
 export async function runCli(
   cwd: PortablePath,
   argv: string[],
@@ -101,7 +119,7 @@ export async function runCli(
       resolve({
         exitCode,
         stdout: Buffer.concat(out).toString(),
-        stderr: Buffer.concat(err).toString(),
+        stderr: stripDownloadNotices(Buffer.concat(err).toString()),
       });
     });
   });

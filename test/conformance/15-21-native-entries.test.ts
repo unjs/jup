@@ -57,6 +57,7 @@ import {
   npmTarball,
   run,
   type Fixture,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const POSIX = process.platform !== "win32";
@@ -253,7 +254,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
 
     const result = await run(["bun", "install", "--frozen"], options(fixture));
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=bun args=install --frozen");
 
@@ -303,7 +304,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
 
     const result = await run(["deno", "task", "build"], options(fixture));
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=deno args=task build");
     expect(JSON.parse(readMarker(fixture, "deno", DENO_VERSION)).bin).toEqual({
@@ -386,7 +387,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
       options(fixture, { COREPACK_DEFAULT_TO_LATEST: "1" }),
     );
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=deno args=task build");
 
@@ -484,7 +485,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
 
     const result = await run(["aube", "install", "--prod"], options(fixture));
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=aube args=install --prod");
 
@@ -611,7 +612,7 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
 
     const result = await run(["pnpm", "install", "--frozen-lockfile"], options(fixture));
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=pnpm args=install --frozen-lockfile");
 

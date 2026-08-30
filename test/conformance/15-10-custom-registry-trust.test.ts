@@ -26,6 +26,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -65,7 +66,7 @@ describe("§06.3 — trust keyed by registry origin", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
   });
 
   it("165: the same key under a different origin does not vouch for this one", async () => {

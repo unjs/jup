@@ -19,6 +19,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 import { startProxy } from "./_harness/proxy.ts";
 
@@ -58,7 +59,7 @@ describe("§05.1 proxying", () => {
         }),
       });
 
-      expect(result.stderr).toBe("");
+      expect(withoutDownloadNotices(result.stderr)).toBe("");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("6.6.2\n");
 

@@ -21,6 +21,7 @@ import {
   packageManagerTarball,
   run,
   type RunResult,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 import { startProxy, type ProxyFixture } from "./_harness/proxy.ts";
 
@@ -235,7 +236,7 @@ describe("§13.7 registry, auth and integrity", () => {
   it("71: HTTP_PROXY plus a CONNECT proxy tunnels the request", async () => {
     const { result, proxy } = await proxiedInstall({ NODE_USE_ENV_PROXY: "1" });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
 

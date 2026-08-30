@@ -353,7 +353,5 @@ describe("§13.11 enable / disable", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain(`COREPACK_ROOT=${copyRoot}\n`);
-    // §10.1 — a shim defaults the download prompt to 1; `bin.ts` defaults it to 0.
-    expect(result.stdout).toContain(`COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n`);
   });
 });

@@ -260,7 +260,7 @@ version+digest := §04.6's `latest` lookup for jup's own package
     a non-semver answer → UsageError naming what the registry said
 stdout: `Installing jup@<version>...`
 unless <home>/self/<version> holds a readable marker:
-    metadata → tarball URL (§07.3), download prompt (§05.4)
+    metadata → tarball URL (§07.3), download notice (§05.4)
     one pass: hash the stream while extracting it (strip 1)
     digest mismatch → discard, install nothing
     the archive must contain dist/ and the bin/ CLI entry both names point at,
@@ -290,7 +290,7 @@ project's pin; the usage line names whichever word was typed.
 | `Adding …`, `Installing …`, `Updated <path> …` from a management command | stdout |
 | `--json` output, `info`, `cache list` | stdout |
 | Management-mode `Usage Error: …` and its usage block | **stdout** |
-| Validation warnings, advisories, the download prompt, Yarn Switch notices | stderr |
+| Validation warnings, advisories, the download notice, Yarn Switch notices | stderr |
 | Auto-pin's notice and its `Updated …` line (proxy mode) | stderr |
 | Proxy-mode `UsageError` | stderr |
 | Everything the tool itself prints | passthrough, unmodified |

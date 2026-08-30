@@ -30,6 +30,7 @@ import {
   run,
   seedPackageManager,
   sriOf,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -193,7 +194,7 @@ describe("§04.4 ranges and jup.lock", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
 
     // The project's own file is untouched: running a package manager is not a
     // decision about what the project runs on, and `git status` says so.
@@ -489,7 +490,7 @@ describe("§04.4 ranges and jup.lock", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("11.1.2\n");
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     // §03.3 — the member outranks the top-level range, so its own range is the
     // key the resolution is recorded under.
     expect(memoOf(fixture).resolutions["pnpm@>=11"]?.resolved).toBe("11.1.2");

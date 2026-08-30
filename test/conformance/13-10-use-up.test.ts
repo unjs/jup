@@ -11,6 +11,7 @@ import {
   packageManagerTarball,
   publishBerry,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -99,7 +100,7 @@ describe("§13.10 use / up", () => {
         `Updated ${fixture.path("package.json")} to use yarn@1.22.4\n` +
         `\nyarn@1.22.4 install\n`,
     );
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     // §03.7 — nothing was declared, so the pin has one home and the top-level
     // field is not created beside it.
     expect(topLevelPinOf(fixture)).toBeUndefined();
@@ -203,7 +204,7 @@ describe("§13.10 use / up", () => {
     expect(result.stdout).toContain(
       "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
     );
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     // The pin was never written: the pnpm declaration is exactly as the fixture
     // left it, and no `packageManager` was created beside it.
     expect(topLevelPinOf(fixture)).toBeUndefined();

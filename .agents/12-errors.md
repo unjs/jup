@@ -142,7 +142,6 @@ Giving up after <n> attempt(s) (set JUP_NETWORK_RETRIES to change)
 <name>@<version> does not exist in <registry>. Run 'jup info' to see the resolved spec and where it came from.
 <name>@<version> does not exist in <registry>. jup installs <name> from <package>, whose earliest published version is <from>; releases before it were only ever distributed elsewhere. Pin <from> or newer.
 Refusing to download from <host>: it does not match the configured registry <registry>
-Aborted by the user
 ```
 
 TLS:
@@ -257,13 +256,10 @@ Updated <path> to use <name>@<reference>
 Removed <name>@<range> from <path>
 All done!
 ! jup is about to download <url>
-? Do you want to continue? [Y/n] 
 ! The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing <name>@<reference>.
 ! For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
 ! Ignoring <name> from <path>: this variable can only be set in the environment
 ```
-
-The confirmation prompt has a trailing space and no newline.
 
 `--no-lockfile` prints `Removed …` only when it removes an entry from the
 committed `jup.lock` (§09).

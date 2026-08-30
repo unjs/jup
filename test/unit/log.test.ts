@@ -82,12 +82,12 @@ describe("the writers with colour off — §09.14", () => {
     expect(stderr).toHaveBeenCalledWith("! jup is about to download https://example.test/y.tgz\n");
   });
 
-  // The download prompt ends in a space and no newline (§12), and the marker
-  // rewrite splits on `\n` — so a line without one has to survive it.
+  // The marker rewrite splits on `\n`, so a partial line — a caller writing a
+  // prefix and finishing it later — has to survive it unchanged.
   it("preserves a write with no trailing newline", () => {
-    err("! Do you want to continue? [Y/n] ");
+    err("! jup is about to download ");
 
-    expect(stderr).toHaveBeenCalledWith("! Do you want to continue? [Y/n] ");
+    expect(stderr).toHaveBeenCalledWith("! jup is about to download ");
   });
 
   it("passes the message to console.warn unchanged", () => {
@@ -268,7 +268,6 @@ describe("the help text — §09.14", () => {
     expect(printed).toContain(`${GREEN}%LOCALAPPDATA%`);
     expect(printed).toContain(`${GREEN}%ProgramData%`);
     expect(printed).toContain(`${GREEN}PATH`);
-    expect(printed).toContain(`${GREEN}JUP_ENABLE_DOWNLOAD_PROMPT`);
   });
 
   it("highlights a flag in the list and in the prose", async () => {
@@ -294,9 +293,9 @@ describe("the help text — §09.14", () => {
     // The words, not the phrases they sit in: what is under test is the
     // lookbehind in `FLAG`, and an assertion spanning two words also asserts
     // where the paragraph happens to wrap.
-    expect(printed).toContain("package-manager");
+    expect(printed).toContain("top-level");
     expect(printed).toContain("per-user");
-    expect(printed).not.toContain(`${YELLOW}-manager`);
+    expect(printed).not.toContain(`${YELLOW}-level`);
     expect(printed).not.toContain(`${YELLOW}-user`);
   });
 

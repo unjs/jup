@@ -18,6 +18,7 @@ import {
   publishBerry,
   run,
   type Fixture,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -192,7 +193,7 @@ describe("§13.9 default version and last-known-good", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Installing yarn@4.9.9...\n");
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(lastKnownGood(fixture).yarn).toMatch(/^4\.9\.9/);
   });
 

@@ -53,17 +53,14 @@ function deniedSpellings(names: readonly string[]): ReadonlySet<string> {
 /**
  * §03.2 — variables an env file may never supply.
  *
- * `COREPACK_ENV_FILE` is chicken-and-egg; `COREPACK_ENABLE_DOWNLOAD_PROMPT`'s
- * default depends on how the tool was invoked, which a project file must not be
- * able to override. The rest are §03.2's security additions: a
- * hostile repo must not be able to disable signature verification, point at an
- * arbitrary host, pair a token with a hostile registry to exfiltrate it,
- * switch off (or redirect) TLS certificate verification, or nominate any of the
- * three *locations* code is loaded and run from, below.
+ * `COREPACK_ENV_FILE` is chicken-and-egg. The rest are §03.2's security
+ * additions: a hostile repo must not be able to disable signature verification,
+ * point at an arbitrary host, pair a token with a hostile registry to exfiltrate
+ * it, switch off (or redirect) TLS certificate verification, or nominate any of
+ * the three *locations* code is loaded and run from, below.
  */
 export const ENV_FILE_INELIGIBLE = deniedSpellings([
   ENV.ENV_FILE,
-  ENV.ENABLE_DOWNLOAD_PROMPT,
   ENV.INTEGRITY_KEYS,
   ENV.ENABLE_UNSAFE_CUSTOM_URLS,
   ENV.NPM_TOKEN,
@@ -447,19 +444,6 @@ export function envFlag(name: string): boolean {
 /** `true` only for the exact string `"0"`. */
 export function envDisabled(name: string): boolean {
   return readEnv(name) === "0";
-}
-
-/**
- * §05.4 — "an unset `CI`", the way every other tool spells it: any non-empty
- * value means a non-interactive automated environment.
- *
- * It gates two unrelated things, which is why it lives here rather than in
- * either caller: the interactive half of the download prompt (§05.4), and
- * §04.4's frozen-lockfile default.
- */
-export function isCI(): boolean {
-  const ci = process.env[SYSTEM_ENV.CI];
-  return ci !== undefined && ci !== "";
 }
 
 /**

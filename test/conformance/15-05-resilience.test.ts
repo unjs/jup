@@ -17,6 +17,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -149,7 +150,7 @@ describe("§05.1 network resilience", () => {
         env: trusted({ COREPACK_NPM_REGISTRY: front.origin }),
       });
 
-      expect(result.stderr).toBe("");
+      expect(withoutDownloadNotices(result.stderr)).toBe("");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("6.6.2\n");
 

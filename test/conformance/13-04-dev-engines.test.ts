@@ -15,6 +15,7 @@ import {
   packageManagerTarball,
   run,
   seedPackageManager,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -220,7 +221,7 @@ describe("§13.4 devEngines", () => {
     const result = await run(["pnpm", "--version"], fixture);
 
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toBe(
+    expect(withoutDownloadNotices(result.stderr)).toBe(
       `! jup validation warning: "packageManager" field is set to "${PIN}" which does not match the value defined in "devEngines.packageManager" for "pnpm" of "10.x"\n`,
     );
     // §03.3 — the warning reports the disagreement; the member settles it. The

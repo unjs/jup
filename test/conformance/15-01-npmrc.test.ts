@@ -31,6 +31,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 /** Stands in for `registry.npmjs.org` and `repo.yarnpkg.com` (via `intercept.ts`). */
@@ -99,7 +100,7 @@ describe("§05.3 — the .npmrc subset", () => {
       env: { COREPACK_INTEGRITY_KEYS: trustAll() },
     });
 
-    expect(fromNpmrc.stderr).toBe("");
+    expect(withoutDownloadNotices(fromNpmrc.stderr)).toBe("");
     expect(fromNpmrc.exitCode).toBe(0);
     expect(fromNpmrc.stdout).toBe("6.6.2\n");
     expect(paths(mirror)).toEqual(["/pnpm/6.6.2", "/pnpm/-/pnpm-6.6.2.tgz"]);
@@ -202,7 +203,7 @@ describe("§05.3 — the .npmrc subset", () => {
       env: { COREPACK_INTEGRITY_KEYS: trustAll() },
     });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("4.0.0\n");
     expect(paths(mirror)).toEqual([

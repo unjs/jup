@@ -150,23 +150,25 @@ honoured.
 Parsing is memoised and stays off the warm path. `jup info` reports which file
 and key supplied each effective setting.
 
-## 5.4 The download prompt
+## 5.4 The download notice
 
 Before streaming any **artifact** download — never before metadata:
 
 ```
-JUP_ENABLE_DOWNLOAD_PROMPT=1:
     stderr: `! jup is about to download <url>`
-    if stdin is a TTY and CI is unset:
-        stderr: `? Do you want to continue? [Y/n] `
-        read one chunk; a leading 'n' or 'N' aborts
 ```
 
-Any other input, a bare newline included, means yes. Exactly one chunk is read,
-and only under the TTY condition, so buffered stdin the tool did not need is left
-for the package manager.
+The notice MUST be printed on every artifact download, from every entry point,
+with no setting to turn it off and no question attached. A cache hit downloads
+nothing and therefore says nothing.
 
-The **default** is set by the entry point, not by the core: `0` when jup was
-invoked by its own name (the user asked for it), `1` through a package-manager
-shim (the user asked for `yarn`, not for a download). Both are defaults a real
-environment variable overrides, and neither may be set from an env file (§03.2).
+jup MUST NOT read stdin here. A download behaves identically on a TTY, on a pipe
+and with stdin closed, and whatever the caller piped in is still there for the
+package manager (§08.6).
+
+The prompt this replaced was the one behaviour that depended on how jup was
+invoked — announced-and-confirmed through a shim, silent through `jup` — which
+made the same project, store and command behave differently for a reason the
+user never chose, and could stop a run dead on a terminal nobody was watching.
+`COREPACK_ENABLE_DOWNLOAD_PROMPT` is gone with it: jup neither reads nor
+forwards it, under either spelling (§11).

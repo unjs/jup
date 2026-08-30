@@ -34,6 +34,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -161,7 +162,7 @@ describe("§05.1 TLS", () => {
 
       // The control for the row above: same server, same certificate, and the
       // only difference is the bundle the error message told the user about.
-      expect(result.stderr).toBe("");
+      expect(withoutDownloadNotices(result.stderr)).toBe("");
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("6.6.2\n");
     } finally {
@@ -236,10 +237,12 @@ describe("§05.1 TLS", () => {
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toBe("6.6.2\n");
       // Loud, once, and byte for byte.
-      expect(result.stderr).toBe(
+      expect(withoutDownloadNotices(result.stderr)).toBe(
         "! TLS certificate verification is disabled (set by JUP_STRICT_SSL)\n",
       );
-      expect(result.stderr).toBe(`${messages.strictSslDisabled("JUP_STRICT_SSL")}\n`);
+      expect(withoutDownloadNotices(result.stderr)).toBe(
+        `${messages.strictSslDisabled("JUP_STRICT_SSL")}\n`,
+      );
     } finally {
       await front.stop();
     }

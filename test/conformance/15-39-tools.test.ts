@@ -40,6 +40,7 @@ import {
   npmTarball,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const POSIX = process.platform !== "win32";
@@ -132,7 +133,7 @@ describe.skipIf(!POSIX)("§02.3 node, and tools that are not package managers", 
 
     const result = await run([`node@${NODE_VERSION}`, "--version"], options(fixture));
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout.trim()).toBe("ran=node args=--version");
 
@@ -163,7 +164,7 @@ describe.skipIf(!POSIX)("§02.3 node, and tools that are not package managers", 
     // `devEngines.runtime` and never sees the pin beside it. Before §02.3 this
     // was `This project is configured to use pnpm`.
     const node = await run(["node", "server.js"], options(fixture));
-    expect(node.stderr).toBe("");
+    expect(withoutDownloadNotices(node.stderr)).toBe("");
     expect(node.exitCode).toBe(0);
     expect(node.stdout.trim()).toBe("ran=node args=server.js");
 

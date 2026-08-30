@@ -91,7 +91,10 @@ let corepackHome: string;
 let warn: ReturnType<typeof vi.spyOn>;
 
 const ENTRY_SOURCE = `export async function runMain(argv) {
-  process.stdout.write(JSON.stringify({ argv, prompt: process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT }));
+  const injected = Object.keys(process.env)
+    .filter((key) => key.startsWith("COREPACK_") || key.startsWith("JUP_"))
+    .sort();
+  process.stdout.write(JSON.stringify({ argv, injected }));
   return { code: 0 };
 }
 `;
@@ -818,16 +821,27 @@ describe("enable (§10.3)", () => {
   it("runs the package manager through the generated shim", async () => {
     await generatePosixLink(binDir, dist, "yarn");
 
+    // A child environment with none of the tool's own variables in it, so
+    // whatever the stub reports having is the stub's doing and not the
+    // developer's shell.
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([key]) => !key.startsWith("COREPACK_") && !key.startsWith("JUP_"),
+      ),
+    );
     const { stdout } = await execFileAsync(
       process.execPath,
       [join(binDir, "yarn"), "add", "lodash"],
-      { env: { ...process.env, COREPACK_ENABLE_DOWNLOAD_PROMPT: undefined } },
+      { env },
     );
 
     expect(JSON.parse(stdout)).toEqual({
       argv: ["yarn", "add", "lodash"],
-      // §10.1 — a shim defaults the prompt to `1`; `bin.ts` defaults it to `0`.
-      prompt: "1",
+      // §10.1 — the stub baked in the binary name and nothing else. It used to
+      // default the download prompt too, which is what made the same command
+      // behave differently through a shim than through `jup` (#550); §05.4
+      // removed the setting rather than the disagreement.
+      injected: [],
     });
     // The stub is executable in its own right, for the `#!/usr/bin/env node` path.
     expectMode(stubPath("yarn"), 0o755);

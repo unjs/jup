@@ -7,9 +7,9 @@ explicitly. `src/commands/shims.ts` is the implementation;
 
 ## 10.1 What a shim is
 
-A shim for binary `B` invokes jup as if the user had typed `jup B <args…>`, with
-the download-prompt default at `1` (§05.4) — the user asked for `B`, not for a
-download.
+A shim for binary `B` invokes jup as if the user had typed `jup B <args…>`. It
+bakes in the binary name and nothing else: no entry-point-specific defaults, so
+`yarn` and `jup yarn` behave identically (§05.4).
 
 On POSIX, each name is a symlink to **its own stub**, `<B>.mjs`, which resolves
 the jup entry point from its own realpath and runs the name written into it. On
@@ -20,7 +20,7 @@ looks for — except the Windows wrappers, whose bodies are byte-exact, and whic
 are recognised by their exact generated contents instead.
 
 jup's own two names are not stubs at all: §10.9 points them straight at the CLI
-entry, which defaults the prompt to `0` and passes argv through unchanged.
+entry, which passes argv through unchanged.
 
 **The name is written into the stub; a stub must never derive it from `argv[1]`.**
 One stub reading `basename(argv[1])` would serve every name and is correct under
@@ -304,10 +304,10 @@ Three consequences:
 
 1. **Neither name may be given a stub of its own.** A stub for `jup` would be
    `jup.mjs`, which is the CLI entry's own name, and writing it would destroy the
-   entry. Pointing at the entry is also what these names want: the download
-   prompt defaults to `0` rather than `1`, and argv passes through unchanged
-   rather than gaining a leading binary name — without which `jup use pnpm@12`
-   arrives as `["jup", "use", …]` and is rejected as an unknown command.
+   entry. Pointing at the entry is also what these names want: argv passes
+   through unchanged rather than gaining a leading binary name — without which
+   `jup use pnpm@12` arrives as `["jup", "use", …]` and is rejected as an
+   unknown command.
 2. **The CLI entry carries the shim marker**, because it is the target the
    ownership test resolves to; without it `disable` would leave both names on
    `PATH`.

@@ -207,8 +207,6 @@ export const messages = {
   noValidTarball: (packageName: string, version: string) =>
     `${packageName}@${version} does not have a valid tarball.`,
 
-  abortedByUser: () => `Aborted by the user`,
-
   /**
    * Both env var names here are load-bearing: the conformance suite asserts they
    * are exactly `JUP_INTEGRITY_KEYS` and `JUP_DEFAULT_TO_LATEST` — the canonical
@@ -305,9 +303,6 @@ export const messages = {
   allDone: () => `All done!`,
 
   aboutToDownload: (url: string) => `! jup is about to download ${url_(url)}`,
-
-  /** Trailing space, no newline. */
-  downloadPrompt: () => `? Do you want to continue? [Y/n] `,
 
   /** §07.9 — `cache clean` must distinguish a successful clean from a no-op. */
   removedFromCache: (count: number, path: string) =>

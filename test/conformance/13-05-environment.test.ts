@@ -279,14 +279,10 @@ describe("§13.5 environment variables", () => {
     expect(result.stderr).toContain("jup install -g --cache-only yarn@1.22.4");
   });
 
-  it("46: COREPACK_ENABLE_DOWNLOAD_PROMPT=1 prints exactly the download notice", async () => {
+  it("46: a cold artifact download prints exactly the download notice", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
 
-    const result = await run(["yarn", "--version"], {
-      ...fixture,
-      registry,
-      env: { COREPACK_ENABLE_DOWNLOAD_PROMPT: "1" },
-    });
+    const result = await run(["yarn", "--version"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
@@ -297,11 +293,7 @@ describe("§13.5 environment variables", () => {
 
   it("47: the second, cached run says nothing", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-    const options = {
-      ...fixture,
-      registry,
-      env: { COREPACK_ENABLE_DOWNLOAD_PROMPT: "1" },
-    };
+    const options = { ...fixture, registry };
 
     expect((await run(["yarn", "--version"], options)).exitCode).toBe(0);
     const second = await run(["yarn", "--version"], options);
@@ -309,21 +301,6 @@ describe("§13.5 environment variables", () => {
     expect(second.exitCode).toBe(0);
     expect(second.stderr).toBe("");
     expect(second.stdout).toBe("3.0.0\n");
-  });
-
-  it("48: .jup.env cannot enable the download prompt", async () => {
-    const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-    fixture.write(".jup.env", "COREPACK_ENABLE_DOWNLOAD_PROMPT=1\n");
-
-    const result = await run(["yarn", "--version"], { ...fixture, registry });
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("3.0.0\n");
-    // The file cannot turn the prompt on, and says nothing about having tried.
-    // §03.2's notice is reserved for the five security-relevant variables it
-    // adds; this one corepack already refused silently, so announcing it would
-    // break this row while telling the user nothing actionable.
-    expect(result.stderr).toBe("");
   });
 
   it("49: the notice names the mirror's tarball for a default-version download", async () => {
@@ -334,7 +311,6 @@ describe("§13.5 environment variables", () => {
       env: {
         COREPACK_NPM_REGISTRY: registry.origin,
         COREPACK_INTEGRITY_KEYS: registry.trustStore(),
-        COREPACK_ENABLE_DOWNLOAD_PROMPT: "1",
       },
     });
 
@@ -375,7 +351,6 @@ describe("§13.5 environment variables", () => {
       env: {
         COREPACK_NPM_REGISTRY: registry.origin,
         COREPACK_INTEGRITY_KEYS: registry.trustStore(),
-        COREPACK_ENABLE_DOWNLOAD_PROMPT: "1",
       },
     });
 

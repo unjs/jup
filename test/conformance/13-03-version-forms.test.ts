@@ -18,6 +18,7 @@ import {
   packageManagerTarball,
   publishBerry,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -83,7 +84,7 @@ describe("§13.3 version forms", () => {
 
     const result = await run([name!, "--version"], { ...fixture, registry, env: env() });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`${version}\n`);
   });
@@ -157,7 +158,7 @@ describe("§13.3 version forms", () => {
       env: env({ COREPACK_ENABLE_UNSAFE_CUSTOM_URLS: "1", JUP_ALLOW_UNVERIFIED: "1" }),
     });
 
-    expect(result.stderr).toBe(
+    expect(withoutDownloadNotices(result.stderr)).toBe(
       `! Installing yarn@${url} from ${registry.origin} with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)\n`,
     );
     expect(result.exitCode).toBe(0);

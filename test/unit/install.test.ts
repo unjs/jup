@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../../src/errors.ts";
-import { confirmDownload, ensureInstalled } from "../../src/cache/install.ts";
+import { ensureInstalled } from "../../src/cache/install.ts";
 import { create } from "../../src/cache/tar.ts";
 import type { CorepackMarker, ResolvedSpec, TrustedKey } from "../../src/types.ts";
 
@@ -79,7 +79,6 @@ const ENV_KEYS = [
   "COREPACK_HOME",
   "COREPACK_NPM_REGISTRY",
   "COREPACK_INTEGRITY_KEYS",
-  "COREPACK_ENABLE_DOWNLOAD_PROMPT",
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_ENABLE_NETWORK",
   "JUP_REQUIRE_SIGNATURES",
@@ -890,10 +889,10 @@ describe("§06.2 — Berry's tarball is verified like any other (§02.5)", () =>
 });
 
 /* ------------------------------------------------------------------ *
- * §05.4 — the download prompt
+ * §05.4 — the download notice
  * ------------------------------------------------------------------ */
 
-describe("download prompt (§05.4, tests 46, 47)", () => {
+describe("download notice (§05.4, tests 46, 47)", () => {
   /**
    * What these rows assert is the notice — one line, naming the artifact that
    * is about to be fetched — and the silence around it. The artifact itself is
@@ -902,7 +901,7 @@ describe("download prompt (§05.4, tests 46, 47)", () => {
    *
    * It used to be a `yarn@3.0.0` spec pointing at `repo.yarnpkg.com`. §02.5
    * moved that band to an `@yarnpkg/cli-dist` tarball, which would drag a
-   * packument, a signature and a trusted key into a test about a prompt.
+   * packument, a signature and a trusted key into a test about a notice.
    */
   function serveScript(): string {
     const script = "console.log('yarn 3')\n";
@@ -910,9 +909,8 @@ describe("download prompt (§05.4, tests 46, 47)", () => {
     return `${origin}/custom/yarn.js#sha512.${hashOf(Buffer.from(script))}`;
   }
 
-  it("prints exactly the notice when the variable is 1, and asks nothing off a TTY", async () => {
+  it("prints exactly the notice, and asks nothing (test 46)", async () => {
     const reference = serveScript();
-    process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "1";
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
     const resume = vi.spyOn(process.stdin, "resume");
     const listen = vi.spyOn(process.stdin, "on");
@@ -922,19 +920,35 @@ describe("download prompt (§05.4, tests 46, 47)", () => {
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
       `! jup is about to download ${origin}/custom/yarn.js\n`,
     ]);
-    // §08.6 — stdin is never touched when the confirmation is skipped.
+    // §08.6 — stdin is never touched: there is no question to answer.
     expect(resume).not.toHaveBeenCalled();
     expect(listen).not.toHaveBeenCalled();
   });
 
-  it("stays silent when the variable is 0 (test 47)", async () => {
+  // §05.4 — a TTY is not a different code path any more. The notice is the
+  // whole behaviour, so the same run on an interactive stdin reads nothing and
+  // cannot be aborted (test 47).
+  it("reads nothing even on a TTY stdin", async () => {
     const reference = serveScript();
-    process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "0";
+    const fake = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
+    fake.isTTY = true;
+    fake.push("n\n");
+    const original = Object.getOwnPropertyDescriptor(process, "stdin")!;
+    Object.defineProperty(process, "stdin", { value: fake, configurable: true });
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
-    await ensureInstalled({ name: "yarn", reference });
+    try {
+      await ensureInstalled({ name: "yarn", reference });
+    } finally {
+      Object.defineProperty(process, "stdin", original);
+    }
 
-    expect(stderr).not.toHaveBeenCalled();
+    // The `n` that used to abort is still sitting in stdin, unread, for the
+    // package manager (§08.6).
+    expect(fake.read()).toEqual(Buffer.from("n\n"));
+    expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
+      `! jup is about to download ${origin}/custom/yarn.js\n`,
+    ]);
   });
 
   it("names the mirror's tarball URL, not the table's (test 50)", async () => {
@@ -956,7 +970,6 @@ describe("download prompt (§05.4, tests 46, 47)", () => {
     routes["/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz"] = bytesRoute(tarball);
     process.env.COREPACK_NPM_REGISTRY = origin;
     process.env.COREPACK_INTEGRITY_KEYS = JSON.stringify({ npm: [trustedKey(pair)] });
-    process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "1";
     const stderr = vi.spyOn(process.stderr, "write").mockReturnValue(true);
 
     await ensureInstalled({ name: "yarn", reference: "3.0.0" });
@@ -966,45 +979,6 @@ describe("download prompt (§05.4, tests 46, 47)", () => {
     expect(stderr.mock.calls.map(([chunk]) => chunk)).toEqual([
       `! jup is about to download ${origin}/@yarnpkg/cli-dist/-/cli-dist-3.0.0.tgz\n`,
     ]);
-  });
-
-  describe("the interactive branch", () => {
-    let restore: (() => void) | undefined;
-
-    function fakeTty(input: string): void {
-      const fake = new Readable({ read() {} }) as Readable & { isTTY?: boolean };
-      fake.isTTY = true;
-      fake.push(input);
-      const original = Object.getOwnPropertyDescriptor(process, "stdin")!;
-      Object.defineProperty(process, "stdin", { value: fake, configurable: true });
-      restore = () => Object.defineProperty(process, "stdin", original);
-      process.env.COREPACK_ENABLE_DOWNLOAD_PROMPT = "1";
-      vi.spyOn(process.stderr, "write").mockReturnValue(true);
-    }
-
-    afterEach(() => {
-      restore?.();
-      restore = undefined;
-    });
-
-    it("treats a bare newline as yes", async () => {
-      fakeTty("\n");
-      await expect(confirmDownload("https://example.com/yarn.js")).resolves.toBeUndefined();
-    });
-
-    it("aborts on `n`", async () => {
-      fakeTty("n\n");
-      const error = await rejection(confirmDownload("https://example.com/yarn.js"));
-      expect(error).toBeInstanceOf(UsageError);
-      expect(error.message).toBe("Aborted by the user");
-    });
-
-    it("does not prompt inside CI", async () => {
-      fakeTty("n\n");
-      process.env.CI = "true";
-      // `n` would have aborted; with CI set the byte is never read.
-      await expect(confirmDownload("https://example.com/yarn.js")).resolves.toBeUndefined();
-    });
   });
 });
 

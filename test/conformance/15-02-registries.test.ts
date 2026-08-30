@@ -32,6 +32,7 @@ import {
   MockRegistry,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 /** `registry.npmjs.org` and `repo.yarnpkg.com`, via `intercept.ts`. */
@@ -166,7 +167,7 @@ describe("§05.2 — rewrite origins, not substrings", () => {
       },
     });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
     expect(fallback.requests.map((request) => request.original)).toEqual([

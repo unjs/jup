@@ -11,7 +11,7 @@ presence. That compatibility set is closed — it is listed in §11.7, and
 `COMPATIBILITY_ENV` in `src/config/env-vars.ts` is the implementation of it.
 Everything jup invented is `JUP_`-only, because a CI written against corepack
 cannot be setting a name corepack never had. Ambient variables such as `PATH`
-and `CI` have no prefixed alias.
+have no prefixed alias.
 
 The **Env file** column says whether `.jup.env` may supply the variable (§03.2).
 A real environment variable always beats the file.
@@ -26,7 +26,6 @@ A real environment variable always beats the file.
 | `JUP_DEFAULT_TO_LATEST` | `0` | Never query "latest", never auto-bump the last-known-good; use the compiled-in default | yes |
 | `JUP_ENABLE_NETWORK` | `0` | Refuse every network request | yes |
 | `JUP_ENABLE_UNSAFE_CUSTOM_URLS` | `1` | Allow a URL reference for a *known* tool. Unknown names may always use URLs | **no** |
-| `JUP_ENABLE_DOWNLOAD_PROMPT` | `0`/`1` | Announce and confirm artifact downloads. Default `0` invoked as jup, `1` through a shim | **no** |
 | `JUP_ENABLE_PRERELEASES` | `1` | Allow prereleases in implicit resolution | yes |
 | `JUP_MINIMUM_RELEASE_AGE` | hours | Filter younger releases from implicit resolution; exact pins exempt (§04.1) | yes |
 | `JUP_FROZEN_LOCKFILE` | `1` | Refuse lockfile creation, refresh, and deletion (§04.4) | yes |
@@ -57,7 +56,7 @@ A real environment variable always beats the file.
 | `JUP_NODE_EXECPATH` | path | JavaScript runtime used to execute a spawned JS entry point (§08.3) | **no** |
 | `JUP_SHIM_DIRECTORY` | path | Default shim directory (§10.5) | **no** |
 | `JUP_HOST_RUNTIME` | path | A validated absolute runtime outside the install folder, forwarded through native child chains and read by `enable` (§10.2) | **no** |
-| `JUP_QUIET_ADVISORIES` | `1` | Silence added advisory `!` lines. Never silences errors, the download prompt, auto-pin, validation warnings, or Yarn Switch notices | **no** |
+| `JUP_QUIET_ADVISORIES` | `1` | Silence added advisory `!` lines. Never silences errors, the download notice, auto-pin, validation warnings, or Yarn Switch notices | **no** |
 
 ## 11.4 Set by jup, read by others
 
@@ -74,7 +73,6 @@ finds it too.
 | Variable | Effect |
 |---|---|
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase forms | Proxy configuration (§05.1); lowercase is consulted first |
-| `CI` | Any non-empty value: the download prompt announces but does not wait |
 | `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location chain (§07.1) |
 | `XDG_BIN_HOME`, `ProgramData` | Shim directory candidates (§10.5) |
 | `PATH`, `PATHEXT` | Shim directory choice, executable lookup |
@@ -125,7 +123,7 @@ it would be inventing a compatibility burden rather than honouring one.
 
 | | |
 |---|---|
-| Behaviour (§11.1) | `ENABLE_PROJECT_SPEC`, `ENABLE_STRICT`, `ENABLE_AUTO_PIN`, `DEFAULT_TO_LATEST`, `ENABLE_NETWORK`, `ENABLE_UNSAFE_CUSTOM_URLS`, `ENABLE_DOWNLOAD_PROMPT`, `ENV_FILE`, `HOME` |
+| Behaviour (§11.1) | `ENABLE_PROJECT_SPEC`, `ENABLE_STRICT`, `ENABLE_AUTO_PIN`, `DEFAULT_TO_LATEST`, `ENABLE_NETWORK`, `ENABLE_UNSAFE_CUSTOM_URLS`, `ENV_FILE`, `HOME` |
 | Registry and auth (§11.2) | `NPM_REGISTRY`, `NPM_TOKEN`, `NPM_USERNAME`, `NPM_PASSWORD`, `INTEGRITY_KEYS` |
 | Written, not read (§11.4) | `ROOT`, `MIGRATE_FROM` |
 

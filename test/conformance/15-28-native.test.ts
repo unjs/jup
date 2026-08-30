@@ -36,6 +36,7 @@ import {
   makeTarball,
   MockRegistry,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const POSIX = process.platform !== "win32";
@@ -303,7 +304,7 @@ describe.skipIf(!POSIX)("§08.3 native package managers", () => {
 
     const result = await run([NAME, "--version"], options(fixture));
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`${VERSION}\n`);
 

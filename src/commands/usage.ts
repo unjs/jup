@@ -196,6 +196,6 @@ never chooses a directory merely because it is writable and on PATH. For root,
 and never falls back elsewhere. Use --system with disable for shims installed
 that way.
 
-Configuration uses environment variables only. JUP_ENABLE_DOWNLOAD_PROMPT
-defaults to 1 through a package-manager shim and 0 when jup is invoked directly.
+Configuration uses environment variables only. Every artifact download prints a
+notice to stderr naming the URL it is about to fetch, and asks nothing.
 `;

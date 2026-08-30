@@ -62,7 +62,7 @@ pnpm test:corepack                          # compat mode, live network — gree
 NOCK_ENV=record pnpm test:corepack          # write test/corepack/nocks.db
 NOCK_ENV=replay pnpm test:corepack          # offline, from that recording
 
-# jup's real defaults, no compat hatches: 39 rows fail, all of them deliberate
+# jup's real defaults, no compat hatches: 65 rows fail, all of them deliberate
 vitest run --config test/corepack/vitest.config.ts
 ```
 
@@ -89,7 +89,7 @@ made with `NOCK_ENV=record`; the file is gitignored.
 > Measured 2026-08-29. The per-cause table below accounts for all 54.
 
 `pnpm test:corepack` sets `JUP_COREPACK_COMPAT=1`, because that is the mode in
-which green means green. Without it, 39 rows fail — see *Compat mode* below.
+which green means green. Without it, 65 rows fail — see *Compat mode* below.
 
 Every skip is a deliberate divergence, carries a `// SKIP (jup …)` comment
 naming what makes it deliberate — a section where one governs, the reason in
@@ -119,28 +119,30 @@ the set rather than one apiece.
 
 ## Compat mode
 
-`JUP_COREPACK_COMPAT=1` sets three variables, and each answers a divergence too
-broad to skip row by row:
+`JUP_COREPACK_COMPAT=1` sets three variables and drops one line, and each
+answers a divergence too broad to skip row by row:
 
 | Variable | Rows | Divergence |
 | --- | --- | --- |
 | `COREPACK_INTEGRITY_KEYS=0` | 20 | §06.5 — npm's retired signing key. Everything published before the 2025-01 rotation still carries a signature from it, which upstream pins heavily (`yarn@1.22.4`, `pnpm@4.11.6`, `npm@6.14.2`). Corepack never reads `expires`; jup fails. Widest reach on a real project. |
 | `COREPACK_ALLOW_UNVERIFIED=1` | 18 | §06.1 — a source with no signature and no pinned hash is refused: every URL reference, and (before §02.5 moved Berry onto npm) every Berry release from `repo.yarnpkg.com`. |
 | `COREPACK_QUIET_ADVISORIES=1` | 22 | §11.3 — the advisory `!` lines jup adds. |
+| `! jup is about to download …`, stripped in `_runCli.ts` | 26 | §05.4 — jup announces every artifact download; Corepack prints that line only when `COREPACK_ENABLE_DOWNLOAD_PROMPT=1` asks for it. A strip rather than a fourth variable because §05.4 leaves no variable to set. |
 
-The per-variable splits were measured before §02.5; the total they add up to has
-since fallen from 52 to 39: Berry now arrives signed from npm like every other
+The per-variable splits were measured before §02.5; the total they add up to
+fell from 52 to 39 there — Berry now arrives signed from npm like every other
 entry and no longer needs the second hatch, and two of the rows the hatches used
-to carry are now skipped for §03.3 / §03.7.
+to carry are now skipped for §03.3 / §03.7 — and rose to 65 when §05.4 made the
+download notice unconditional.
 
 The first two are **not** applied to rows that run against the mock registry
 (`runCli(..., true)`): `_registryServer.mjs` mints its own keypair, so those rows
 are about verification itself and several assert that it *fails* before turning
-it off. The advisory mute is applied everywhere, because it changes no outcome —
-only how much jup says about it.
+it off. The advisory mute and the notice strip are applied everywhere, because
+they change no outcome — only how much jup says about it.
 
 Run without it — `vitest run --config test/corepack/vitest.config.ts` — to see
-those 39 rows fail, which is what a user with jup's real defaults would hit.
+those 65 rows fail, which is what a user with jup's real defaults would hit.
 
 ### What was fixed rather than skipped
 

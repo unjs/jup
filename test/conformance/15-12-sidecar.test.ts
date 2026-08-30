@@ -27,6 +27,7 @@ import {
   packageManagerTarball,
   run,
   sriOf,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const registry = new MockRegistry();
@@ -76,7 +77,7 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
 
     const result = await run(["pnpm", "--version"], { ...fixture, registry });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
     // §06.1 row 1: an explicit hash is the check, so no trust store was needed

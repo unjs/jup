@@ -30,6 +30,7 @@ import {
   npmTarball,
   packageManagerTarball,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 const POSIX = process.platform !== "win32";
@@ -104,7 +105,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     registry.reset();
 
     const node = await run(["node", "server.js"], options(fixture));
-    expect(node.stderr).toBe("");
+    expect(withoutDownloadNotices(node.stderr)).toBe("");
     expect(node.exitCode).toBe(0);
     expect(node.stdout.trim()).toBe("ran=node args=server.js");
 
@@ -150,7 +151,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     const nested = { ...options(fixture), cwd: join(fixture.cwd, "packages", "app") };
     const result = await run(["node", "-e", "0"], nested);
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     // The nearer file, exactly as `nvm_find_up` picks it — and read through both
     // the comment and the setting line.
@@ -179,7 +180,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     fixture.write(".nvmrc", `${NEWEST}\n`);
 
     const result = await run(["node", "-e", "0"], options(fixture));
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(installed(fixture, PINNED)).toBe(true);
     expect(installed(fixture, NEWEST)).toBe(false);
@@ -209,7 +210,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
       fixture.write(".nvmrc", `${alias}\n`);
 
       const result = await run(["node", "-e", "0"], options(fixture));
-      expect(result.stderr).toBe("");
+      expect(withoutDownloadNotices(result.stderr)).toBe("");
       expect(result.exitCode).toBe(0);
       expect(installed(fixture, NEWEST)).toBe(true);
     }
@@ -243,7 +244,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     fixture.write(".nvmrc", `${PINNED}\n`);
 
     const result = await run(["node", "-e", "0"], options(fixture));
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(installed(fixture, PINNED)).toBe(true);
 
@@ -263,7 +264,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
       options(fixture, { COREPACK_ENABLE_PROJECT_SPEC: "0" }),
     );
     expect(disabled.exitCode).toBe(0);
-    expect(disabled.stderr).toBe("");
+    expect(withoutDownloadNotices(disabled.stderr)).toBe("");
 
     // §03.1's mutating walk never looks for one: the file a write targets is
     // always the manifest, so an unreadable `.nvmrc` cannot block the command

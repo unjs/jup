@@ -61,7 +61,6 @@ export const ENV = {
   DEFAULT_TO_LATEST: "COREPACK_DEFAULT_TO_LATEST",
   ENABLE_NETWORK: "COREPACK_ENABLE_NETWORK",
   ENABLE_UNSAFE_CUSTOM_URLS: "COREPACK_ENABLE_UNSAFE_CUSTOM_URLS",
-  ENABLE_DOWNLOAD_PROMPT: "COREPACK_ENABLE_DOWNLOAD_PROMPT",
   ENV_FILE: "COREPACK_ENV_FILE",
   HOME: "COREPACK_HOME",
 
@@ -105,8 +104,6 @@ export const ENV = {
  * cases and the scheme decides which one, so {@link PROXY_ENV} holds them.
  */
 export const SYSTEM_ENV = {
-  /** §08.6 — any non-empty value means an automated, non-interactive run. */
-  CI: "CI",
   /** §11.5 — a value containing `jup` (or `corepack`) enables diagnostic logging. */
   DEBUG: "DEBUG",
   /** §07.1 / §10.5 — store and shim-directory fallback chains. */
@@ -168,7 +165,6 @@ export const COMPATIBILITY_ENV: ReadonlySet<string> = new Set(
     ENV.DEFAULT_TO_LATEST,
     ENV.ENABLE_NETWORK,
     ENV.ENABLE_UNSAFE_CUSTOM_URLS,
-    ENV.ENABLE_DOWNLOAD_PROMPT,
     ENV.ENV_FILE,
     ENV.HOME,
     ENV.NPM_REGISTRY,
@@ -284,16 +280,4 @@ export function writeEnv(name: string, value: string): void {
  */
 export function writeEnvInto(env: NodeJS.ProcessEnv, name: string, value: string): void {
   for (const spelling of envSpellings(name)) env[spelling] = value;
-}
-
-/**
- * A default that a real environment variable — under **any** spelling it answers
- * to — beats.
- *
- * `??=` on one spelling is the bug this exists to prevent: for a compatibility
- * setting it cannot see that the user set the other one, so the default would
- * win over an explicit setting.
- */
-export function defaultEnv(name: string, value: string): void {
-  if (readEnv(name) === undefined) process.env[name] = value;
 }

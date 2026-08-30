@@ -20,7 +20,7 @@ import {
   resolveSpecBin,
   resolveSpecUrl,
 } from "../config/table.ts";
-import { envFlag, isCI } from "../project/env.ts";
+import { envFlag } from "../project/env.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
 import { err, errColors, warn } from "../utils/log.ts";
 import { httpGet } from "../net/http.ts";
@@ -159,9 +159,9 @@ export async function ensureInstalled(
   // §06.1 — every artifact clears one verification tier before a byte moves.
   assertVerificationTier(locator, source, pin, expected, version);
 
-  // §05.4 — artifacts only. The metadata request above deliberately does not
-  // prompt, which is also what makes tests 49/50 name the *tarball* URL.
-  await confirmDownload(source.url);
+  // §05.4 — artifacts only. The metadata request above deliberately announces
+  // nothing, which is also what makes tests 49/50 name the *tarball* URL.
+  announceDownload(source.url);
 
   const tmp = createTempDir();
   try {
@@ -252,31 +252,13 @@ export async function ensureInstalled(
 /**
  * §05.4 — printed before any **artifact** download, never before metadata.
  *
- * The notice needs `COREPACK_ENABLE_DOWNLOAD_PROMPT=1`; the interactive
- * confirmation additionally needs a TTY stdin and an unset `CI`. Any input other
- * than `n`/`N` — including a bare newline — is yes.
+ * A notice, not a question. It goes to stderr from every entry point,
+ * unconditionally, and nothing is read back: a run behaves the same on a TTY, on
+ * a pipe and with stdin closed, and buffered input the tool did not need is left
+ * untouched for the package manager (§08.6).
  */
-export async function confirmDownload(url: string): Promise<void> {
-  // §05.4 — `0` (and anything that is not `1`) suppresses both the notice and
-  // the confirmation, from every entry point, unconditionally.
-  if (!envFlag(ENV.ENABLE_DOWNLOAD_PROMPT)) return;
-
+export function announceDownload(url: string): void {
   err(`${messages.aboutToDownload(url)}\n`);
-
-  // §08.6 — stdin is never touched unless we are actually going to ask. An
-  // empty `CI` counts as unset.
-  if (process.stdin.isTTY !== true || isCI()) return;
-
-  err(messages.downloadPrompt());
-
-  const first = await readFirstByte();
-  // 0x6e / 0x4e. Anything else — including a bare newline, and including EOF —
-  // is yes.
-  if (first === 0x6e || first === 0x4e) {
-    throw new UsageError(messages.abortedByUser());
-  }
-
-  err("\n");
 }
 
 /**
@@ -772,26 +754,4 @@ async function writeStreamToFile(
   } finally {
     await handle.close();
   }
-}
-
-/** One chunk from stdin, then stdin is released again (§08.6). */
-function readFirstByte(): Promise<number | undefined> {
-  return new Promise<number | undefined>((resolve) => {
-    const stdin = process.stdin;
-
-    const finish = (value: number | undefined): void => {
-      stdin.off("data", onData);
-      stdin.off("end", onEnd);
-      stdin.pause();
-      resolve(value);
-    };
-    const onData = (chunk: Buffer | string): void => {
-      finish(typeof chunk === "string" ? chunk.codePointAt(0) : chunk[0]);
-    };
-    const onEnd = (): void => finish(undefined);
-
-    stdin.on("data", onData);
-    stdin.on("end", onEnd);
-    stdin.resume();
-  });
 }

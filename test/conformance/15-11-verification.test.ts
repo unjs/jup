@@ -37,6 +37,7 @@ import {
   packageManagerTarball,
   pmScript,
   run,
+  withoutDownloadNotices,
 } from "./_harness/index.ts";
 
 /** Stands in for `registry.npmjs.org` (see `intercept.ts`). */
@@ -88,7 +89,7 @@ describe("§06.1 — every artifact clears a verification tier", () => {
       },
     });
 
-    expect(result.stderr).toBe("");
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("4.0.0\n");
     // §02.2 — Berry resolves as `@yarnpkg/cli-dist`, filtered down to the one

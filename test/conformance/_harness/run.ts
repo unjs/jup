@@ -144,8 +144,8 @@ export function cleanEnv(): Record<string, string> {
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
     if (key.startsWith("COREPACK_") || key === "DEBUG" || key === "FORCE_COLOR") continue;
-    // `CI` gates the interactive half of the download prompt (§05.4), and
-    // `NODE_OPTIONS` could smuggle a loader into the child.
+    // `CI` is a habit the fixtures keep out of the child's environment, and
+    // `NODE_OPTIONS` could smuggle a loader into it.
     if (key === "CI" || key === "NODE_OPTIONS" || key === "JUP_MOCK_ORIGIN") continue;
     // §05.1 makes the proxy variables live with no second opt-in, so a developer
     // who has one configured would otherwise route every fixture request through
@@ -239,4 +239,22 @@ export function run(args: string[], options: RunOptions): Promise<RunResult> {
       resolve({ exitCode, signal, stdout, stderr });
     });
   });
+}
+
+/**
+ * §05.4 — every cold **artifact** download announces itself on stderr, from
+ * every entry point and with no question attached.
+ *
+ * Rows about something else strip the notices and assert what is left, so a
+ * fresh download does not turn every "stderr is exactly this" row into a
+ * restatement of §05.4. The notice's own wording, placement and the fact that
+ * nothing is read back are `15-20-download-notice.test.ts`'s rows.
+ */
+export function withoutDownloadNotices(stderr: string): string {
+  return stderr.replaceAll(/^! jup is about to download \S+\n/gm, "");
+}
+
+/** §05.4's line for `url`, for the rows that assert it directly. */
+export function downloadNotice(url: string): string {
+  return `! jup is about to download ${url}\n`;
 }

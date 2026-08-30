@@ -69,7 +69,7 @@ const {
   resolve: resolvePath,
 } = process.getBuiltinModule("node:path");
 const { fileURLToPath } = process.getBuiltinModule("node:url");
-import { ENV, jupSpelling, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
+import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { DEFINITIONS, getBinariesFor, shimsByDefault } from "../config/table.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
 import { warn } from "../utils/log.ts";
@@ -1031,10 +1031,6 @@ function realpathOr(directory: string): string {
  * §10.1 — the stub bakes in the binary name, because Node loses it: it
  * `realpath`s the executed module, so a shim cannot ask how it was called.
  *
- * `COREPACK_ENABLE_DOWNLOAD_PROMPT` defaults to `1` here and to `0` in the CLI entry
- * (§05.4): the user asked for `yarn`, not for a download. `??=` in both, so a
- * real environment variable still wins.
- *
  * **The entry is resolved against the stub's own realpath, not by a relative
  * specifier.** `./index.mjs` would be the obvious spelling and it is wrong: the
  * shim on `PATH` is a *symlink* to this file (§10.3), so a relative specifier is
@@ -1048,10 +1044,6 @@ function realpathOr(directory: string): string {
  * costs a single `stat` on a path the loader is about to stat anyway — measured
  * at no change against §16, Build shape's budget, because `node:fs` and `node:url` are
  * already loaded by the warm chunk this stub is about to import.
- *
- * The two builtin imports are static, since neither reads our environment; the
- * `import()` of the entry stays *after* the download-prompt assignment, which
- * the entry does read.
  *
  * The exit code is assigned only when it is non-zero, exactly as the CLI entry does
  * it and for the same reason (§08.4): the in-process handover answers `0` before
@@ -1081,12 +1073,11 @@ function realpathOr(directory: string): string {
  * §10.9 — **{@link OWN_BIN_NAMES} are the exception**, and they are handled by
  * not being stubs at all: §09.12's `self-install` links `jup` and `corepack`
  * straight at {@link cliEntrySource}'s file on every platform (§10.9). Those two
- * are the management CLI rather than a package manager to run, so both of
- * §05.4's answers differ — the download prompt defaults to `0`, the user having
- * typed *our* name, and the argv goes through unchanged instead of gaining a
- * leading binary name, which for `jup use pnpm@12` would otherwise arrive at
- * `runMain` as `["jup", "use", …]` and be rejected as an unknown command. The
- * CLI entry makes exactly those two decisions and needs no name to do it.
+ * are the management CLI rather than a package manager to run, so the argv goes
+ * through unchanged instead of gaining a leading binary name, which for
+ * `jup use pnpm@12` would otherwise arrive at `runMain` as `["jup", "use", …]`
+ * and be rejected as an unknown command. The CLI entry makes exactly that
+ * decision and needs no name to do it.
  *
  * This function never sees one of those names, by construction: `enable` takes
  * its names from the table, and `self-install` points both of ours at
@@ -1148,8 +1139,6 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
     `const nodeModule = process.getBuiltinModule("node:module");`,
     `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
     `nodeModule.enableCompileCache?.();`,
-    `if (process.env.${jupSpelling(ENV.ENABLE_DOWNLOAD_PROMPT)} === undefined)`,
-    `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "1";`,
     `const entry = new URL(${JSON.stringify(entry)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
     `const { code } = await runMain([${name}, ...process.argv.slice(2)], { handover: true });`,
@@ -1174,13 +1163,9 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
  * an `npm` bin symlink and `--preserve-symlinks-main` cannot send it into
  * `node_modules/dist/`, and the exit code assigned only when non-zero (§08.4).
  *
- * Two things differ, both §05.4's:
- *
- * - the download prompt defaults to `0`, not `1`. The user typed our name, so
- *   they did ask to download something.
- * - `argv` is passed through unchanged. A shim prepends the name it was invoked
- *   under (§10.1); here that name *is* us, and `runMain` reads §09's commands
- *   from position 0.
+ * One thing differs: `argv` is passed through unchanged. A shim prepends the
+ * name it was invoked under (§10.1); here that name *is* us, and `runMain` reads
+ * §09's commands from position 0.
  *
  * @param interpreter Absolute path for the shebang — §10.2's pin. Omitted,
  * `/usr/bin/env node`, which is how it ships.
@@ -1200,8 +1185,6 @@ export function cliEntrySource(interpreter?: string): string {
     `const { realpathSync } = process.getBuiltinModule("node:fs");`,
     `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
     `nodeModule.enableCompileCache?.();`,
-    `if (process.env.${jupSpelling(ENV.ENABLE_DOWNLOAD_PROMPT)} === undefined)`,
-    `  process.env.${ENV.ENABLE_DOWNLOAD_PROMPT} ??= "0";`,
     `const entry = new URL(${JSON.stringify(BUILT_ENTRY_SPECIFIER)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
     `const { code } = await runMain(process.argv.slice(2), { handover: true });`,

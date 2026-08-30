@@ -964,7 +964,7 @@ const LABEL_WIDTH = 16;
 
 function line(label: string, value: string): string {
   // A label wider than the column still gets a separating space; without the
-  // guard, `COREPACK_ENABLE_DOWNLOAD_PROMPT0` is what a long variable renders as.
+  // guard, `COREPACK_ENABLE_UNSAFE_CUSTOM_URLS1` is what a long variable renders as.
   const padded = label.length < LABEL_WIDTH ? label.padEnd(LABEL_WIDTH) : `${label} `;
   return `  ${padded}${value}\n`;
 }

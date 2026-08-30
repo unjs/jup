@@ -32,8 +32,4 @@ describe("errors", () => {
     expect(message).not.toContain("INTEGRITY_CHECK");
     expect(message).not.toContain("USE_LATEST");
   });
-
-  it("keeps the trailing space on the download prompt", () => {
-    expect(messages.downloadPrompt()).toBe("? Do you want to continue? [Y/n] ");
-  });
 });
