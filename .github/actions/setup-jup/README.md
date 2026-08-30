@@ -63,6 +63,22 @@ requests either way ([§05](../../../.agents/05-registry.md)).
 Outputs: `node-version`, `node-path`, `package-manager`, `bin-directory`,
 `jup-home`.
 
+## What it changes in the job
+
+Everything below outlives the action and applies to every later step:
+
+* `PATH` gains two entries at the front — the shim directory, then jup's own npm
+  prefix. So `npm`, `npx`, `pnpm`, `yarn` and `aube` are jup shims resolving the
+  project's pin, `node` is the pinned runtime, and `corepack` is jup, which
+  shadows the runner's bundled one rather than replacing it.
+* `JUP_HOME` and `JUP_SHIM_DIRECTORY` are exported. A workflow that already set
+  either keeps its own value; the action only supplies a default.
+* Nothing else. The report path the steps pass between themselves is a step
+  input, not a job variable.
+
+Both cache keys are prefixed `setup-jup-`, so they cannot collide with a cache
+step of the caller's own.
+
 ## A caveat worth keeping
 
 A restored `JUP_HOME` is executable code trusted on a cache hit

@@ -38,7 +38,7 @@
 
 import { lstatSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, resolve } from "node:path";
 import { isToolEnvName } from "../src/config/env-vars.ts";
 
 /**
@@ -73,9 +73,29 @@ function has(entry: string, names: readonly string[]): boolean {
   );
 }
 
+/**
+ * One spelling per directory, so two names for the same place compare equal.
+ *
+ * `===` was not enough. A `GITHUB_PATH` line is written with forward slashes —
+ * the spelling bash wants, and the one jup's own CI action exports in
+ * `JUP_SHIM_DIRECTORY` — and the Windows runner hands it back on `PATH` with
+ * backslashes. The two named one directory and did not match, so the shim
+ * directory stayed on `PATH` and rows about a fixture's own shims answered
+ * about the job's instead. `resolve` settles the separators; Windows paths are
+ * case-insensitive, so the key is folded there and only there.
+ */
+function pathKey(entry: string): string {
+  const absolute = resolve(entry);
+  return process.platform === "win32" ? absolute.toLowerCase() : absolute;
+}
+
+const ambientShimKey =
+  ambientShimDirectory === undefined ? undefined : pathKey(ambientShimDirectory);
+
 function holdsAnInstallation(entry: string): boolean {
   if (entry === "") return false;
-  return entry === ambientShimDirectory || has(entry, ["jup", "jup.cmd", "jup.exe"]);
+  if (ambientShimKey !== undefined && pathKey(entry) === ambientShimKey) return true;
+  return has(entry, ["jup", "jup.cmd", "jup.exe"]);
 }
 
 const path = (process.env.PATH ?? "")
@@ -105,13 +125,23 @@ process.on("exit", () => rmSync(HOME, { recursive: true, force: true }));
  * interpreter. The runtime running the suite is offered under a directory of
  * its own instead — the same answer `childPath` gives for §10.5 point 8, for
  * the same reason. Its own directory, not `HOME`, which stays empty.
+ *
+ * **Offered unconditionally**, and that is the point rather than a shortcut. The
+ * guard this replaces asked whether any entry held a *file* named `node`, which
+ * is not the question `envFindsInterpreter` asks: a `PATH` whose only `node` is
+ * a shim of ours satisfies the file test and still reaches no interpreter, so
+ * the suite skipped the fallback exactly where the paragraph above says it is
+ * needed and §10.2 pinned an absolute shebang into rows asserting it does not.
+ * That is a real machine — jup's own CI, running the suite on a runner jup set
+ * up. Appending costs one symlink, goes last so it shadows nothing a fixture
+ * put earlier, and makes the invariant hold for every shape of ambient `PATH`.
+ * A row that wants a `PATH` with no interpreter builds its own; none of them
+ * reads this one to get it.
  */
-if (!path.some((entry) => entry !== "" && has(entry, ["node", "node.exe"]))) {
-  const runtime = mkdtempSync(`${tmpdir()}/jup-test-runtime-`);
-  process.on("exit", () => rmSync(runtime, { recursive: true, force: true }));
-  symlinkSync(process.execPath, join(runtime, "node"));
-  path.push(runtime);
-}
+const runtime = mkdtempSync(`${tmpdir()}/jup-test-runtime-`);
+process.on("exit", () => rmSync(runtime, { recursive: true, force: true }));
+symlinkSync(process.execPath, join(runtime, "node"));
+path.push(runtime);
 
 process.env.PATH = path.join(delimiter);
 

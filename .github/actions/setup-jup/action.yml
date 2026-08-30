@@ -95,23 +95,30 @@ runs:
       run: |
         set -euo pipefail
         temp="${RUNNER_TEMP//\\//}"
-        home="$temp/jup-home"
-        bin="$temp/jup-bin"
+        # A workflow that already said where jup's store or shims go keeps its
+        # answer: this action supplies a default for a job that has none, and a
+        # published action has no business overwriting a caller's setting.
+        home="${JUP_HOME:-$temp/jup-home}"
+        bin="${JUP_SHIM_DIRECTORY:-$temp/jup-bin}"
         prefix="$temp/jup-npm"
+        info="$temp/jup-info.json"
         mkdir -p "$home" "$bin" "$prefix"
         # npm puts global executables in `<prefix>/bin`, and directly in
         # `<prefix>` on Windows.
         npm_bin="$prefix/bin"
         if [ "$RUNNER_OS" = Windows ]; then npm_bin="$prefix"; fi
+        # Only jup's own two settings reach the job. The report path is this
+        # action's business and stays a step input, so a caller's environment
+        # carries nothing of ours it did not ask for.
         {
           echo "JUP_HOME=$home"
           echo "JUP_SHIM_DIRECTORY=$bin"
-          echo "SETUP_JUP_INFO=$temp/jup-info.json"
         } >> "$GITHUB_ENV"
         {
           echo "home=$home"
           echo "bin=$bin"
           echo "npm-prefix=$prefix"
+          echo "info=$info"
         } >> "$GITHUB_OUTPUT"
         # Shims first: they are what a later step means by `pnpm` or `node`.
         {
@@ -131,9 +138,9 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.paths.outputs.home }}
-        key: jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package.json', inputs.working-directory), format('{0}/jup.lock', inputs.working-directory), format('{0}/.nvmrc', inputs.working-directory)) }}
+        key: setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package.json', inputs.working-directory), format('{0}/jup.lock', inputs.working-directory), format('{0}/.nvmrc', inputs.working-directory)) }}
         restore-keys: |
-          jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-
+          setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-
 
     # The runner's own node bootstraps jup; jup takes over from there.
     #
@@ -176,6 +183,7 @@ runs:
         BIN_DIR: ${{ steps.paths.outputs.bin }}
         REQUESTED: ${{ inputs.node-version }}
         NAMES: ${{ inputs.package-managers }}
+        SETUP_JUP_INFO: ${{ steps.paths.outputs.info }}
       run: |
         set -euo pipefail
 
@@ -241,6 +249,8 @@ runs:
     - id: project
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        SETUP_JUP_INFO: ${{ steps.paths.outputs.info }}
       run: |
         set -euo pipefail
         jup info --json > "$SETUP_JUP_INFO"
@@ -287,6 +297,6 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.store.outputs.dir }}
-        key: ${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory), format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/bun.lock', inputs.working-directory)) }}
+        key: setup-jup-${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory), format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/bun.lock', inputs.working-directory)) }}
         restore-keys: |
-          ${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-
+          setup-jup-${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-
