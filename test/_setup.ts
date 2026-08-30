@@ -23,18 +23,66 @@
  * worker makes the fallback land somewhere the suite owns, so reaching it is a
  * missing fixture rather than a write to the developer's cache.
  *
+ * **`PATH`.** §10.7's continuity scan walks it looking for shims, so a
+ * developer's own shim directory on it is another way the machine answers a
+ * question the fixture meant to ask about itself: a row that disables `npm` in
+ * its own directory and then scans finds the real `npm` shim one entry further
+ * along and reports it as installed. Twenty-odd rows build a child `PATH` by
+ * splicing `process.env.PATH`, so the entries come off here rather than at each
+ * of them.
+ *
  * The ported Corepack suite does its own equivalent scrubbing in
  * `test/corepack/_setup.ts`; it runs under a config of its own and does not
  * load this file.
  */
 
-import { mkdtempSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
 import { isToolEnvName } from "../src/config/env-vars.ts";
+
+/**
+ * Read before the scrub below takes it away: where this machine's own `enable`
+ * put its shims, which is the entry §10.7 would find first.
+ */
+const ambientShimDirectory = process.env.JUP_SHIM_DIRECTORY ?? process.env.COREPACK_SHIM_DIRECTORY;
 
 for (const key of Object.keys(process.env)) {
   if (isToolEnvName(key)) delete process.env[key];
 }
+
+/**
+ * A directory holding `jup` itself is a jup installation, whether or not
+ * `JUP_SHIM_DIRECTORY` named it — the default is a plain `~/.local/bin` that no
+ * variable points at.
+ *
+ * `jup` and not also `corepack`, though `enable` writes both: Node.js ships a
+ * `corepack` of its own in the directory it ships `node` in, so the wider test
+ * drops the runtime's own directory off `PATH` — and §10.2 then bakes an
+ * absolute interpreter into every shim, because `#!/usr/bin/env node` no longer
+ * resolves. That is a whole class of row answering a question about the machine
+ * again, so `node` is checked for first and its directory is never a candidate.
+ *
+ * `lstat`, not `exists`: a shim whose target has gone is still a shim, still on
+ * `PATH`, and still something §10.7 reports on. `existsSync` follows the link
+ * and would call that directory clean.
+ */
+function has(entry: string, names: readonly string[]): boolean {
+  return names.some(
+    (name) => lstatSync(join(entry, name), { throwIfNoEntry: false }) !== undefined,
+  );
+}
+
+function holdsAnInstallation(entry: string): boolean {
+  if (entry === "") return false;
+  if (has(entry, ["node", "node.exe"])) return false;
+  return entry === ambientShimDirectory || has(entry, ["jup", "jup.cmd", "jup.exe"]);
+}
+
+process.env.PATH = (process.env.PATH ?? "")
+  .split(delimiter)
+  .filter((entry) => !holdsAnInstallation(entry))
+  .join(delimiter);
 
 /**
  * One per worker, not one per test file: `setupFiles` is evaluated for each
