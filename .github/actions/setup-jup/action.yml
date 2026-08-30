@@ -74,6 +74,14 @@ runs:
     # directory a step later. Empty is also the safe moment: the runner's own
     # node is still the only `node` on `PATH`, which is what keeps §10.2 from
     # baking an absolute interpreter into the stubs.
+    #
+    # jup gets its own npm prefix, in the same temp directory, for one reason
+    # that only shows on Windows: a §10.4 wrapper names its stub relative to its
+    # own directory, and there is no relative path from `D:\a\_temp\jup-bin`
+    # to a global install on `C:`. The runner's npm prefix is on the other drive
+    # from `RUNNER_TEMP`, so putting both on `D:` is what keeps that path
+    # spellable. A private prefix also has nothing in it to collide with the
+    # `corepack` name jup's own `bin` claims (§10.9).
     - id: paths
       shell: bash
       run: |
@@ -81,7 +89,12 @@ runs:
         temp="${RUNNER_TEMP//\\//}"
         home="$temp/jup-home"
         bin="$temp/jup-bin"
-        mkdir -p "$home" "$bin"
+        prefix="$temp/jup-npm"
+        mkdir -p "$home" "$bin" "$prefix"
+        # npm puts global executables in `<prefix>/bin`, and directly in
+        # `<prefix>` on Windows.
+        npm_bin="$prefix/bin"
+        if [ "$RUNNER_OS" = Windows ]; then npm_bin="$prefix"; fi
         {
           echo "JUP_HOME=$home"
           echo "SETUP_JUP_INFO=$temp/jup-info.json"
@@ -89,8 +102,13 @@ runs:
         {
           echo "home=$home"
           echo "bin=$bin"
+          echo "npm-prefix=$prefix"
         } >> "$GITHUB_OUTPUT"
-        echo "$bin" >> "$GITHUB_PATH"
+        # Shims first: they are what a later step means by `pnpm` or `node`.
+        {
+          echo "$bin"
+          echo "$npm_bin"
+        } >> "$GITHUB_PATH"
 
     # docs/3.ci.md: `JUP_HOME` holds executable code trusted on a hit, so the key
     # carries the host triple. The `restore-keys` prefix stops at the same jup
@@ -110,17 +128,18 @@ runs:
 
     # The runner's own node bootstraps jup; jup takes over from there.
     #
-    # `-f` is required, not defensive: jup's package `bin` claims `corepack` as
-    # well as `jup` (§10.9), and a runner image whose node bundles corepack
-    # already owns that name in the same global prefix. Without it npm refuses
-    # the link with `EEXIST`, which is the failure `npm i -fg corepack` was
-    # working around in these workflows before jup replaced it.
+    # `-f` on top of the private prefix: jup's package `bin` claims `corepack` as
+    # well as `jup` (§10.9), so any prefix that is not empty — a runner image
+    # whose node bundles corepack, a cache someone adds here later — makes npm
+    # refuse the link with `EEXIST`. That is the failure `npm i -fg corepack`
+    # was working around in these workflows before jup replaced it.
     - shell: bash
       env:
         JUP_SPEC: ${{ inputs.jup-version }}
+        NPM_PREFIX: ${{ steps.paths.outputs.npm-prefix }}
       run: |
         set -euo pipefail
-        npm install -gf "jup@$JUP_SPEC"
+        npm install -gf --prefix "$NPM_PREFIX" "jup@$JUP_SPEC"
         jup --version
 
     # `enable` runs before the runtime lands in the same directory. A foreign

@@ -167,6 +167,17 @@ strips `.JS` from `PATHEXT` so that `node` resolves to `node.exe` rather than
 recursing into a `node.js` file; the `.ps1` wrapper forwards pipeline input and
 propagates `$LASTEXITCODE`.
 
+**The stub a wrapper names is `%~dp0`-relative only when a relative path exists.**
+`relative` cannot cross a Windows drive letter and returns the absolute target
+instead — shims under `RUNNER_TEMP` on `D:` beside a global install on `C:` is
+the ordinary shape of a CI job, not an exotic one. Prefixing that answer builds
+`D:\shims\C:\…\pnpm.mjs`, so an absolute path is written as it stands, in all
+three wrappers and in §10.9's. Such a wrapper is not relocatable, which costs
+nothing: there was no relative path to be relocatable with. §07.9's reader
+therefore accepts a `%~dp0`-relative, drive-absolute or UNC stub in the fallback
+branch it parses the interpreter out of; the `%~dp0` lookahead, not the stub's
+spelling, is what tells the two branches apart.
+
 **Each existing entry is removed before its replacement is written, never written
 through.** Ownership and `--force` decide whether the name may be taken, so what
 reaches the write is one of ours — possibly a symlink left by an earlier

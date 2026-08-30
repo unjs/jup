@@ -420,8 +420,7 @@ function shebangOf(head: string): string | undefined {
  * {@link win32ScriptPath} could not spell a relative one, so both are accepted;
  * the lookahead, not the stub's spelling, is what picks the fallback branch.
  */
-const WIN32_CMD_INTERPRETER_RE =
-  /^\s*"((?!%~dp0)[^"\n]+)"\s\s"(?:%~dp0[\\/]|[A-Za-z]:[\\/]|\\\\)/m;
+const WIN32_CMD_INTERPRETER_RE = /^\s*"((?!%~dp0)[^"\n]+)"\s\s"(?:%~dp0[\\/]|[A-Za-z]:[\\/]|\\\\)/m;
 
 /**
  * {@link bakedInterpreter} on Windows, where the answer lives in the shim

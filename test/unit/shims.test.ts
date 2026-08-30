@@ -51,6 +51,7 @@ import {
   restoreDisplaced,
   resolveInstallDirectory,
   restoreFailed,
+  selfWin32Wrappers,
   shimDirectoryFallback,
   shimDirectoryNotOnPath,
   shimDirectoryPreferred,
@@ -65,6 +66,7 @@ import {
   targetBinaries,
   verifyOnPath,
   whichFile,
+  win32ScriptPath,
 } from "../../src/commands/shims.ts";
 import { isOurShim, shimDirectoryCandidates, systemShimDirectory } from "../../src/run/exec.ts";
 import { writeStubFolder } from "../../build.config.ts";
@@ -1825,6 +1827,53 @@ exit $ret
     for (const path of [file, `${file}.cmd`, `${file}.ps1`]) {
       expectMode(path, 0o755);
     }
+  });
+
+  /**
+   * §10.4 — `relative` has no answer across Windows drive letters and hands back
+   * the absolute target instead. That is the ordinary shape of a Windows CI job,
+   * not an exotic one: shims under `RUNNER_TEMP` on `D:`, the global install on
+   * `C:`. Pasting the answer after `%~dp0\\` built `D:\\shims\\C:\\…\\pnpm.mjs`, and
+   * every wrapper failed to load the stub it names.
+   *
+   * Asserted on the path builder rather than through `generateWin32Link`, which
+   * computes `rel` with the *host's* `relative` — no POSIX test run can straddle
+   * two drive letters.
+   */
+  it("names an absolute stub outright, with no %~dp0 or $basedir in front", () => {
+    const crossDrive = "C:\\npm\\prefix\\node_modules\\jup\\bin\\pnpm.mjs";
+    const unc = "\\\\host\\share\\jup\\bin\\pnpm.mjs";
+
+    expect(win32ScriptPath(crossDrive, "cmd")).toBe(crossDrive);
+    expect(win32ScriptPath(crossDrive, "posix")).toBe(
+      "C:/npm/prefix/node_modules/jup/bin/pnpm.mjs",
+    );
+    expect(win32ScriptPath(unc, "cmd")).toBe(unc);
+
+    // The relative spelling is untouched — it is the one that keeps a shim
+    // directory movable, and it stays the answer wherever it exists.
+    expect(win32ScriptPath("..\\jup\\bin\\pnpm.mjs", "cmd")).toBe("%~dp0\\..\\jup\\bin\\pnpm.mjs");
+    expect(win32ScriptPath("..\\jup\\bin\\pnpm.mjs", "posix")).toBe("$basedir/../jup/bin/pnpm.mjs");
+  });
+
+  it("applies the same rule to the self-install wrappers (§10.9)", () => {
+    const crossDrive = "C:\\npm\\prefix\\node_modules\\jup\\bin\\jup.mjs";
+    const wrappers = selfWin32Wrappers(crossDrive, node);
+
+    expect(wrappers.cmd).toContain(`"${node}"  "${crossDrive}" %*`);
+    expect(wrappers.cmd).not.toContain("%~dp0\\C:");
+    expect(wrappers.sh).not.toContain("$basedir/C:");
+    expect(wrappers.ps1).not.toContain("$basedir/C:");
+  });
+
+  it("still reads the interpreter back out of an absolutely-named wrapper (§07.9)", () => {
+    const { cmd } = selfWin32Wrappers("C:\\npm\\prefix\\jup\\bin\\jup.mjs", node);
+
+    // §07.9's shape, transcribed: the lookahead picks the fallback branch, and
+    // the stub may be `%~dp0`-relative, drive-absolute or UNC.
+    expect(/^\s*"((?!%~dp0)[^"\n]+)"\s\s"(?:%~dp0[\\/]|[A-Za-z]:[\\/]|\\\\)/m.exec(cmd)?.[1]).toBe(
+      node,
+    );
   });
 
   it("overwrites its own files unconditionally — no idempotency short-circuit", async () => {
