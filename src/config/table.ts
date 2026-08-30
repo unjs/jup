@@ -252,7 +252,11 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // tarball and is refreshed by `scripts/refresh-table.mjs`.
     default:
       "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e",
-    fetchLatestFrom: { type: "npm", package: "yarn" },
+    // §04.6 — the package `default` above is refreshed from, and the one the
+    // band that covers it downloads. Corepack asks the legacy `yarn` package,
+    // whose `latest` is Classic's 1.22.x: self-consistent for its Classic
+    // default, and a silent Yarn 1 for a fresh machine here.
+    fetchLatestFrom: { type: "npm", package: "@yarnpkg/cli-dist" },
     transparent: {
       default:
         "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e",

@@ -201,7 +201,32 @@ describe("registry table — shape (§02.5)", () => {
       package: "@yarnpkg/cli-dist",
       publishedFrom: "2.4.1",
     });
-    expect(DEFINITIONS.yarn!.fetchLatestFrom).toEqual({ type: "npm", package: "yarn" });
+    expect(DEFINITIONS.yarn!.fetchLatestFrom).toEqual({
+      type: "npm",
+      package: "@yarnpkg/cli-dist",
+    });
+  });
+
+  /**
+   * §04.6 — `fetchLatestFrom` answers "newest stable?", and whichever band that
+   * answer lands in downloads it. An entry whose two halves name different
+   * packages therefore resolves against one line and runs another: yarn asked
+   * the legacy `yarn` package, whose `latest` dist-tag is Classic's 1.22.x,
+   * while `default` and the Berry band had moved to `@yarnpkg/cli-dist` — so a
+   * machine with nothing recorded silently defaulted to Yarn 1 while the
+   * transparent commands, floored by major, ran 4.x on the same store.
+   *
+   * A sweep rather than a yarn row: the mismatch is invisible until an entry's
+   * default crosses a band, which is a thing any entry here may do next.
+   */
+  it("asks for the newest stable release where the default's own band downloads it (§04.6)", () => {
+    for (const [name, definition] of Object.entries(DEFINITIONS)) {
+      const version = parse(definition.default)!.version;
+      const band = getSpecFor(name, version);
+      expect(`${name}@${version} <- ${definition.fetchLatestFrom.package}`).toBe(
+        `${name}@${version} <- ${band.registry.package}`,
+      );
+    }
   });
 
   /**

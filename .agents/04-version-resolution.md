@@ -355,6 +355,15 @@ bump can still advance such an entry, within its major, and it stays pinned.
   bare for such an entry.
 * **url** — `GET spec.url` and return `data[fields.tags].stable`. No hash.
 
+An entry's `fetchLatestFrom` **MUST** name the same package as the band that
+covers its compiled-in `default` (§02.5). The two are one decision seen from
+either end: this step asks a package what its newest stable release is, and
+whichever band that answer lands in downloads it. An entry whose halves name
+different packages resolves against one release line and runs another — the
+compiled-in default becomes unreachable, and a machine with nothing recorded
+silently defaults to a different major from the one a transparent command
+(below) or an offline run would use. `test/unit/config.test.ts` sweeps this.
+
 `JUP_MINIMUM_RELEASE_AGE` applies here as it does to any tag. With no recorded
 entry to fall back on, failure in the npm path is rethrown wrapped in the message
 naming both escape hatches (§12).

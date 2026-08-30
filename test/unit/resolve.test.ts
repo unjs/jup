@@ -170,7 +170,7 @@ async function startYarnServers(options?: {
 }): Promise<{ npm: TestServer; berry: TestServer }> {
   const latest: Route =
     options?.latestStatus === undefined
-      ? { version: "1.22.9", dist: { shasum: "deadbeef" } }
+      ? { version: "4.9.0", dist: { shasum: "deadbeef" } }
       : (response: ServerResponse) => {
           response.writeHead(options.latestStatus!, { "content-type": "application/json" });
           response.end(`{"error":"nope"}`);
@@ -178,7 +178,7 @@ async function startYarnServers(options?: {
 
   const npm = await startServer({
     "/yarn": YARN_PACKUMENT,
-    "/yarn/latest": latest,
+    "/@yarnpkg/cli-dist/latest": latest,
     "/deno/latest": latest,
     "/pnpm": { versions: { "10.0.0": {} }, "dist-tags": { latest: "10.0.0" } },
     "/@yarnpkg/cli-dist": CLI_DIST_PACKUMENT,
@@ -702,9 +702,9 @@ describe("getDefaultVersion (§04.6)", () => {
   it("fetches the latest stable version and records it (test 103)", async () => {
     const { npm } = await startYarnServers();
 
-    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.9+sha1.deadbeef" });
+    await expect(getDefaultVersion("yarn")).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "4.9.0+sha1.deadbeef" });
   });
 
   it("keeps the other entries when recording", async () => {
@@ -712,7 +712,7 @@ describe("getDefaultVersion (§04.6)", () => {
     seedLastKnownGood({ pnpm: "10.0.0" });
 
     await getDefaultVersion("yarn");
-    expect(readLastKnownGoodFile()).toEqual({ pnpm: "10.0.0", yarn: "1.22.9+sha1.deadbeef" });
+    expect(readLastKnownGoodFile()).toEqual({ pnpm: "10.0.0", yarn: "4.9.0+sha1.deadbeef" });
   });
 
   it("survives an unwritable home rather than failing the run", async () => {
@@ -722,8 +722,8 @@ describe("getDefaultVersion (§04.6)", () => {
     writeFileSync(blocked, "");
     process.env.COREPACK_HOME = blocked;
 
-    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
+    await expect(getDefaultVersion("yarn")).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
   });
 
   it("rejects an unknown package manager", async () => {
@@ -739,9 +739,9 @@ describe("getDefaultVersion (§04.6)", () => {
     const { npm } = await startYarnServers();
     seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - DEFAULT_TTL_MS - 1 });
 
-    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
-    expect(readLastKnownGoodFile()).toEqual({ yarn: "1.22.9+sha1.deadbeef" });
+    await expect(getDefaultVersion("yarn")).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
+    expect(readLastKnownGoodFile()).toEqual({ yarn: "4.9.0+sha1.deadbeef" });
     expect(readStamps().yarn).toBeGreaterThan(Date.now() - 60_000);
   });
 
@@ -755,8 +755,8 @@ describe("getDefaultVersion (§04.6)", () => {
     const { npm } = await startYarnServers();
     seedLastKnownGood({ yarn: "1.0.0" }, {});
 
-    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
+    await expect(getDefaultVersion("yarn")).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
   });
 
   /** A home restored from an image, or written under a fast clock (§04.6). */
@@ -764,8 +764,8 @@ describe("getDefaultVersion (§04.6)", () => {
     const { npm } = await startYarnServers();
     seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() + DEFAULT_TTL_MS * 3 });
 
-    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
+    await expect(getDefaultVersion("yarn")).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
   });
 
   it("never expires a pinned entry, however old the stamp", async () => {
@@ -790,8 +790,8 @@ describe("getDefaultVersion (§04.6)", () => {
     process.env.JUP_DEFAULT_TTL = "1";
     seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - 2 * 60 * 60 * 1000 });
 
-    await expect(getDefaultVersion("yarn")).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
+    await expect(getDefaultVersion("yarn")).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
   });
 
   /** §04.1's rule for every numeric variable that is not a supply-chain control. */
@@ -815,7 +815,7 @@ describe("getDefaultVersion (§04.6)", () => {
     seedLastKnownGood({ yarn: "1.0.0" }, { yarn: Date.now() - DEFAULT_TTL_MS - 1 });
 
     await expect(getDefaultVersion("yarn")).resolves.toBe("1.0.0");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
     // Not re-stamped: the entry is still due, and the next run asks again.
     expect(readStamps().yarn).toBeLessThan(Date.now() - DEFAULT_TTL_MS);
   });
@@ -955,8 +955,8 @@ describe("getFallbackLocator (§02.1)", () => {
     const { npm } = await startYarnServers();
 
     const locator = getFallbackLocator("yarn", { transparent: false });
-    await expect(locator.reference()).resolves.toBe("1.22.9+sha1.deadbeef");
-    expect(npm.requests).toEqual(["/yarn/latest"]);
+    await expect(locator.reference()).resolves.toBe("4.9.0+sha1.deadbeef");
+    expect(npm.requests).toEqual(["/@yarnpkg/cli-dist/latest"]);
   });
 
   // §04.6 redirected this row: `transparent.default` used to be an

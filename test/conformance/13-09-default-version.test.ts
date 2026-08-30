@@ -248,7 +248,9 @@ describe("§13.9 default version and last-known-good", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("1.22.4\n");
+    // Row 103's line: a bare default is the newest stable of the *supported*
+    // major, which the registry answers from `@yarnpkg/cli-dist`.
+    expect(result.stdout).toBe("4.9.9\n");
     expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(true);
   });
 
@@ -267,8 +269,8 @@ describe("§13.9 default version and last-known-good", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe("1.22.4\n");
-    expect(lastKnownGood(fixture).yarn).toMatch(/^1\.22\.4/);
+    expect(result.stdout).toBe("4.9.9\n");
+    expect(lastKnownGood(fixture).yarn).toMatch(/^4\.9\.9/);
     expect(typeof stamps(fixture).yarn).toBe("number");
   });
 

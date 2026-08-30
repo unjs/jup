@@ -220,6 +220,14 @@ it(`should update the Known Good Release only when the major matches`, async () 
   });
 
   process.env.COREPACK_DEFAULT_TO_LATEST = `1`;
+  // DIVERGENCE (jup §04.6): the entry above is written by hand and so carries no
+  // stamp, which jup reads as expired — every bare `yarn --version` below would
+  // re-check it against the registry and answer with the newest stable Berry
+  // instead of the recorded 1.x line. Upstream has no TTL and never re-checks.
+  // This row's subject is the major-match rule for *advancing* the recorded
+  // default, so the TTL is switched off rather than the expectations rewritten;
+  // the re-check itself is covered by test/conformance/13-09-default-version.
+  process.env.JUP_DEFAULT_TTL = `0`;
 
   await xfs.mktempPromise(async cwd => {
     await xfs.writeJsonPromise(ppath.join(cwd, `package.json` as Filename), {
