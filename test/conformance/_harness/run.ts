@@ -2,10 +2,10 @@
  * §13.1's `run()` — spawn the real entry point and assert on
  * `(exitCode, stdout, stderr)`.
  *
- * The environment is scrubbed of every `COREPACK_*`, `DEBUG` and `FORCE_COLOR`
- * variable, `COREPACK_HOME` is always a fresh directory the caller owns, and
- * `COREPACK_DEFAULT_TO_LATEST` is `0` unless the test is about default-version
- * lookup and says otherwise.
+ * The environment is scrubbed of every variable this tool answers to — both
+ * spellings, §11.6 — as well as `DEBUG` and `FORCE_COLOR`, `COREPACK_HOME` is
+ * always a fresh directory the caller owns, and `COREPACK_DEFAULT_TO_LATEST` is
+ * `0` unless the test is about default-version lookup and says otherwise.
  *
  * What it does **not** do is take the network away. The sandbox these tests run
  * in has one, so a row whose answer is supposed to come from a fixture — a
@@ -19,6 +19,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { symlinkSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isToolEnvName } from "../../../src/config/env-vars.ts";
 import { tempRoot } from "./fixtures.ts";
 import type { MockRegistry } from "./registry.ts";
 
@@ -143,10 +144,18 @@ export function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (value === undefined) continue;
-    if (key.startsWith("COREPACK_") || key === "DEBUG" || key === "FORCE_COLOR") continue;
+    // Both spellings, via the tool's own predicate rather than a prefix test of
+    // our own. §11.6 makes `JUP_X` outrank `COREPACK_X`, so a developer running
+    // jup as their package manager has an ambient `JUP_HOME` that would beat
+    // the fresh `COREPACK_HOME` set below and point every row at their real
+    // store — and `JUP_SHIM_DIRECTORY` would send `enable` at their real shims.
+    // `test/_setup.ts` already takes these off the runner's own environment;
+    // this is the spawn boundary keeping its own promise.
+    if (isToolEnvName(key) || key === "DEBUG" || key === "FORCE_COLOR") continue;
     // `CI` is a habit the fixtures keep out of the child's environment, and
-    // `NODE_OPTIONS` could smuggle a loader into it.
-    if (key === "CI" || key === "NODE_OPTIONS" || key === "JUP_MOCK_ORIGIN") continue;
+    // `NODE_OPTIONS` could smuggle a loader into it. (`JUP_MOCK_ORIGIN` was
+    // named here too, and is now one of the `JUP_` names dropped above.)
+    if (key === "CI" || key === "NODE_OPTIONS") continue;
     // §05.1 makes the proxy variables live with no second opt-in, so a developer
     // who has one configured would otherwise route every fixture request through
     // it. The rows that want a proxy set these themselves.

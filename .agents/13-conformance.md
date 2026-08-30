@@ -15,6 +15,14 @@ case matrix in prose.
 
 ## Harness contract
 
+`test/_setup.ts` runs before every worker in the default suite and takes two
+things off the machine the suite is running on: every variable the tool answers
+to under either spelling (§11.6 makes `JUP_X` outrank `COREPACK_X`, so a
+developer whose own package manager is jup has an ambient `JUP_HOME` and
+`JUP_SHIM_DIRECTORY` that would outrank the fixtures and aim the rows at their
+real store and shims), and the `HOME`/`XDG_*`/`LOCALAPPDATA` family §07.1 falls
+back to. A suite MUST NOT be able to write outside directories it created.
+
 Conformance tests isolate cwd, home, cache, `PATH`, environment, registry and
 shim directories, and use the local signed registry/proxy rather than public
 services. Assert exit or signal status, exact stdout/stderr where §12 contracts

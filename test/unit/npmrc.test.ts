@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isToolEnvName } from "../../src/config/env-vars.ts";
 import {
   expandVariables,
   hasNpmProtocolRegistry,
@@ -56,7 +57,10 @@ function write(path: string, content: string): void {
 beforeEach(() => {
   resetNpmrcCache();
   for (const name of Object.keys(process.env)) {
-    if (name.startsWith("COREPACK_")) delete process.env[name];
+    // Either spelling — a developer's ambient `JUP_NPM_REGISTRY` outranks the
+    // `COREPACK_` name this used to test for, and §05.3's tiers are the whole
+    // subject here.
+    if (isToolEnvName(name)) delete process.env[name];
   }
 });
 

@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { isToolEnvName } from "../../src/config/env-vars.ts";
 import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../../src/errors-cold.ts";
 import {
   findProjectSpec,
@@ -25,7 +26,9 @@ beforeEach(() => {
   // an env file, and that must not leak between tests.
   process.env = { ...process.env };
   for (const key of Object.keys(process.env)) {
-    if (key.startsWith("COREPACK_")) {
+    // Either spelling: §11.6 makes `JUP_ENV_FILE` outrank `COREPACK_ENV_FILE`,
+    // so a prefix test for one of them leaves the other deciding the row.
+    if (isToolEnvName(key)) {
       delete process.env[key];
     }
   }

@@ -56,6 +56,10 @@ export default defineConfig({
       NODE_COMPILE_CACHE: COMPILE_CACHE,
     },
     exclude: ["**/node_modules/**", "**/dist/**", "test/corepack/**"],
+    // §13.2 — takes the developer's own `JUP_*`/`COREPACK_*` and home directory
+    // away from every worker, so a machine that runs jup as its package manager
+    // cannot have its store or shims written to by a test run. See the file.
+    setupFiles: ["./test/_setup.ts"],
     // Most rows here spawn a real `node`, and process creation on Windows costs
     // an order of magnitude more than `fork`/`exec` does on Linux — a row that
     // takes 200 ms on the Linux runner takes seconds on the Windows one, and
