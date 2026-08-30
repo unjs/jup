@@ -227,8 +227,8 @@ describe("§03.7 — devEngines.packageManager.integrity", () => {
 
     expect(result.exitCode).toBe(0);
     expect(sidecarOf(fixture)).toEqual({ name: "pnpm", version: "6.6.2" });
-    // The top-level string is refreshed because it was already there, and the
-    // opt-out reaches its suffix too — that field has no second key to strip.
-    expect(pinOf(fixture)).toBe("pnpm@6.6.2");
+    // The top-level string went out with §03.7's retirement, and its suffixed
+    // digest with it — there is no second copy of the pin left to strip.
+    expect(pinOf(fixture)).toBeUndefined();
   });
 });

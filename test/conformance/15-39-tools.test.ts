@@ -229,9 +229,17 @@ describe.skipIf(!POSIX)("§02.3 node, and tools that are not package managers", 
     // the field, so it must not be blocked by what the field currently says.
     const result = await run(["use", `pnpm@${PNPM_VERSION}`], options(fixture));
     expect(result.exitCode).toBe(0);
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toMatch(
-      new RegExp(`^pnpm@${PNPM_VERSION.replaceAll(".", "\\.")}\\+sha`),
-    );
+    // §03.7 — the pin lands in the member, and the stray `node@…` goes out with
+    // the field it was written in rather than being refreshed in place.
+    const manifest = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines?: { packageManager?: { name?: string; version?: string } };
+    };
+    expect(manifest.packageManager).toBeUndefined();
+    expect(manifest.devEngines?.packageManager).toMatchObject({
+      name: "pnpm",
+      version: PNPM_VERSION,
+    });
   });
 
   it("234: `use node@…` writes `devEngines.runtime` and creates no `packageManager`", async () => {

@@ -144,6 +144,82 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(fixture.read("jup.lock")).toBe(`${JSON.stringify(lockOf(fixture), undefined, 2)}\n`);
   });
 
+  // §03.4 parses `packageManager` with `requireVersion`, so a range is not a
+  // value it can hold: `packageManager: "pnpm@^11.0.0"` is a pin jup refuses on
+  // the next read, and npm and corepack with it. §03.7's retirement is what
+  // keeps one out of there — the member takes the range, the top-level copy goes.
+  it("181: a range never lands in `packageManager`, which cannot hold one", async () => {
+    const fixture = createFixture({ name: "demo", packageManager: "pnpm@10.5.0" });
+
+    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    const manifest = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines?: { packageManager?: { name?: string; version?: string } };
+    };
+    expect(manifest.packageManager).toBeUndefined();
+    expect(manifest.devEngines?.packageManager).toEqual({ name: "pnpm", version: "^11.0.0" });
+
+    // The requirement, not the appearance: the project it just wrote reads back
+    // with no warning and no error.
+    const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    expect(rerun.exitCode).toBe(0);
+    expect(rerun.stdout).toBe("11.1.2\n");
+    expect(withoutDownloadNotices(rerun.stderr)).toBe("");
+  });
+
+  // The state a project is left in by a jup that refreshed the top-level field
+  // instead of retiring it: a range in both, and `packageManager` holding one it
+  // may not. §03.1's laziness is what makes it recoverable — `use` is about to
+  // replace the field, so it must not be blocked by what the field says now.
+  it("181: `use` repairs a manifest already carrying a range in `packageManager`", async () => {
+    const fixture = createFixture({
+      name: "demo",
+      packageManager: "pnpm@^11.0.0",
+      devEngines: { packageManager: { name: "pnpm", version: "^11.0.0" } },
+    });
+
+    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    const manifest = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines?: { packageManager?: { name?: string; version?: string } };
+    };
+    expect(manifest.packageManager).toBeUndefined();
+    expect(manifest.devEngines?.packageManager).toEqual({ name: "pnpm", version: "^11.0.0" });
+
+    const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
+    expect(rerun.exitCode).toBe(0);
+    expect(rerun.stdout).toBe("11.1.2\n");
+    expect(withoutDownloadNotices(rerun.stderr)).toBe("");
+  });
+
+  // The one path that still writes the top-level field: a `devEngines` member
+  // naming another tool, which §03.7 will not overwrite. The range has to land
+  // there or nowhere, so what lands is the version it resolved to — the same
+  // version `jup.lock` records — rather than a range the field cannot hold.
+  it("181: a range forced into `packageManager` is normalised to the resolved version", async () => {
+    const fixture = createFixture({
+      name: "demo",
+      devEngines: { packageManager: { name: "yarn", version: "1.x", onFail: "ignore" } },
+    });
+
+    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+
+    expect(result.exitCode).toBe(0);
+    const manifest = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines?: { packageManager?: { name?: string; version?: string } };
+    };
+    expect(manifest.packageManager).toBe("pnpm@11.1.2");
+    // The declaration about the other tool is reported, never rewritten.
+    expect(manifest.devEngines?.packageManager).toMatchObject({ name: "yarn", version: "1.x" });
+    // §12.11 names what actually landed in the file.
+    expect(result.stdout).toContain(`Updated ${fixture.path("package.json")} to use pnpm@11.1.2`);
+  });
+
   it("181: an exact `use` still pins exactly, and records nothing", async () => {
     const fixture = createFixture({ name: "demo" });
 

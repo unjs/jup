@@ -340,17 +340,33 @@ can carry a name, a version and a digest together.
 |---|---|
 | neither field | `devEngines.packageManager`, created |
 | `devEngines.packageManager` for this tool, no `packageManager` | `devEngines.packageManager.version` (+ `integrity`) |
-| `packageManager` only | `devEngines.packageManager`, created; `packageManager` refreshed |
-| both, for this tool | both refreshed |
+| `packageManager` only | `devEngines.packageManager`, created; `packageManager` **removed** |
+| both, for this tool | `devEngines.packageManager`; `packageManager` **removed** |
 | `devEngines.packageManager` for a *different* tool | `packageManager`; the mismatch reported |
 | the pin is a **runtime** | `devEngines.runtime`, created if absent |
 
-Rows one and two write one field because that is the whole pin: §3.3 reads the
-member, and a second, thinner copy in `packageManager` states nothing the member
-does not. Rows three and four refresh the top-level field only because it is
-already there — a `packageManager` left holding the version before last is a
-false statement about what will run, to jup and to every tool that reads only
-that field. No `packageManager` is ever **created**.
+Every row but the fifth leaves the pin in exactly one field, and the member is
+that field. §3.3 reads it first, and it is the half that can say everything: a
+name, a range, an `onFail`, and a digest in its own key. `packageManager` is the
+half that cannot. §3.4 parses it with `requireVersion`, so it holds an exact
+version and nothing else — and a `packageManager: "pnpm@^12"` written beside a
+member declaring `^12` is a pin jup rejects on the next read, as npm and corepack
+do.
+
+So rows three and four **retire** the top-level field rather than refreshing it.
+Refreshing kept the two in step but kept the duplicate: a second field to hold in
+step forever, in a spelling that cannot express half of what the member does. No
+`packageManager` is ever **created**; what changed is that an existing one is
+removed once the member has taken the pin over. A runtime pin removes nothing —
+§3.4 refuses a runtime in that field, so a `packageManager` beside
+`devEngines.runtime` speaks about the project's package manager and is not this
+write's business.
+
+Removal is surgical like every other edit here: the member goes with exactly one
+of the commas around it, and the document's indentation, line endings, key order
+and BOM survive. A removal that cannot be made surgically falls back to
+refreshing the field in place, because leaving it holding the version before last
+is the stale statement the retirement exists to prevent.
 
 A declared **range is replaced**, not preserved. While `packageManager` carried
 the pin and won the read, `1.x || 2.x` beside it was a statement of intent worth
@@ -391,6 +407,14 @@ A **range** pin (`jup use pnpm@^11`) puts the range in the field and the resolve
 version in `jup.lock` (§04.4); no digest reaches the manifest, because the field
 holds no version for one to describe. A **per-host** locator never contributes a
 digest to the manifest either (§02.4).
+
+The range goes to the member, which is the only field that can hold one. On the
+fifth row above — the one path where `packageManager` is still the pin's only
+home — the range is **normalised** to the version it resolved to, bare, with no
+digest: that field takes an exact version (§3.4), and the digest it would
+otherwise carry is either per-host (§02.4) or describes a release the range may
+move off tomorrow. `jup.lock` records both, and keeps recording the range as the
+key.
 
 ### Formatting
 

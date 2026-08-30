@@ -96,10 +96,11 @@ describe("§03.7 atomic pin updates", () => {
     expect(text).toContain(`    "build": "tsc"`);
   });
 
-  it("190: with both fields, an exact devEngines version is a pin and is updated too", async () => {
+  it("190: with both fields, the member takes the pin and the top-level field is retired", async () => {
     // The #874 shape: two fields that both name one release, differing only in
-    // whether they carry the digest. Left un-updated, the devEngines value
-    // pins 11.0.0 while `packageManager` says 11.1.2.
+    // whether they carry the digest. Refreshing the second one kept them in step
+    // but kept the duplicate; §03.7 retires it instead, so there is one pin in
+    // the one field that can carry every part of it.
     const fixture = createFixture({
       name: "project",
       packageManager: "pnpm@11.0.0",
@@ -111,7 +112,7 @@ describe("§03.7 atomic pin updates", () => {
     expect(result.exitCode).toBe(0);
 
     const written = manifestOf(fixture);
-    expect(written.packageManager).toMatch(/^pnpm@11\.1\.2\+sha512\./);
+    expect(written.packageManager).toBeUndefined();
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
       version: "11.1.2",
@@ -143,7 +144,7 @@ describe("§03.7 atomic pin updates", () => {
     expect(result.exitCode).toBe(0);
 
     const written = manifestOf(fixture);
-    expect(written.packageManager).toMatch(/^pnpm@11\.1\.2\+sha512\./);
+    expect(written.packageManager).toBeUndefined();
     expect(written.devEngines?.packageManager).toEqual({
       name: "pnpm",
       version: "11.1.2",

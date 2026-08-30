@@ -1083,8 +1083,10 @@ describe("writePin — §03.7", () => {
     expect(previousPackageManager).toBe("yarn@1.22.4");
 
     const updated = readFileSync(join(root, "package.json"), "utf8");
-    // §03.7 — the pin goes to `devEngines`, created here; the `packageManager`
-    // already in the file is refreshed alongside rather than left stale.
+    // §03.7 — the pin goes to `devEngines`, created here, and the
+    // `packageManager` it takes over from is retired rather than refreshed. The
+    // removal takes the member's own comma and the whitespace up to `"scripts"`,
+    // so the survivor keeps its tab.
     expect(updated).toBe(
       [
         "{",
@@ -1095,7 +1097,6 @@ describe("writePin — §03.7", () => {
         "\t\t}",
         "\t},",
         `\t"name": "demo",`,
-        `\t"packageManager": "yarn@3.0.0+sha1.abc",`,
         `\t"scripts": {`,
         `\t\t"build": "tsc"`,
         "\t}",
@@ -1104,15 +1105,13 @@ describe("writePin — §03.7", () => {
       ].join("\r\n"),
     );
     expect(updated).toContain("\r\n");
-    expect(updated).toContain(`\t"packageManager"`);
+    expect(JSON.parse(updated).packageManager).toBeUndefined();
     // The created block is indented with the document's own tabs, at its depth.
     // `sha1.abc` is odd-length hex, so §03.7 cannot spell it as SRI and keeps
     // the digest in the version string rather than dropping it.
     expect(updated).toContain(`\t\t\t"version": "3.0.0+sha1.abc"`);
     // The order of the keys that were already there is untouched.
-    expect(updated.indexOf(`\t"name": "demo"`)).toBeLessThan(
-      updated.indexOf(`\t"packageManager": "yarn@`),
-    );
+    expect(updated.indexOf(`\t"name": "demo"`)).toBeLessThan(updated.indexOf(`\t"scripts"`));
   });
 
   // Test 13 — the BOM survives (§03.7).
@@ -1123,7 +1122,10 @@ describe("writePin — §03.7", () => {
     const updated = readFileSync(join(root, "package.json"), "utf8");
 
     expect(updated.startsWith("\uFEFF")).toBe(true);
-    expect(updated).toContain(`"packageManager": "yarn@1.22.21"`);
+    // §03.7 — the member takes the pin and the top-level field is retired, even
+    // when it was the manifest's only key. The BOM survives the removal.
+    expect(updated).toContain(`"version": "1.22.21"`);
+    expect(JSON.parse(updated.slice(1)).packageManager).toBeUndefined();
   });
 
   // §03.7 row one — neither field declared, so the pin gets one home and no
@@ -1157,9 +1159,11 @@ describe("writePin — §03.7", () => {
 
     writePin(nested, { name: "yarn", reference: "1.22.21" });
 
-    expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
-      "yarn@1.22.21",
-    );
+    // §03.7 — the pin lands in the ancestor's `devEngines`, and the top-level
+    // field it replaces is retired there rather than refreshed.
+    const ancestor = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    expect(ancestor.packageManager).toBeUndefined();
+    expect(ancestor.devEngines.packageManager).toEqual({ name: "yarn", version: "1.22.21" });
   });
 
   // Test 109.
@@ -1167,9 +1171,11 @@ describe("writePin — §03.7", () => {
     for (const packageManager of ["yarn@^1", "yarn", "yarn@", 42]) {
       manifest(".", { packageManager });
       expect(() => writePin(root, { name: "yarn", reference: "1.22.4" })).not.toThrow();
-      expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
-        "yarn@1.22.4",
-      );
+      // The malformed value goes with the field: §12.2's error must not survive
+      // in a manifest jup has just written, and the member now carries the pin.
+      const after = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+      expect(after.packageManager).toBeUndefined();
+      expect(after.devEngines.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
     }
   });
 
@@ -1206,7 +1212,7 @@ describe("writePin — §03.7", () => {
     writePin(root, { name: "yarn", reference: "1.22.4" });
 
     const after = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
-    expect(after.packageManager).toBe("yarn@1.22.4");
+    expect(after.packageManager).toBeUndefined();
     expect(after.devEngines.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
   });
 
@@ -1218,9 +1224,9 @@ describe("writePin — §03.7", () => {
     });
 
     writePin(root, { name: "yarn", reference: "1.22.4" });
-    expect(JSON.parse(readFileSync(join(root, "package.json"), "utf8")).packageManager).toBe(
-      "yarn@1.22.4",
-    );
+    const after = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+    expect(after.packageManager).toBeUndefined();
+    expect(after.devEngines.packageManager).toMatchObject({ version: "1.22.4" });
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -1455,7 +1461,14 @@ describe("writePin — §03.7", () => {
   });
 
   it("strips the digest from the top-level field under `--no-integrity`", () => {
-    manifest(".", { packageManager: "yarn@1.22.0+sha512.beef" });
+    // §03.7 — with the member taking the pin everywhere else, the top-level
+    // string is now reached only where it is the pin's *only* home: a member
+    // naming another tool. It has no second key to hold a digest, so the opt-out
+    // has to reach the suffix itself.
+    manifest(".", {
+      packageManager: "yarn@1.22.0+sha512.beef",
+      devEngines: { packageManager: { name: "pnpm", version: "2.x", onFail: "ignore" } },
+    });
 
     writePin(
       root,
@@ -1463,10 +1476,12 @@ describe("writePin — §03.7", () => {
       { integrity: false },
     );
 
-    // The top-level string has no second key to hold a digest, so the opt-out
-    // has to reach the suffix itself.
     expect(read().packageManager).toBe("yarn@1.22.4");
-    expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "1.22.4" });
+    expect(read().devEngines?.packageManager).toEqual({
+      name: "pnpm",
+      version: "2.x",
+      onFail: "ignore",
+    });
   });
 
   // §03.7 — the sidecar describes the version beside it. Declared beside a
@@ -1519,7 +1534,7 @@ describe("writePin — §03.7", () => {
     });
   });
 
-  it("updates both fields when devEngines names an exact version", () => {
+  it("retires the top-level field when devEngines names an exact version", () => {
     manifest(".", {
       packageManager: "yarn@1.22.0",
       devEngines: { packageManager: { name: "yarn", version: "1.22.0" } },
@@ -1527,9 +1542,10 @@ describe("writePin — §03.7", () => {
 
     writePin(root, { name: "yarn", reference: "1.22.4+sha512.abcdef", hash: "sha512.abcdef" });
 
-    // Both fields, each in its own spelling: the string carries §02.1's suffix
-    // because it has nowhere else to put the digest; the member has `integrity`.
-    expect(read().packageManager).toBe("yarn@1.22.4+sha512.abcdef");
+    // One field, in the spelling that can hold everything: a clean version with
+    // the digest beside it. The duplicate goes rather than being refreshed —
+    // there is nothing left for it to say that the member does not.
+    expect(read().packageManager).toBeUndefined();
     expect(read().devEngines?.packageManager).toMatchObject({
       version: "1.22.4",
       integrity: "sha512-q83v",
@@ -1549,7 +1565,7 @@ describe("writePin — §03.7", () => {
 
     writePin(root, { name: "yarn", reference: "2.4.3" });
 
-    expect(read().packageManager).toBe("yarn@2.4.3");
+    expect(read().packageManager).toBeUndefined();
     expect(read().devEngines?.packageManager).toEqual({ name: "yarn", version: "2.4.3" });
   });
 

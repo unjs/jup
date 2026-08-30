@@ -6,6 +6,7 @@ const { basename, dirname, join } = process.getBuiltinModule("node:path");
 import { messages } from "../errors-cold.ts";
 import {
   detectFormat,
+  removeTopLevelKey,
   scanTopLevelKey,
   setNestedString,
   setTopLevelString,
@@ -115,6 +116,36 @@ function versionToRecord(
 }
 
 /**
+ * §03.4 — the reference the *top-level* field is allowed to hold.
+ *
+ * `packageManager` is parsed with `requireVersion`, so it takes an exact version
+ * and nothing else. §04.4's range is therefore not writable there as typed: a
+ * `packageManager: "pnpm@^12"` is a pin jup itself refuses on the next read, and
+ * npm and corepack with it. The field that *can* hold a range is the `devEngines`
+ * member, which is where §03.7 sends every range pin — so this is reached only on
+ * the fallback path, where the member could not take the pin and the range has to
+ * land here or nowhere. What lands is the version the range resolved to, which is
+ * the version `jup.lock` records for it, so the two files still say one thing.
+ *
+ * No digest rides along with that normalisation, and the stripping is deliberate.
+ * `resolved` arrives carrying §02.1's suffix, because the install path rewrites
+ * the locator it came from — but §02.4's per-host tools reach here by the same
+ * route, and their digest describes this machine's artifact, not the release. A
+ * pin is committed; a host-specific digest in one fails every colleague on
+ * another platform, which is the single outcome a pin exists to prevent. §04.4's
+ * `jup.lock` is where a range's digest lives, per host, and it is still recorded
+ * there.
+ */
+function topLevelReference(info: PinInfo, record: boolean): string {
+  // An exact reference parses, digest suffix and all; only a range does not.
+  const resolved = info.resolved;
+  if (resolved !== undefined && parse(info.reference) === null) {
+    return pinText(resolved) ?? resolved;
+  }
+  return record ? info.reference : (pinText(info.reference) ?? info.reference);
+}
+
+/**
  * §03.7, per §03.1's write-mode stop conditions — write the pin.
  *
  * Preserves indentation, line endings, key order, and (per §03.7) the BOM.
@@ -129,17 +160,25 @@ function versionToRecord(
  * |---|---|
  * | neither field | `devEngines.packageManager`, created |
  * | `devEngines.packageManager` for **this** package manager, no `packageManager` | `devEngines.packageManager.version` (+ `integrity`) |
- * | `packageManager` only | `devEngines.packageManager`, created; `packageManager` refreshed |
- * | both, for this package manager | both refreshed |
+ * | `packageManager` only | `devEngines.packageManager`, created; `packageManager` **removed** |
+ * | both, for this package manager | `devEngines.packageManager`; `packageManager` **removed** |
  * | `devEngines.packageManager` for a **different** package manager | `packageManager`; the mismatch reported |
  * | anything, and the pin is a **runtime** (§02.3) | `devEngines.runtime`, created if absent |
  *
- * Rows one and two write one field because that is the whole pin: §03.3 reads
- * the member, so nothing is served by minting a second, thinner copy of the
- * same statement in `packageManager`. Rows three and four refresh the top-level
- * field only because it is *already there*, and a `packageManager` left holding
- * the version before last is a false statement about what will run — to jup,
- * and to every other tool that reads only that field.
+ * Every row but the fifth leaves the pin in exactly one field, and the member is
+ * that field: §03.3 reads it first, and a second, thinner copy in
+ * `packageManager` states nothing the member does not while being the half that
+ * cannot say everything. It holds no `onFail`, no separate `integrity`, and —
+ * §03.4 parses it with `requireVersion` — no range at all, so §04.4's
+ * `use pnpm@^12` had nowhere honest to put its pin and put `pnpm@^12` there
+ * anyway: a field jup rejects on the next read, and npm and corepack with it.
+ *
+ * So rows three and four *retire* the top-level field rather than refreshing it.
+ * Refreshing kept it from going stale but kept the duplicate too, and the pin
+ * moves to the field that can carry every shape of it. `packageManager` is still
+ * never **created**; what changes is that an existing one is removed once the
+ * member has taken over. {@link topLevelReference} covers the fifth row, where
+ * the field is the pin's only home and a range still has to be normalised to fit.
  *
  * A declared range is replaced, not preserved; {@link devEnginesWriteTarget}
  * carries the reasoning, along with why §09.4's cross-major `up` still works.
@@ -312,11 +351,29 @@ export function writePin(
       throw new Error(`Failed to set "devEngines.runtime" in package.json`);
     }
     written = memberVersion();
-  } else if (!devEnginesTarget.exclusive || !wroteDevEngines) {
+  } else if (!wroteDevEngines) {
+    // The member did not take the pin — a declaration for another tool, a
+    // reference no semver field can hold, or an edit that could not be made
+    // surgically — so `packageManager` is the pin's only home, and §03.4 says
+    // what may go in it.
+    written = topLevelReference(info, record);
     updated = setTopLevelString(updated, "packageManager", `${info.name}@${written}`);
   } else {
-    // Exclusively `devEngines`, and it took the write.
     written = memberVersion();
+    if (devEnginesTarget.retireTopLevel) {
+      const next = removeTopLevelKey(updated, "packageManager");
+      updated =
+        next ??
+        // The removal could not be made surgically. Leaving the field holding
+        // the version before last is the stale statement it is retired to
+        // prevent, so it is refreshed in place instead — second best, and still
+        // true. The pin itself is already in the member either way.
+        setTopLevelString(
+          updated,
+          "packageManager",
+          `${info.name}@${topLevelReference(info, record)}`,
+        );
+    }
   }
 
   // 9 — in the `NoProject` case this creates `<cwd>/package.json`.
@@ -386,13 +443,14 @@ function writeManifest(target: string, content: string): void {
  * written whenever the pin has semver text to record, created if it is not
  * there yet — the runtime path (§02.3) generalised to both members.
  *
- * `exclusive` is what is left of the old three-way question, and it now asks
+ * `retireTopLevel` is what is left of the old three-way question, and it now asks
  * only whether the manifest *already* has a top-level `packageManager`. If it
- * does, that field is refreshed alongside, because a stale
- * `packageManager: "pnpm@9"` sitting beside a fresh `devEngines` member is a
- * statement about what will run that is no longer true — for jup, and for every
- * other tool that reads only that field. If it does not, none is created: §03.7
- * writes one home for the pin, not two.
+ * does, that field is **removed** once the member has the pin: a
+ * `packageManager: "pnpm@9"` beside a fresh `devEngines` member is a statement
+ * about what will run that is no longer true, and refreshing it only trades a
+ * stale duplicate for a live one — a second field to keep in step, in a spelling
+ * that cannot hold §04.4's range or §03.7's `onFail`. If it does not, none is
+ * created: §03.7 writes one home for the pin, and now keeps it that way.
  *
  * A declared *range* is replaced rather than preserved, which reverses what
  * this function used to do. `1.x || 2.x` beside an exact `packageManager` was a
@@ -407,8 +465,8 @@ function devEnginesWriteTarget(
   declared: DevEnginesDeclaration | undefined,
   info: PinInfo,
   field: DevEnginesField = "packageManager",
-): { write: boolean; exclusive: boolean; replacesDeclaredVersion: boolean } {
-  const none = { write: false, exclusive: false, replacesDeclaredVersion: false };
+): { write: boolean; retireTopLevel: boolean; replacesDeclaredVersion: boolean } {
+  const none = { write: false, retireTopLevel: false, replacesDeclaredVersion: false };
 
   // §02.3 — a runtime's pin has one home and no alternative, so none of the
   // three-way reasoning below applies: there is no top-level field to prefer, to
@@ -423,7 +481,11 @@ function devEnginesWriteTarget(
     if (pinText(info.reference) === undefined) return none;
     return {
       write: true,
-      exclusive: true,
+      // §03.4 refuses a runtime in `packageManager`, so there is no top-level
+      // copy of *this* pin to retire — and a `packageManager` that happens to
+      // sit beside it speaks about the project's package manager, which this
+      // write has no business touching.
+      retireTopLevel: false,
       replacesDeclaredVersion: declared?.version !== undefined && isValidVersion(declared.version),
     };
   }
@@ -463,7 +525,7 @@ function devEnginesWriteTarget(
   // pin §03.3 would reject on every later run, and no write can make that true.
   return {
     write: true,
-    exclusive: !hasTopLevelField,
+    retireTopLevel: hasTopLevelField,
     replacesDeclaredVersion: true,
   };
 }

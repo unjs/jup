@@ -1036,11 +1036,18 @@ describe("use (§09.5, tests 105-110)", () => {
     // line that separates our output from the package manager's (§09.5).
     expect(stdout).toBe(
       `Installing yarn@1.22.4 in the project...\n` +
-        `Updated ${join(project, "package.json")} to use yarn@${(readManifest().packageManager as string).slice("yarn@".length)}\n` +
+        `Updated ${join(project, "package.json")} to use yarn@${pinnedMember()?.version as string}\n` +
         `\n`,
     );
     expect(stderr).toBe("");
-    expect(readManifest().packageManager).toMatch(/^yarn@1\.22\.4\+sha512\./);
+    // §03.7 — the pin lands in the member, and the `packageManager` it took
+    // over from is retired rather than left as a second copy.
+    expect(readManifest().packageManager).toBeUndefined();
+    expect(pinnedMember()).toMatchObject({
+      name: "yarn",
+      version: "1.22.4",
+      integrity: expect.stringMatching(/^sha512-/),
+    });
 
     // §09.5 — `commands.use` runs with the previous value in the environment.
     expect(execMock).toHaveBeenCalledTimes(1);
@@ -1088,7 +1095,8 @@ describe("use (§09.5, tests 105-110)", () => {
 
     await cmdUse(["yarn@1.22.4"]);
 
-    expect(readManifest().packageManager).toMatch(/^yarn@1\.22\.4\+sha512\./);
+    expect(readManifest().packageManager).toBeUndefined();
+    expect(pinnedMember()).toMatchObject({ name: "yarn", version: "1.22.4" });
     expect(existsSync(join(nested, "package.json"))).toBe(false);
   });
 
@@ -1099,7 +1107,9 @@ describe("use (§09.5, tests 105-110)", () => {
       await manifest({ name: "demo", packageManager: malformed });
 
       await expect(cmdUse(["yarn@1.22.4"])).resolves.toBe(0);
-      expect(readManifest().packageManager).toMatch(/^yarn@1\.22\.4\+sha512\./);
+      // The malformed value goes out with the field it was in (§03.7).
+      expect(readManifest().packageManager).toBeUndefined();
+      expect(pinnedMember()).toMatchObject({ name: "yarn", version: "1.22.4" });
     }
   });
 
@@ -1198,7 +1208,10 @@ describe("use (§09.5, tests 105-110)", () => {
     await manifest({ name: "demo", packageManager: "yarn@2.x" });
 
     await expect(cmdUse(["yarn@2.4.3"])).resolves.toBe(0);
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3/);
+    expect(pinnedMember()).toMatchObject({
+      name: "yarn",
+      version: expect.stringMatching(/^2\.4\.3(\+|$)/),
+    });
     expect(existsSync(join(project, "jup.lock"))).toBe(false);
   });
 });
@@ -1217,10 +1230,16 @@ describe("up (§09.4, tests 111-115)", () => {
 
     expect(stdout).toBe(
       `Installing yarn@2.4.3 in the project...\n` +
-        `Updated ${join(project, "package.json")} to use yarn@${(readManifest().packageManager as string).slice("yarn@".length)}\n` +
+        `Updated ${join(project, "package.json")} to use yarn@${pinnedMember()?.version as string}\n` +
         `\n`,
     );
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+sha512\./);
+    expect(readManifest().packageManager).toBeUndefined();
+    // The seeded digest is odd-length hex, so §03.7 cannot spell it as SRI and
+    // keeps it in the version suffix rather than dropping it.
+    expect(pinnedMember()).toMatchObject({
+      name: "yarn",
+      version: expect.stringMatching(/^2\.4\.3\+sha512\./),
+    });
   });
 
   // §03.3 redirected test 112. The declared range still carries `up` across the
@@ -1427,7 +1446,9 @@ describe("up (§09.4, tests 111-115)", () => {
     await cmdUp([]);
 
     // 2.1.0 is installed and satisfies the pin; only `useCache: false` gets past it.
-    expect(readManifest().packageManager).toMatch(/^yarn@2\.4\.3\+/);
+    expect(pinnedMember()).toMatchObject({
+      version: expect.stringMatching(/^2\.4\.3\+sha512\./),
+    });
     expect(requested.length).toBeGreaterThan(0);
   });
 

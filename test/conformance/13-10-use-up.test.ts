@@ -342,8 +342,8 @@ describe("§13.10 use / up", () => {
     ).toBe(0);
     const afterUse = used.read("package.json");
     // §03.7 — the pin goes to `devEngines`, created here with the document's own
-    // tabs and CRLFs; the `packageManager` already in the file is refreshed
-    // rather than left stale, and the keys that were there keep their order.
+    // tabs and CRLFs; the `packageManager` it takes over from is retired, its
+    // line and its comma with it, and the keys that stay keep their order.
     expect(afterUse).toMatch(
       new RegExp(
         [
@@ -355,8 +355,7 @@ describe("§13.10 use / up", () => {
           String.raw`\t\t\t"integrity": "sha512-[^"]+"\r\n`,
           String.raw`\t\t\}\r\n`,
           String.raw`\t\},\r\n`,
-          String.raw`\t"name": "crlf",\r\n`,
-          String.raw`\t"packageManager": "yarn@1\.22\.4\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\t"name": "crlf"\r\n`,
           String.raw`\}\r\n$`,
         ].join(""),
       ),
@@ -379,8 +378,7 @@ describe("§13.10 use / up", () => {
           String.raw`\t\t\t"integrity": "sha512-[^"]+"\r\n`,
           String.raw`\t\t\}\r\n`,
           String.raw`\t\},\r\n`,
-          String.raw`\t"name": "crlf",\r\n`,
-          String.raw`\t"packageManager": "yarn@2\.4\.3\+sha512\.[\da-f]{128}"\r\n`,
+          String.raw`\t"name": "crlf"\r\n`,
           String.raw`\}\r\n$`,
         ].join(""),
       ),

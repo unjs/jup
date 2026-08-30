@@ -365,10 +365,16 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
     // is not, and a run on one host must not invalidate the record for another.
     expect(entry.integrity["some-other-host"]).toBe("sha512-theirs");
     expect(entry.integrity[hostTarget()]).toMatch(/^sha512-/);
-    // And the field keeps the range it declared.
-    expect((fixture.json("package.json") as { packageManager: string }).packageManager).toBe(
-      "bun@^1.4.0",
-    );
+    // And the range survives the write — in the one field that can hold it.
+    // §03.4 parses `packageManager` with `requireVersion`, so the range moves to
+    // the member and the top-level copy is retired rather than left holding a
+    // `bun@^1.4.0` that the next read would refuse.
+    const manifest = fixture.json("package.json") as {
+      packageManager?: string;
+      devEngines?: { packageManager?: { name?: string; version?: string } };
+    };
+    expect(manifest.packageManager).toBeUndefined();
+    expect(manifest.devEngines?.packageManager).toEqual({ name: "bun", version: "^1.4.0" });
   });
 
   it("220: the default-version lookup pins no digest, because the launcher's is the wrong one", async () => {

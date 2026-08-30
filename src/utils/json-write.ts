@@ -211,6 +211,101 @@ export function setNestedString(
   return result;
 }
 
+/**
+ * Delete a top-level key — its comma and the whitespace that held it — or
+ * return the text unchanged when the key is not there.
+ *
+ * §03.7 retires a `packageManager` that the `devEngines` member has taken over,
+ * and "retire" has to mean *remove*: a second, thinner copy of the pin only
+ * states what the member already states, and goes stale the moment the member
+ * moves without it.
+ *
+ * Duplicate keys are legal JSON and resolve last-wins, so every occurrence goes.
+ * Removing only the one a reader consults would promote a shadowed earlier copy
+ * from dead text to the live pin. Each pass re-scans the result rather than
+ * splicing a batch of spans, which is what keeps two adjacent copies from
+ * cutting into each other.
+ *
+ * `null` when the document could not be walked or the result would not parse,
+ * so a caller can leave the manifest alone rather than corrupt it.
+ */
+export function removeTopLevelKey(text: string, key: string): string | null {
+  const prefix = text.startsWith(BOM) ? BOM : "";
+  let body = stripBom(text);
+
+  for (let span = memberSpan(body, key); span !== null; span = memberSpan(body, key)) {
+    body = body.slice(0, span.start) + body.slice(span.end);
+  }
+
+  const result = prefix + body;
+  // §16 — the same self-check the setters run: the key has to be gone from where
+  // the next reader looks, and what is left has to parse *as a manifest*. An
+  // array or a scalar is a document this never understood, and reporting an
+  // untouched no-op as success would tell the caller the field is gone.
+  if (scanTopLevelKey(result, key) !== null) return null;
+  try {
+    const parsed: unknown = JSON.parse(stripBom(result));
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+  } catch {
+    return null;
+  }
+  return result;
+}
+
+/**
+ * The span to cut for the *first* occurrence of a top-level key: the member
+ * itself plus exactly one of the commas around it.
+ *
+ * Which comma depends on where the member sits. One with a sibling after it
+ * takes its own comma and the whitespace up to that sibling, so the sibling
+ * keeps its indentation. The last member takes the comma *before* it, back to
+ * where the previous value ended, because the comma that separated them would
+ * otherwise dangle in front of the closing brace.
+ */
+function memberSpan(body: string, key: string): { start: number; end: number } | null {
+  let i = skipWhitespace(body, 0);
+  if (body.charCodeAt(i) !== CH_LBRACE) return null;
+  const afterBrace = i + 1;
+  i = skipWhitespace(body, afterBrace);
+
+  // Where the member before this one ended — the opening brace, for the first.
+  let previousEnd = afterBrace;
+
+  while (i < body.length) {
+    if (body.charCodeAt(i) === CH_RBRACE) return null; // End of the object.
+    if (body.charCodeAt(i) !== CH_QUOTE) return null; // Malformed — refuse to guess.
+
+    const keyStart = i;
+    const keyEnd = skipString(body, i);
+    if (keyEnd < 0) return null;
+    const name = decodeStringLiteral(body.slice(keyStart, keyEnd));
+
+    i = skipWhitespace(body, keyEnd);
+    if (body.charCodeAt(i) !== CH_COLON) return null;
+    i = skipWhitespace(body, i + 1);
+
+    const valueEnd = skipValue(body, i);
+    if (valueEnd < 0) return null;
+
+    const afterValue = skipWhitespace(body, valueEnd);
+    const comma = body.charCodeAt(afterValue) === CH_COMMA;
+    const nextStart = comma ? skipWhitespace(body, afterValue + 1) : afterValue;
+    // A trailing comma is not a sibling: nothing follows it but the brace.
+    const last = !comma || body.charCodeAt(nextStart) === CH_RBRACE;
+
+    if (name === key) {
+      return last
+        ? { start: previousEnd, end: comma ? afterValue + 1 : valueEnd }
+        : { start: keyStart, end: nextStart };
+    }
+
+    previousEnd = valueEnd;
+    if (!comma) return null; // `}` or garbage — the key is not in this object.
+    i = nextStart;
+  }
+  return null;
+}
+
 function rewriteBody(body: string, key: string, literal: string, format: ManifestFormat): string {
   const { indent, eol } = format;
 

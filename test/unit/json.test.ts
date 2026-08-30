@@ -2,6 +2,7 @@ import { EOL } from "node:os";
 import { describe, expect, it } from "vitest";
 import {
   detectFormat,
+  removeTopLevelKey,
   scanTopLevelKey,
   setNestedString,
   setTopLevelString,
@@ -244,6 +245,73 @@ describe("setTopLevelString", () => {
   it("refuses to edit content that is not a JSON object", () => {
     expect(() => setTopLevelString(`[1,2,3]`, "packageManager", "yarn@1")).toThrow();
     expect(() => setTopLevelString(`{`, "packageManager", "yarn@1")).toThrow();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §03.7 — retiring a field the `devEngines` member has taken over
+ * ------------------------------------------------------------------ */
+
+describe("removeTopLevelKey — §03.7", () => {
+  it("takes a middle member with its own comma, leaving the neighbours indented", () => {
+    const before = `{\n  "name": "x",\n  "packageManager": "yarn@1.0.0",\n  "scripts": {\n    "b": "tsc"\n  }\n}\n`;
+
+    expect(removeTopLevelKey(before, "packageManager")).toBe(
+      `{\n  "name": "x",\n  "scripts": {\n    "b": "tsc"\n  }\n}\n`,
+    );
+  });
+
+  it("takes the *preceding* comma when the member is last", () => {
+    const before = `{\n  "name": "x",\n  "packageManager": "yarn@1.0.0"\n}\n`;
+
+    expect(removeTopLevelKey(before, "packageManager")).toBe(`{\n  "name": "x"\n}\n`);
+  });
+
+  it("empties the object when the member is the only one", () => {
+    const after = removeTopLevelKey(`{\n  "packageManager": "yarn@1.0.0"\n}\n`, "packageManager");
+
+    expect(after).not.toBeNull();
+    expect(parseManifest(after!)).toEqual({});
+  });
+
+  it("preserves tabs, CRLF and the BOM", () => {
+    const before = `${BOM}{\r\n\t"packageManager": "yarn@1.0.0",\r\n\t"name": "x"\r\n}\r\n`;
+
+    expect(removeTopLevelKey(before, "packageManager")).toBe(`${BOM}{\r\n\t"name": "x"\r\n}\r\n`);
+  });
+
+  it("returns the text unchanged when the key is not there", () => {
+    const before = `{\n  "name": "x"\n}\n`;
+
+    expect(removeTopLevelKey(before, "packageManager")).toBe(before);
+  });
+
+  // Duplicates resolve last-wins, so removing only the live one would promote a
+  // shadowed copy from dead text to the project's pin.
+  it("removes every occurrence of a duplicated key", () => {
+    const before = `{"packageManager":"yarn@1.0.0","name":"x","packageManager":"yarn@2.0.0"}`;
+
+    const after = removeTopLevelKey(before, "packageManager");
+    expect(after).toBe(`{"name":"x"}`);
+    expect(scanTopLevelKey(after!, "packageManager")).toBeNull();
+  });
+
+  it("removes adjacent duplicates without cutting into each other", () => {
+    const before = `{"packageManager":"yarn@1.0.0","packageManager":"yarn@2.0.0","name":"x"}`;
+
+    expect(removeTopLevelKey(before, "packageManager")).toBe(`{"name":"x"}`);
+  });
+
+  it("leaves a value alone when the key only occurs nested", () => {
+    const before = `{"devEngines":{"packageManager":{"name":"pnpm"}}}`;
+
+    expect(removeTopLevelKey(before, "packageManager")).toBe(before);
+  });
+
+  it("refuses content it cannot walk, rather than guessing", () => {
+    expect(removeTopLevelKey(`[1,2,3]`, "packageManager")).toBeNull();
+    expect(removeTopLevelKey(`{`, "packageManager")).toBeNull();
+    expect(removeTopLevelKey(`{"packageManager":}`, "packageManager")).toBeNull();
   });
 });
 

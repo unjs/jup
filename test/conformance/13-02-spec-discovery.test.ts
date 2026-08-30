@@ -189,7 +189,10 @@ describe("§13.2 spec parsing and discovery", () => {
     expect(result.exitCode).toBe(0);
     const written = fixture.read("package.json");
     expect(written.startsWith("﻿")).toBe(true);
-    expect(written).toContain(`"packageManager": "yarn@1.22.4+sha512.seeded"`);
+    // §03.7 — the pin goes to the member, and the `packageManager` it took over
+    // from is retired. The BOM survives both edits.
+    expect(written).toContain(`"version": "1.22.4+sha512.seeded"`);
+    expect(JSON.parse(written.slice(1)).packageManager).toBeUndefined();
     // The rewrite is surgical: key order and the rest of the file are untouched.
     expect(written).toContain(`"name": "bom"`);
   });
