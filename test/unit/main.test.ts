@@ -1595,6 +1595,15 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * go — so this is the same code measured under a different entry, and the
    * ceiling stays where it was.
    *
+   * Re-based to 286,500 for §09.16's `commands.run`: every package-manager band
+   * in `config/table.ts` gains a script-runner argv, +443 bytes across eleven
+   * entries and one comment (deno spells it `deno task`). It is table data on
+   * the warm path for the same reason `commands.use` is — the table is one
+   * structure, read by band, and splitting the field a cold command uses out of
+   * the band a warm run already loads would buy nothing measurable. No warm
+   * *code* was added: §09.16's dispatch and §09.17's fallback are both in
+   * `commands/cli.ts`, which no proxy run imports.
+   *
    * Re-based to 285,700 for §09.11's `install` alias, which is the first thing
    * in a while to add warm *code* rather than move it: `main.ts` rewrites the
    * command word before dispatch (~300 bytes, four lines and a comment), and
@@ -1613,7 +1622,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(285_700);
+    ).toBeLessThanOrEqual(286_500);
   });
 });
 

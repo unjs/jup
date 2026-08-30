@@ -1,5 +1,5 @@
 /**
- * §13.10 — `use`, `up` and `install` (rows 105–116, §09.15).
+ * §13.10 — `use`, `up`, `install` and `run` (rows 105–116, §09.15, §09.16, §09.17).
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -446,6 +446,69 @@ describe("§09.15 install", () => {
       `Usage Error: The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it\n` +
         `\n` +
         `$ jup install [...args]\n`,
+    );
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
+  });
+});
+
+describe("§09.16 run, and §09.17's unrecognised command word", () => {
+  it("runs a script through the pinned manager's script runner", async () => {
+    const fixture = createFixture({ name: "project", packageManager: "yarn@1.22.4" });
+    const before = fixture.read("package.json");
+
+    const result = await run(["run", "build", "--watch"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    // §09.16 — `commands.run` and then the words as typed, with no banner.
+    expect(result.stdout).toBe(`yarn@1.22.4 run build --watch\n`);
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
+    expect(fixture.read("package.json")).toBe(before);
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("passes a bare `run` through, scripts unnamed", async () => {
+    const fixture = createFixture({ name: "project", packageManager: "yarn@1.22.4" });
+
+    const result = await run(["run"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`yarn@1.22.4 run\n`);
+  });
+
+  it("§09.17 — takes a word it does not know for a script name", async () => {
+    const fixture = createFixture({ name: "project", packageManager: "yarn@1.22.4" });
+
+    const result = await run(["lint", "--fix"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    // `jup lint --fix` is `jup run lint --fix`, which is `yarn run lint --fix`.
+    expect(result.stdout).toBe(`yarn@1.22.4 run lint --fix\n`);
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("§09.17 — a flag and a reserved word keep the unknown-command error", async () => {
+    const fixture = createFixture({ name: "project", packageManager: "yarn@1.22.4" });
+
+    for (const word of ["--frobnicate", "upgrade"]) {
+      const result = await run([word], { ...fixture, registry, env: trusted() });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.stdout).toBe(
+        `Usage Error: Unknown command "${word}"\n` + `\n` + `$ jup <command>\n`,
+      );
+    }
+  });
+
+  it("reports a project with no pin, with its own usage line", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const result = await run(["run", "build"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe(
+      `Usage Error: The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it\n` +
+        `\n` +
+        `$ jup run [...args]\n`,
     );
     expect(withoutDownloadNotices(result.stderr)).toBe("");
   });

@@ -178,8 +178,16 @@ export interface ToolSpec {
    * launcher nobody downloads. §06 follows this spec, §04 follows `registry`.
    */
   artifactRegistry?: NpmRegistrySpec;
-  /** argv to run after `jup use` / `up`. */
-  commands?: { use?: string[] };
+  /**
+   * argv for the band's own commands: `use` is what `jup use` / `up` end with
+   * and what §09.15's `jup install` runs; `run` is its script runner, which
+   * §09.16's `jup run` and an unrecognised command word (§09.17) reach.
+   *
+   * Both are argv rather than a flag because the word is not always the same as
+   * the command: deno's script runner is `deno task`, and the first element is
+   * the `bin` name to invoke, not necessarily the tool's own.
+   */
+  commands?: { use?: string[]; run?: string[] };
   /**
    * Execution mode is per range entry; `"native"` bypasses runtime lookup.
    */

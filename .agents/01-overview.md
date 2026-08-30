@@ -44,7 +44,8 @@ Let `arg0` match `/^([^@]*)(?:@(.*))?$/`, yielding `binaryName` and an optional
 * Otherwise the argument contained an `@` → **proxy mode** with an unknown tool,
   which is how `jup foo@1.2.3` reaches "unsupported package manager
   specification" rather than "unknown command".
-* Otherwise → **management mode** (§09).
+* Otherwise → **management mode** (§09), where a word §09's dispatch does not
+  know is the project's own script (§09.17) rather than an error.
 
 `[^@]*` means a scoped spec never matches as a name: `@scope/pkg@1.0.0` yields an
 empty `binaryName`, which fails the supported-name check. That is the intended

@@ -16,6 +16,7 @@ export const USAGE_LINES: Record<string, string> = {
   info: "$ jup info [--json]",
   install: "$ jup install [...args]",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
+  run: "$ jup run [...args]",
   "self-install": "$ jup self-install [--install-directory <path>|--system] [--force]",
   "self-upgrade": "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
   up: "$ jup up [--here] [--no-integrity] [--no-lockfile]",
@@ -142,6 +143,7 @@ function paintDescription(rest: string, colors: Palette): string {
 export const HELP_TEXT = `Usage: jup <command>
 
   jup <binary>[@<version>] [...args]     run a package manager
+  jup <script> [...args]                 run a project script
 
   jup cache clean [--all]
   jup cache clear [--all]
@@ -153,6 +155,7 @@ export const HELP_TEXT = `Usage: jup <command>
   jup info [--json]
   jup install [...args]
   jup pack [--json] [-o|--output <path>] [...name[@<version>]]
+  jup run [...args]
   jup self-install [--install-directory <path>|--system] [--force]
   jup self-upgrade [--install-directory <path>|--system] [--force]
   jup up [--here] [--no-integrity] [--no-lockfile]
@@ -171,6 +174,10 @@ It differs from up: up changes this project's pin; self-upgrade changes jup.
 install runs the project package manager's own install command, with any
 arguments after it passed straight through. It changes no project file: it is
 jup pnpm install written without naming the manager.
+
+run runs a script the same way: jup run build is jup pnpm run build. Any word
+that is not a command above is a script too, so jup lint runs the lint script.
+Neither claims a flag of its own; everything after the word is the manager's.
 
 --here limits project changes to the current directory's manifest. Otherwise,
 the search stops at a workspace root. Every mutating command prints each path

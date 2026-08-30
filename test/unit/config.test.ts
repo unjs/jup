@@ -183,6 +183,28 @@ describe("registry table — shape (§02.5)", () => {
     expect(DEFINITIONS.pnpm!.transparent.default).toBeUndefined();
   });
 
+  /**
+   * §09.15, §09.16 — the two commands a project can be told to run without
+   * naming its package manager. A band missing either is a band `jup install`
+   * or `jup run` refuses to use, which nothing else in the suite would notice
+   * — and a *new* entry is exactly where one would go missing.
+   */
+  it("gives every package manager an install and a script-runner command", () => {
+    for (const [name, definition] of Object.entries(DEFINITIONS)) {
+      if (isRuntime(name)) continue;
+      for (const [range, spec] of definition.ranges) {
+        expect(spec.commands?.use?.[0], `${name}@${range} commands.use`).toBeTypeOf("string");
+        expect(spec.commands?.run?.[0], `${name}@${range} commands.run`).toBeTypeOf("string");
+      }
+    }
+  });
+
+  /** The word is not always `run`: deno spells its script runner `deno task`. */
+  it("lets the script runner be spelled the way the tool spells it", () => {
+    expect(getSpecFor("deno", "2.9.6").commands?.run).toEqual(["deno", "task"]);
+    expect(getSpecFor("npm", "11.6.2").commands?.run).toEqual(["npm", "run"]);
+  });
+
   it("keeps ranges as an ordered list of [range, spec] pairs", () => {
     expect(DEFINITIONS.pnpm!.ranges.map(([range]) => range)).toEqual([
       "<6.0.0",
@@ -256,7 +278,7 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
     expect(spec.bin).toEqual({ pnpm: "./bin/pnpm.js", pnpx: "./bin/pnpx.js" });
     expect(spec.url).toBe("https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz");
     expect(spec.registry).toEqual({ type: "npm", package: "pnpm" });
-    expect(spec.commands).toEqual({ use: ["pnpm", "install"] });
+    expect(spec.commands).toEqual({ use: ["pnpm", "install"], run: ["pnpm", "run"] });
   });
 
   it("picks pnpm's .cjs band for 9.1.0", () => {
@@ -778,9 +800,15 @@ describe("bun and deno — §02.4's per-host entries (§03.1, §02.5)", () => {
     expect(getSpecFor("pnpm", "11.1.2").exec).toBeUndefined();
   });
 
-  it("declares what `use` runs afterwards", () => {
-    expect(getSpecFor("bun", "1.4.0").commands).toEqual({ use: ["bun", "install"] });
-    expect(getSpecFor("deno", "2.9.5").commands).toEqual({ use: ["deno", "install"] });
+  it("declares what `use` runs afterwards, and what a script runs through", () => {
+    expect(getSpecFor("bun", "1.4.0").commands).toEqual({
+      use: ["bun", "install"],
+      run: ["bun", "run"],
+    });
+    expect(getSpecFor("deno", "2.9.5").commands).toEqual({
+      use: ["deno", "install"],
+      run: ["deno", "task"],
+    });
   });
 });
 
@@ -812,7 +840,7 @@ describe("aube — §03.1's third per-host entry", () => {
     expect(spec.artifactRegistry).toEqual({ type: "npm", package: "@endevco/aube-{target}" });
     expect(DEFINITIONS.aube!.fetchLatestFrom).toEqual({ type: "npm", package: "@endevco/aube" });
     expect(spec.exec).toBe("native");
-    expect(spec.commands).toEqual({ use: ["aube", "install"] });
+    expect(spec.commands).toEqual({ use: ["aube", "install"], run: ["aube", "run"] });
     expect(isPerHost({ name: "aube", reference: "2.2.0" })).toBe(true);
   });
 
@@ -934,7 +962,7 @@ describe("nub — §03.1's fourth per-host entry", () => {
     expect(spec.artifactRegistry).toEqual({ type: "npm", package: "@nubjs/nub-{target}" });
     expect(DEFINITIONS.nub!.fetchLatestFrom).toEqual({ type: "npm", package: "@nubjs/nub" });
     expect(spec.exec).toBe("native");
-    expect(spec.commands).toEqual({ use: ["nub", "install"] });
+    expect(spec.commands).toEqual({ use: ["nub", "install"], run: ["nub", "run"] });
     expect(isPerHost({ name: "nub", reference: "0.7.5" })).toBe(true);
     // Bare, because one version is many artifacts (§02.3). The literal is the
     // review gate `scripts/refresh-table.mjs` has to walk a human through (§16);

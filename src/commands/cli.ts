@@ -308,21 +308,29 @@ export async function cmdCacheInstall(args: string[]): Promise<number> {
   return 0;
 }
 /**
- * §09.15 — run the project package manager's own install command.
+ * §09.15, §09.16 — hand the process to one of the project package manager's own
+ * commands, with `args` appended verbatim.
  *
  * The same handover `use` ends with (§09.5), without the pin: nothing is
  * written to the project, `lastKnownGood.json`, or `jup.lock`. What the tool
- * prints is all this command prints.
+ * prints is all these commands print.
  *
  * Resolution follows §09.2 rather than resolving the spec afresh: the committed
  * resolution and the memo answer first, so a warm pinned project reaches the
- * package manager with no request of any kind, and this command and the proxy
+ * package manager with no request of any kind, and these commands and the proxy
  * cannot disagree about which version a range currently means.
  *
- * Arguments are forwarded verbatim after `commands.use`, so
- * `jup install --frozen-lockfile` is the manager's own flag and not one of ours.
+ * `word` is only ever the spelling the user typed, for §12.10's message; `key`
+ * is what is looked up. They differ because §09.15 is spelled `install` and runs
+ * `commands.use` — the field is named for `jup use`, which is where it was first
+ * needed.
  */
-export async function cmdInstall(args: string[], run?: RunOptions): Promise<number> {
+async function forwardToPackageManager(
+  word: "install" | "run",
+  key: "use" | "run",
+  args: string[],
+  run?: RunOptions,
+): Promise<number> {
   const { descriptor, lookup } = resolveProjectSpec();
 
   const pinned = lookup.getSpec({ requireVersion: false });
@@ -334,13 +342,35 @@ export async function cmdInstall(args: string[], run?: RunOptions): Promise<numb
 
   // Before the install rather than after it: a pin with no command to run is a
   // statement about the request, and there is no reason to download for it.
-  const use = useCommandFor(locator);
-  if (use === undefined) {
-    throw new UsageError(messages.noInstallCommand(locator.name, locator.reference));
+  const command = bandCommandFor(locator, key);
+  if (command === undefined) {
+    throw new UsageError(messages.unsupportedCommand(word, locator.name, locator.reference));
   }
 
   const spec = await installOrExplain(locator, descriptor.range);
-  return await execUseCommand(use, spec, args, run);
+  return await execBandCommand(command, spec, args, run);
+}
+
+/**
+ * §09.15 — run the project package manager's own install command.
+ *
+ * Arguments are forwarded verbatim after `commands.use`, so
+ * `jup install --frozen-lockfile` is the manager's own flag and not one of ours.
+ */
+export function cmdInstall(args: string[], run?: RunOptions): Promise<number> {
+  return forwardToPackageManager("install", "use", args, run);
+}
+
+/**
+ * §09.16 — run a project script through the package manager's script runner.
+ *
+ * `jup run build --watch` is `pnpm run build --watch`; a bare `jup run` is a
+ * bare `pnpm run`, which is that manager's own way of listing the scripts. §09.17's
+ * unrecognised command word arrives here too, with the word itself at the front
+ * of `args`.
+ */
+export function cmdRun(args: string[], run?: RunOptions): Promise<number> {
+  return forwardToPackageManager("run", "run", args, run);
 }
 /** §09.3 — sets last-known-good **unconditionally**, unlike §04.8's guarded bump. */
 export async function cmdCacheInstallGlobal(args: string[]): Promise<number> {
@@ -793,7 +823,7 @@ async function applyToProject(
   const previousPackageManager = record(reference, spec);
 
   // A URL reference has no table band, so it has no `commands.use` either.
-  const use = useCommandFor({ name: locator.name, reference });
+  const use = bandCommandFor({ name: locator.name, reference }, "use");
   if (use === undefined) return 0;
 
   // §09.5 — what the package manager's own `use` command is told to migrate
@@ -809,29 +839,31 @@ async function applyToProject(
   out(`\n`);
 
   try {
-    return await execUseCommand(use, spec, [], run);
+    return await execBandCommand(use, spec, [], run);
   } finally {
     restore();
   }
 }
 
 /**
- * §09.5, §09.15 — the band's own install command, or `undefined` where there is
- * none: every runtime declares no `commands.use`, and a URL reference has no
- * band to declare one in.
+ * §09.5, §09.15, §09.16 — one of the band's own commands, or `undefined` where
+ * there is none: every runtime declares no `commands` at all, and a URL
+ * reference has no band to declare them in.
  */
-function useCommandFor(
+function bandCommandFor(
   locator: ResolvedSpec,
+  key: "use" | "run",
 ): { command: string[]; tableSpec: ToolSpec } | undefined {
   const tableSpec = getTableSpec(locator);
-  const command = tableSpec?.commands?.use;
+  const command = tableSpec?.commands?.[key];
   if (tableSpec === undefined || command === undefined || command.length === 0) return undefined;
   return { command, tableSpec };
 }
 
 /**
- * Hand the process to `commands.use`, with `extra` appended (§09.15 forwards
- * the user's own arguments; §09.5 passes none).
+ * Hand the process to the band command {@link bandCommandFor} chose, with
+ * `extra` appended (§09.15 and §09.16 forward the user's own arguments; §09.5
+ * passes none).
  *
  * From here the package manager owns the process and its output is passed
  * through untouched (§09.14). §08.3's native path is the one that has an exit
@@ -839,7 +871,7 @@ function useCommandFor(
  * itself, later (§08.4) — unless `run.handover` is off, in which case it is
  * spawned too and this is the tool's own code either way.
  */
-function execUseCommand(
+function execBandCommand(
   { command, tableSpec }: { command: string[]; tableSpec: ToolSpec },
   spec: Installation,
   extra: string[],
@@ -853,7 +885,7 @@ function execUseCommand(
     // §02.4 — `{exe}`-substituted, per `resolveSpecBin`.
     resolveSpecBin(tableSpec),
     tableSpec.exec,
-    // §02.4 — no band names its own `commands.use` under an aliased bin, so
+    // §02.4 — no band names its own `commands` under an aliased bin, so
     // this is `undefined` for every entry in the table today; it is passed for
     // the same reason the two above are, so that one handover cannot drift from
     // the other.
@@ -1288,6 +1320,15 @@ function cmdHelp(): Promise<number> {
   return Promise.resolve(0);
 }
 /**
+ * §09.17 — words that stay `Unknown command` rather than becoming scripts.
+ *
+ * `upgrade` was `self-upgrade`'s short spelling and is reserved for a
+ * project-level command (§09.13). A reservation the script fallback overrode
+ * would not be one.
+ */
+const RESERVED = new Set(["upgrade"]);
+
+/**
  * §09 — dispatch a management-mode invocation and return its exit code.
  *
  * A `UsageError` deliberately propagates: `main.ts` owns §12.1's presentation
@@ -1322,12 +1363,15 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
     case "disable": {
       return import("./shims.ts").then(({ cmdDisable }) => cmdDisable(rest));
     }
-    // §09.15 — a run, not a mutation: it writes nothing and forwards everything
-    // after the command word to the package manager. Under the `corepack` name
-    // `install` is rewritten to `cache install` before this switch is reached
-    // (§09.11), so the compatibility spelling is unaffected.
+    // §09.15, §09.16 — runs, not mutations: they write nothing and forward
+    // everything after the command word to the package manager. Under the
+    // `corepack` name `install` is rewritten to `cache install` before this
+    // switch is reached (§09.11), so the compatibility spelling is unaffected.
     case "install": {
       return cmdInstall(rest, run);
+    }
+    case "run": {
+      return cmdRun(rest, run);
     }
     case "info": {
       // Lazily, like `enable`/`disable`: §09.9's report reaches for the shim
@@ -1356,6 +1400,17 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
       return cmdUse(rest, run);
     }
     default: {
+      // §09.17 — a word this switch does not know is the project's own script:
+      // `jup lint` is `jup run lint`, which is `pnpm run lint`. Three things
+      // keep the error instead. A flag is not a script name, so a mistyped
+      // option still says so. `upgrade` is spoken for (§09.13), and a project
+      // with a script of that name must not be what decides. And under the
+      // `corepack` name the surface stays corepack's: a Dockerfile that still
+      // says `corepack prepare` is told the command is gone (§09.11), rather
+      // than quietly running a script that is not there.
+      if (run?.corepackCompat !== true && !command.startsWith("-") && !RESERVED.has(command)) {
+        return cmdRun([command, ...rest], run);
+      }
       throw new UsageError(`Unknown command "${command}"`);
     }
   }

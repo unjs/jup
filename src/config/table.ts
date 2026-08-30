@@ -40,7 +40,7 @@ const BUN_BAND = {
   registry: { type: "npm", package: "bun" },
   artifactRegistry: { type: "npm", package: "@oven/bun-{target}" },
   exec: "native",
-  commands: { use: ["bun", "install"] },
+  commands: { use: ["bun", "install"], run: ["bun", "run"] },
 } as const satisfies Omit<ToolSpec, "targets">;
 
 /** The four hosts every published bun artifact covers. */
@@ -66,7 +66,7 @@ const AUBE_BAND = {
   registry: { type: "npm", package: "@endevco/aube" },
   artifactRegistry: { type: "npm", package: "@endevco/aube-{target}" },
   exec: "native",
-  commands: { use: ["aube", "install"] },
+  commands: { use: ["aube", "install"], run: ["aube", "run"] },
 } as const satisfies Omit<ToolSpec, "targets">;
 
 /** aube's glibc and native hosts. Note the absent `darwin-x64`: there is none. */
@@ -93,7 +93,7 @@ const NUB_BAND = {
   registry: { type: "npm", package: "@nubjs/nub" },
   artifactRegistry: { type: "npm", package: "@nubjs/nub-{target}" },
   exec: "native",
-  commands: { use: ["nub", "install"] },
+  commands: { use: ["nub", "install"], run: ["nub", "run"] },
 } as const satisfies Omit<ToolSpec, "targets">;
 
 /**
@@ -180,7 +180,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/npm/-/npm-{}.tgz",
           bin: { npm: "./bin/npm-cli.js", npx: "./bin/npx-cli.js" },
           registry: { type: "npm", package: "npm" },
-          commands: { use: ["npm", "install"] },
+          commands: { use: ["npm", "install"], run: ["npm", "run"] },
         },
       ],
     ],
@@ -199,7 +199,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz",
           bin: { pnpm: "./bin/pnpm.js", pnpx: "./bin/pnpx.js" },
           registry: { type: "npm", package: "pnpm" },
-          commands: { use: ["pnpm", "install"] },
+          commands: { use: ["pnpm", "install"], run: ["pnpm", "run"] },
         },
       ],
       [
@@ -208,7 +208,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz",
           bin: { pnpm: "./bin/pnpm.cjs", pnpx: "./bin/pnpx.cjs" },
           registry: { type: "npm", package: "pnpm" },
-          commands: { use: ["pnpm", "install"] },
+          commands: { use: ["pnpm", "install"], run: ["pnpm", "run"] },
         },
       ],
       [
@@ -217,7 +217,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/pnpm/-/pnpm-{}.tgz",
           bin: { pnpm: "./bin/pnpm.mjs", pnpx: "./bin/pnpx.mjs" },
           registry: { type: "npm", package: "pnpm" },
-          commands: { use: ["pnpm", "install"] },
+          commands: { use: ["pnpm", "install"], run: ["pnpm", "run"] },
         },
       ],
       // §02.5 — pnpm is native from 12.0.0, and the first entry in this table
@@ -240,7 +240,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           artifactRegistry: { type: "npm", package: "@pnpm/exe.{target}" },
           targets: PNPM_EXE_TARGETS,
           exec: "native",
-          commands: { use: ["pnpm", "install"] },
+          commands: { use: ["pnpm", "install"], run: ["pnpm", "run"] },
         },
       ],
     ],
@@ -272,7 +272,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/yarn/-/yarn-{}.tgz",
           bin: { yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" },
           registry: { type: "npm", package: "yarn" },
-          commands: { use: ["yarn", "install"] },
+          commands: { use: ["yarn", "install"], run: ["yarn", "run"] },
         },
       ],
       [
@@ -285,7 +285,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           url: "https://registry.npmjs.org/@yarnpkg/cli-dist/-/cli-dist-{}.tgz",
           bin: { yarn: "./bin/yarn.js", yarnpkg: "./bin/yarn.js" },
           registry: { type: "npm", package: "@yarnpkg/cli-dist", publishedFrom: "2.4.1" },
-          commands: { use: ["yarn", "install"] },
+          commands: { use: ["yarn", "install"], run: ["yarn", "run"] },
         },
       ],
     ],
@@ -360,7 +360,10 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
             "win32-x64": "win32-x64",
           },
           exec: "native",
-          commands: { use: ["deno", "install"] },
+          // §09.16 — deno spells its script runner `deno task`; `deno run`
+          // takes a module path. The field is argv precisely so the word can
+          // differ from every other entry's.
+          commands: { use: ["deno", "install"], run: ["deno", "task"] },
         },
       ],
     ],

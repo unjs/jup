@@ -68,6 +68,7 @@ import {
   cmdCacheInstallGlobal,
   cmdInstall,
   cmdPack,
+  cmdRun,
   cmdUp,
   cmdUse,
   resolvePatternsToDescriptors,
@@ -1314,8 +1315,160 @@ describe("install (§09.15)", () => {
     const error = await rejection(cmdInstall([]));
 
     expect(error).toBeInstanceOf(UsageError);
-    expect(error.message).toBe(messages.noInstallCommand("yarn", reference));
+    expect(error.message).toBe(messages.unsupportedCommand("install", "yarn", reference));
     // Refused before the download the reference names, and before any handover.
+    expect(requested).toEqual([]);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §09.16, §09.17 — run, and the unrecognised command word
+ * ------------------------------------------------------------------ */
+
+describe("run (§09.16, §09.17)", () => {
+  beforeEach(() => {
+    execMock.mockClear();
+  });
+
+  it("runs the pinned manager's script runner and writes nothing", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+    const before = readFileSync(join(project, "package.json"), "utf8");
+
+    const migrateFrom = captureMigrateFrom();
+    await expect(cmdRun(["build"])).resolves.toBe(0);
+
+    // §09.16 — no banner: the script's output is the whole of it.
+    expect(stdout).toBe("");
+    expect(stderr).toBe("");
+
+    const [binName, , args] = execMock.mock.calls[0]!;
+    expect(execMock).toHaveBeenCalledTimes(1);
+    expect(binName).toBe("yarn");
+    expect(args).toEqual(["run", "build"]);
+
+    expect(migrateFrom.value).toBeUndefined();
+    expect(readFileSync(join(project, "package.json"), "utf8")).toBe(before);
+    expect(existsSync(join(project, "jup.lock"))).toBe(false);
+    expect(lastKnownGood()).toEqual({});
+  });
+
+  it("forwards its arguments verbatim after commands.run", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    await expect(cmdRun(["build", "--watch", "--", "-h"])).resolves.toBe(0);
+
+    const [, , args] = execMock.mock.calls[0]!;
+    expect(args).toEqual(["run", "build", "--watch", "--", "-h"]);
+  });
+
+  it("passes a bare `run` through, which is how a manager lists its scripts", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    await expect(cmdRun([])).resolves.toBe(0);
+
+    const [, , args] = execMock.mock.calls[0]!;
+    expect(args).toEqual(["run"]);
+  });
+
+  it("answers a range from the committed resolution without a request", async () => {
+    await seed("yarn", "2.4.3");
+    await manifest({
+      name: "demo",
+      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+    });
+    await record({ "yarn@2.x": { resolved: "2.4.3" } });
+
+    await expect(cmdRun(["build"])).resolves.toBe(0);
+
+    // §09.2's order, as §09.15 uses: a warm project asks nothing.
+    expect(requested).toEqual([]);
+    const [, spec] = execMock.mock.calls[0]!;
+    expect(spec.location).toBe(join(home, "v1", "yarn", "2.4.3"));
+  });
+
+  it("hands back the exit code the script produced", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+    execMock.mockImplementationOnce(() => 7);
+
+    await expect(cmdRun(["build"])).resolves.toBe(7);
+  });
+
+  it("§09.17 — an unrecognised command word is the script name", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    await expect(runManagementCommand(["lint", "--fix"])).resolves.toBe(0);
+
+    const [binName, , args] = execMock.mock.calls[0]!;
+    expect(binName).toBe("yarn");
+    // The word itself leads the script's own arguments.
+    expect(args).toEqual(["run", "lint", "--fix"]);
+  });
+
+  it("§09.17 — a flag is not a script name", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    const error = await rejection(runManagementCommand(["--frobnicate"]));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(`Unknown command "--frobnicate"`);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it("§09.17, §09.13 — `upgrade` stays reserved", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    const error = await rejection(runManagementCommand(["upgrade"]));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(`Unknown command "upgrade"`);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it("§09.17 — the fallback is jup's own, not corepack's", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    // §09.11 — a script written against corepack must be told `prepare` is
+    // gone, not have it silently become a script that is not there.
+    await expect(runMain(["prepare"], { corepackCompat: true })).resolves.toEqual({ code: 1 });
+
+    expect(stdout).toContain(`Usage Error: Unknown command "prepare"`);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+
+  it("reports the two project errors, with its own usage line", async () => {
+    const noProject = await rejection(cmdRun(["build"]));
+    expect(noProject).toBeInstanceOf(UsageError);
+    expect(noProject.message).toBe(messages.couldntFindProject());
+
+    await manifest({ name: "demo" });
+    const noSpec = await rejection(cmdRun(["build"]));
+    expect(noSpec).toBeInstanceOf(UsageError);
+    expect(noSpec.message).toBe(messages.noSpecInProject());
+
+    expect(execMock).not.toHaveBeenCalled();
+    expect(USAGE_LINES.run).toBe("$ jup run [...args]");
+  });
+
+  it("refuses a pin the table cannot describe", async () => {
+    // §04.1 step 1 — a custom URL has no band, so it declares no `commands.run`.
+    process.env.JUP_ENABLE_UNSAFE_CUSTOM_URLS = "1";
+    const reference = "https://example.com/yarn-1.22.4.tgz";
+    await manifest({ name: "demo", packageManager: `yarn@${reference}` });
+
+    const error = await rejection(cmdRun(["build"]));
+
+    expect(error).toBeInstanceOf(UsageError);
+    // The word the user typed, not the field behind it (§12.10).
+    expect(error.message).toBe(messages.unsupportedCommand("run", "yarn", reference));
     expect(requested).toEqual([]);
     expect(execMock).not.toHaveBeenCalled();
   });
@@ -1606,8 +1759,12 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
     }
   });
 
-  it("reports an unknown command as a usage error", async () => {
-    await expect(runManagementCommand(["frobnicate"])).rejects.toBeInstanceOf(UsageError);
+  it("reports an unknown command outside a project as a usage error", async () => {
+    // §09.17 — the word is taken for a script, so what fails is the project
+    // lookup the script would have needed, and it still ends in a `UsageError`.
+    const error = await rejection(runManagementCommand(["frobnicate"]));
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(messages.couldntFindProject());
   });
 
   /* ---------------------------------------------------------------- *
@@ -1678,7 +1835,7 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
   });
 
   it("keeps a usage line for every command it dispatches", () => {
-    for (const command of ["cache", "pack", "up", "use"]) {
+    for (const command of ["cache", "install", "pack", "run", "up", "use"]) {
       expect(USAGE_LINES[command]).toMatch(/^\$ jup /);
     }
   });

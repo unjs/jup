@@ -5,6 +5,7 @@ This is the complete surface. Anything not here is out of scope (§01.7).
 
 ```
 jup <binary>[@<version>] [...args]     proxy mode (§01.2)
+jup <script> [...args]                 §09.17, and so §09.16
 
 jup cache clean [--all]
 jup cache clear [--all]
@@ -16,6 +17,7 @@ jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [
 jup info [--json]
 jup install [...args]
 jup pack [--json] [-o|--output <path>] [...name[@<version>]]
+jup run [...args]
 jup self-install [--install-directory <path>|--system] [--force]
 jup self-upgrade [--install-directory <path>|--system] [--force]
 jup up  [--here] [--no-integrity] [--no-lockfile]
@@ -239,7 +241,9 @@ notice are the same under both names, because a security posture chosen by which
 symlink was typed is one nobody chose. See `RunOptions.corepackCompat`.
 
 `hydrate` and `prepare` were corepack's predecessors of `cache install -g
-<file>.tgz` and of `pack` + `cache install -g`. They were dropped before publication:
+<file>.tgz` and of `pack` + `cache install -g`. §09.17 is why the compatibility
+flag also suppresses the script fallback: under corepack's name their word must
+keep saying it is gone. They were dropped before publication:
 they existed for scripts written against corepack, jup has no install base of its
 own, and the corepack compatibility suite never exercised them. `cache install -g
 <file>.tgz` and `pack` (§09.3, §09.6) cover both.
@@ -399,3 +403,49 @@ and is §12.10's `The 'jup install' command isn't supported for <name>@<referenc
 Every entry in the table declares one, so no table pin can reach it. A runtime
 cannot: `packageManager` refuses to name one (§12.2), and this command reads that
 field pair alone.
+
+## 9.16 `run [...args]`
+
+§9.15 with `commands.run` in place of `commands.use`: the band's script runner,
+which is `pnpm run`, `yarn run`, `bun run`, and `deno task`. Everything else
+about it — §09.2's resolution, verbatim forwarding, no banner, no writes, no
+`JUP_MIGRATE_FROM`, the tool's own exit code — is §9.15's, from the same code.
+
+```
+argv := commands.run ++ args                                  # else §9.15's refusal
+```
+
+`jup run build --watch` is `jup pnpm run build --watch`. A bare `jup run` is a
+bare `pnpm run`, which is how that manager lists its scripts; jup neither reads
+the manifest's `scripts` nor claims a flag of its own, so what a script is, and
+what an unknown one prints, stay the package manager's answers.
+
+The refusal is §9.15's with the word the user typed:
+`The 'jup run' command isn't supported for <name>@<reference>`. Every table entry
+declares `commands.run`, and the field is argv rather than a subcommand name
+precisely so deno's `task` can be spelled.
+
+## 9.17 An unrecognised command word
+
+A word §09's dispatch does not know is a **script**, not a mistake: `jup lint` is
+`jup run lint`, with the word itself at the front of the forwarded arguments.
+
+Three things keep `Unknown command "<word>"` instead.
+
+* A **flag**. `jup --frobnicate` is a mistyped option, and no package manager's
+  script runner would make more sense of it than jup does.
+* A **reserved word**. `upgrade` was `self-upgrade`'s short spelling (§9.13) and
+  is reserved for a project-level command; a project that happens to have a
+  script of that name must not be what settles the question.
+* The **`corepack` name** (`RunOptions.corepackCompat`, §9.11). The compatibility
+  surface is corepack's, and a CI job that still says `corepack prepare` is owed
+  the sentence saying the command is gone rather than a run of a script that is
+  not there.
+
+The command word reaches §12.1's presenter as itself, so an unrecognised one has
+no `USAGE_LINES` entry and the generic `$ jup <command>` is what prints under a
+project error. The word is a script name, not a command jup has usage for.
+
+`jup <script>` never shadows §01.2's proxy mode: `parseArgs` classifies argv[0]
+first, so a word the table knows as a binary — or any word with an `@` in it —
+is a tool invocation and never reaches this switch.

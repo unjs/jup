@@ -83,11 +83,14 @@ jup node@^22 script.js
 ```
 
 `jup install` runs the install command of whichever manager the project pins, so
-a script does not have to name it:
+a script does not have to name it. `jup run` does the same for project scripts,
+and a word jup does not recognize is a script name:
 
 ```sh
 jup install
 jup install --frozen-lockfile
+jup run build
+jup lint
 ```
 
 Run `jup info` at any time to inspect the selected project, version, local store,

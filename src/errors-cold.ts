@@ -289,11 +289,15 @@ export const messages = {
     `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
 
   /**
-   * §09.15 — every package manager in the table declares `commands.use`, so this
-   * is reachable only through a pin the table cannot describe: a custom URL.
+   * §09.15, §09.16 — every package manager in the table declares both
+   * `commands.use` and `commands.run`, so this is reachable only through a pin
+   * the table cannot describe: a custom URL.
+   *
+   * `command` is the word the user typed, `install` or `run`, so the sentence
+   * names the command that cannot be honoured rather than the field behind it.
    */
-  noInstallCommand: (name: string, reference: string) =>
-    `The 'jup install' command isn't supported for ${name}@${reference}`,
+  unsupportedCommand: (command: string, name: string, reference: string) =>
+    `The 'jup ${command}' command isn't supported for ${name}@${reference}`,
 
   invalidPackageManagerName: (name: string) => `Invalid package manager name '${name}'`,
 
