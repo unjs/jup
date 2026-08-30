@@ -9,11 +9,23 @@
 #
 # The runtime is whatever the machine already has. Only when there is neither a
 # recent enough Node.js nor a bun does this download one: Node.js, from the same
-# signed npm artifact jup's own table names (`node-<target>`), into <home>\node
-# beside the store rather than anywhere on the user's PATH.
+# signed npm artifact jup's own table names (`node-<target>`), at the version
+# jup's table calls node's default. Bootstrapping any other version is what
+# leaves a fresh machine holding two copies of Node, this script's and the one
+# the first real command fetches.
 #
 # <home>\node is a sibling of the store's `v1`, so `jup cache clean` cannot take
-# it away, and section 10.1 therefore lets the wrappers name it.
+# it away, and section 10.1 therefore lets the wrappers name it. When the store
+# already holds the entry, <home>\node\bin\node.exe is a hard link into it
+# rather than a second copy — see New-RuntimeLink.
+#
+# Unlike install.sh, this half does not *write* the store entry. That needs the
+# artifact's npm signature checked first (section 06.1), and Windows ships no
+# openssl: the .NET APIs that would do it take spans, which PowerShell cannot
+# bind, and the DER-signature overload of VerifyData does not exist at all under
+# Windows PowerShell 5.1, which is what `irm | iex` runs. So the download is
+# parked at <home>\node and jup fetches and verifies its own store copy on
+# first use, as both halves used to.
 #
 # It is node and not bun for one measured reason: section 10.2's POSIX shims
 # dispatch on `basename(process.argv[1])`, and bun sets that to the realpath of
@@ -48,6 +60,13 @@ Set-StrictMode -Version Latest
 # about syntax rather than about the version.
 $nodeMinMajor = 22
 $nodeMinMinor = 18
+
+# `node.default` from `src/config/table.ts`, stamped by
+# `scripts/refresh-table.mjs` (section 16, Built-in table and trust keys) and not
+# to be edited by hand. Table data lives in `src/config/`; this is a copy because
+# a bootstrap runs before there is a jup to ask, and the stamper is what keeps it
+# from becoming a second, drifting source. install.sh carries the same literal.
+$nodeVersion = '24.20.0'
 
 # `JUP_NPM_REGISTRY` is jup's own setting (section 11.2) and is honoured here for
 # the machine that has to reach a mirror for everything, bootstrap included.
@@ -171,10 +190,10 @@ function Expand-Package([string] $package, [string] $spec, [string] $into, [stri
 # insensitive, so a parameter called `$home` is the automatic `$HOME`.
 function Install-Node([string] $storeRoot, [string] $stage) {
   $target = Get-NodeTarget
-  Note "no Node.js $nodeMinMajor.$nodeMinMinor+ and no bun found; downloading node for $target"
+  Note "no Node.js $nodeMinMajor.$nodeMinMinor+ and no bun found; downloading node $nodeVersion for $target"
 
   $staged = Join-Path $stage 'node'
-  Expand-Package "node-$target" 'latest' $staged $stage
+  Expand-Package "node-$target" $nodeVersion $staged $stage
 
   $exe = Join-Path $staged 'bin\node.exe'
   if (-not (Test-Path -LiteralPath $exe)) { Fail "node-$target did not contain bin\node.exe" }
@@ -189,6 +208,25 @@ function Install-Node([string] $storeRoot, [string] $stage) {
   return (Join-Path $dest 'bin\node.exe')
 }
 
+# <home>\node\bin\node.exe, made out of a binary that already exists in the
+# store. A hard link, so the second name costs no bytes and the file survives the
+# `cache clean` that unlinks the store's name — which is the whole reason
+# section 10.1 lets a wrapper name this path. Both names are under <home> and so
+# on one volume, which is what NTFS requires; a copy is the fallback, and it
+# costs the bytes this exists to save.
+function New-RuntimeLink([string] $storeRoot, [string] $source) {
+  $dest = Join-Path $storeRoot 'node\bin'
+  New-Item -ItemType Directory -Path $dest -Force | Out-Null
+  $link = Join-Path $dest 'node.exe'
+  if (Test-Path -LiteralPath $link) { Remove-Item -LiteralPath $link -Force }
+  try {
+    New-Item -ItemType HardLink -Path $link -Target $source -ErrorAction Stop | Out-Null
+  } catch {
+    Copy-Item -LiteralPath $source -Destination $link -Force
+  }
+  return $link
+}
+
 # The runtime to run jup under: the user's own first, then one an earlier run of
 # this script left behind. Node before bun because jup's Windows wrappers name
 # `node` in their bodies, so a machine with both wants that one.
@@ -199,8 +237,22 @@ function Find-Runtime([string] $storeRoot) {
   $bun = Get-Command bun.exe -ErrorAction SilentlyContinue
   if ($bun) { return $bun.Path }
 
+  # One an earlier run parked here, version checked like the ones on PATH rather
+  # than taken on sight: an installer old enough to have left a different major
+  # is what $nodeMinMajor is here to catch, and adopting it forever is how a
+  # machine never ends up running the version jup's table names.
   $sidecar = Join-Path $storeRoot 'node\bin\node.exe'
-  if (Test-Path -LiteralPath $sidecar) { return $sidecar }
+  if ((Test-Path -LiteralPath $sidecar) -and (Test-NodeSupported $sidecar)) { return $sidecar }
+
+  # The store may already hold the entry a download would produce — an earlier
+  # `jup install node`, or an image seeded by `jup pack`. It cannot be named
+  # directly, because section 10.2 forbids naming a runtime inside `v1` that
+  # `cache clean` exists to delete, but linking it out is free.
+  $cached = Join-Path $storeRoot "v1\node\$nodeVersion\bin\node.exe"
+  if ((Test-Path -LiteralPath (Join-Path $storeRoot "v1\node\$nodeVersion\.jup")) -and
+      (Test-Path -LiteralPath $cached) -and (Test-NodeSupported $cached)) {
+    try { return (New-RuntimeLink $storeRoot $cached) } catch { }
+  }
 
   return $null
 }

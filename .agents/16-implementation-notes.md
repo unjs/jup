@@ -117,6 +117,13 @@ what keeps `default` versions and digests current, §02 deliberately documents t
 table's *shape* and points at the code for its values; do not reintroduce a copy
 of the data into the docs.
 
+The same script stamps the two values `docs/public/install.{sh,ps1}` have to
+carry as literals — node's `default` and, for the sh half, §02.6's keys — because
+a bootstrap runs before there is a jup to ask for either. That is the only
+sanctioned copy of table data outside `src/config/`, and it is sanctioned because
+nothing hand-maintains it: `test/unit/install-scripts.test.ts` fails on drift,
+and §07.11 explains what each stale value costs.
+
 Refresh npm trust keys from `https://registry.npmjs.org/-/npm/v1/keys` and check
 origin, key IDs, SPKI bytes, expiry and rollover. The refresh script removes
 expired keys, so confirm that ending verification for signatures needing those

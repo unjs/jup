@@ -35,6 +35,12 @@ const SRC = join(import.meta.dirname, "..", "src", "config");
 const TABLE = join(SRC, "table.ts");
 const KEYS = join(SRC, "keys.ts");
 
+// The two bootstrap installers. They are stamped, not authored: see
+// {@link stampInstallers}.
+const PUBLIC = join(import.meta.dirname, "..", "docs", "public");
+const INSTALL_SH = join(PUBLIC, "install.sh");
+const INSTALL_PS1 = join(PUBLIC, "install.ps1");
+
 const NPM_REGISTRY = "https://registry.npmjs.org";
 const check = process.argv.includes("--check");
 
@@ -292,6 +298,68 @@ function rewriteDefault(source, name, field, reference) {
   return source.replace(block, (_all, open, _body, close) => open + rewritten + close);
 }
 
+/** One `default:` literal read back out, for the installers to be stamped with. */
+function readDefault(source, name) {
+  const block = new RegExp(`\\n  ${name}: \\{([\\s\\S]*?)\\n  \\},\\n`).exec(source);
+  if (block === null) throw new Error(`No ${name} block in ${TABLE}`);
+  const value = /\n    default:(?: |\n      )"([^"]*)"/.exec(block[1]);
+  if (value === null) throw new Error(`No ${name}.default in ${TABLE}`);
+  return value[1];
+}
+
+/** The default registry's keys, in the order {@link refreshKeys} left them. */
+function readTrustKeys(source) {
+  const block = /\n  \[DEFAULT_REGISTRY\]: \[\n([\s\S]*?)\n  \],\n/.exec(source);
+  if (block === null) throw new Error(`No trust-store block in ${KEYS}`);
+  const found = [...block[1].matchAll(/\n      key: "([^"]*)",/g)].map((match) => match[1]);
+  if (found.length === 0) throw new Error(`No keys in ${KEYS}`);
+  return found;
+}
+
+/**
+ * §16 — the two installers carry copies of table values, and this is what keeps
+ * them from becoming a second source of them.
+ *
+ * `docs/public/install.{sh,ps1}` bootstrap a machine that has no Node at all, so
+ * they run before there is a jup to ask what version it wants; the version has
+ * to be a literal in the script. Which makes it exactly the thing §16 says table
+ * data must not become — a hand-maintained copy — unless something stamps it.
+ *
+ * Both values matter for a reason, and neither is cosmetic:
+ *
+ * * `NODE_VERSION` naming anything but `node.default` is a duplicate download.
+ *   The installer's copy would satisfy nothing jup later resolves, so the first
+ *   real command fetches ~200 MB of a *second* Node beside the first.
+ * * `NPM_TRUST_KEYS` is §02.6's store, which `install.sh` verifies the download's
+ *   npm signature against before promoting it into the store (§06.1). A key left
+ *   behind by a rotation stops that check succeeding, and the installer quietly
+ *   falls back to a placement jup has to re-download.
+ *
+ * `install.ps1` takes the version only: it does not write a store entry, because
+ * it cannot run the signature check (see its own header).
+ */
+function stampInstallers(table, keys) {
+  const version = readDefault(table, "node");
+  const trusted = readTrustKeys(keys).join(" ");
+
+  const stamp = (path, source, label, pattern, value) => {
+    const found = pattern.exec(source);
+    if (found === null) throw new Error(`No ${label} in ${path}`);
+    if (found[1] === value) return source;
+    changes.push(`${label}: ${found[1]} -> ${value}`);
+    return source.replace(pattern, (all) => all.replace(found[1], value));
+  };
+
+  let sh = readFileSync(INSTALL_SH, "utf8");
+  sh = stamp(INSTALL_SH, sh, "install.sh NODE_VERSION", /^NODE_VERSION=(.*)$/m, version);
+  sh = stamp(INSTALL_SH, sh, "install.sh NPM_TRUST_KEYS", /^NPM_TRUST_KEYS="([^"]*)"$/m, trusted);
+
+  let ps1 = readFileSync(INSTALL_PS1, "utf8");
+  ps1 = stamp(INSTALL_PS1, ps1, "install.ps1 nodeVersion", /^\$nodeVersion = '([^']*)'$/m, version);
+
+  return { sh, ps1 };
+}
+
 /**
  * §02.6 — npm's published signing keys, expired ones dropped.
  *
@@ -365,6 +433,10 @@ table = rewriteDefault(table, "nub", "default", nub);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 
+// After both rewrites, so a rotated key and a hand-edited `node.default` are
+// stamped in the same run that produced them.
+const installers = stampInstallers(table, keys);
+
 /**
  * §02.3 — `node`'s `lts` is the one table value this script cannot compute.
  *
@@ -399,6 +471,8 @@ if (check) {
 
 writeFileSync(TABLE, table);
 writeFileSync(KEYS, keys);
+writeFileSync(INSTALL_SH, installers.sh);
+writeFileSync(INSTALL_PS1, installers.ps1);
 console.log(
   "\nRewritten. A bin-path change still needs a new `ranges` entry and human review (§16, Built-in table and trust keys).",
 );

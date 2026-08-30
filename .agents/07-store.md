@@ -370,6 +370,17 @@ shim may name it (§10.2). Answering that boundary question with "is it under
 `<home>`" rather than "is it under the install folder" is what leaves a
 bootstrapped machine with shims that all exit 127.
 
+`<home>/node/bin/node` is normally a **hard link** into `v1/node/<version>`, not
+a copy. `docs/public/install.sh` downloads `node.default` — no other version, or
+the first real command fetches a second one — verifies its npm signature against
+§02.6's embedded keys, and promotes it as a §7.2 entry before linking the binary
+out. One download serves both the bootstrap and the cache, and the link is what
+keeps the paragraph above true: `cache clean` unlinks the store's name and the
+inode survives under `<home>/node`. A host that cannot run that check — the sh
+half needs openssl, and `install.ps1` cannot run it at all — parks the download
+at `<home>/node` alone and leaves the store to jup, because §06.1 is not
+negotiable for something the store will hand to a later pinned run.
+
 The marker is §7.2's, with two differences that both follow from nothing having
 been downloaded:
 
