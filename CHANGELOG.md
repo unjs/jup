@@ -1,6 +1,34 @@
 # Changelog
 
 
+## v0.5.0
+
+[compare changes](https://github.com/unjs/jup/compare/v0.4.0...v0.5.0)
+
+### 🚀 Enhancements
+
+- ⚠️  Retire top-level `packageManager` once `devEngines` carries the pin ([6379a24](https://github.com/unjs/jup/commit/6379a24))
+
+### 📖 Documentation
+
+- Fix links ([3fbd450](https://github.com/unjs/jup/commit/3fbd450))
+
+### 🏡 Chore
+
+- Update docs ([66b5ef2](https://github.com/unjs/jup/commit/66b5ef2))
+
+### ✅ Tests
+
+- **corepack:** Name §03.7's retirement in the skips that now hide it ([3370ebf](https://github.com/unjs/jup/commit/3370ebf))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Retire top-level `packageManager` once `devEngines` carries the pin ([6379a24](https://github.com/unjs/jup/commit/6379a24))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.4.0
 
 [compare changes](https://github.com/unjs/jup/compare/v0.3.0...v0.4.0)
