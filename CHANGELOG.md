@@ -1,6 +1,19 @@
 # Changelog
 
 
+## v0.5.1
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5.0...v0.5.1)
+
+### 🚀 Enhancements
+
+- Add `jup install` ([7eacb4b](https://github.com/unjs/jup/commit/7eacb4b))
+- Add `jup run` and script fallback for unknown commands ([6a5984a](https://github.com/unjs/jup/commit/6a5984a))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.5.0
 
 [compare changes](https://github.com/unjs/jup/compare/v0.4.0...v0.5.0)
