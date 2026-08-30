@@ -160,9 +160,14 @@ All three are created unconditionally — the generator can be invoked from a PO
 build machine — at mode `0755`, and overwritten unconditionally; there is no
 idempotency short-circuit on Windows.
 
-Each wrapper prefers `%~dp0\node.exe` / `$basedir/node` when the shim directory
-*is* the Node install directory (which keeps that arrangement relocatable) and
-otherwise names the baked-in absolute interpreter (§10.2). The `.cmd` wrapper
+Each wrapper prefers `%~dp0\node.exe` / `$basedir/node.exe` when the shim
+directory *is* the Node install directory (which keeps that arrangement
+relocatable) and otherwise names the baked-in absolute interpreter (§10.2). All
+three probe the `.exe`, including the sh body: these wrappers only run on
+Windows, where a Node install directory holds `node.exe` and never an
+extensionless `node` — while the shim directory holds an extensionless `node`
+exactly when `enable node` has run, and that file is the sh wrapper itself. A
+wrapper that probed it would `exec` itself forever. The `.cmd` wrapper
 strips `.JS` from `PATHEXT` so that `node` resolves to `node.exe` rather than
 recursing into a `node.js` file; the `.ps1` wrapper forwards pipeline input and
 propagates `$LASTEXITCODE`.

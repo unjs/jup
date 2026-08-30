@@ -1934,6 +1934,15 @@ function win32CmdSource(rel: string, interpreter: string): string {
  * under Git Bash finds `<shimdir>/node`, this very file, once `enable node` has
  * run — with the separators flipped, which is the spelling those shells accept
  * for a Windows path.
+ *
+ * **The probe branch names `node.exe`, not `node`, and that is what keeps the
+ * fallback's guarantee true.** These wrappers only ever run on Windows, where a
+ * Node install directory holds `node.exe`; there is no extensionless `node` in
+ * one. The extensionless name in this directory is *this file*, so probing it
+ * made `enable node` write a wrapper that `exec`s itself — an unkillable loop
+ * rather than the recursion the absolute fallback was chosen to prevent. `.exe`
+ * cannot collide with a wrapper, and it is what the `.cmd` and `.ps1` bodies
+ * have always tested.
  */
 function win32ShSource(rel: string, interpreter: string): string {
   const script = win32ScriptPath(rel, "posix");
@@ -1946,8 +1955,8 @@ function win32ShSource(rel: string, interpreter: string): string {
     `    *CYGWIN*) basedir=\`cygpath -w "$basedir"\`;;`,
     `esac`,
     ``,
-    `if [ -x "$basedir/node" ]; then`,
-    `  exec "$basedir/node"  "${script}" "$@"`,
+    `if [ -x "$basedir/node.exe" ]; then`,
+    `  exec "$basedir/node.exe"  "${script}" "$@"`,
     `else`,
     `  exec "${posixInterpreter}"  "${script}" "$@"`,
     `fi`,

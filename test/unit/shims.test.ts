@@ -1777,8 +1777,8 @@ case \`uname\` in
     *CYGWIN*) basedir=\`cygpath -w "$basedir"\`;;
 esac
 
-if [ -x "$basedir/node" ]; then
-  exec "$basedir/node"  "$basedir/${rel}" "$@"
+if [ -x "$basedir/node.exe" ]; then
+  exec "$basedir/node.exe"  "$basedir/${rel}" "$@"
 else
   exec "${posixNode}"  "$basedir/${rel}" "$@"
 fi
