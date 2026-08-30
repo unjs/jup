@@ -1,6 +1,6 @@
 # `setup-jup`
 
-jup's own CI, run by jup. One step replaces `actions/setup-node` **and**
+jup's unpublished CI action replaces `actions/setup-node` plus
 `corepack enable`:
 
 ```yaml
@@ -10,79 +10,73 @@ jup's own CI, run by jup. One step replaces `actions/setup-node` **and**
 - run: pnpm install
 ```
 
-It is intentionally unpublished. Everything here goes through the documented
-command surface ([§09](../../../.agents/09-cli.md)) and `jup info --json`, so it
-is also a standing test that those two are enough to build on.
+It uses only the documented [§09 command surface](../../../.agents/09-cli.md)
+and `jup info --json`, making the action a standing test of that interface.
 
-## What it does
+## How it works
 
-1. Points `JUP_HOME` and `JUP_SHIM_DIRECTORY` at the runner's temp directory and
-   restores that store from the cache, keyed by OS, architecture, jup version
-   and the project's pins. The shim directory goes on `PATH` here, while it is
-   still empty, so `enable` can see that its install directory is reachable.
-2. Installs jup with the runner's own node — the only bootstrap step — into an
-   npm prefix of its own, beside the shim directory. On Windows that is load
-   bearing: a §10.4 wrapper names its stub relative to its own directory, and
-   there is no relative path from `D:\a\_temp\jup-bin` to a global install on
-   `C:`. `-f` covers the `corepack` name jup's `bin` also claims.
-3. `jup enable` writes the package-manager shims into that directory.
-4. `jup node --version` resolves, verifies and installs the runtime, and the
-   real binary is linked beside those shims. `node` is a genuine executable, not
-   a shim: no per-invocation cost, and `process.execPath` is what any tool would
-   expect.
-5. `jup install` warms the pinned package manager, so the first `pnpm install`
-   of the job is already a store hit.
-6. The manager's *own* store is cached separately — jup keeps programs, the
-   package manager keeps packages, and preparing one does not prepare the other.
+1. Set `JUP_HOME` and `JUP_SHIM_DIRECTORY` under the runner's temp directory,
+   add the shim directory to `PATH`, and restore jup's host-specific cache.
+2. Bootstrap with the runner's node via `npx jup self-install`. The permanent
+   jup copy and its `jup`/`corepack` shims are owned by jup
+   ([§09.12](../../../.agents/09-cli.md)).
+3. Enable `node` and the requested managers together so every shim gets the
+   runner's absolute interpreter ([§10.2](../../../.agents/10-shims.md)).
+4. Record an explicit `node-version` as jup's global default, then resolve,
+   verify, install, and report the version through the `node` shim. Project
+   runtime pins still take precedence.
+5. Warm the project-pinned package manager with `jup install`.
+6. Cache the manager's package store separately from jup's program store.
 
 ## Differences from `actions/setup-node`
 
-| | `setup-node` | this |
+| | `setup-node` | this action |
 |---|---|---|
-| Version source | `node-version`, `node-version-file` | `node-version`, else `devEngines.runtime`, else `.nvmrc`, else jup's built-in default |
-| `lts/*` | a codename per line | one `lts` tag, answered by jup's table; `lts/<codename>` is read as `lts` |
-| Package manager | separate action, or `corepack enable` | pinned, verified and shimmed by the same step |
-| Integrity | none beyond the download | signature-verified per host ([§06](../../../.agents/06-integrity.md)) |
-| `npm` on `PATH` | the runtime's bundled copy | jup's shim, resolving the project's pin — `node-<target>` ships the binary alone |
+| Version source | `node-version`, `node-version-file` | `node-version`; otherwise `devEngines.runtime`, `.nvmrc`, or jup's default |
+| `lts/*` | codename-specific | mapped to jup's single `lts` tag |
+| Package managers | separate action or `corepack enable` | pinned, verified, and shimmed by jup |
+| Integrity | download integrity only | per-host signature verification ([§06](../../../.agents/06-integrity.md)) |
+| `npm` | runtime-bundled copy | jup shim resolving the project pin |
+| `node` | extracted binary | jup shim; runtime pin changes apply mid-job at one process hop per call |
 
-Not carried over: `registry-url`, `scope`, `always-auth`, `mirror`, and the
-problem matchers. Nothing here needs them; jup reads `.npmrc` for its own
-requests either way ([§05](../../../.agents/05-registry.md)).
+Not supported: `registry-url`, `scope`, `always-auth`, `mirror`, or problem
+matchers. jup reads `.npmrc` for its requests without action configuration
+([§05](../../../.agents/05-registry.md)).
 
 ## Inputs
 
 | Name | Default | Meaning |
 |---|---|---|
-| `node-version` | *(empty)* | Version, range or tag. Empty lets the project decide. |
-| `jup-version` | `latest` | The jup release to install. `latest` is deliberate: a published release that cannot run this repository's own CI is worth finding out about here. |
-| `package-managers` | `auto` | Names to shim. `auto` is jup's default set; `none` shims nothing. |
-| `cache` | `true` | Save and restore `JUP_HOME`. |
-| `cache-dependencies` | `true` | Save and restore the package manager's store. |
-| `working-directory` | `.` | Which project's pins are read. |
+| `node-version` | *(empty)* | Version, range, or tag. Empty uses project/default resolution. |
+| `jup-version` | `latest` | npm spec for jup. `latest` intentionally tests the published release. |
+| `package-managers` | `auto` | Space-separated managers. `auto` enables the full table; `none` enables no manager. `node` is always enabled. |
+| `cache` | `true` | Cache `JUP_HOME`. |
+| `cache-dependencies` | `true` | Cache the package manager's store. |
+| `working-directory` | `.` | Project directory whose pins are read. |
 
-Outputs: `node-version`, `node-path`, `package-manager`, `bin-directory`,
+Outputs: `node-version`, `node-path`, `package-manager`, `bin-directory`, and
 `jup-home`.
 
-## What it changes in the job
+## Job changes
 
-Everything below outlives the action and applies to every later step:
+Later steps inherit:
 
-* `PATH` gains two entries at the front — the shim directory, then jup's own npm
-  prefix. So `npm`, `npx`, `pnpm`, `yarn` and `aube` are jup shims resolving the
-  project's pin, `node` is the pinned runtime, and `corepack` is jup, which
-  shadows the runner's bundled one rather than replacing it.
-* `JUP_HOME` and `JUP_SHIM_DIRECTORY` are exported. A workflow that already set
-  either keeps its own value; the action only supplies a default.
-* Nothing else. The report path the steps pass between themselves is a step
-  input, not a job variable.
+- One new leading `PATH` entry containing all jup shims, including `node`,
+  package managers, `jup`, and `corepack`.
+- `JUP_HOME` and `JUP_SHIM_DIRECTORY`. Caller-provided values are preserved.
 
-Both cache keys are prefixed `setup-jup-`, so they cannot collide with a cache
-step of the caller's own.
+No other job variables are exported. Both cache keys use the `setup-jup-`
+prefix to avoid caller cache collisions.
 
-## A caveat worth keeping
+## Cache safety
 
-A restored `JUP_HOME` is executable code trusted on a cache hit
-([CI docs](../../../docs/3.ci.md)). The key carries the host triple and the
-`restore-keys` prefix stops at the same jup and the same runtime request, and
-`actions/cache` is pinned by digest for the same reason. Do not let an untrusted
-fork populate a cache a release job reads.
+`<JUP_HOME>/self` is excluded from the cache. Its CLI entry embeds the runner's
+absolute node path ([§10.2](../../../.agents/10-shims.md)); restoring it could
+retain a path from an older image because `self-install` compares the downloaded
+source digest. npx downloads that source each run, so only a local copy is lost.
+
+A restored `JUP_HOME` is trusted executable code
+([CI docs](../../../docs/3.ci.md)). Cache keys therefore include the host triple,
+jup version, and runtime request; restore prefixes stop at that boundary; and
+`actions/cache` is pinned by digest. Do not let untrusted forks populate caches
+used by release jobs.
