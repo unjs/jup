@@ -82,6 +82,14 @@ jup pnpm install
 jup node@^22 script.js
 ```
 
+`jup install` runs the install command of whichever manager the project pins, so
+a script does not have to name it:
+
+```sh
+jup install
+jup install --frozen-lockfile
+```
+
 Run `jup info` at any time to inspect the selected project, version, local store,
 network settings, and shims.
 

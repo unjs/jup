@@ -14,6 +14,7 @@ jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
 jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
 jup info [--json]
+jup install [...args]
 jup pack [--json] [-o|--output <path>] [...name[@<version>]]
 jup self-install [--install-directory <path>|--system] [--force]
 jup self-upgrade [--install-directory <path>|--system] [--force]
@@ -143,6 +144,8 @@ install` prints. With no `commands.use` the command returns 0 after writing —
 which is every `use` of a runtime, so `jup use node@22` writes
 `devEngines.runtime` and stops there.
 
+`jup install` (§09.15) is the same handover without the pin.
+
 Behaviours worth knowing, all test-asserted:
 
 * An existing **malformed** `packageManager` (a range, a bare name, a trailing
@@ -220,9 +223,10 @@ invocation and prints Yarn's version.
 
 ## 9.11 (retired) Deprecated commands
 
-**`install` under corepack's name.** The word `install` is reserved on jup's own
-surface and is a `UsageError` there. Invoked through `corepack` — meaning
-`bin/corepack.mjs` ran, which §10.9 makes the only reliable statement of that —
+**`install` under corepack's name.** On jup's own surface `install` is §09.15,
+which runs the project package manager's install command. Invoked through
+`corepack` — meaning `bin/corepack.mjs` ran, which §10.9 makes the only reliable
+statement of that —
 `install` and `install -g` are rewritten to `cache install` and
 `cache install -g` before dispatch, so a Dockerfile or CI job written against
 corepack keeps working. The rewrite happens in `runMain`, ahead of both the
@@ -361,3 +365,37 @@ The agent-detection list is a vendored copy of someone else's table and a moving
 target. It buys a nicer transcript and costs recurring maintenance; if it ever
 starts producing surprises, dropping back to `NO_COLOR`/`FORCE_COLOR`/TTY is a
 reasonable retreat.
+
+## 9.15 `install [...args]`
+
+Runs the project package manager's own install command — §09.5's handover
+without the pin. It writes nothing: not the manifest, not `jup.lock`, not
+`lastKnownGood.json`, not the memo.
+
+```
+descriptor := the project's spec (§09.1, no patterns)
+    NoProject / NoSpec → §12.10's two project errors
+locator    := the recorded resolution or memo, else resolve(descriptor)  # §09.2
+install
+argv       := commands.use ++ args                                       # §09.5
+```
+
+Resolution is §09.2's, not §09.5's: the committed resolution and the memo are
+read first and the spec is not re-resolved, so a warm pinned project reaches the
+package manager with no request of any kind, and `jup install` and `jup pnpm
+install` cannot disagree about which version a range currently means.
+
+Everything after the command word is forwarded verbatim after `commands.use`, so
+`jup install --frozen-lockfile` passes the manager's own flag through and jup
+claims no flags of its own here — `--here` and the two pin opt-outs are for the
+commands that write. There is no banner and no blank line: what the tool prints
+is the whole of the output, and its exit code is the command's.
+
+`JUP_MIGRATE_FROM` is **not** set. Nothing migrated: the pin is what it was
+before the command ran.
+
+A pin with no band — a custom URL (§04.1 step 1) — declares no `commands.use`,
+and is §12.10's `The 'jup install' command isn't supported for <name>@<reference>`.
+Every entry in the table declares one, so no table pin can reach it. A runtime
+cannot: `packageManager` refuses to name one (§12.2), and this command reads that
+field pair alone.

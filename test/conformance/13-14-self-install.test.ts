@@ -214,12 +214,18 @@ describe("§09.12 self-install", () => {
       expect(shim.stdout).toBe(`${VERSION}\n`);
 
       // Degraded, and deliberately so: without its own entry the name cannot
-      // carry the alias, and a dangling link would be worse than losing it.
+      // carry the alias, and a dangling link would be worse than losing it. So
+      // `install` is §09.15's own command here rather than §09.11's rewrite to
+      // `cache install`, which the usage line under the refusal is what names.
+      // Run outside any project, so that both spellings refuse rather than hand
+      // the process to whatever package manager the cwd happens to pin.
       const aliased = spawnSync(join(shimDir, "corepack"), ["install"], {
+        cwd: options.home,
         encoding: "utf8",
         env: { ...process.env, COREPACK_HOME: options.home, PATH: options.env.PATH },
       });
-      expect(aliased.stdout).toContain(`Unknown command "install"`);
+      expect(aliased.stdout).toContain(`$ jup install [...args]`);
+      expect(aliased.stdout).not.toContain(`$ jup cache clean|clear|install|list`);
     },
   );
 

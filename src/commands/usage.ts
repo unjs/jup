@@ -14,6 +14,7 @@ export const USAGE_LINES: Record<string, string> = {
   disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
   enable: "$ jup enable [--install-directory <path>|--system] [--exclude <name>] [--force] ...",
   info: "$ jup info [--json]",
+  install: "$ jup install [...args]",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
   "self-install": "$ jup self-install [--install-directory <path>|--system] [--force]",
   "self-upgrade": "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
@@ -150,6 +151,7 @@ export const HELP_TEXT = `Usage: jup <command>
   jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
   jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
   jup info [--json]
+  jup install [...args]
   jup pack [--json] [-o|--output <path>] [...name[@<version>]]
   jup self-install [--install-directory <path>|--system] [--force]
   jup self-upgrade [--install-directory <path>|--system] [--force]
@@ -165,6 +167,10 @@ owned by another tool, including Node's bundled corepack.
 
 self-upgrade downloads and verifies the latest jup, then updates the same links.
 It differs from up: up changes this project's pin; self-upgrade changes jup.
+
+install runs the project package manager's own install command, with any
+arguments after it passed straight through. It changes no project file: it is
+jup pnpm install written without naming the manager.
 
 --here limits project changes to the current directory's manifest. Otherwise,
 the search stops at a workspace root. Every mutating command prints each path

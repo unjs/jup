@@ -1,5 +1,5 @@
 /**
- * §13.10 — `use` and `up` (rows 105–116).
+ * §13.10 — `use`, `up` and `install` (rows 105–116, §09.15).
  */
 
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -383,5 +383,70 @@ describe("§13.10 use / up", () => {
         ].join(""),
       ),
     );
+  });
+});
+
+describe("§09.15 install", () => {
+  it("runs the pinned manager's install command and changes nothing", async () => {
+    const fixture = createFixture({ name: "project", packageManager: "yarn@1.22.4" });
+    const before = fixture.read("package.json");
+
+    const result = await run(["install"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(0);
+    // §09.15 — no banner and no blank line in front: the tool's own output is
+    // the whole of stdout, exactly as `jup yarn install` would have printed it.
+    expect(result.stdout).toBe(`yarn@1.22.4 install\n`);
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
+    expect(fixture.read("package.json")).toBe(before);
+    expect(fixture.exists("jup.lock")).toBe(false);
+  });
+
+  it("forwards its own arguments to the package manager", async () => {
+    const fixture = createFixture({ name: "project", packageManager: "yarn@1.22.4" });
+
+    const result = await run(["install", "--frozen-lockfile", "extra"], {
+      ...fixture,
+      registry,
+      env: trusted(),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`yarn@1.22.4 install --frozen-lockfile extra\n`);
+  });
+
+  it("answers a committed range with no request at all", async () => {
+    const fixture = createFixture({
+      name: "project",
+      devEngines: { packageManager: { name: "yarn", version: "1.x" } },
+    });
+    record(fixture, "yarn@1.x", "1.22.4");
+
+    // Warm the store first, then bar the registry: §09.15 reads `jup.lock` and
+    // the store, so the second run is the one that proves it asks nothing.
+    await run(["install"], { ...fixture, registry, env: trusted() });
+    const result = await run(["install"], {
+      ...fixture,
+      registry,
+      env: trusted({ JUP_NPM_REGISTRY: "http://127.0.0.1:1" }),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(`yarn@1.22.4 install\n`);
+  });
+
+  it("reports a project with no pin, with its own usage line", async () => {
+    const fixture = createFixture({ name: "project" });
+
+    const result = await run(["install"], { ...fixture, registry, env: trusted() });
+
+    expect(result.exitCode).toBe(1);
+    // §12.1 — management mode puts both on stdout.
+    expect(result.stdout).toBe(
+      `Usage Error: The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it\n` +
+        `\n` +
+        `$ jup install [...args]\n`,
+    );
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
   });
 });

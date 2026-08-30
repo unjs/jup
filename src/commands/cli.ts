@@ -63,7 +63,14 @@ import {
   writeMarker,
 } from "../cache/store.ts";
 import { create, extract, listEntries } from "../cache/tar.ts";
-import type { Spec, Installation, ResolvedSpec, ProjectSpec, RunOptions } from "../types.ts";
+import type {
+  Spec,
+  Installation,
+  ResolvedSpec,
+  ProjectSpec,
+  RunOptions,
+  ToolSpec,
+} from "../types.ts";
 
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "jup.tgz";
@@ -299,6 +306,41 @@ export async function cmdCacheInstall(args: string[]): Promise<number> {
   await installOrExplain(locator, descriptor.range, { cacheOnly: true });
 
   return 0;
+}
+/**
+ * §09.15 — run the project package manager's own install command.
+ *
+ * The same handover `use` ends with (§09.5), without the pin: nothing is
+ * written to the project, `lastKnownGood.json`, or `jup.lock`. What the tool
+ * prints is all this command prints.
+ *
+ * Resolution follows §09.2 rather than resolving the spec afresh: the committed
+ * resolution and the memo answer first, so a warm pinned project reaches the
+ * package manager with no request of any kind, and this command and the proxy
+ * cannot disagree about which version a range currently means.
+ *
+ * Arguments are forwarded verbatim after `commands.use`, so
+ * `jup install --frozen-lockfile` is the manager's own flag and not one of ours.
+ */
+export async function cmdInstall(args: string[], run?: RunOptions): Promise<number> {
+  const { descriptor, lookup } = resolveProjectSpec();
+
+  const pinned = lookup.getSpec({ requireVersion: false });
+  const known = usesLockfile(pinned)
+    ? readKnownResolution(dirname(lookup.target), pinned).locator
+    : null;
+
+  const locator = known ?? (await resolveOrThrow(descriptor, { allowTags: true }));
+
+  // Before the install rather than after it: a pin with no command to run is a
+  // statement about the request, and there is no reason to download for it.
+  const use = useCommandFor(locator);
+  if (use === undefined) {
+    throw new UsageError(messages.noInstallCommand(locator.name, locator.reference));
+  }
+
+  const spec = await installOrExplain(locator, descriptor.range);
+  return await execUseCommand(use, spec, args, run);
 }
 /** §09.3 — sets last-known-good **unconditionally**, unlike §04.8's guarded bump. */
 export async function cmdCacheInstallGlobal(args: string[]): Promise<number> {
@@ -751,11 +793,8 @@ async function applyToProject(
   const previousPackageManager = record(reference, spec);
 
   // A URL reference has no table band, so it has no `commands.use` either.
-  const pinned: ResolvedSpec = { name: locator.name, reference };
-  const tableSpec = getTableSpec(pinned);
-  const useCommand = tableSpec?.commands?.use;
-
-  if (useCommand === undefined || useCommand.length === 0) return 0;
+  const use = useCommandFor({ name: locator.name, reference });
+  if (use === undefined) return 0;
 
   // §09.5 — what the package manager's own `use` command is told to migrate
   // from; the literal `unknown` when the project had no previous value.
@@ -770,29 +809,57 @@ async function applyToProject(
   out(`\n`);
 
   try {
-    // From here the package manager owns the process and its output is passed
-    // through untouched (§09.14). §08.3's native path is the one that has an exit
-    // code to hand back here; the JavaScript path answers 0 and sets the real one
-    // itself, later (§08.4) — unless `run.handover` is off, in which case it is
-    // spawned too and this is the tool's own code either way.
-    return await execPackageManager(
-      useCommand[0]!,
-      spec,
-      useCommand.slice(1),
-      // §08.1 — `installSpec.bin ?? spec.bin`; the marker may carry no `bin`.
-      // §02.4 — `{exe}`-substituted, per `resolveSpecBin`.
-      tableSpec === undefined ? undefined : resolveSpecBin(tableSpec),
-      tableSpec?.exec,
-      // §02.4 — no band names its own `commands.use` under an aliased bin, so
-      // this is `undefined` for every entry in the table today; it is passed for
-      // the same reason the two above are, so that one handover cannot drift from
-      // the other.
-      tableSpec?.binArgs?.[useCommand[0]!],
-      run,
-    );
+    return await execUseCommand(use, spec, [], run);
   } finally {
     restore();
   }
+}
+
+/**
+ * §09.5, §09.15 — the band's own install command, or `undefined` where there is
+ * none: every runtime declares no `commands.use`, and a URL reference has no
+ * band to declare one in.
+ */
+function useCommandFor(
+  locator: ResolvedSpec,
+): { command: string[]; tableSpec: ToolSpec } | undefined {
+  const tableSpec = getTableSpec(locator);
+  const command = tableSpec?.commands?.use;
+  if (tableSpec === undefined || command === undefined || command.length === 0) return undefined;
+  return { command, tableSpec };
+}
+
+/**
+ * Hand the process to `commands.use`, with `extra` appended (§09.15 forwards
+ * the user's own arguments; §09.5 passes none).
+ *
+ * From here the package manager owns the process and its output is passed
+ * through untouched (§09.14). §08.3's native path is the one that has an exit
+ * code to hand back here; the JavaScript path answers 0 and sets the real one
+ * itself, later (§08.4) — unless `run.handover` is off, in which case it is
+ * spawned too and this is the tool's own code either way.
+ */
+function execUseCommand(
+  { command, tableSpec }: { command: string[]; tableSpec: ToolSpec },
+  spec: Installation,
+  extra: string[],
+  run?: RunOptions,
+): number | Promise<number> {
+  return execPackageManager(
+    command[0]!,
+    spec,
+    [...command.slice(1), ...extra],
+    // §08.1 — `installSpec.bin ?? spec.bin`; the marker may carry no `bin`.
+    // §02.4 — `{exe}`-substituted, per `resolveSpecBin`.
+    resolveSpecBin(tableSpec),
+    tableSpec.exec,
+    // §02.4 — no band names its own `commands.use` under an aliased bin, so
+    // this is `undefined` for every entry in the table today; it is passed for
+    // the same reason the two above are, so that one handover cannot drift from
+    // the other.
+    tableSpec.binArgs?.[command[0]!],
+    run,
+  );
 }
 
 /**
@@ -1254,6 +1321,13 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
     }
     case "disable": {
       return import("./shims.ts").then(({ cmdDisable }) => cmdDisable(rest));
+    }
+    // §09.15 — a run, not a mutation: it writes nothing and forwards everything
+    // after the command word to the package manager. Under the `corepack` name
+    // `install` is rewritten to `cache install` before this switch is reached
+    // (§09.11), so the compatibility spelling is unaffected.
+    case "install": {
+      return cmdInstall(rest, run);
     }
     case "info": {
       // Lazily, like `enable`/`disable`: §09.9's report reaches for the shim

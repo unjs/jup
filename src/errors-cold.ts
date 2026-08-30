@@ -288,6 +288,13 @@ export const messages = {
   noSpecInProject: () =>
     `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
 
+  /**
+   * §09.15 — every package manager in the table declares `commands.use`, so this
+   * is reachable only through a pin the table cannot describe: a custom URL.
+   */
+  noInstallCommand: (name: string, reference: string) =>
+    `The 'jup install' command isn't supported for ${name}@${reference}`,
+
   invalidPackageManagerName: (name: string) => `Invalid package manager name '${name}'`,
 
   assertStubFolderMissing: () => `Assertion failed: The stub folder doesn't exist`,

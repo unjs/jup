@@ -248,6 +248,7 @@ Couldn't find a project in the local directory - please specify the package mana
 The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it
 The local project doesn't feature a 'packageManager' field - please specify the package manager to pack, or update the manifest to reference it
 Invalid package manager name '<name>'
+The 'jup install' command isn't supported for <name>@<reference>
 Assertion failed: The stub folder doesn't exist
 Unable to determine where to install the shims; pass --install-directory
 Options --system and --install-directory both name an install directory; pass one or the other

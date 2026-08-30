@@ -66,6 +66,7 @@ import {
   cmdCache,
   cmdCacheInstall,
   cmdCacheInstallGlobal,
+  cmdInstall,
   cmdPack,
   cmdUp,
   cmdUse,
@@ -1217,6 +1218,110 @@ describe("use (§09.5, tests 105-110)", () => {
 });
 
 /* ------------------------------------------------------------------ *
+ * §09.15 — install
+ * ------------------------------------------------------------------ */
+
+describe("install (§09.15)", () => {
+  // The handover mock is module-scoped and outlives `restoreAllMocks`, so the
+  // call log is cleared here rather than counted from wherever the file is up to.
+  beforeEach(() => {
+    execMock.mockClear();
+  });
+
+  it("runs the pinned manager's own install command and writes nothing", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+    const before = readFileSync(join(project, "package.json"), "utf8");
+
+    const migrateFrom = captureMigrateFrom();
+    await expect(cmdInstall([])).resolves.toBe(0);
+
+    // §09.15 — no banner and no blank line: the tool's output is the whole of it.
+    expect(stdout).toBe("");
+    expect(stderr).toBe("");
+
+    const [binName, , args] = execMock.mock.calls[0]!;
+    expect(execMock).toHaveBeenCalledTimes(1);
+    expect(binName).toBe("yarn");
+    expect(args).toEqual(["install"]);
+
+    // Nothing migrated, so §09.5's variable is not set (§09.15).
+    expect(migrateFrom.value).toBeUndefined();
+    // Not the manifest, not `jup.lock`, not the global default.
+    expect(readFileSync(join(project, "package.json"), "utf8")).toBe(before);
+    expect(existsSync(join(project, "jup.lock"))).toBe(false);
+    expect(lastKnownGood()).toEqual({});
+  });
+
+  it("forwards its arguments verbatim after commands.use", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    await expect(cmdInstall(["--frozen-lockfile", "--", "-h"])).resolves.toBe(0);
+
+    const [, , args] = execMock.mock.calls[0]!;
+    // jup claims no flags of its own here: `--` and `-h` are the manager's.
+    expect(args).toEqual(["install", "--frozen-lockfile", "--", "-h"]);
+  });
+
+  it("answers a range from the committed resolution without a request", async () => {
+    await seed("yarn", "2.4.3");
+    await manifest({
+      name: "demo",
+      devEngines: { packageManager: { name: "yarn", version: "2.x" } },
+    });
+    await record({ "yarn@2.x": { resolved: "2.4.3" } });
+
+    await expect(cmdInstall([])).resolves.toBe(0);
+
+    // §09.2's order, so `jup install` and the proxy cannot disagree about what
+    // the range currently means — and a warm project asks nothing (no registry
+    // routes are mocked, so a resolve would have failed outright).
+    expect(requested).toEqual([]);
+    const [, spec] = execMock.mock.calls[0]!;
+    expect(spec.location).toBe(join(home, "v1", "yarn", "2.4.3"));
+  });
+
+  it("hands back the exit code the package manager produced", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+    execMock.mockImplementationOnce(() => 7);
+
+    await expect(cmdInstall([])).resolves.toBe(7);
+  });
+
+  it("reports the two project errors, with its own usage line", async () => {
+    // §09.1's no-pattern path, shared with `cache install` (§12.10).
+    const noProject = await rejection(cmdInstall([]));
+    expect(noProject).toBeInstanceOf(UsageError);
+    expect(noProject.message).toBe(messages.couldntFindProject());
+
+    await manifest({ name: "demo" });
+    const noSpec = await rejection(cmdInstall([]));
+    expect(noSpec).toBeInstanceOf(UsageError);
+    expect(noSpec.message).toBe(messages.noSpecInProject());
+
+    expect(execMock).not.toHaveBeenCalled();
+    expect(USAGE_LINES.install).toBe("$ jup install [...args]");
+  });
+
+  it("refuses a pin the table cannot describe", async () => {
+    // §04.1 step 1 — a custom URL has no band, so it declares no `commands.use`.
+    process.env.JUP_ENABLE_UNSAFE_CUSTOM_URLS = "1";
+    const reference = "https://example.com/yarn-1.22.4.tgz";
+    await manifest({ name: "demo", packageManager: `yarn@${reference}` });
+
+    const error = await rejection(cmdInstall([]));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(messages.noInstallCommand("yarn", reference));
+    // Refused before the download the reference names, and before any handover.
+    expect(requested).toEqual([]);
+    expect(execMock).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------------------------ *
  * §09.4 — up
  * ------------------------------------------------------------------ */
 
@@ -1547,10 +1652,17 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
       expect(stdout).not.toContain("$ jup <command>");
     });
 
-    it("leaves `install` reserved under jup's own name (§09.11)", async () => {
+    it("does not rewrite `install` under jup's own name (§09.11, §09.15)", async () => {
+      await manifest({ name: "no-spec" });
+
       await expect(runMain(["install"])).resolves.toEqual({ code: 1 });
 
-      expect(stdout).toContain(`Usage Error: Unknown command "install"`);
+      // §09.15's own project error and usage line, not `cache install`'s.
+      expect(stdout).toContain(
+        `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field`,
+      );
+      expect(stdout).toContain("$ jup install [...args]");
+      expect(stdout).not.toContain("$ jup cache clean|clear|install|list");
     });
 
     it("rewrites the command word and nothing else", async () => {
