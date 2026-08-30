@@ -58,11 +58,10 @@
   "devEngines": {
     "packageManager": {
       "name": "pnpm",
-      "version": "11.22.0"
+      "version": "^12"
     }
   },
   "engines": {
     "node": ">=22.18.0"
-  },
-  "packageManager": "pnpm@11.22.0"
+  }
 }
