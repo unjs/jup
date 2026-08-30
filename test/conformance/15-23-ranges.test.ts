@@ -202,7 +202,7 @@ describe("§04.4 ranges and jup.lock", () => {
 
     // The memo goes inside `.jup`, never loose in `node_modules`: npm reads a
     // visible entry there as an installed package, reports it as
-    // `jup.lock@ extraneous`, and deletes it on the next `install` — so a memo
+    // `jup.lock@ extraneous`, and deletes it on the next `cache install` — so a memo
     // written the other way would be destroyed by the very command jup exists to
     // run, and would never live long enough for its 24-hour window to matter.
     expect(fixture.exists("node_modules/jup.lock")).toBe(false);
@@ -503,10 +503,10 @@ describe("§04.4 ranges and jup.lock", () => {
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@^11.0.0": { resolved: "11.0.0" } } })}\n`,
     );
 
-    const result = await run(["install"], { ...fixture, registry, env: env() });
+    const result = await run(["cache", "install"], { ...fixture, registry, env: env() });
 
     // Caching 11.1.2 here and then running 11.0.0 offline is the whole failure
-    // mode `install` exists to prevent (§09.2 — "warming a Docker layer").
+    // mode `cache install` exists to prevent (§09.2 — "warming a Docker layer").
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Adding pnpm@11.0.0 to the cache...\n");
     expect(existsSync(join(fixture.home, "v1", "pnpm", "11.0.0"))).toBe(true);
@@ -523,7 +523,7 @@ describe("§04.4 ranges and jup.lock", () => {
       `${JSON.stringify({ version: 1, resolutions: { "pnpm@>=10": { resolved: "11.0.0" } } })}\n`,
     );
 
-    const result = await run(["install"], { ...fixture, registry, env: env() });
+    const result = await run(["cache", "install"], { ...fixture, registry, env: env() });
 
     // §03.3 — the member is the spec, so it is also the key the *proxy* path
     // will look up. Warming the cache under any other key warms the wrong
@@ -630,9 +630,9 @@ describe("§04.4 ranges and jup.lock", () => {
       })}\n`,
     );
 
-    const result = await run(["install"], { ...fixture, registry, env: env() });
+    const result = await run(["cache", "install"], { ...fixture, registry, env: env() });
 
-    // Caching 11.1.2 and then running 11.0.0 offline is the failure `install`
+    // Caching 11.1.2 and then running 11.0.0 offline is the failure `cache install`
     // exists to prevent, and in a `JUP_ENABLE_NETWORK=0` layer it is fatal.
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("Adding pnpm@11.0.0 to the cache...\n");

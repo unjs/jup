@@ -307,7 +307,7 @@ find_runtime() {
   fi
 
   # The store may already hold the entry `install_node` would write — an earlier
-  # `jup install node`, an image seeded by `jup pack`, a re-run after <home>/node
+  # `jup cache install -g node`, an image seeded by `jup pack`, a re-run after <home>/node
   # was deleted. It cannot be named directly, because §10.2 forbids a shebang
   # into `v1` and `cache clean` is why, but linking it out is free and skips the
   # download entirely.

@@ -336,7 +336,7 @@ export function writeMarker(dir: string, marker: CorepackMarker): void {
 /**
  * §07.10 — the `hash` written over a claim that nothing here could attribute.
  *
- * `install -g <archive>.tgz` promotes markers it did not write, over bytes it
+ * `cache install -g <archive>.tgz` promotes markers it did not write, over bytes it
  * never hashed (`pack` ships extracted subtrees, not the artifact tarball the
  * digest was taken over). The claim is replaced rather than deleted, because
  * §07.2 requires the field and a marker failing shape validation is treated as
@@ -709,7 +709,7 @@ export type LastKnownGoodStamp = number | typeof PINNED_STAMP;
 /**
  * §04.5 — `install -g` and `pack` write this instead of a timestamp.
  *
- * `jup install -g yarn@1.22.22` is a statement about what the user wants to run,
+ * `jup cache install -g yarn@1.22.22` is a statement about what the user wants to run,
  * not a cache of what the registry last said, so §04.6's TTL must not quietly
  * carry it to 4.x overnight. A sentinel rather than a far-future timestamp: the
  * distinction is "explicit", not "expires late", and a clock that jumps must not

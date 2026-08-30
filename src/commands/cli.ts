@@ -114,13 +114,13 @@ async function installOrExplain(
  *
  * | Command | Effect on `lastKnownGood.json` |
  * |---|---|
- * | `install` (§09.2) | **none** — it only warms the cache |
- * | `install -g` (§09.3) | set **unconditionally**, even downgrading across majors |
- * | `install -g --cache-only` | none |
+ * | `cache install` (§09.2) | **none** — it only warms the cache |
+ * | `cache install -g` (§09.3) | set **unconditionally**, even downgrading across majors |
+ * | `cache install -g --cache-only` | none |
  * | `pack` (§09.6) | set, deliberately: you pack what you intend to run |
  *
  * This is not §04.8's guarded bump — no "same major", no "strictly upward", no
- * "only if an entry already exists". `install -g yarn@1.0.0` makes 1.0.0 the
+ * "only if an entry already exists". `cache install -g yarn@1.0.0` makes 1.0.0 the
  * default even when the current default is 4.x.
  */
 function setLastKnownGood(name: string, reference: string): void {
@@ -212,7 +212,7 @@ function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
   return names.some((name) => parsed.flags.has(name));
 }
 /**
- * §09.1 — shared by `install`, `pack`, `up`, and `use`.
+ * §09.1 — shared by `cache install`, `pack`, `up`, and `use`.
  *
  * With patterns, only the env file is loaded (§03.2 `envOnly`). Without them the
  * project is consulted, and `lookup.range ?? lookup.getSpec()` prefers a
@@ -269,18 +269,18 @@ function resolveProjectSpec(options?: { mutating?: boolean; here?: boolean }): {
   }
 }
 /** §09.2 — cache the project's package manager. Does **not** touch last-known-good. */
-export async function cmdInstall(args: string[]): Promise<number> {
+export async function cmdCacheInstall(args: string[]): Promise<number> {
   const parsed = parseArgs(args, {});
   if (parsed.positionals.length > 0) {
     throw new UsageError(
-      `The 'jup install' command takes no arguments; use 'jup install -g <name>@<version>' to install one globally`,
+      `The 'jup cache install' command takes no arguments; use 'jup cache install -g <name>@<version>' to install one globally`,
     );
   }
 
   const { descriptor, lookup } = resolveProjectSpec();
 
   // §04.4 — warm the cache with the version the project will actually run.
-  // `install` exists to fill a Docker layer, and resolving a range afresh here
+  // `cache install` exists to fill a Docker layer, and resolving a range afresh here
   // can legitimately answer something newer than the project's files record —
   // which would cache one version and then run another, offline, in the layer
   // that has no network to fix it with.
@@ -295,19 +295,19 @@ export async function cmdInstall(args: string[]): Promise<number> {
   const locator = known ?? (await resolveOrThrow(descriptor, { allowTags: true }));
 
   out(`${messages.addingToCache(locator.name, locator.reference)}\n`);
-  // Project `install` warms the cache without changing the global default.
+  // A bare `cache install` warms the cache without changing the global default.
   await installOrExplain(locator, descriptor.range, { cacheOnly: true });
 
   return 0;
 }
 /** §09.3 — sets last-known-good **unconditionally**, unlike §04.8's guarded bump. */
-export async function cmdInstallGlobal(args: string[]): Promise<number> {
+export async function cmdCacheInstallGlobal(args: string[]): Promise<number> {
   const parsed = parseArgs(args, { booleans: ["-g", "--global", "--cache-only"] });
   const cacheOnly = hasFlag(parsed, "--cache-only");
 
   if (parsed.positionals.length === 0) {
     throw new UsageError(
-      `The 'jup install -g' command requires at least one package manager or archive`,
+      `The 'jup cache install -g' command requires at least one package manager or archive`,
     );
   }
 
@@ -984,6 +984,17 @@ async function writeArchive(locations: string[], output: string, json: boolean):
  * `cache list` is handled just below.
  */
 export async function cmdCache(args: string[]): Promise<number> {
+  // §09.2/§09.3 — `install` carries its own flags and its own positionals (specs and
+  // `.tgz` paths), so it is split off ahead of the parse below, which knows only
+  // `--all` and `--json` and would reject every one of them.
+  if (args[0] === "install") {
+    const rest = args.slice(1);
+    // `-g`/`--global` selects a different command, not a different flag.
+    return rest.includes("-g") || rest.includes("--global")
+      ? cmdCacheInstallGlobal(rest)
+      : cmdCacheInstall(rest);
+  }
+
   const parsed = parseArgs(args, { booleans: ["--all", "--json"] });
   const [subcommand, ...extra] = parsed.positionals;
 
@@ -996,7 +1007,9 @@ export async function cmdCache(args: string[]): Promise<number> {
   }
 
   if ((subcommand !== "clean" && subcommand !== "clear") || extra.length > 0) {
-    throw new UsageError(`The 'jup cache' command only accepts 'clean', 'clear' or 'list'`);
+    throw new UsageError(
+      `The 'jup cache' command only accepts 'clean', 'clear', 'install' or 'list'`,
+    );
   }
   // `--json` belongs to `list`; silently ignoring it here would let a script
   // believe it was parsing output that never came.
@@ -1243,27 +1256,17 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
       // resolver and the store listing, and no other command pays for either.
       return import("./info.ts").then(({ cmdInfo }) => cmdInfo(rest));
     }
-    case "install": {
-      // `-g`/`--global` selects a different command, not a different flag.
-      return rest.includes("-g") || rest.includes("--global")
-        ? cmdInstallGlobal(rest)
-        : cmdInstall(rest);
-    }
     case "self-install": {
       // Lazily, like `enable`/`disable`, and for the same reason: §09.12 pulls
       // in the whole of §10's shim machinery plus a tree copy, and no other
       // command in this switch pays for either.
       return import("./self-install.ts").then(({ cmdSelfInstall }) => cmdSelfInstall(rest));
     }
-    // §09.13 — `upgrade` is the same command under a shorter name. It is
-    // deliberately *not* `up`, which updates the project's `packageManager`
-    // field (§09.4) and is corepack's own spelling for it; the two are adjacent
-    // enough that the help text distinguishes them outright.
-    case "self-upgrade":
-    case "upgrade": {
-      return import("./self-upgrade.ts").then(({ cmdSelfUpgrade }) =>
-        cmdSelfUpgrade(rest, command),
-      );
+    // §09.13 — spelled in full, and only in full. The short `upgrade` was too
+    // close to `up`, which updates the project's `packageManager` field (§09.4),
+    // and the word is reserved for a project-level command.
+    case "self-upgrade": {
+      return import("./self-upgrade.ts").then(({ cmdSelfUpgrade }) => cmdSelfUpgrade(rest));
     }
     case "pack": {
       return cmdPack(rest);

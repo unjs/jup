@@ -224,7 +224,7 @@ export const messages = {
    * §12.2, §03.4, §02.3 — a runtime named in the manifest's `packageManager`.
    *
    * Raised on the *field*, never on `parseSpec` in general: `jup node@22`,
-   * `jup use node@22` and `jup install -g node@24` all put a runtime name
+   * `jup use node@22` and `jup cache install -g node@24` all put a runtime name
    * through the same parser from `CLI arguments` and are ordinary. It is only
    * the committed pin that must not claim a runtime is the project's package
    * manager, because that is the field §03.5 enforces `pnpm` and `yarn` with —

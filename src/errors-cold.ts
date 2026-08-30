@@ -191,7 +191,7 @@ export const messages = {
 
   /** An offline miss must name the requested tool and the cache-seeding command. */
   notInCacheOffline: (name: string, range: string) =>
-    `${name}@${range} is not in the cache and network access is disabled. Seed it with 'jup install -g --cache-only ${name}@${range}', or run 'jup pack ${name}@${range}' on a networked machine.`,
+    `${name}@${range} is not in the cache and network access is disabled. Seed it with 'jup cache install -g --cache-only ${name}@${range}', or run 'jup pack ${name}@${range}' on a networked machine.`,
   networkDisabledUrl: (url: string) =>
     `Network access disabled by the environment; can't reach ${url_(url)}`,
 

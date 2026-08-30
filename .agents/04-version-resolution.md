@@ -290,7 +290,7 @@ stamps is written without the key at all.
 | Value | Written by | Meaning |
 |---|---|---|
 | a timestamp | §4.6 step 3 | last taken from the registry; expires one TTL later |
-| `"pinned"` | `install -g`, `pack` | the user named this version; never expires |
+| `"pinned"` | `cache install -g`, `pack` | the user named this version; never expires |
 | absent | anything else | due for a re-check |
 
 Reading is as forgiving as the rest of the file: anything unparseable reads as
@@ -342,7 +342,7 @@ the TTL existed this path made no request at all, and a rotated token or a
 proxy that 403s must not start failing runs that worked yesterday. The stamp is
 not advanced, so the next run asks again. `DEBUG=jup` names what went wrong.
 
-`install -g` and `pack` write `"pinned"` instead of a timestamp: they record a
+`cache install -g` and `pack` write `"pinned"` instead of a timestamp: they record a
 version the user named, and a TTL is a statement about derived state. §4.8's
 bump can still advance such an entry, within its major, and it stays pinned.
 
@@ -405,8 +405,8 @@ if an entry exists for this tool
 
 So installing `yarn@4.9.0` advances a `4.1.0` default; installing `yarn@5.0.0`
 does not — major bumps are never automatic. With no existing entry nothing is
-written; the entry is created only by §4.6 step 3, by `install -g`, or by `pack`.
+written; the entry is created only by §4.6 step 3, by `cache install -g`, or by `pack`.
 
 Note the blast radius: installing a version in project A moves the default that
 unrelated unpinned project B will use. That is inherited behaviour, and confining
-the write to `install -g` would be a defensible change.
+the write to `cache install -g` would be a defensible change.

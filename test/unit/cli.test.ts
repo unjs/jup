@@ -64,8 +64,8 @@ vi.mock("../../src/run/exec.ts", () => ({
 
 import {
   cmdCache,
-  cmdInstall,
-  cmdInstallGlobal,
+  cmdCacheInstall,
+  cmdCacheInstallGlobal,
   cmdPack,
   cmdUp,
   cmdUse,
@@ -396,7 +396,7 @@ describe("resolvePatternsToDescriptors (§09.1)", () => {
   });
 
   it("reports the §12.9 no-project message verbatim (test 142)", async () => {
-    const error = await rejection(cmdInstall([]));
+    const error = await rejection(cmdCacheInstall([]));
     expect(error).toBeInstanceOf(UsageError);
     expect(error.message).toBe(
       `Couldn't find a project in the local directory - please specify the package manager to pack, or run this command from a valid project`,
@@ -407,7 +407,7 @@ describe("resolvePatternsToDescriptors (§09.1)", () => {
   it("reports the §12.9 no-spec message verbatim (test 143)", async () => {
     await manifest({ name: "no-spec" });
 
-    const error = await rejection(cmdInstall([]));
+    const error = await rejection(cmdCacheInstall([]));
     expect(error).toBeInstanceOf(UsageError);
     expect(error.message).toBe(
       `The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it`,
@@ -416,15 +416,15 @@ describe("resolvePatternsToDescriptors (§09.1)", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * §09.2 — install
+ * §09.2 — cache install
  * ------------------------------------------------------------------ */
 
-describe("install (§09.2, test 86)", () => {
+describe("cache install (§09.2, test 86)", () => {
   it("prints exactly the cache banner and leaves stderr empty", async () => {
     await seed("yarn", "2.2.2");
     await manifest({ packageManager: "yarn@2.2.2" });
 
-    await expect(cmdInstall([])).resolves.toBe(0);
+    await expect(cmdCacheInstall([])).resolves.toBe(0);
 
     expect(stdout).toBe(`Adding yarn@2.2.2 to the cache...\n`);
     expect(stderr).toBe("");
@@ -436,7 +436,7 @@ describe("install (§09.2, test 86)", () => {
     await writeLastKnownGood({ yarn: "1.22.22" });
     await manifest({ packageManager: "yarn@2.2.2" });
 
-    await cmdInstall([]);
+    await cmdCacheInstall([]);
 
     expect(lastKnownGood()).toEqual({ yarn: "1.22.22" });
   });
@@ -472,7 +472,7 @@ describe("install (§09.2, test 86)", () => {
     await writeLastKnownGood({ yarn: "2.1.0" });
     await manifest({ packageManager: "yarn@2.2.2" });
 
-    await expect(cmdInstall([])).resolves.toBe(0);
+    await expect(cmdCacheInstall([])).resolves.toBe(0);
 
     // It really did download: the store was empty before this ran.
     expect(existsSync(join(home, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
@@ -482,7 +482,7 @@ describe("install (§09.2, test 86)", () => {
 
   it("refuses positional arguments", async () => {
     await manifest({ packageManager: "yarn@2.2.2" });
-    await expect(cmdInstall(["yarn@2.2.2"])).rejects.toBeInstanceOf(UsageError);
+    await expect(cmdCacheInstall(["yarn@2.2.2"])).rejects.toBeInstanceOf(UsageError);
   });
 
   /* §04.4 — what the project's two files already say ------------------- */
@@ -493,12 +493,12 @@ describe("install (§09.2, test 86)", () => {
     await seed("yarn", "2.4.3");
     await manifest({ packageManager: "yarn@2.x" });
     // The now-ordinary state: nothing committed, a live memo. Caching 2.4.3 here
-    // and then running 2.1.0 offline is the whole failure `install` exists to
+    // and then running 2.1.0 offline is the whole failure `cache install` exists to
     // prevent — and in a `JUP_ENABLE_NETWORK=0` layer it is not a re-download,
     // it is a hard failure.
     await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
 
-    await expect(cmdInstall([])).resolves.toBe(0);
+    await expect(cmdCacheInstall([])).resolves.toBe(0);
 
     expect(stdout).toBe(`Adding yarn@2.1.0 to the cache...\n`);
     expect(requested).toEqual([]);
@@ -515,7 +515,7 @@ describe("install (§09.2, test 86)", () => {
     );
     await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
 
-    await expect(cmdInstall([])).resolves.toBe(0);
+    await expect(cmdCacheInstall([])).resolves.toBe(0);
 
     // A committed decision beats a note about what the registry said yesterday.
     expect(stdout).toBe(`Adding yarn@2.2.2 to the cache...\n`);
@@ -528,21 +528,23 @@ describe("install (§09.2, test 86)", () => {
     await manifest({ packageManager: "yarn@2.x" });
     await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() - 60_000 } });
 
-    await expect(cmdInstall([])).resolves.toBe(0);
+    await expect(cmdCacheInstall([])).resolves.toBe(0);
 
     expect(stdout).toBe(`Adding yarn@2.4.3 to the cache...\n`);
   });
 });
 
 /* ------------------------------------------------------------------ *
- * §09.3 — install -g
+ * §09.3 — cache install -g
  * ------------------------------------------------------------------ */
 
-describe("install --global (§09.3, tests 89, 101)", () => {
+describe("cache install --global (§09.3, tests 89, 101)", () => {
   it("prints the install banner and records the default (test 89)", async () => {
     await seed("yarn", "2.2.2");
 
-    await expect(runManagementCommand(["install", "--global", "yarn@2.2.2"])).resolves.toBe(0);
+    await expect(
+      runManagementCommand(["cache", "install", "--global", "yarn@2.2.2"]),
+    ).resolves.toBe(0);
 
     expect(stdout).toBe(`Installing yarn@2.2.2...\n`);
     expect(stderr).toBe("");
@@ -553,7 +555,7 @@ describe("install --global (§09.3, tests 89, 101)", () => {
     await seed("yarn", "1.0.0");
     await writeLastKnownGood({ yarn: "4.9.0" });
 
-    await runManagementCommand(["install", "-g", "yarn@1.0.0"]);
+    await runManagementCommand(["cache", "install", "-g", "yarn@1.0.0"]);
 
     expect(lastKnownGood().yarn).toMatch(/^1\.0\.0\+sha512\./);
   });
@@ -562,7 +564,7 @@ describe("install --global (§09.3, tests 89, 101)", () => {
     await seed("yarn", "1.0.0");
     await writeLastKnownGood({ yarn: "4.9.0" });
 
-    await runManagementCommand(["install", "-g", "--cache-only", "yarn@1.0.0"]);
+    await runManagementCommand(["cache", "install", "-g", "--cache-only", "yarn@1.0.0"]);
 
     expect(stdout).toBe(`Adding yarn@1.0.0 to the cache...\n`);
     expect(lastKnownGood()).toEqual({ yarn: "4.9.0" });
@@ -572,18 +574,18 @@ describe("install --global (§09.3, tests 89, 101)", () => {
     await seed("yarn", "2.2.2");
     await seed("pnpm", "5.8.0");
 
-    await cmdInstallGlobal(["-g", "yarn@2.2.2", "pnpm@5.8.0"]);
+    await cmdCacheInstallGlobal(["-g", "yarn@2.2.2", "pnpm@5.8.0"]);
 
     expect(stdout).toBe(`Installing yarn@2.2.2...\nInstalling pnpm@5.8.0...\n`);
     expect(Object.keys(lastKnownGood()).sort()).toEqual(["pnpm", "yarn"]);
   });
 
   it("requires at least one target", async () => {
-    await expect(cmdInstallGlobal(["-g"])).rejects.toBeInstanceOf(UsageError);
+    await expect(cmdCacheInstallGlobal(["-g"])).rejects.toBeInstanceOf(UsageError);
   });
 
   it("rejects an unknown option rather than ignoring it", async () => {
-    await expect(cmdInstallGlobal(["-g", "--nope", "yarn@1.0.0"])).rejects.toThrow(
+    await expect(cmdCacheInstallGlobal(["-g", "--nope", "yarn@1.0.0"])).rejects.toThrow(
       `Unsupported option name ("--nope")`,
     );
   });
@@ -620,7 +622,7 @@ function rawArchive(paths: string[]): Buffer {
   return gzipSync(Buffer.concat(blocks));
 }
 
-describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
+describe("pack and cache install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   it("round-trips through a fresh, offline COREPACK_HOME (tests 90, 92)", async () => {
     await seed("yarn", "2.2.2");
     await seed("pnpm", "5.8.0");
@@ -643,7 +645,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     process.env.COREPACK_ENABLE_NETWORK = "0";
     stdout = "";
 
-    await expect(runManagementCommand(["install", "-g", archive])).resolves.toBe(0);
+    await expect(runManagementCommand(["cache", "install", "-g", archive])).resolves.toBe(0);
 
     expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
     expect(existsSync(join(fresh, "v1", "pnpm", "5.8.0", ".jup"))).toBe(true);
@@ -672,7 +674,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     process.env.COREPACK_ENABLE_NETWORK = "0";
     expect(existsSync(fresh)).toBe(false);
 
-    await expect(runManagementCommand(["install", "-g", archive])).resolves.toBe(0);
+    await expect(runManagementCommand(["cache", "install", "-g", archive])).resolves.toBe(0);
 
     expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
 
@@ -716,7 +718,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     const archive = join(project, "other.tgz");
     await create(source, ["stuff"], archive);
 
-    const error = await rejection(cmdInstallGlobal(["-g", archive]));
+    const error = await rejection(cmdCacheInstallGlobal(["-g", archive]));
     expect(error).toBeInstanceOf(UsageError);
     expect(error.message).toBe(`Invalid archive format; did it get generated by 'jup pack'?`);
 
@@ -730,7 +732,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     const archive = join(project, "short.tgz");
     await create(source, ["yarn"], archive);
 
-    await expect(cmdInstallGlobal(["-g", archive])).rejects.toThrow(
+    await expect(cmdCacheInstallGlobal(["-g", archive])).rejects.toThrow(
       `Invalid archive format; did it get generated by 'jup pack'?`,
     );
 
@@ -750,7 +752,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
       const archive = join(project, `poison-${path.length}.tgz`);
       await writeFile(archive, rawArchive([path]));
 
-      const error = await rejection(cmdInstallGlobal(["-g", archive]));
+      const error = await rejection(cmdCacheInstallGlobal(["-g", archive]));
       expect(error, path).toBeInstanceOf(UsageError);
       expect(error.message).toBe(`Invalid archive format; did it get generated by 'jup pack'?`);
       // Nothing was recorded, so a later spec-less run still has no default.
@@ -762,7 +764,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     const archive = join(project, "fine.tgz");
     await writeFile(archive, rawArchive(["yarn/1.22.4/.jup"]));
 
-    await expect(cmdInstallGlobal(["-g", "--cache-only", archive])).resolves.toBe(0);
+    await expect(cmdCacheInstallGlobal(["-g", "--cache-only", archive])).resolves.toBe(0);
     expect(existsSync(join(home, "v1", "yarn", "1.22.4", ".jup"))).toBe(true);
   });
 
@@ -793,7 +795,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     const archive = join(project, "forged.tgz");
     await create(source, ["yarn"], archive);
 
-    await expect(cmdInstallGlobal(["-g", "--cache-only", archive])).resolves.toBe(0);
+    await expect(cmdCacheInstallGlobal(["-g", "--cache-only", archive])).resolves.toBe(0);
 
     // The claim did not survive promotion.
     const promoted = JSON.parse(
@@ -819,7 +821,7 @@ describe("pack and install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
     const archive = join(project, "bogus.tgz");
     await create(source, ["vlt"], archive);
 
-    await expect(cmdInstallGlobal(["-g", archive])).rejects.toThrow(
+    await expect(cmdCacheInstallGlobal(["-g", archive])).rejects.toThrow(
       `Unsupported package manager 'vlt'`,
     );
     expect(existsSync(join(home, "v1", "vlt"))).toBe(false);
@@ -1478,21 +1480,21 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
   });
 
   it("keeps a usage line for every command it dispatches", () => {
-    for (const command of ["cache", "install", "pack", "up", "use"]) {
+    for (const command of ["cache", "pack", "up", "use"]) {
       expect(USAGE_LINES[command]).toMatch(/^\$ jup /);
     }
   });
 
-  it("routes install to the global command only when -g or --global is present", async () => {
+  it("routes cache install to the global command only when -g or --global is present", async () => {
     await seed("yarn", "2.2.2");
     await manifest({ packageManager: "yarn@2.2.2" });
 
-    await runManagementCommand(["install"]);
+    await runManagementCommand(["cache", "install"]);
     expect(stdout).toBe(`Adding yarn@2.2.2 to the cache...\n`);
     expect(lastKnownGood()).toEqual({});
 
     stdout = "";
-    await runManagementCommand(["install", "-g", "yarn@2.2.2"]);
+    await runManagementCommand(["cache", "install", "-g", "yarn@2.2.2"]);
     expect(stdout).toBe(`Installing yarn@2.2.2...\n`);
     expect(lastKnownGood().yarn).toMatch(/^2\.2\.2\+sha512\./);
   });

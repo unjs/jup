@@ -10,18 +10,14 @@ import type { Palette } from "../utils/log.ts";
  * {@link GENERIC_USAGE_LINE}, which is what an unknown command would print anyway.
  */
 export const USAGE_LINES: Record<string, string> = {
-  cache: "$ jup cache clean|clear|list",
+  cache: "$ jup cache clean|clear|install|list",
   disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
   enable: "$ jup enable [--install-directory <path>|--system] [--exclude <name>] [--force] ...",
   info: "$ jup info [--json]",
-  install: "$ jup install [-g,--global] [--cache-only] ...",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
   "self-install": "$ jup self-install [--install-directory <path>|--system] [--force]",
   "self-upgrade": "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
   up: "$ jup up [--here] [--no-integrity] [--no-lockfile]",
-  // §09.13's other spelling. Its usage line names the word the user typed, so
-  // the two entries differ by exactly that.
-  upgrade: "$ jup upgrade [--install-directory <path>|--system] [--force]",
   use: "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
 };
 
@@ -148,12 +144,12 @@ export const HELP_TEXT = `Usage: jup <command>
 
   jup cache clean [--all]
   jup cache clear [--all]
+  jup cache install
+  jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
   jup cache list [--json]
   jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
   jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
   jup info [--json]
-  jup install
-  jup install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
   jup pack [--json] [-o|--output <path>] [...name[@<version>]]
   jup self-install [--install-directory <path>|--system] [--force]
   jup self-upgrade [--install-directory <path>|--system] [--force]
@@ -168,8 +164,7 @@ bytes without resolving or downloading anything. Pass --force to replace names
 owned by another tool, including Node's bundled corepack.
 
 self-upgrade downloads and verifies the latest jup, then updates the same links.
-Its alias is upgrade. It differs from up: up changes this project's pin;
-self-upgrade changes jup.
+It differs from up: up changes this project's pin; self-upgrade changes jup.
 
 --here limits project changes to the current directory's manifest. Otherwise,
 the search stops at a workspace root. Every mutating command prints each path

@@ -262,7 +262,7 @@ present.
 When the string came from a manifest's `packageManager` field, a name whose entry
 declares `kind: "runtime"` is a UsageError pointing at `devEngines.runtime`. The
 check is on the **field**, not on `parseSpec` in general: `jup node@22`,
-`jup use node@22` and `jup install -g node@24` all pass a runtime name through
+`jup use node@22` and `jup cache install -g node@24` all pass a runtime name through
 the same parser from `CLI arguments` and are ordinary. Only the committed pin must
 not claim a runtime is the project's package manager, because that is the field
 §3.5 enforces.

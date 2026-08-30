@@ -537,7 +537,7 @@ describe.skipIf(!POSIX)("§08.3 native package managers", () => {
   it("194: `corepack install` seeds a native manager, and the store keeps it runnable", async () => {
     const fixture = createFixture({ name: "app" });
 
-    const install = await run(["install", "-g", `${NAME}@${REFERENCE}`], {
+    const install = await run(["cache", "install", "-g", `${NAME}@${REFERENCE}`], {
       cwd: fixture.cwd,
       home: fixture.home,
       bin: toolBin,

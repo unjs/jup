@@ -193,7 +193,9 @@ describe("§03.7 write targets", () => {
     mkdirSync(fixture.path("packages/app"), { recursive: true });
     fixture.write("packages/app/package.json", `{"name":"app"}\n`);
 
-    expect((await run(["install"], { ...fixture, registry, env: env() })).exitCode).toBe(0);
+    expect((await run(["cache", "install"], { ...fixture, registry, env: env() })).exitCode).toBe(
+      0,
+    );
 
     registry.reset();
     const result = await run(["pnpm", "--version"], {

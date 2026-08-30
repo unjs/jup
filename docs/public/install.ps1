@@ -245,7 +245,7 @@ function Find-Runtime([string] $storeRoot) {
   if ((Test-Path -LiteralPath $sidecar) -and (Test-NodeSupported $sidecar)) { return $sidecar }
 
   # The store may already hold the entry a download would produce — an earlier
-  # `jup install node`, or an image seeded by `jup pack`. It cannot be named
+  # `jup cache install -g node`, or an image seeded by `jup pack`. It cannot be named
   # directly, because section 10.2 forbids naming a runtime inside `v1` that
   # `cache clean` exists to delete, but linking it out is free.
   $cached = Join-Path $storeRoot "v1\node\$nodeVersion\bin\node.exe"

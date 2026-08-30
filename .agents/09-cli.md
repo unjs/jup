@@ -8,15 +8,15 @@ jup <binary>[@<version>] [...args]     proxy mode (§01.2)
 
 jup cache clean [--all]
 jup cache clear [--all]
+jup cache install
+jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
 jup enable  [--install-directory <path>|--system] [--exclude <name>] [--force] [...name]
 jup info [--json]
-jup install
-jup install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup pack [--json] [-o|--output <path>] [...name[@<version>]]
 jup self-install [--install-directory <path>|--system] [--force]
-jup self-upgrade | upgrade [--install-directory <path>|--system] [--force]
+jup self-upgrade [--install-directory <path>|--system] [--force]
 jup up  [--here] [--no-integrity] [--no-lockfile]
 jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>
 jup --version
@@ -40,7 +40,7 @@ Three flags apply to every mutating command:
 
 Every mutating command prints each path it changed.
 
-## 9.1 Pattern resolution (`install`, `pack`, `up`, `use`)
+## 9.1 Pattern resolution (`cache install`, `pack`, `up`, `use`)
 
 ```
 patterns given → load ONLY the env file (envOnly, §03.2)
@@ -55,7 +55,7 @@ no patterns    → discover the project spec
 the top-level `packageManager` pin — the same order §3.3 reads them in — which is
 what lets `up` follow a declared range across majors (§9.4).
 
-## 9.2 `install`
+## 9.2 `cache install`
 
 Resolves the project's spec (tags allowed), prints `Adding <name>@<ref> to the
 cache...`, and installs it. It does **not** touch `lastKnownGood.json`. It reads
@@ -63,7 +63,7 @@ cache...`, and installs it. It does **not** touch `lastKnownGood.json`. It reads
 run it warms cannot disagree about which version the files name. Exit 0, stderr
 empty.
 
-## 9.3 `install -g` / `--global`
+## 9.3 `cache install -g` / `--global`
 
 Accepts a mixed list of specs and `.tgz` archive paths; `--cache-only` downloads
 and extracts without making anything the default.
@@ -71,7 +71,7 @@ and extracts without making anything the default.
 For a spec: resolve (tags allowed), print `Installing <name>@<ref>...` (or
 `Adding … to the cache...` with `--cache-only`), install, and — unless
 `--cache-only` — set the last-known-good **unconditionally**. Unlike §04.8's
-guarded bump, `install -g yarn@1.0.0` sets the default to 1.0.0 even when the
+guarded bump, `cache install -g yarn@1.0.0` sets the default to 1.0.0 even when the
 current default is 4.x.
 
 For an archive: §07.10.
@@ -174,7 +174,8 @@ of the human log.
 
 `clean` and `clear` are aliases; behaviour and output are in §07.9. `cache list`
 is the store half of `info` — the installed versions per tool, with `--json`
-sharing `info`'s report shape.
+sharing `info`'s report shape. `cache install` is §09.2 and §09.3; it is dispatched
+ahead of these three because it carries its own flags and positionals.
 
 ## 9.8 `enable` / `disable`
 
@@ -216,11 +217,11 @@ above. Both are ordinary management commands and are shadowed by proxy mode:
 
 ## 9.11 (retired) Deprecated commands
 
-`hydrate` and `prepare` were corepack's predecessors of `install -g <file>.tgz`
-and of `pack` + `install -g`. They were dropped before publication: they existed
-for scripts written against corepack, jup has no install base of its own, and the
-corepack compatibility suite never exercised them. `install -g <file>.tgz` and
-`pack` (§09.3, §09.6) cover both.
+`hydrate` and `prepare` were corepack's predecessors of `cache install -g
+<file>.tgz` and of `pack` + `cache install -g`. They were dropped before publication:
+they existed for scripts written against corepack, jup has no install base of its
+own, and the corepack compatibility suite never exercised them. `cache install -g
+<file>.tgz` and `pack` (§09.3, §09.6) cover both.
 
 The number is kept so §09.12-§09.14 do not move. Do not reuse it.
 
@@ -298,8 +299,9 @@ Two differences are load-bearing:
    mirror) is reported and nothing is installed: the equal case still reinstalls,
    which is what makes the command a repair.
 
-`upgrade` is an accepted spelling. It is deliberately not `up`, which writes the
-project's pin; the usage line names whichever word was typed.
+The command is spelled in full, and only in full. The short `upgrade` was too
+close to `up`, which writes the project's pin, and the word is reserved for a
+project-level command; `jup upgrade` is an unknown command (§12.1).
 
 ## 9.14 Output streams
 

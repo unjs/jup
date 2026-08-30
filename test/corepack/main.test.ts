@@ -815,7 +815,7 @@ describe(`when called on a project without any defined packageManager`, () => {
 
 it(`should allow updating the pinned version using the "corepack install -g" command`, async () => {
   await xfs.mktempPromise(async cwd => {
-    await expect(runCli(cwd, [`install`, `-g`, `yarn@1.0.0`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`, `-g`, `yarn@1.0.0`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
     });
@@ -833,7 +833,7 @@ it(`should allow updating the pinned version using the "corepack install -g" com
 
 it(`should allow to call "corepack install -g" with a tag`, async () => {
   await xfs.mktempPromise(async cwd => {
-    await expect(runCli(cwd, [`install`, `-g`, `npm@latest-7`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`, `-g`, `npm@latest-7`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
     });
@@ -851,7 +851,7 @@ it(`should allow to call "corepack install -g" with a tag`, async () => {
 
 it(`should allow to call "corepack install -g" without any range`, async () => {
   await xfs.mktempPromise(async cwd => {
-    await expect(runCli(cwd, [`install`, `-g`, `yarn`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`, `-g`, `yarn`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
     });
@@ -873,7 +873,7 @@ it(`should allow to call "corepack install" without arguments within a configure
       packageManager: `yarn@1.0.0`,
     });
 
-    await expect(runCli(cwd, [`install`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`])).resolves.toMatchObject({
       exitCode: 0,
       stderr: ``,
     });
@@ -983,7 +983,7 @@ describe(`read-only and offline environment`, () => {
       });
 
       // $ corepack install
-      await expect(runCli(cwd, [`install`])).resolves.toMatchObject({
+      await expect(runCli(cwd, [`cache`, `install`])).resolves.toMatchObject({
         stdout: `Adding yarn@2.4.1 to the cache...\n`,
         stderr: ``,
         exitCode: 0,
@@ -1020,7 +1020,7 @@ describe(`read-only and offline environment`, () => {
         exitCode: 0,
       });
 
-      await expect(runCli(installDir, [`install`, `--global`, `yarn@2.4.1`])).resolves.toMatchObject({
+      await expect(runCli(installDir, [`cache`, `install`, `--global`, `yarn@2.4.1`])).resolves.toMatchObject({
         stdout: `Installing yarn@2.4.1...\n`,
         stderr: ``,
         exitCode: 0,
@@ -1057,7 +1057,7 @@ it(`should support hydrating package managers from cached archives`, async () =>
     // Disable the network to make sure we don't succeed by accident
     process.env.COREPACK_ENABLE_NETWORK = `0`;
 
-    await expect(runCli(cwd, [`install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });
@@ -1090,7 +1090,7 @@ it(`should support hydrating package managers if cache folder was removed`, asyn
     // Disable the network to make sure we don't succeed by accident
     process.env.COREPACK_ENABLE_NETWORK = `0`;
 
-    await expect(runCli(cwd, [`install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });
@@ -1123,7 +1123,7 @@ it(`should support hydrating multiple package managers from cached archives`, as
     // Disable the network to make sure we don't succeed by accident
     process.env.COREPACK_ENABLE_NETWORK = `0`;
 
-    await expect(runCli(cwd, [`install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
+    await expect(runCli(cwd, [`cache`, `install`, `-g`, `jup.tgz`])).resolves.toMatchObject({
       stderr: ``,
       exitCode: 0,
     });

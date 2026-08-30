@@ -205,7 +205,7 @@ export async function runProxy(
   // is answered inline by {@link resolveExactPin}; for a recorded range it is
   // one `jup.lock` read and nothing else.
   // §04.4's order — recorded, then unexpired memo — is `readKnownResolution`,
-  // shared with `install` (§09.2) so a warmed layer and the run it warms cannot
+  // shared with `cache install` (§09.2) so a warmed layer and the run it warms cannot
   // disagree about which version the files already name.
   const files: KnownResolution =
     projectDir === undefined

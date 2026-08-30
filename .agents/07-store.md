@@ -54,7 +54,7 @@ entire warm path: `ENOENT` proceeds to download, any other error propagates.
 to the locator as its build suffix (§7.6).
 
 **Shape validation is required, not optional.** A marker is a file on disk and not
-everything that writes one is jup: `install -g <archive>.tgz` promotes markers
+everything that writes one is jup: `cache install -g <archive>.tgz` promotes markers
 that arrived inside a tarball (§7.10), and a store directory is a directory like
 any other. Two fields are used as more than data — `hash` lands in the user's
 committed `packageManager` field, and `bin` names paths §08 executes:
@@ -315,14 +315,14 @@ section gets much smaller.
 Output is `Removed <n> cached version(s) from <path>` or `Nothing to remove`; a
 failed removal warns by path.
 
-## 7.10 Portable archives (`pack` / `install -g <file>.tgz`)
+## 7.10 Portable archives (`pack` / `cache install -g <file>.tgz`)
 
 `pack` produces a gzip tar **rooted at `<home>/v1`** containing one or more
 complete `<name>/<version>/` subtrees, markers included. It is a copy of cache
 subtrees, not a repackaging. Default output `./jup.tgz`; `-o/--output` overrides;
 `--json` prints the output path as JSON.
 
-`install -g <file>.tgz` validates the archive before touching anything:
+`cache install -g <file>.tgz` validates the archive before touching anything:
 
 ```
 scan entries whose LAST segment is ".jup"

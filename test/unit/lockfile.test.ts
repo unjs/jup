@@ -461,7 +461,7 @@ describe("the resolution cache — §04.4", () => {
 
     // The path is the whole point of the directory: npm reads a visible entry in
     // `node_modules` as an installed package and deletes it on the next
-    // `install`, so a memo at `node_modules/jup.lock` never survives to expire.
+    // `cache install`, so a memo at `node_modules/jup.lock` never survives to expire.
     expect(existsSync(join(dir, "node_modules", ".jup", LOCKFILE_NAME))).toBe(true);
     expect(existsSync(join(dir, "node_modules", LOCKFILE_NAME))).toBe(false);
 

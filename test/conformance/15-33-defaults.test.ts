@@ -53,14 +53,14 @@ describe("§04.6 transparent.default is a floor, not an override", () => {
     expect(result.stderr).toBe("");
   });
 
-  it("199: and `install -g` is how that default gets recorded", async () => {
+  it("199: and `cache install -g` is how that default gets recorded", async () => {
     const fixture = createFixture();
     seedPackageManager(fixture.home, "yarn", "4.9.0");
     seedPackageManager(fixture.home, "yarn", YARN_TRANSPARENT);
 
-    // No registry: `install -g` on an already-cached exact version resolves from
+    // No registry: `cache install -g` on an already-cached exact version resolves from
     // the store (§04.1 step 4) and records it (§09.3), all without the network.
-    const installed = await run(["install", "-g", "yarn@4.9.0"], fixture);
+    const installed = await run(["cache", "install", "-g", "yarn@4.9.0"], fixture);
     expect(installed.exitCode).toBe(0);
 
     const result = await run(["yarn", "dlx", "--help"], fixture);
@@ -80,7 +80,7 @@ describe("§04.6 transparent.default is a floor, not an override", () => {
 
   it("200: a recorded default from an older major line does not shadow the floor", async () => {
     // #812 exactly. Yarn's compiled-in `default` is Classic 1.22.22 while its
-    // `transparent.default` is modern, and `install -g yarn@1.22.22` records the
+    // `transparent.default` is modern, and `cache install -g yarn@1.22.22` records the
     // classic line — which has no `dlx` at all.
     const fixture = createFixture();
     recordDefault(fixture.home, { yarn: "1.22.22" });
@@ -157,7 +157,7 @@ describe("§02.5 the compiled-in default tracks the supported major", () => {
     const fixture = createFixture({});
     seedPackageManager(fixture.home, "yarn", YARN_DEFAULT);
 
-    const installed = await run(["install", "-g", `yarn@${versionOf(YARN_DEFAULT)}`], {
+    const installed = await run(["cache", "install", "-g", `yarn@${versionOf(YARN_DEFAULT)}`], {
       ...fixture,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });

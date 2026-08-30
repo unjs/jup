@@ -312,7 +312,7 @@ describe("the help text — §09.14", () => {
    * The rule itself is unchanged and still reachable by any future block.
    */
   it("bolds a heading", async () => {
-    const printed = await paintedWithColour("A heading:\n\n  jup install\n");
+    const printed = await paintedWithColour("A heading:\n\n  jup pack\n");
 
     expect(printed).toContain(`${BOLD}A heading:`);
   });

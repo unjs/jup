@@ -186,7 +186,7 @@ describe.skipIf(IS_WINDOWS)("§05.4 the download notice from every entry point",
     const shim = await installShim(shimDir, options);
     registry.reset();
 
-    const result = await run(["install"], { ...options, bin: shim, input: "n\n" });
+    const result = await run(["cache", "install"], { ...options, bin: shim, input: "n\n" });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("STDIN:n\n");

@@ -169,7 +169,7 @@ runs:
           *)                   spec="node@${REQUESTED#v}" ;;
         esac
 
-        if [ -n "$spec" ]; then jup install -g "$spec"; fi
+        if [ -n "$spec" ]; then jup cache install -g "$spec"; fi
 
         # Resolve, verify, install, and report the runtime through the shim.
         version="$(node --version)"
@@ -194,7 +194,7 @@ runs:
           process.stdout.write(report.project.status === "found" ? report.project.name ?? "" : "");
         ')"
         echo "package-manager=$name" >> "$GITHUB_OUTPUT"
-        if [ -n "$name" ]; then jup install; fi
+        if [ -n "$name" ]; then jup cache install; fi
 
     # Cache manager packages separately from jup's program store.
     - id: store

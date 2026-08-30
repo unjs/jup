@@ -276,7 +276,7 @@ export interface ToolDefinition {
    * deliberately — bun and deno are runtimes first and package managers second —
    * so silently taking the name over on upgrade would be a change nobody asked
    * for. Naming the entry (`jup enable bun`) still installs it; `--all` in
-   * `install` is unaffected, because that is about the cache, not `PATH`.
+   * `cache clean` is unaffected, because that is about the cache, not `PATH`.
    *
    * Required to be `false` when {@link ToolDefinition.kind} is `"runtime"`.
    */
@@ -383,7 +383,7 @@ export interface ParseSpecOptions {
    *
    * The one place a `kind: "runtime"` name is rejected. It is a property of the
    * *field*, not of `parseSpec`: `jup node@22`, `jup use node@22` and
-   * `jup install -g node@24` all put a runtime name through this same function
+   * `jup cache install -g node@24` all put a runtime name through this same function
    * from `CLI arguments`, and all three are ordinary. Only the committed pin must
    * not claim a runtime is the project's package manager, because that is the
    * field §03.5 enforces `pnpm` and `yarn` with.

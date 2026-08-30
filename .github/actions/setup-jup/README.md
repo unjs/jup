@@ -25,7 +25,7 @@ and `jup info --json`, making the action a standing test of that interface.
 4. Record an explicit `node-version` as jup's global default, then resolve,
    verify, install, and report the version through the `node` shim. Project
    runtime pins still take precedence.
-5. Warm the project-pinned package manager with `jup install`.
+5. Warm the project-pinned package manager with `jup cache install`.
 6. Cache the manager's package store separately from jup's program store.
 
 ## Differences from `actions/setup-node`

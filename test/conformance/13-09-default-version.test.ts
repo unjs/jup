@@ -67,13 +67,13 @@ function recordUnstamped(fixture: Fixture, entries: Record<string, string>): voi
 }
 
 /**
- * `install -g`, then the pin scrubbed off: a warm store holding the version,
+ * `cache install -g`, then the pin scrubbed off: a warm store holding the version,
  * with a recorded default that reads as due. The rows below need both, because
  * a default that cannot be *run* offline would fail on the download rather than
  * on the question they are asking.
  */
 async function warmUnstampedDefault(fixture: Fixture, reference: string): Promise<void> {
-  const installed = await run(["install", "-g", `yarn@${reference}`], {
+  const installed = await run(["cache", "install", "-g", `yarn@${reference}`], {
     ...fixture,
     registry,
     env: trusted(),
@@ -122,8 +122,8 @@ beforeEach(() => registry.reset());
 
 describe("§13.9 default version and last-known-good", () => {
   it("97: installing 1.22.4 over a recorded 1.0.0 advances the default (same major)", async () => {
-    // Seed the recorded default the way `install -g` would have.
-    const seed = await run(["install", "-g", "yarn@1.0.0"], {
+    // Seed the recorded default the way `cache install -g` would have.
+    const seed = await run(["cache", "install", "-g", "yarn@1.0.0"], {
       ...sequence,
       registry,
       env: trusted(),
@@ -180,18 +180,28 @@ describe("§13.9 default version and last-known-good", () => {
     expect(result.stdout).toBe("1.22.4\n");
   });
 
-  it("101: install -g sets the default unconditionally, even downgrading a major", async () => {
+  it("101: cache install -g sets the default unconditionally, even downgrading a major", async () => {
     const fixture = createFixture({});
 
     expect(
-      (await run(["install", "-g", `yarn@${BERRY}`], { ...fixture, registry, env: trusted() }))
-        .exitCode,
+      (
+        await run(["cache", "install", "-g", `yarn@${BERRY}`], {
+          ...fixture,
+          registry,
+          env: trusted(),
+        })
+      ).exitCode,
     ).toBe(0);
     expect(lastKnownGood(fixture).yarn).toMatch(/^2\.2\.2/);
 
     expect(
-      (await run(["install", "-g", "yarn@1.0.0"], { ...fixture, registry, env: trusted() }))
-        .exitCode,
+      (
+        await run(["cache", "install", "-g", "yarn@1.0.0"], {
+          ...fixture,
+          registry,
+          env: trusted(),
+        })
+      ).exitCode,
     ).toBe(0);
     expect(lastKnownGood(fixture).yarn).toMatch(/^1\.0\.0/);
 
@@ -200,10 +210,10 @@ describe("§13.9 default version and last-known-good", () => {
     expect(result.stdout).toBe("1.0.0\n");
   });
 
-  it("102: install -g npm@latest-7 resolves the dist-tag and pins the 7.x line", async () => {
+  it("102: cache install -g npm@latest-7 resolves the dist-tag and pins the 7.x line", async () => {
     const fixture = createFixture({});
 
-    const installed = await run(["install", "-g", "npm@latest-7"], {
+    const installed = await run(["cache", "install", "-g", "npm@latest-7"], {
       ...fixture,
       registry,
       env: trusted(),
@@ -215,7 +225,7 @@ describe("§13.9 default version and last-known-good", () => {
     expect(result.stdout).toMatch(/^7\./);
   });
 
-  it("103: install -g yarn (bare) resolves the true latest, not the 1.x line", async () => {
+  it("103: cache install -g yarn (bare) resolves the true latest, not the 1.x line", async () => {
     const fixture = createFixture({});
 
     // §02.5 — no opt-out. This row needed `JUP_ALLOW_UNVERIFIED=1` for as
@@ -225,7 +235,7 @@ describe("§13.9 default version and last-known-good", () => {
     // clear §06.1. Resolving through `@yarnpkg/cli-dist` gives it npm's
     // signature, so the plain form now works on a clean machine — and the empty
     // stderr below is the assertion that says so.
-    const result = await run(["install", "-g", "yarn"], {
+    const result = await run(["cache", "install", "-g", "yarn"], {
       ...fixture,
       registry,
       env: trusted(),
@@ -287,12 +297,17 @@ describe("§13.9 default version and last-known-good", () => {
     expect(result.stdout).toBe("1.0.0\n");
   });
 
-  it("install -g pins the default, and the TTL never moves it", async () => {
+  it("cache install -g pins the default, and the TTL never moves it", async () => {
     const fixture = createFixture({});
 
     expect(
-      (await run(["install", "-g", "yarn@1.0.0"], { ...fixture, registry, env: trusted() }))
-        .exitCode,
+      (
+        await run(["cache", "install", "-g", "yarn@1.0.0"], {
+          ...fixture,
+          registry,
+          env: trusted(),
+        })
+      ).exitCode,
     ).toBe(0);
     expect(stamps(fixture).yarn).toBe("pinned");
 
@@ -330,8 +345,13 @@ describe("§13.9 default version and last-known-good", () => {
   it("keeps the stamps in the file itself, so cache clean --all takes both", async () => {
     const fixture = createFixture({});
     expect(
-      (await run(["install", "-g", "yarn@1.0.0"], { ...fixture, registry, env: trusted() }))
-        .exitCode,
+      (
+        await run(["cache", "install", "-g", "yarn@1.0.0"], {
+          ...fixture,
+          registry,
+          env: trusted(),
+        })
+      ).exitCode,
     ).toBe(0);
     expect(lastKnownGood(fixture)).toEqual({ yarn: expect.stringMatching(/^1\.0\.0/) });
     expect(stamps(fixture).yarn).toBe("pinned");

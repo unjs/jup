@@ -66,7 +66,7 @@ describe("§12.6 airgapped installs", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
       `pnpm@11.1.2 is not in the cache and network access is disabled. ` +
-        `Seed it with 'jup install -g --cache-only pnpm@11.1.2', ` +
+        `Seed it with 'jup cache install -g --cache-only pnpm@11.1.2', ` +
         `or run 'jup pack pnpm@11.1.2' on a networked machine.\n`,
     );
   });
@@ -84,7 +84,7 @@ describe("§12.6 airgapped installs", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain("pnpm@^11.0.0 is not in the cache and network access is");
-    expect(result.stderr).toContain("jup install -g --cache-only pnpm@^11.0.0");
+    expect(result.stderr).toContain("jup cache install -g --cache-only pnpm@^11.0.0");
   });
 
   it("178: `corepack up` says the same, from its second resolve", async () => {
@@ -98,7 +98,7 @@ describe("§12.6 airgapped installs", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("pnpm@^11.0.0 is not in the cache and network access is");
-    expect(result.stdout).toContain("jup install -g --cache-only pnpm@^11.0.0");
+    expect(result.stdout).toContain("jup cache install -g --cache-only pnpm@^11.0.0");
   });
 
   it("178: a seeded store needs no network at all, which is the point", async () => {
@@ -192,7 +192,7 @@ describe("§04.1 nonexistent versions", () => {
   it("204: the same for `corepack install -g`, in management-mode presentation", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "pnpm@11.9.9"], {
+    const result = await run(["cache", "install", "-g", "pnpm@11.9.9"], {
       ...fixture,
       registry,
       env: env(),

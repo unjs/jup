@@ -53,23 +53,23 @@ afterAll(async () => {
 beforeEach(() => registry.reset());
 
 describe("§13.13 CLI errors", () => {
-  it("142: install with no project at all", async () => {
+  it("142: cache install with no project at all", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install"], fixture);
+    const result = await run(["cache", "install"], fixture);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
       `Usage Error: Couldn't find a project in the local directory - please specify the package manager to pack, or run this command from a valid project`,
     );
-    expect(result.stdout).toContain("$ jup install");
+    expect(result.stdout).toContain("$ jup cache clean|clear|install|list");
     expect(result.stderr).toBe("");
   });
 
-  it("143: install in a project with no spec", async () => {
+  it("143: cache install in a project with no spec", async () => {
     const fixture = createFixture({ name: "no-spec" });
 
-    const result = await run(["install"], fixture);
+    const result = await run(["cache", "install"], fixture);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
@@ -80,7 +80,7 @@ describe("§13.13 CLI errors", () => {
   it("144: an impossible range reports what the user asked for", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "yarn@^99.0.0"], { ...fixture, registry });
+    const result = await run(["cache", "install", "-g", "yarn@^99.0.0"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
@@ -91,7 +91,10 @@ describe("§13.13 CLI errors", () => {
   it("145: a tag that does not exist", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "yarn@nosuchtag"], { ...fixture, registry });
+    const result = await run(["cache", "install", "-g", "yarn@nosuchtag"], {
+      ...fixture,
+      registry,
+    });
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(`Usage Error: Tag not found (nosuchtag)`);

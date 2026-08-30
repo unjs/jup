@@ -73,7 +73,7 @@ describe("§13.8 store, cache and offline", () => {
   it("86: corepack install prints exactly the cache banner", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
 
-    const result = await run(["install"], { ...fixture, registry, env: trusted() });
+    const result = await run(["cache", "install"], { ...fixture, registry, env: trusted() });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`Adding yarn@${BERRY} to the cache...\n`);
@@ -89,11 +89,11 @@ describe("§13.8 store, cache and offline", () => {
     const lastKnownGood = join(fixture.home, "lastKnownGood.json");
     writeFileSync(lastKnownGood, `${JSON.stringify({ yarn: "2.0.0" }, undefined, 2)}\n`);
 
-    const result = await run(["install"], {
+    const result = await run(["cache", "install"], {
       ...fixture,
       registry,
       // The harness pins this to `0`, which would disable §04.8's bump on its
-      // own; the point here is that `install` leaves the file alone even when
+      // own; the point here is that `cache install` leaves the file alone even when
       // the bump is enabled.
       env: trusted({ COREPACK_DEFAULT_TO_LATEST: undefined }),
     });
@@ -104,7 +104,9 @@ describe("§13.8 store, cache and offline", () => {
 
   it("87: the cached version then runs with COREPACK_ENABLE_NETWORK=0", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-    expect((await run(["install"], { ...fixture, registry, env: trusted() })).exitCode).toBe(0);
+    expect(
+      (await run(["cache", "install"], { ...fixture, registry, env: trusted() })).exitCode,
+    ).toBe(0);
 
     const result = await run(["yarn", "--version"], {
       ...fixture,
@@ -120,7 +122,9 @@ describe("§13.8 store, cache and offline", () => {
     "88: a corrupt lastKnownGood.json, a read-only home and no network still run",
     async () => {
       const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-      expect((await run(["install"], { ...fixture, registry, env: trusted() })).exitCode).toBe(0);
+      expect(
+        (await run(["cache", "install"], { ...fixture, registry, env: trusted() })).exitCode,
+      ).toBe(0);
 
       writeFileSync(join(fixture.home, "lastKnownGood.json"), "{");
       chmodSync(fixture.home, 0o555);
@@ -141,7 +145,7 @@ describe("§13.8 store, cache and offline", () => {
     async () => {
       const fixture = createFixture();
 
-      const installed = await run(["install", "--global", `yarn@${BERRY}`], {
+      const installed = await run(["cache", "install", "--global", `yarn@${BERRY}`], {
         ...fixture,
         registry,
         env: trusted(),
@@ -165,14 +169,14 @@ describe("§13.8 store, cache and offline", () => {
     },
   );
 
-  it("90: pack, then install -g the archive into a fresh offline COREPACK_HOME", async () => {
+  it("90: pack, then cache install -g the archive into a fresh offline COREPACK_HOME", async () => {
     const source = createFixture();
     const packed = await run(["pack", `yarn@${BERRY}`], { ...source, registry, env: trusted() });
     expect(packed.exitCode).toBe(0);
     expect(source.exists("jup.tgz")).toBe(true);
 
     const target = createFixture({ packageManager: "yarn@2.2.2" });
-    const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
+    const hydrated = await run(["cache", "install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });
@@ -207,7 +211,7 @@ describe("§13.8 store, cache and offline", () => {
     const target = createFixture({ packageManager: `yarn@${BERRY}` });
     expect(
       (
-        await run(["install", "-g", source.path("jup.tgz")], {
+        await run(["cache", "install", "-g", source.path("jup.tgz")], {
           ...target,
           env: { COREPACK_ENABLE_NETWORK: "0" },
         })
@@ -234,7 +238,7 @@ describe("§13.8 store, cache and offline", () => {
     const target = createFixture({ packageManager: "yarn@2.2.2" });
     rmSync(target.home, { recursive: true, force: true });
 
-    const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
+    const hydrated = await run(["cache", "install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });
@@ -255,7 +259,7 @@ describe("§13.8 store, cache and offline", () => {
     expect(packed.exitCode).toBe(0);
 
     const target = createFixture();
-    const hydrated = await run(["install", "-g", source.path("jup.tgz")], {
+    const hydrated = await run(["cache", "install", "-g", source.path("jup.tgz")], {
       ...target,
       env: { COREPACK_ENABLE_NETWORK: "0" },
     });
@@ -268,14 +272,14 @@ describe("§13.8 store, cache and offline", () => {
     expect(pnpm.stdout).toBe("5.8.0\n");
   });
 
-  it("93: install -g refuses an archive that did not come from pack", async () => {
+  it("93: cache install -g refuses an archive that did not come from pack", async () => {
     const fixture = createFixture();
     writeFileSync(
       fixture.path("stray.tgz"),
       makeTarball([{ path: "not-a-store/readme.txt", content: "hello" }]),
     );
 
-    const result = await run(["install", "-g", fixture.path("stray.tgz")], fixture);
+    const result = await run(["cache", "install", "-g", fixture.path("stray.tgz")], fixture);
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
@@ -310,8 +314,13 @@ describe("§13.8 store, cache and offline", () => {
     for (const subcommand of ["clean", "clear"] as const) {
       const fixture = createFixture();
       expect(
-        (await run(["install", "-g", `yarn@${BERRY}`], { ...fixture, registry, env: trusted() }))
-          .exitCode,
+        (
+          await run(["cache", "install", "-g", `yarn@${BERRY}`], {
+            ...fixture,
+            registry,
+            env: trusted(),
+          })
+        ).exitCode,
       ).toBe(0);
       expect(existsSync(join(fixture.home, "v1", "yarn", "2.2.2"))).toBe(true);
       expect(existsSync(join(fixture.home, "lastKnownGood.json"))).toBe(true);
@@ -330,7 +339,9 @@ describe("§13.8 store, cache and offline", () => {
 
   it("96: a warm run with an exact pin makes zero network requests (§01.3)", async () => {
     const fixture = createFixture({ packageManager: `yarn@${BERRY}` });
-    expect((await run(["install"], { ...fixture, registry, env: trusted() })).exitCode).toBe(0);
+    expect(
+      (await run(["cache", "install"], { ...fixture, registry, env: trusted() })).exitCode,
+    ).toBe(0);
     registry.reset();
 
     const result = await run(["yarn", "--version"], { ...fixture, registry, env: trusted() });

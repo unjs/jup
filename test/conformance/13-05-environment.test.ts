@@ -276,7 +276,7 @@ describe("§13.5 environment variables", () => {
     // row 178 requires the airgapped failure to name the package manager and
     // the seeding command. "network access is disabled" survives inside it.
     expect(result.stderr).toContain("network access is disabled");
-    expect(result.stderr).toContain("jup install -g --cache-only yarn@1.22.4");
+    expect(result.stderr).toContain("jup cache install -g --cache-only yarn@1.22.4");
   });
 
   it("46: a cold artifact download prints exactly the download notice", async () => {

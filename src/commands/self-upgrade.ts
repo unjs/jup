@@ -300,11 +300,9 @@ function makeStubsExecutable(directory: string): void {
  * makes the command a repair — a store copy whose shims were removed, or whose
  * marker cannot be read, is put back without touching the network more than the
  * one resolution costs.
- *
- * @param command The word it was invoked as, for §12.1's usage line.
  */
-export async function cmdSelfUpgrade(args: string[], command: string): Promise<number> {
-  const options = parseSelfArgs(args, command);
+export async function cmdSelfUpgrade(args: string[]): Promise<number> {
+  const options = parseSelfArgs(args, "self-upgrade");
 
   const release = await resolveRelease();
 

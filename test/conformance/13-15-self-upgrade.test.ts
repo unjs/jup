@@ -322,20 +322,16 @@ describe("§09.13 self-upgrade", () => {
     expect(existsSync(join(fixture.home, "self", "notes"))).toBe(true);
   });
 
-  it("`upgrade` is the same command", async () => {
-    const { shimDir, selfDir, options } = upgradeFixture();
+  // §09.13 — `upgrade` was an accepted spelling of this command. The word is now
+  // reserved, so it reaches the switch's default and nothing is installed.
+  it("`upgrade` is no longer a spelling of it", async () => {
+    const { selfDir, options } = upgradeFixture();
 
     const result = await run(["upgrade"], options);
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(
-      [
-        `Installing jup@${VERSION}...`,
-        `jup ${VERSION} -> ${selfDir}`,
-        `jup, corepack -> ${shimDir}`,
-        "",
-      ].join("\n"),
-    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`Usage Error: Unknown command "upgrade"`);
+    expect(existsSync(selfDir)).toBe(false);
   });
 
   it("§06.2 — a tarball that does not match the signed digest installs nothing", async () => {
@@ -360,15 +356,15 @@ describe("§09.13 self-upgrade", () => {
     expect(existsSync(selfDir)).toBe(false);
   });
 
-  it("§12.1 — an unknown argument names the word that was typed", async () => {
+  it("§12.1 — an unknown argument names the command and its usage line", async () => {
     const { options } = upgradeFixture();
 
-    const result = await run(["upgrade", "pnpm"], options);
+    const result = await run(["self-upgrade", "pnpm"], options);
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain("The 'jup upgrade' command takes no arguments other than");
+    expect(result.stdout).toContain("The 'jup self-upgrade' command takes no arguments other than");
     expect(result.stdout).toContain(
-      "$ jup upgrade [--install-directory <path>|--system] [--force]",
+      "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
     );
   });
 

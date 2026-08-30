@@ -17,13 +17,14 @@ fixture rather than a behaviour:
 
 | Edit | Sites | Why |
 | --- | --- | --- |
-| `corepack.tgz` → `jup.tgz` | 3 | the hydration rows are about `pack` / `install -g` round-tripping |
+| `corepack.tgz` → `jup.tgz` | 3 | the hydration rows are about `pack` / `cache install -g` round-tripping |
 | `.corepack` → `.jup` | 4 | jup's store marker (§07.1) |
 | `{}` → `{hash: MARKER_HASH}` | 4 | §07.2 — a marker without a digest reads as *no* marker, and the row would fall through to a download |
 | `yarn.js` → `bin/yarn.js` | 4 | §02.5 — Berry is an npm tarball now, not a single file at the root |
 | `yarn@2.2.2` → `yarn@2.4.1` | 12 | §02.5 — `@yarnpkg/cli-dist`'s 2.x line starts at 2.4.1 |
+| `install` → `cache install` | 9 | §09.2, §09.3 — jup spells corepack's `install` and `install -g` as `cache install` and `cache install -g`; the word `install` is reserved |
 
-Those rows are about `pack`/`install -g` round-tripping, about exit codes and
+Those rows are about `pack`/`cache install -g` round-tripping, about exit codes and
 ESM handover, about parallel installs and `use`; which Berry release stands in,
 and where its entry script sits, is incidental to every one of them, and
 skipping them to preserve the literal would discard the coverage that caught

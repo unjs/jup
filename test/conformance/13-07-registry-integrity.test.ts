@@ -87,7 +87,7 @@ describe("§13.7 registry, auth and integrity", () => {
   it("63: metadata is fetched from <default registry>/<pkg> with the abbreviated Accept header", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "pnpm@6.x"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.x"], {
       ...fixture,
       registry,
       env: trusted(),
@@ -102,7 +102,7 @@ describe("§13.7 registry, auth and integrity", () => {
   it("64: a trailing slash on COREPACK_NPM_REGISTRY never doubles in the URL", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "pnpm@6.6.2"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.6.2"], {
       ...fixture,
       env: mirror({ COREPACK_NPM_REGISTRY: `${registry.origin}///` }),
     });
@@ -116,7 +116,7 @@ describe("§13.7 registry, auth and integrity", () => {
   it("65: COREPACK_NPM_TOKEN becomes a Bearer header", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "pnpm@6.6.2"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.6.2"], {
       ...fixture,
       env: mirror({ COREPACK_NPM_TOKEN: "foo" }),
     });
@@ -129,7 +129,7 @@ describe("§13.7 registry, auth and integrity", () => {
   it("66: a token wins over username/password, and nothing else is sent", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "pnpm@6.6.2"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.6.2"], {
       ...fixture,
       env: mirror({
         COREPACK_NPM_TOKEN: "foo",
@@ -147,7 +147,7 @@ describe("§13.7 registry, auth and integrity", () => {
     const fixture = createFixture();
     const expected = `Basic ${Buffer.from("user:pass").toString("base64")}`;
 
-    const result = await run(["install", "-g", "pnpm@6.6.2"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.6.2"], {
       ...fixture,
       env: mirror({ COREPACK_NPM_USERNAME: "user", COREPACK_NPM_PASSWORD: "pass" }),
     });
@@ -160,7 +160,7 @@ describe("§13.7 registry, auth and integrity", () => {
   it("68: a username with no password sends no authorization at all", async () => {
     const fixture = createFixture();
 
-    const result = await run(["install", "-g", "pnpm@6.6.2"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.6.2"], {
       ...fixture,
       env: mirror({ COREPACK_NPM_USERNAME: "user" }),
     });
@@ -175,7 +175,7 @@ describe("§13.7 registry, auth and integrity", () => {
     const origin = registry.origin.replace("http://", "http://user:pass@");
     const expected = `Basic ${Buffer.from("user:pass").toString("base64")}`;
 
-    const result = await run(["install", "-g", "pnpm@6.6.2"], {
+    const result = await run(["cache", "install", "-g", "pnpm@6.6.2"], {
       ...fixture,
       env: mirror({ COREPACK_NPM_REGISTRY: origin }),
     });
@@ -312,7 +312,7 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(byVersion.stderr).toContain("Signature does not match");
 
     const range = createFixture();
-    const byRange = await run(["install", "-g", "pnpm@6.x"], {
+    const byRange = await run(["cache", "install", "-g", "pnpm@6.x"], {
       ...range,
       registry,
       env: trusted(),
@@ -321,7 +321,11 @@ describe("§13.7 registry, auth and integrity", () => {
     expect(byRange.stderr).toContain("Signature does not match");
 
     const tag = createFixture();
-    const byTag = await run(["install", "-g", "pnpm@latest"], { ...tag, registry, env: trusted() });
+    const byTag = await run(["cache", "install", "-g", "pnpm@latest"], {
+      ...tag,
+      registry,
+      env: trusted(),
+    });
     expect(byTag.exitCode).toBe(1);
     expect(byTag.stderr).toContain("Signature does not match");
 
