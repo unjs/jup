@@ -1,0 +1,264 @@
+# A drop-in replacement for `actions/setup-node` + `corepack enable`, built on
+# jup. One step installs the runtime the project pins (`devEngines.runtime`, else
+# `.nvmrc`, else jup's built-in default), puts a *real* node on `PATH`, shims the
+# package managers, and caches both jup's store and the manager's own store.
+#
+# Not published: this is jup's own CI dogfooding jup. It deliberately uses only
+# the documented command surface (§09) and `info --json` (§09.9), and every
+# input reaches a script through the environment rather than through expression
+# interpolation, so a branch name can never become shell.
+name: setup-jup
+description: Install the project's pinned Node.js runtime and package managers with jup.
+
+inputs:
+  node-version:
+    description: >-
+      Version, range or tag for Node.js. Empty (the default) lets the project
+      decide: `devEngines.runtime`, then `.nvmrc`, then jup's built-in default.
+      `setup-node` spellings are translated — `lts/*` becomes `lts`, `node` and
+      `current` become `latest`, and a leading `v` is dropped.
+    required: false
+    default: ""
+  jup-version:
+    description: The jup release to install, as an npm spec.
+    required: false
+    default: latest
+  package-managers:
+    description: >-
+      Names to shim, space-separated. `auto` (the default) shims jup's default
+      set — every entry except the opt-in runtimes. `none` shims nothing.
+    required: false
+    default: auto
+  cache:
+    description: Save and restore `JUP_HOME` between runs.
+    required: false
+    default: "true"
+  cache-dependencies:
+    description: Save and restore the pinned package manager's own store.
+    required: false
+    default: "true"
+  working-directory:
+    description: The directory whose project pins are read.
+    required: false
+    default: "."
+
+outputs:
+  node-version:
+    description: The exact Node.js version now on `PATH`.
+    value: ${{ steps.node.outputs.version }}
+  node-path:
+    description: Absolute path of the node binary.
+    value: ${{ steps.node.outputs.path }}
+  package-manager:
+    description: The package manager the project pins, or empty when it pins none.
+    value: ${{ steps.project.outputs.package-manager }}
+  bin-directory:
+    description: The directory prepended to `PATH`, holding node and every shim.
+    value: ${{ steps.paths.outputs.bin }}
+  jup-home:
+    description: The value of `JUP_HOME` for the rest of the job.
+    value: ${{ steps.paths.outputs.home }}
+
+runs:
+  using: composite
+  steps:
+    # `JUP_HOME` reaches every later step, because a shim that cannot find the
+    # store would re-download into a different one. The shim directory stays
+    # *outside* it: a shim can carry an absolute interpreter path (§10.2), and a
+    # restored cache must never be able to hand a later run a stale one.
+    #
+    # The shim directory goes on `PATH` here, while it is still empty, rather
+    # than after the runtime lands. `enable` verifies its install directory is
+    # reachable and otherwise prints the ⚠ block and the `export PATH=` line
+    # meant for a human shell — advice that is wrong in a job that adds the
+    # directory a step later. Empty is also the safe moment: the runner's own
+    # node is still the only `node` on `PATH`, which is what keeps §10.2 from
+    # baking an absolute interpreter into the stubs.
+    - id: paths
+      shell: bash
+      run: |
+        set -euo pipefail
+        temp="${RUNNER_TEMP//\\//}"
+        home="$temp/jup-home"
+        bin="$temp/jup-bin"
+        mkdir -p "$home" "$bin"
+        {
+          echo "JUP_HOME=$home"
+          echo "SETUP_JUP_INFO=$temp/jup-info.json"
+        } >> "$GITHUB_ENV"
+        {
+          echo "home=$home"
+          echo "bin=$bin"
+        } >> "$GITHUB_OUTPUT"
+        echo "$bin" >> "$GITHUB_PATH"
+
+    # docs/3.ci.md: `JUP_HOME` holds executable code trusted on a hit, so the key
+    # carries the host triple. The `restore-keys` prefix stops at the same jup
+    # and the same runtime request — a partial hit past that point is a store
+    # warmed for a different answer.
+    #
+    # Pinned by digest, as `autofix-ci/action` already is: a cache action reads
+    # and writes `JUP_HOME`, which §07 treats as executable code trusted on a
+    # hit, so a moving tag here is a moving tag over the store.
+    - if: inputs.cache == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.paths.outputs.home }}
+        key: jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package.json', inputs.working-directory), format('{0}/jup.lock', inputs.working-directory), format('{0}/.nvmrc', inputs.working-directory)) }}
+        restore-keys: |
+          jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-
+
+    # The runner's own node bootstraps jup; jup takes over from there.
+    #
+    # `-f` is required, not defensive: jup's package `bin` claims `corepack` as
+    # well as `jup` (§10.9), and a runner image whose node bundles corepack
+    # already owns that name in the same global prefix. Without it npm refuses
+    # the link with `EEXIST`, which is the failure `npm i -fg corepack` was
+    # working around in these workflows before jup replaced it.
+    - shell: bash
+      env:
+        JUP_SPEC: ${{ inputs.jup-version }}
+      run: |
+        set -euo pipefail
+        npm install -gf "jup@$JUP_SPEC"
+        jup --version
+
+    # `enable` runs before the runtime lands in the same directory. A foreign
+    # `node` there is not ours (§10.6), so the stubs keep a relocatable
+    # `#!/usr/bin/env node` and resolve through the binary installed below.
+    - if: inputs.package-managers != 'none'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BIN_DIR: ${{ steps.paths.outputs.bin }}
+        NAMES: ${{ inputs.package-managers }}
+      run: |
+        set -euo pipefail
+        if [ "$NAMES" = auto ]; then NAMES=""; fi
+        # shellcheck disable=SC2086
+        jup enable --install-directory "$BIN_DIR" $NAMES
+
+    # `jup <spec> --version` is proxy mode (§01.2): it resolves, verifies,
+    # installs, and then prints the runtime's own answer — which is the exact
+    # version, and therefore the store directory's name (§07.2).
+    - id: node
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        BIN_DIR: ${{ steps.paths.outputs.bin }}
+        REQUESTED: ${{ inputs.node-version }}
+        NAMES: ${{ inputs.package-managers }}
+      run: |
+        set -euo pipefail
+
+        case "$REQUESTED" in
+          "")                  spec="node" ;;
+          node|current|latest) spec="node@latest" ;;
+          lts)                 spec="node@lts" ;;
+          lts/*)
+            echo "::notice::jup answers a bare 'lts' tag; reading '$REQUESTED' as 'lts'"
+            spec="node@lts" ;;
+          *)                   spec="node@${REQUESTED#v}" ;;
+        esac
+
+        version="$(jup "$spec" --version)"
+        version="${version#v}"
+
+        jup info --json > "$SETUP_JUP_INFO"
+        store="$(node -e 'process.stdout.write(require(process.env.SETUP_JUP_INFO).store.path)')"
+
+        exe=""
+        if [ "$RUNNER_OS" = Windows ]; then exe=".exe"; fi
+        installed="$store/node/$version/bin/node$exe"
+        resolved="$BIN_DIR/node$exe"
+
+        if [ -f "$installed" ]; then
+          # The runtime joins the shims in one directory rather than putting a
+          # second entry on PATH, whose winner would depend on how the runner
+          # orders $GITHUB_PATH. `node-<target>` ships the binary and nothing
+          # else, so `npm` and `npx` come from jup's shims either way.
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp -f "$installed" "$BIN_DIR/node.exe"
+          else
+            ln -sf "$installed" "$BIN_DIR/node"
+          fi
+        else
+          # Not expected — but a shim still runs the right version, so degrade
+          # instead of failing the job over a layout that moved.
+          echo "::notice::no node binary at $installed; falling back to a jup shim"
+          jup enable node --install-directory "$BIN_DIR"
+          # The manager stubs above were written while this directory held no
+          # `node`, so §10.2 left them a relocatable `#!/usr/bin/env node` — and
+          # that name now finds the shim just installed, which is a script the
+          # kernel will not chain a shebang through. Enabling them again, with
+          # `node` claimed, re-pins each stub to an absolute interpreter.
+          if [ "$NAMES" != none ]; then
+            if [ "$NAMES" = auto ]; then NAMES=""; fi
+            # shellcheck disable=SC2086
+            jup enable --install-directory "$BIN_DIR" $NAMES
+          fi
+          # A POSIX shim is a symlink named `node`; a Windows one is a trio of
+          # wrappers, none of them `node.exe`.
+          resolved="$BIN_DIR/node"
+        fi
+
+        {
+          echo "version=$version"
+          echo "path=$resolved"
+        } >> "$GITHUB_OUTPUT"
+
+    # Warm the package manager in the run that pinned it, so the job's first
+    # `pnpm install` is already a store hit (§09.2). `jup install` needs a
+    # project spec, and a repository without one is not an error here.
+    - id: project
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        jup info --json > "$SETUP_JUP_INFO"
+        name="$(node -e '
+          const report = require(process.env.SETUP_JUP_INFO);
+          process.stdout.write(report.project.status === "found" ? report.project.name ?? "" : "");
+        ')"
+        echo "package-manager=$name" >> "$GITHUB_OUTPUT"
+        if [ -n "$name" ]; then jup install; fi
+
+    # Two stores, two steps — jup keeps package manager programs, the manager
+    # keeps packages, and preparing one does not prepare the other.
+    - id: store
+      if: inputs.cache-dependencies == 'true' && steps.project.outputs.package-manager != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        PM: ${{ steps.project.outputs.package-manager }}
+      run: |
+        set -euo pipefail
+        # Every branch tolerates failure: this step computes a cache path, and
+        # losing the cache is not a reason to lose the job.
+        dir=""
+        case "$PM" in
+          pnpm) dir="$(jup pnpm store path --silent | tail -n1 || true)" ;;
+          npm)  dir="$(jup npm config get cache | tail -n1 || true)" ;;
+          yarn)
+            # Berry answers `cacheFolder`; Classic prints `undefined` for it.
+            dir="$(jup yarn config get cacheFolder 2>/dev/null | tail -n1 || true)"
+            case "$dir" in
+              "" | undefined) dir="$(jup yarn cache dir | tail -n1 || true)" ;;
+            esac ;;
+          bun)  dir="$(jup bun pm cache | tail -n1 || true)" ;;
+          # Deliberately silent for the rest of the table — `aube` is in the
+          # default shim set, `deno` and `nub` are not, and none of the three
+          # has a store command settled enough to name here. No branch means no
+          # dependency cache, which is a missing optimisation, not an error.
+          *) ;;
+        esac
+        if [ "$dir" = undefined ]; then dir=""; fi
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"
+
+    - if: steps.store.outputs.dir != ''
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.store.outputs.dir }}
+        key: ${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory), format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/bun.lock', inputs.working-directory)) }}
+        restore-keys: |
+          ${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-

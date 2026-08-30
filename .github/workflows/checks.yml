@@ -18,10 +18,10 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
-      # Before `setup-node`, which needs `pnpm` on PATH to resolve its cache.
-      - run: npm i -fg corepack && corepack enable
-      - uses: actions/setup-node@v6
-        with: { node-version: lts/*, cache: "pnpm" }
+      # jup replaces `setup-node` and `corepack enable` in one step: it installs
+      # the runtime, shims the pinned package manager, and warms both stores.
+      - uses: ./.github/actions/setup-jup
+        with: { node-version: lts }
       - run: pnpm install
       - if: runner.os == 'Linux'
         run: pnpm typecheck
