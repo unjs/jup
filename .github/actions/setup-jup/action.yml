@@ -8,12 +8,14 @@ description: Install the project's pinned Node.js runtime and package managers w
 inputs:
   node-version:
     description: >-
-      Version, range or tag for Node.js. Empty (the default) lets the project
-      decide: `devEngines.runtime`, then `.nvmrc`, then jup's built-in default.
-      `setup-node` spellings are translated — `lts/*` becomes `lts`, `node` and
-      `current` become `latest`, and a leading `v` is dropped.
+      Version, range or tag for Node.js. `lts` is the default and is recorded as
+      the global default only (§09.3): a project's own `devEngines.runtime` or
+      `.nvmrc` still wins (§04.5). Empty leaves even that unrecorded and lets
+      jup's built-in default answer an unpinned project. `setup-node` spellings
+      are translated — `lts/*` becomes `lts`, `node` and `current` become
+      `latest`, and a leading `v` is dropped.
     required: false
-    default: ""
+    default: lts
   jup-version:
     description: The jup release to install, as an npm spec.
     required: false
@@ -32,6 +34,14 @@ inputs:
     default: "true"
   cache-dependencies:
     description: Save and restore the pinned package manager's own store.
+    required: false
+    default: "true"
+  install:
+    description: >-
+      Install the project's dependencies with `jup install` (§09.15), after both
+      caches are restored. `true` (the default) runs the bare command, `false`
+      installs nothing, and any other value is forwarded to the pinned manager
+      verbatim — `--frozen-lockfile` is pnpm's flag, not one of jup's.
     required: false
     default: "true"
   working-directory:
@@ -315,3 +325,23 @@ runs:
         key: setup-jup-${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(format('{0}/**/pnpm-lock.yaml', inputs.working-directory), format('{0}/**/yarn.lock', inputs.working-directory), format('{0}/**/package-lock.json', inputs.working-directory), format('{0}/**/bun.lock', inputs.working-directory)) }}
         restore-keys: |
           setup-jup-${{ steps.project.outputs.package-manager }}-${{ runner.os }}-${{ runner.arch }}-
+
+    # Last, so the manager's store is restored before it is read (§09.15). The
+    # pin decides the command: `pnpm install`, `yarn install`, `npm install`.
+    #
+    # A project with no pin skips this, exactly as the warm step above skips its
+    # `cache install`: with the input defaulting to `true`, reaching §12.10's
+    # project error would mean the default breaking every unpinned repo that
+    # only ever wanted a runtime.
+    - name: Install dependencies
+      if: inputs.install != 'false' && inputs.install != '' && steps.project.outputs.package-manager != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        ARGS: ${{ inputs.install }}
+      run: |
+        set -euo pipefail
+        # `true` asks for the bare command; anything else is the manager's argv.
+        if [ "$ARGS" = true ]; then ARGS=""; fi
+        # shellcheck disable=SC2086
+        jup install $ARGS

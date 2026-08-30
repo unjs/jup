@@ -6,12 +6,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      # jup replaces `setup-node` and `corepack enable` in one step: it installs
-      # the runtime, shims the pinned package manager, and warms both stores.
+      # jup replaces `setup-node`, `corepack enable` and `pnpm install` in one
+      # step: it installs the runtime, shims the pinned package manager, warms
+      # both stores, and runs the manager's own install.
       - name: Setup jup
         uses: ./.github/actions/setup-jup
-        with: { node-version: lts }
-      - run: pnpm install
       - run: pnpm fmt
       - name: Push the formatting fixes
         uses: autofix-ci/action@7a166d7532b277f34e16238930461bf77f9d7ed8
