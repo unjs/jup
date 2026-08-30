@@ -792,6 +792,7 @@ describe("aube — §03.1's third per-host entry", () => {
   });
 
   it("carries a bare default, because one version is many artifacts", () => {
+    expect(parse(DEFINITIONS.aube!.default)?.build).toEqual([]);
     expect(DEFINITIONS.aube!.default).toBe("2.2.0");
   });
 
@@ -910,8 +911,12 @@ describe("nub — §03.1's fourth per-host entry", () => {
     expect(spec.exec).toBe("native");
     expect(spec.commands).toEqual({ use: ["nub", "install"] });
     expect(isPerHost({ name: "nub", reference: "0.7.5" })).toBe(true);
-    // Bare, because one version is many artifacts (§02.3).
-    expect(DEFINITIONS.nub!.default).toBe("0.8.0");
+    // Bare, because one version is many artifacts (§02.3). The literal is the
+    // review gate `scripts/refresh-table.mjs` has to walk a human through (§16);
+    // the assertion beside it is the invariant a refresh must never break, and
+    // it is the one this row is actually about.
+    expect(parse(DEFINITIONS.nub!.default)?.build).toEqual([]);
+    expect(DEFINITIONS.nub!.default).toBe("0.8.1");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {
