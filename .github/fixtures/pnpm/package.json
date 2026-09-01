@@ -2,10 +2,13 @@
   "name": "setup-jup-fixture-pnpm",
   "version": "0.0.0",
   "private": true,
-  "devEngines": {
-    "packageManager": { "name": "pnpm", "version": "^12" }
-  },
   "dependencies": {
     "ms": "2.1.3"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "^12"
+    }
   }
 }

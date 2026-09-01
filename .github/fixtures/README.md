@@ -14,5 +14,7 @@ directory is not a separate project to pnpm or to Yarn: pnpm installs at the
 nearest `pnpm-workspace.yaml` above it, and Yarn refuses a package that is not
 listed in the outer project's workspaces. The empty `pnpm-workspace.yaml` and
 the empty `yarn.lock` are what make each fixture the root of its own install.
-Yarn's lockfile is committed for that reason and fills itself in during a run;
-everything else a manager writes here is gitignored.
+Yarn's lockfile is committed for that reason and stays empty; the `.yarnrc.yml`
+beside it turns off the immutable install Yarn performs whenever `CI` is set,
+which an empty lockfile cannot satisfy. Everything else a manager writes here is
+gitignored.

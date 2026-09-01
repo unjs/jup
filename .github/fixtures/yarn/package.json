@@ -2,10 +2,13 @@
   "name": "setup-jup-fixture-yarn",
   "version": "0.0.0",
   "private": true,
-  "devEngines": {
-    "packageManager": { "name": "yarn", "version": "^4" }
-  },
   "dependencies": {
     "ms": "2.1.3"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "yarn",
+      "version": "^4"
+    }
   }
 }
