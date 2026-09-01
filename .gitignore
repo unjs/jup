@@ -40,7 +40,6 @@ tsconfig.tsbuildinfo
 /.github/fixtures/*/node_modules
 /.github/fixtures/*/.yarn
 /.github/fixtures/*/.pnp.*
-/.github/fixtures/*/*.lock
 /.github/fixtures/*/pnpm-lock.yaml
 /.github/fixtures/*/package-lock.json
 

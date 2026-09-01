@@ -1,0 +1,5 @@
+# This fixture stands in for a repository of its own, and it is not one: it sits
+# inside jup's, whose root holds a `pnpm-workspace.yaml`. pnpm installs at the
+# nearest workspace root it can find, so without this file `jup install` here
+# installs jup's own dependencies at the repository root instead.
+packages: []
