@@ -312,6 +312,27 @@ export const messages = {
   installingInProject: (name: string, reference: string) =>
     `Installing ${name}@${reference} in the project...`,
 
+  /**
+   * §09.11 — `prepare` and `hydrate` are corepack's words, and they announce
+   * their work in corepack's. The pair with `for immediate activation` is what
+   * `--activate` prints; without the flag neither command touches
+   * `lastKnownGood.json`, which is the whole difference the sentence reports.
+   *
+   * `preparing` takes the descriptor's *range*, not the reference it resolved
+   * to: corepack prints the words the user typed, and a `prepare pnpm@latest`
+   * that says `Preparing pnpm@latest...` is the line a CI log has always
+   * carried.
+   */
+  preparing: (name: string, range: string) => `Preparing ${name}@${range}...`,
+
+  preparingForActivation: (name: string, range: string) =>
+    `Preparing ${name}@${range} for immediate activation...`,
+
+  hydrating: (name: string, reference: string) => `Hydrating ${name}@${reference}...`,
+
+  hydratingForActivation: (name: string, reference: string) =>
+    `Hydrating ${name}@${reference} for immediate activation...`,
+
   allDone: () => `All done!`,
 
   /**

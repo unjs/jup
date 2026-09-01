@@ -293,11 +293,15 @@ export async function runMain(argv: string[], run?: RunOptions): Promise<RunResu
     const { runManagementCommand } = await import("./commands/cli.ts");
     return { code: await runManagementCommand(invocation.args, run) };
   } catch (error) {
-    return { code: await presentError(error, invocation) };
+    return { code: await presentError(error, invocation, run) };
   }
 }
 
-export async function presentError(error: unknown, invocation: Invocation): Promise<number> {
+export async function presentError(
+  error: unknown,
+  invocation: Invocation,
+  run?: RunOptions,
+): Promise<number> {
   if (error instanceof UsageError) {
     if (invocation.mode === "proxy") {
       // Bare, on stderr, no stack: the user typed something the project forbids,
@@ -310,7 +314,7 @@ export async function presentError(error: unknown, invocation: Invocation): Prom
     // line underneath. The stream split between the two modes is test-asserted.
     // Only the label is coloured; the message and the usage block underneath it
     // are §12.1's verbatim shape.
-    const usage = await usageLineFor(invocation.args[0]);
+    const usage = await usageLineFor(invocation.args[0], run);
     out(`${outColors.red("Usage Error:")} ${error.message}\n\n${usage}\n`);
     return 1;
   }
@@ -388,11 +392,16 @@ async function fallbackReference(name: string, transparent: boolean): Promise<st
  * synopsis, and neither string has any business being parsed by a `yarn --version`
  * that succeeds.
  */
-async function usageLineFor(command: string | undefined): Promise<string> {
-  const { GENERIC_USAGE_LINE, USAGE_LINES } = await import("./commands/usage.ts");
-  return command !== undefined && Object.hasOwn(USAGE_LINES, command)
-    ? USAGE_LINES[command]!
-    : GENERIC_USAGE_LINE;
+async function usageLineFor(command: string | undefined, run?: RunOptions): Promise<string> {
+  const { COREPACK_USAGE_LINES, GENERIC_USAGE_LINE, USAGE_LINES } =
+    await import("./commands/usage.ts");
+  if (command === undefined) return GENERIC_USAGE_LINE;
+  // §09.11 — corepack's own lines first, and only under corepack's name: on
+  // jup's surface `prepare` is a script (§09.17) and owns no synopsis.
+  if (run?.corepackCompat === true && Object.hasOwn(COREPACK_USAGE_LINES, command)) {
+    return COREPACK_USAGE_LINES[command]!;
+  }
+  return Object.hasOwn(USAGE_LINES, command) ? USAGE_LINES[command]! : GENERIC_USAGE_LINE;
 }
 
 /**

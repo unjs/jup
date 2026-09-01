@@ -24,6 +24,25 @@ export const USAGE_LINES: Record<string, string> = {
   use: "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
 };
 
+/**
+ * §09.11 — the two commands that exist only under the `corepack` name, spelled
+ * the way corepack spells them.
+ *
+ * A separate map rather than two more rows in {@link USAGE_LINES}, because
+ * §09.17 makes `prepare` a *script* name on jup's own surface — `prepare` is an
+ * npm lifecycle script, and a `jup prepare` that failed to find a project must
+ * print the generic line, not a synopsis for a command jup does not have.
+ * `main.ts` consults this map only when `RunOptions.corepackCompat` is set,
+ * which §10.9 makes the only reliable statement that `corepack` was typed.
+ *
+ * The text is corepack's own, `$ corepack` and all: it is the line that command
+ * has always printed, and the name in it is the name the user typed.
+ */
+export const COREPACK_USAGE_LINES: Record<string, string> = {
+  hydrate: "$ corepack hydrate [--activate] <fileName>",
+  prepare: "$ corepack prepare [--activate] [--json] [-o,--output] ...",
+};
+
 export const GENERIC_USAGE_LINE = "$ jup <command>";
 
 /**

@@ -75,6 +75,15 @@ import type {
 /** §09.6 — the default `pack` output, relative to the cwd. */
 const DEFAULT_ARCHIVE_NAME = "jup.tgz";
 
+/**
+ * §09.11 — the default `corepack prepare -o` output, relative to the cwd.
+ *
+ * Deliberately not {@link DEFAULT_ARCHIVE_NAME}: the file a `prepare -o` writes
+ * is the file the `hydrate` on the other side of a CI artifact upload names, and
+ * renaming it would break the pair of scripts this command exists for.
+ */
+const COREPACK_ARCHIVE_NAME = "corepack.tgz";
+
 import { formatHelp } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
 import { out, outColors } from "../utils/log.ts";
@@ -387,7 +396,13 @@ export async function cmdCacheInstallGlobal(args: string[]): Promise<number> {
     // §09.3 — an archive argument is anything ending in `.tgz`; everything else
     // is a spec.
     if (target.endsWith(".tgz")) {
-      await installFromArchive(target, { activate: !cacheOnly });
+      await installFromArchive(target, {
+        activate: !cacheOnly,
+        announce: (name, reference) =>
+          cacheOnly
+            ? messages.addingToCache(name, reference)
+            : messages.installing(name, reference),
+      });
       continue;
     }
 
@@ -503,7 +518,10 @@ function stripUnattributableHash(dir: string): void {
  * path uses (§07.5). Only validated subtrees are promoted, so an archive
  * carrying extra entries never contributes anything to the store.
  */
-async function installFromArchive(file: string, options: { activate: boolean }): Promise<void> {
+async function installFromArchive(
+  file: string,
+  options: { activate: boolean; announce: (name: string, reference: string) => string },
+): Promise<void> {
   const filePath = resolvePath(process.cwd(), file);
   const found = await readArchiveEntries(filePath);
 
@@ -515,13 +533,9 @@ async function installFromArchive(file: string, options: { activate: boolean }):
 
     for (const [name, references] of found) {
       for (const reference of references) {
-        out(
-          `${
-            options.activate
-              ? messages.installing(name, reference)
-              : messages.addingToCache(name, reference)
-          }\n`,
-        );
+        // The sentence belongs to the caller: §09.3 and §09.11's `hydrate` unpack
+        // the same archive the same way and say different things about it.
+        out(`${options.announce(name, reference)}\n`);
         // §07.10 — before promotion, never after: the store must not hold a
         // digest claim this never checked, not even briefly.
         const staged = join(tmp, name, reference);
@@ -1078,6 +1092,108 @@ async function writeArchive(locations: string[], output: string, json: boolean):
   if (json) out(`${JSON.stringify(output)}\n`);
   else out(`${messages.allDone()}\n`);
 }
+
+/**
+ * §09.11 — corepack's `prepare`, reachable only under the `corepack` name.
+ *
+ * It is `pack` with three of corepack's defaults restored, and the differences
+ * are the whole point of keeping the word rather than rewriting it to `pack`:
+ *
+ * * the archive is written **only** for `-o`/`--output`, where `pack` always
+ *   writes one — a bare `corepack prepare` warms the cache and nothing else;
+ * * `lastKnownGood.json` is touched **only** for `--activate`, where `pack`
+ *   records unconditionally (§09.6);
+ * * the default output name is `corepack.tgz`, not `jup.tgz`.
+ *
+ * `-o` follows clipanion's `tolerateBoolean`, which is what corepack's own
+ * parser does: `-o` alone means the default name, `-o=<path>` names the file,
+ * and `-o <path>` does **not** bind — the path is a positional, and corepack
+ * answers it with `Unsupported package manager specification (<path>)`. Faithful
+ * rather than convenient: a script written against corepack must not quietly
+ * mean something else here, and the parser reproduces it exactly by listing the
+ * option under both `booleans` and `strings`.
+ */
+export async function cmdPrepare(args: string[]): Promise<number> {
+  const parsed = parseArgs(args, {
+    booleans: ["--activate", "--json", "-o", "--output"],
+    strings: ["-o", "--output"],
+  });
+  const json = hasFlag(parsed, "--json");
+  const activate = hasFlag(parsed, "--activate");
+
+  const output = firstValue(parsed, "-o", "--output");
+  const wantsArchive = output !== undefined || hasFlag(parsed, "-o", "--output");
+
+  const descriptors = resolvePatternsToDescriptors(parsed.positionals);
+  const locations: string[] = [];
+
+  for (const descriptor of descriptors) {
+    const locator = await resolveOrThrow(descriptor, { allowTags: true });
+    // Like §09.6, every human-readable line sits behind `--json` so a machine
+    // consumer gets the output path and nothing else.
+    if (!json) {
+      out(
+        `${
+          activate
+            ? messages.preparingForActivation(descriptor.name, descriptor.range)
+            : messages.preparing(descriptor.name, descriptor.range)
+        }\n`,
+      );
+    }
+
+    // `cacheOnly` unconditionally: §04.8's guarded bump is an implicit write to
+    // `lastKnownGood.json`, and `prepare` writes there only when `--activate`
+    // asks it to, a line below.
+    const spec = await installOrExplain(locator, descriptor.range, { cacheOnly: true });
+    locations.push(spec.location);
+
+    if (activate) {
+      setLastKnownGood(locator.name, referenceWithHash(locator.name, locator.reference, spec.hash));
+    }
+  }
+
+  if (wantsArchive) {
+    await writeArchive(
+      locations,
+      resolvePath(process.cwd(), output ?? COREPACK_ARCHIVE_NAME),
+      json,
+    );
+  }
+  return 0;
+}
+
+/**
+ * §09.11 — corepack's `hydrate`, reachable only under the `corepack` name.
+ *
+ * `cache install -g <file>.tgz` with corepack's two sentences and corepack's
+ * default: the archive is unpacked into the store, and `lastKnownGood.json` is
+ * left alone unless `--activate` says otherwise. §09.3's spelling has the
+ * opposite default (`--cache-only` opts out), which is exactly why the word is
+ * implemented rather than rewritten — the rewrite would silently change which
+ * version the machine runs next.
+ *
+ * Everything the archive is checked for is §07.10's, unchanged: a hydrated
+ * subtree is promoted only after validation and never keeps a digest claim
+ * nothing here verified.
+ */
+export async function cmdHydrate(args: string[]): Promise<number> {
+  const parsed = parseArgs(args, { booleans: ["--activate"] });
+  const activate = hasFlag(parsed, "--activate");
+
+  if (parsed.positionals.length !== 1) {
+    throw new UsageError(`The 'corepack hydrate' command requires exactly one archive`);
+  }
+
+  await installFromArchive(parsed.positionals[0]!, {
+    activate,
+    announce: (name, reference) =>
+      activate
+        ? messages.hydratingForActivation(name, reference)
+        : messages.hydrating(name, reference),
+  });
+  out(`${messages.allDone()}\n`);
+  return 0;
+}
 /**
  * §09.7 — `clean` and `clear` are the same command; §07.9 covers `--all`, and
  * `cache list` is handled just below.
@@ -1393,6 +1509,14 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
     case "pack": {
       return cmdPack(rest);
     }
+    // §09.11 — corepack's two deprecated commands, under corepack's name only.
+    // On jup's own surface they stay §09.17 script names: `prepare` is a real
+    // npm lifecycle script, and `jup prepare` must keep running it.
+    case "prepare":
+    case "hydrate": {
+      if (run?.corepackCompat !== true) return cmdRun(args, run);
+      return command === "prepare" ? cmdPrepare(rest) : cmdHydrate(rest);
+    }
     case "up": {
       return cmdUp(rest, run);
     }
@@ -1405,9 +1529,9 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
       // keep the error instead. A flag is not a script name, so a mistyped
       // option still says so. `upgrade` is spoken for (§09.13), and a project
       // with a script of that name must not be what decides. And under the
-      // `corepack` name the surface stays corepack's: a Dockerfile that still
-      // says `corepack prepare` is told the command is gone (§09.11), rather
-      // than quietly running a script that is not there.
+      // `corepack` name the surface stays corepack's: a word corepack never had
+      // is an error under corepack's name rather than a run of a script that is
+      // not there. The two words it *did* have are answered above (§09.11).
       if (run?.corepackCompat !== true && !command.startsWith("-") && !RESERVED.has(command)) {
         return cmdRun([command, ...rest], run);
       }

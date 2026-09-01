@@ -79,7 +79,7 @@ import { execPackageManager } from "../../src/run/exec.ts";
 import { create } from "../../src/cache/tar.ts";
 import { readInstalledSpec } from "../../src/cache/store.ts";
 import type { CorepackMarker } from "../../src/types.ts";
-import { USAGE_LINES } from "../../src/commands/usage.ts";
+import { COREPACK_USAGE_LINES, USAGE_LINES } from "../../src/commands/usage.ts";
 import { runMain } from "../../src/main.ts";
 import { getOwnVersion } from "../../src/utils/self.ts";
 
@@ -625,6 +625,158 @@ function rawArchive(paths: string[]): Buffer {
   blocks.push(Buffer.alloc(1024));
   return gzipSync(Buffer.concat(blocks));
 }
+
+describe("prepare and hydrate — corepack's deprecated commands (§09.11)", () => {
+  /** Every assertion here is about the `corepack` name; §10.9 is what sets it. */
+  const corepack = (args: string[]) => runMain(args, { corepackCompat: true });
+
+  // The handover mock is module-scoped and outlives `restoreAllMocks`, so the
+  // §09.17 case below must not leave its call for a later block to count.
+  afterEach(() => {
+    execMock.mockClear();
+  });
+
+  it("prepares the project's package manager without writing an archive", async () => {
+    await seed("yarn", "2.2.2");
+    await manifest({ name: "demo", packageManager: "yarn@2.2.2" });
+
+    await expect(corepack(["prepare"])).resolves.toEqual({ code: 0 });
+
+    // Corepack's sentence, and corepack's silence about `lastKnownGood.json`:
+    // without `--activate` nothing is recorded, and without `-o` nothing is
+    // written to the cwd.
+    expect(stdout).toBe(`Preparing yarn@2.2.2...\n`);
+    expect(existsSync(join(project, "corepack.tgz"))).toBe(false);
+    expect(lastKnownGood()).toEqual({});
+    expect(requested).toEqual([]);
+  });
+
+  it("prepares an explicit spec, and prints the range the user typed", async () => {
+    await seed("yarn", "2.2.2");
+
+    await expect(corepack(["prepare", "yarn@2.2.2"])).resolves.toEqual({ code: 0 });
+
+    expect(stdout).toBe(`Preparing yarn@2.2.2...\n`);
+  });
+
+  it("--activate records the default, and says so", async () => {
+    await seed("yarn", "2.2.2");
+    await writeLastKnownGood({ yarn: "1.0.0" });
+
+    await expect(corepack(["prepare", "--activate", "yarn@2.2.2"])).resolves.toEqual({ code: 0 });
+
+    expect(stdout).toBe(`Preparing yarn@2.2.2 for immediate activation...\n`);
+    expect(lastKnownGood().yarn).toMatch(/^2\.2\.2\+sha512\./);
+  });
+
+  it("-o writes corepack.tgz, and -o=<path> redirects it", async () => {
+    await seed("yarn", "2.2.2");
+
+    await expect(corepack(["prepare", "-o", "yarn@2.2.2"])).resolves.toEqual({ code: 0 });
+
+    // The default name is corepack's, not `pack`'s `jup.tgz` (§09.6).
+    expect(existsSync(join(project, "corepack.tgz"))).toBe(true);
+    expect(stdout).toBe(
+      `Preparing yarn@2.2.2...\n` +
+        `Packing the selected tools in corepack.tgz...\n` +
+        `All done!\n`,
+    );
+
+    stdout = "";
+    const output = join(project, "tools.tgz");
+    await expect(corepack(["prepare", `--output=${output}`, "yarn@2.2.2"])).resolves.toEqual({
+      code: 0,
+    });
+    expect(existsSync(output)).toBe(true);
+  });
+
+  it("-o does not bind the next argument, exactly as corepack's parser does", async () => {
+    await seed("yarn", "2.2.2");
+
+    // `-o out.tgz` leaves `out.tgz` a positional, which is then read as a spec —
+    // corepack answers `Unsupported package manager specification (out.tgz)`,
+    // and so does this. Faithful rather than convenient (§09.11).
+    await expect(corepack(["prepare", "-o", "out.tgz"])).resolves.toEqual({ code: 1 });
+    expect(stdout).toContain(`Unsupported package manager specification (out.tgz)`);
+    expect(existsSync(join(project, "out.tgz"))).toBe(false);
+  });
+
+  it("--json prints the output path and nothing else", async () => {
+    await seed("yarn", "2.2.2");
+    const output = join(project, "tools.tgz");
+
+    await expect(corepack(["prepare", "--json", `-o=${output}`, "yarn@2.2.2"])).resolves.toEqual({
+      code: 0,
+    });
+
+    expect(stdout).toBe(`${JSON.stringify(output)}\n`);
+    expect(existsSync(output)).toBe(true);
+  });
+
+  it("hydrates an archive into a fresh, offline home without activating it", async () => {
+    await seed("yarn", "2.2.2");
+    await expect(corepack(["prepare", "-o", "yarn@2.2.2"])).resolves.toEqual({ code: 0 });
+    const archive = join(project, "corepack.tgz");
+
+    const fresh = await tempDir("jup-cli-hydrate-");
+    process.env.COREPACK_HOME = fresh;
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+    stdout = "";
+
+    await expect(corepack(["hydrate", archive])).resolves.toEqual({ code: 0 });
+
+    expect(existsSync(join(fresh, "v1", "yarn", "2.2.2", ".jup"))).toBe(true);
+    expect(stdout).toBe(`Hydrating yarn@2.2.2...\n` + `All done!\n`);
+    // Corepack's default is the opposite of §09.3's: no `--activate`, no
+    // recorded default.
+    expect(entriesOf(join(fresh, "lastKnownGood.json"))).toEqual({});
+    expect(requested).toEqual([]);
+
+    await rm(fresh, { recursive: true, force: true });
+  });
+
+  it("hydrate --activate records the default, and says so", async () => {
+    await seed("yarn", "2.2.2");
+    await expect(corepack(["prepare", "-o", "yarn@2.2.2"])).resolves.toEqual({ code: 0 });
+    const archive = join(project, "corepack.tgz");
+
+    const fresh = await tempDir("jup-cli-hydrate2-");
+    process.env.COREPACK_HOME = fresh;
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+    stdout = "";
+
+    await expect(corepack(["hydrate", "--activate", archive])).resolves.toEqual({ code: 0 });
+
+    expect(stdout).toBe(`Hydrating yarn@2.2.2 for immediate activation...\n` + `All done!\n`);
+    expect(entriesOf(join(fresh, "lastKnownGood.json"))).toEqual({ yarn: "2.2.2" });
+
+    await rm(fresh, { recursive: true, force: true });
+  });
+
+  it("hydrate needs exactly one archive, and prints corepack's usage line", async () => {
+    await expect(corepack(["hydrate"])).resolves.toEqual({ code: 1 });
+
+    expect(stdout).toContain(
+      `Usage Error: The 'corepack hydrate' command requires exactly one archive`,
+    );
+    expect(stdout).toContain(COREPACK_USAGE_LINES.hydrate);
+  });
+
+  it("both words stay script names on jup's own surface (§09.17)", async () => {
+    await seed("yarn", "1.22.4");
+    await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
+
+    // `prepare` is an npm lifecycle script; `jup prepare` must keep running it,
+    // and must not print a synopsis for a command jup does not have.
+    await expect(runManagementCommand(["prepare"])).resolves.toBe(0);
+
+    const [binName, , args] = execMock.mock.calls[0]!;
+    expect(binName).toBe("yarn");
+    expect(args).toEqual(["run", "prepare"]);
+    expect(USAGE_LINES.prepare).toBeUndefined();
+    expect(USAGE_LINES.hydrate).toBeUndefined();
+  });
+});
 
 describe("pack and cache install -g <file>.tgz (§07.10, tests 90, 92, 93)", () => {
   it("round-trips through a fresh, offline COREPACK_HOME (tests 90, 92)", async () => {
@@ -1436,11 +1588,11 @@ describe("run (§09.16, §09.17)", () => {
     await seed("yarn", "1.22.4");
     await manifest({ name: "demo", packageManager: "yarn@1.22.4" });
 
-    // §09.11 — a script written against corepack must be told `prepare` is
-    // gone, not have it silently become a script that is not there.
-    await expect(runMain(["prepare"], { corepackCompat: true })).resolves.toEqual({ code: 1 });
+    // The compatibility surface is corepack's: a word corepack never had is an
+    // error under its name, not a run of a script that happens to share it.
+    await expect(runMain(["lint"], { corepackCompat: true })).resolves.toEqual({ code: 1 });
 
-    expect(stdout).toContain(`Usage Error: Unknown command "prepare"`);
+    expect(stdout).toContain(`Usage Error: Unknown command "lint"`);
     expect(execMock).not.toHaveBeenCalled();
   });
 

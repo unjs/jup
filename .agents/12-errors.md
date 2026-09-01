@@ -248,6 +248,7 @@ Couldn't find a project in the local directory - please specify the package mana
 The local project doesn't feature a 'packageManager' field nor a 'devEngines.packageManager' field - please specify the package manager to pack, or update the manifest to reference it
 The local project doesn't feature a 'packageManager' field - please specify the package manager to pack, or update the manifest to reference it
 Invalid package manager name '<name>'
+The 'corepack hydrate' command requires exactly one archive
 The 'jup install' command isn't supported for <name>@<reference>
 The 'jup run' command isn't supported for <name>@<reference>
 Assertion failed: The stub folder doesn't exist
@@ -271,6 +272,10 @@ than byte-prescribed, and the read-only-install messages of §10.8 are there.
 
 ```
 Adding <name>@<reference> to the cache...
+Preparing <name>@<range>...
+Preparing <name>@<range> for immediate activation...
+Hydrating <name>@<reference>...
+Hydrating <name>@<reference> for immediate activation...
 Installing <name>@<reference>...
 Installing <name>@<reference> in the project...
 Updated <path> to use <name>@<reference>
@@ -284,6 +289,10 @@ All done!
 
 `--no-lockfile` prints `Removed …` only when it removes an entry from the
 committed `jup.lock` (§09).
+
+The four `Preparing`/`Hydrating` lines are corepack's own, printed only under
+corepack's name (§09.11). `Preparing` names the **range** the user typed, not the
+reference it resolved to.
 
 ## 12.12 Exit codes
 

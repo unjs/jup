@@ -283,7 +283,7 @@ reaches for `-v` is not met with `Unknown command`. Both are ordinary management
 commands and are shadowed by proxy mode: `jup yarn --version` is a *proxy*
 invocation and prints Yarn's version.
 
-## 9.11 (retired) Deprecated commands
+## 9.11 Under corepack's name
 
 **`install` under corepack's name.** On jup's own surface `install` is §09.15,
 which runs the project package manager's install command. Invoked through
@@ -300,15 +300,58 @@ hatches `test/corepack/_runCli.ts` sets: §06's verification and §05.4's downlo
 notice are the same under both names, because a security posture chosen by which
 symlink was typed is one nobody chose. See `RunOptions.corepackCompat`.
 
-`hydrate` and `prepare` were corepack's predecessors of `cache install -g
-<file>.tgz` and of `pack` + `cache install -g`. §09.17 is why the compatibility
-flag also suppresses the script fallback: under corepack's name their word must
-keep saying it is gone. They were dropped before publication:
-they existed for scripts written against corepack, jup has no install base of its
-own, and the corepack compatibility suite never exercised them. `cache install -g
-<file>.tgz` and `pack` (§09.3, §09.6) cover both.
+**`prepare` and `hydrate`.** Corepack's two deprecated commands, live under
+`corepack` and only there. They are not aliases: each keeps corepack's own
+defaults, because both defaults are the kind a rewrite would change silently.
 
-The number is kept so §09.12-§09.14 do not move. Do not reuse it.
+```
+corepack prepare [--activate] [--json] [-o,--output[=<path>]] [...name[@<version>]]
+
+with no patterns: §09.1's project lookup, exactly as `pack` does
+per pattern:
+    stdout: `Preparing <name>@<range>...`               the range the *user* typed
+        or: `Preparing <name>@<range> for immediate activation...`   with --activate
+    install it, cache-only (§09.2 — no §04.8 bump)
+    with --activate: record the default, hash-bearing, pinned (§04.5)
+with -o or --output: §07.10's archive, named `corepack.tgz` unless `=<path>` says otherwise
+    stdout: `Packing the selected tools in <basename>...`, then `All done!`
+--json: the output path alone, and nothing else — every line above is suppressed
+```
+
+```
+corepack hydrate [--activate] <fileName>
+
+§07.10's extraction and promotion, unchanged, one archive only
+per subtree: stdout: `Hydrating <name>@<reference>...`
+                 or: `Hydrating <name>@<reference> for immediate activation...`
+    with --activate: record the default (§09.3's write, opt-in here)
+stdout: `All done!`
+```
+
+Three differences from the jup spellings that cover the same ground, and each is
+why the words are implemented rather than rewritten to them:
+
+* `prepare` writes an archive **only** for `-o`; `pack` (§09.6) always writes one.
+* `prepare` records a default **only** for `--activate`; `pack` records
+  unconditionally. `hydrate` likewise, where `cache install -g <file>.tgz`
+  (§09.3) records unless `--cache-only` — the opposite default, over the file
+  that decides which version the machine runs next.
+* `prepare -o`'s default name is `corepack.tgz`, not `pack`'s `jup.tgz`. It is
+  the name the `hydrate` on the far side of a CI artifact upload was written to
+  expect.
+
+`-o`/`--output` follows clipanion's `tolerateBoolean`, which is corepack's own
+parser: bare `-o` means the default name, `-o=<path>` names the file, and
+`-o <path>` does **not** bind — the path stays a positional and is read as a
+spec, so corepack answers `Unsupported package manager specification (<path>)`
+and so does jup. Faithful rather than convenient: a flag that meant something
+else here is the one thing a compatibility command must not be.
+
+On **jup's own surface** both words stay §09.17 script names. `prepare` is an npm
+lifecycle script, and `jup prepare` runs it; neither word takes a `USAGE_LINES`
+entry, and their synopses live in `COREPACK_USAGE_LINES` — spelled `$ corepack`,
+consulted only when `RunOptions.corepackCompat` is set — so a `jup prepare` that
+cannot find a project still prints the generic line.
 
 ## 9.12 `self-install`
 
@@ -498,9 +541,9 @@ Three things keep `Unknown command "<word>"` instead.
   is reserved for a project-level command; a project that happens to have a
   script of that name must not be what settles the question.
 * The **`corepack` name** (`RunOptions.corepackCompat`, §9.11). The compatibility
-  surface is corepack's, and a CI job that still says `corepack prepare` is owed
-  the sentence saying the command is gone rather than a run of a script that is
-  not there.
+  surface is corepack's: a word corepack never had is an error under corepack's
+  name, rather than a run of a script that is not there. `prepare` and `hydrate`
+  are words corepack *did* have, and §9.11 answers them here.
 
 The command word reaches §12.1's presenter as itself, so an unrecognised one has
 no `USAGE_LINES` entry and the generic `$ jup <command>` is what prints under a

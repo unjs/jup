@@ -509,17 +509,20 @@ export interface RunOptions {
   /**
    * Answer to corepack's command spellings as well as jup's (default `false`).
    *
-   * Today that is one alias: corepack's `install` and `install -g`, which jup
-   * spells `cache install` and `cache install -g` (§09.2, §09.3). The word
-   * `install` is reserved on jup's own surface (§09.11), so the alias exists
-   * only for a caller that arrived under corepack's name.
+   * Today that is three things, all of them §09.11's. Corepack's `install` and
+   * `install -g` are rewritten to `cache install` and `cache install -g` (§09.2,
+   * §09.3), because the word `install` is jup's own §09.15. Corepack's deprecated
+   * `prepare` and `hydrate` are answered, with corepack's flags, corepack's
+   * defaults and corepack's sentences; on jup's surface those two words stay
+   * §09.17 script names. And a word neither surface knows stays
+   * `Unknown command` here rather than becoming a script run.
    *
    * **Which entry point ran is what sets this**, never the invoked path:
    * `bin/corepack.mjs` passes `true` and `bin/jup.mjs` passes nothing, for
    * §10.1's reason — `process.argv[1]` does not survive a pnpm `.bin` wrapper, a
    * Windows `.cmd`, or bun, so the name has to be carried by the file that runs.
    *
-   * **It maps command spellings and nothing else.** The temptation is to hang
+   * **It maps the command surface and nothing else.** The temptation is to hang
    * the rest of the corepack-compatibility surface off it — the hatches
    * `test/corepack/_runCli.ts` sets to make the ported suite green are sitting
    * right there — and it must not carry them:
