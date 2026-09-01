@@ -1,6 +1,24 @@
 # Changelog
 
 
+## v0.5.3
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5.2...v0.5.3)
+
+### 🚀 Enhancements
+
+- Basic gh action ([a330f78](https://github.com/unjs/jup/commit/a330f78))
+- Add back compatibility for `corepack prepare ([hydrate`](https://github.com/unjs/jup/commit/hydrate`))
+
+### 🤖 CI
+
+- Have the action ask jup instead of reimplementing it ([ca32910](https://github.com/unjs/jup/commit/ca32910))
+
+### ❤️ Contributors
+
+- 4184926 <Pooya Parsa>
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.5.2
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5.1...v0.5.2)
