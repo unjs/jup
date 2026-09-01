@@ -279,8 +279,9 @@ JUP_ENABLE_STRICT=0       → transparent = true  # mismatch falls back instead 
 NoProject → fallback
 NoSpec    → auto-pin if enabled (§3.6); fallback
 Found     → spec = getSpec({requireVersion: !binaryVersion})
-            name mismatch → transparent ? fallback
-                                        : UsageError "This project is configured to use …"
+            name mismatch → transparent || requested entry runs as a runtime
+                              ? fallback
+                              : UsageError "This project is configured to use …"
             else spec
 ```
 
@@ -288,11 +289,28 @@ Then, unconditionally: **a CLI `binaryVersion` overwrites `descriptor.range`.**
 This is why `jup yarn@1.22.4 --version` works in a Yarn-4 project — but the
 *name* still has to match, so `jup pnpm@9 install` there is still an error.
 
-The spec being reconciled is the one **for the requested tool**, so a project's
-package-manager pin is never a reason to refuse a runtime: `jup node` in a
-pnpm-pinned project resolves node, and a `devEngines.runtime` beside that pin does
-not affect `jup pnpm`. Within a kind the rule is unchanged — `jup deno` in a
-pnpm-pinned project is still a mismatch.
+A project's package-manager pin is never a reason to refuse a runtime. For
+`node` that falls out of the spec being the one **for the requested tool**: it
+reads `devEngines.runtime` and never sees the pin beside it, so `jup node` in a
+pnpm-pinned project resolves node, and a `devEngines.runtime` beside that pin
+does not affect `jup pnpm`.
+
+`bun`, `deno` and `nub` are runtimes *and* package managers (§2.3
+`alsoRuntime`). They do read the field the other manager's pin is in, so the
+mismatch arises and is answered here: it falls back, exactly as a transparent
+command does. `jup deno` in a pnpm-pinned project runs deno rather than
+refusing.
+
+The escape is read off the **requested** name, which is what keeps it one-way:
+
+* `bun server.ts` in a pnpm-pinned project → bun's fallback version.
+* `pnpm install` in a bun-pinned project → still the mismatch error. Being a
+  runtime says nothing about what may run *against* your project.
+* `bun install` in a bun-pinned project → the pinned version, unchanged.
+* `bun install` in a pnpm-pinned project → installs with bun. The entry decides
+  this, not argv; jup does not read a subcommand to work out whether an
+  invocation was runtime-ish, and a rule that did would be a second, softer
+  §3.5 living in the table's command lists.
 
 A version file arrives here as a `Found`, resolved during discovery, so the name
 mismatch cannot arise for it (the name comes from the entry that declared the

@@ -18,6 +18,10 @@
  * mismatch is enforced, and that a runtime must stay out of the default shim set
  * (§10.7). Nothing in §04–§08 may branch on it: resolution, registry access,
  * integrity, the store and execution are one path over both kinds.
+ *
+ * The third of those is the one question an entry may answer without being a
+ * runtime by kind: see {@link ToolDefinition.alsoRuntime}, which bun, deno and
+ * nub declare because they are runtimes *and* package managers.
  */
 export type ToolKind = "package-manager" | "runtime";
 
@@ -233,6 +237,29 @@ export interface ToolDefinition {
    * outside a project, and a runtime's does by definition.
    */
   kind?: ToolKind;
+  /**
+   * §03.5, §02.3 — this entry is a runtime as well as a package manager.
+   *
+   * Not a second {@link ToolKind}, and it changes none of the four things
+   * {@link kind} decides: the entry's pin is still `packageManager` /
+   * `devEngines.packageManager`, that field may still legally name it, its
+   * `transparent.commands` are still consulted and `commands.use` is still what
+   * `use` runs. What it changes is §03.5, and only in one direction — a project
+   * pin naming a *different* package manager is not a reason to refuse this
+   * entry, because the name on the command line is also the name of a runtime,
+   * and `bun server.ts` in a pnpm project is someone running a file rather than
+   * someone reaching for the wrong package manager. `node` gets the same answer
+   * from its `kind` alone (§03.3 sends it to a different field, so the mismatch
+   * cannot arise); this is that behaviour for an entry that has to keep reading
+   * the package-manager field, because it is also pinned in one.
+   *
+   * The relaxation is asymmetric on purpose. A project that pins *this* entry
+   * still refuses every other package manager: `pnpm install` in a bun-pinned
+   * project is the mismatch it always was, and this flag says nothing about it.
+   *
+   * Absent means no — a package manager and nothing else.
+   */
+  alsoRuntime?: boolean;
   /** Compiled-in fallback version, hash-pinned. */
   default: string;
   /**

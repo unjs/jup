@@ -13,6 +13,7 @@ import {
   devEnginesFieldFor,
   isRuntime,
   isSupportedPackageManager,
+  runsAsRuntime,
   versionFileFor,
 } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
@@ -905,7 +906,10 @@ export function reconcile(
     case "Found": {
       const spec = result.getSpec({ requireVersion: binaryVersion === undefined });
       if (spec.name !== requestedName) {
-        if (transparent) {
+        // §03.5 — a package-manager pin is no reason to refuse a runtime, and
+        // the entries that are both arrive here where `node` cannot. Read off
+        // the *requested* name, so a bun-pinned project still refuses pnpm.
+        if (transparent || runsAsRuntime(requestedName)) {
           return withBinaryVersion(fallback);
         }
         throw new UsageError(

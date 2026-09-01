@@ -651,6 +651,61 @@ describe.skipIf(!POSIX)("§03.1 bun, deno, aube, nub and pnpm 12", () => {
     // reports the one file it was.
     expect(result.stdout.trim()).toBe("ran=pnpm args=dlx cowsay moo");
   });
+
+  it("270: another manager's pin does not refuse the entries that are runtimes too", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `pnpm@${PNPM_VERSION}` });
+
+    // §03.5 — `bun`, `deno` and `nub` are package managers *and* runtimes, and
+    // `alsoRuntime` is where the table says so. A pnpm project has pinned which
+    // package manager installs its dependencies; it has not said that the word
+    // `bun` on a command line is an error, and `bun server.ts` here is somebody
+    // running a file. So the mismatch falls back to the requested tool's own
+    // version, exactly as a transparent command does, rather than erroring with
+    // `This project is configured to use pnpm`.
+    const bun = await run(["bun", "server.ts"], options(fixture));
+    expect(withoutDownloadNotices(bun.stderr)).toBe("");
+    expect(bun.exitCode).toBe(0);
+    expect(bun.stdout.trim()).toBe("ran=bun args=server.ts");
+    // The fallback is the compiled-in default, not anything the project said.
+    expect(existsSync(join(fixture.home, "v1", "bun", BUN_VERSION))).toBe(true);
+
+    // A CLI version still overwrites the range on the way through (§03.5), which
+    // is the only reason these two can name a version the table's default is
+    // not: the escape is the same one either way.
+    const deno = await run([`deno@${DENO_VERSION}`, "run", "main.ts"], options(fixture));
+    expect(deno.exitCode).toBe(0);
+    expect(deno.stdout.trim()).toBe("ran=deno args=run main.ts");
+
+    const nub = await run([`nub@${NUB_VERSION}`, "server.ts"], options(fixture));
+    expect(nub.exitCode).toBe(0);
+    expect(nub.stdout.trim()).toBe("ran=nub args=server.ts");
+
+    // And the project's own package manager is untouched by any of it.
+    const pnpm = await run(["pnpm", "install"], options(fixture));
+    expect(pnpm.exitCode).toBe(0);
+    expect(pnpm.stdout.trim()).toBe("ran=pnpm args=install");
+  });
+
+  it("271: the escape is one-way — a bun-pinned project still refuses pnpm", async () => {
+    const fixture = createFixture({ name: "app", packageManager: `bun@${BUN_VERSION}` });
+
+    // Row 270 is read off the *requested* name, so it says nothing about what
+    // may run against a project that pins one of these. This project has chosen
+    // bun as its package manager, and §03.5 is exactly the promise that a
+    // colleague's `pnpm install` will not quietly write a second lockfile into
+    // it. The message names bun, and the field to edit.
+    const pnpm = await run(["pnpm", "install"], options(fixture));
+    expect(pnpm.exitCode).toBe(1);
+    expect(pnpm.stderr).toContain(
+      `This project is configured to use bun because ${join(fixture.cwd, "package.json")} ` +
+        `has a "packageManager" field`,
+    );
+
+    // …and bun itself still resolves the pin rather than the fallback.
+    const bun = await run(["bun", "install"], options(fixture));
+    expect(bun.exitCode).toBe(0);
+    expect(bun.stdout.trim()).toBe("ran=bun args=install");
+  });
 });
 
 /* -------------------------------------------------------------------------- */

@@ -982,6 +982,46 @@ describe("reconcile — §03.5", () => {
     );
   });
 
+  // §03.5 — the entries that are runtimes as well as package managers take the
+  // transparent branch on a mismatch, without being transparent commands.
+  it("falls back instead of erroring for an entry that is also a runtime", () => {
+    for (const requestedName of ["bun", "deno", "nub"]) {
+      const fallback = lazyFallback(requestedName);
+      expect(reconcile(found("yarn@1.0.0"), fallback, { requestedName, transparent: false })).toBe(
+        fallback,
+      );
+    }
+  });
+
+  it("still enforces the pin the other way round, and against every other name", () => {
+    // Read off the *requested* name: a project pinning bun is a project that
+    // has chosen bun, and §03.5 is what stops a colleague's pnpm running in it.
+    manifest(".", { packageManager: "bun@1.4.0" });
+    const result = findProjectSpec(root);
+    expectUsageError(
+      () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
+      `This project is configured to use bun because ${join(root, "package.json")} has a "packageManager" field`,
+    );
+
+    // And bun in its own project still gets the pin, not the fallback.
+    expect(
+      reconcile(findProjectSpec(root), lazyFallback("bun"), {
+        requestedName: "bun",
+        transparent: false,
+      }),
+    ).toEqual({ name: "bun", range: "1.4.0" });
+  });
+
+  it("applies a CLI version to the range it falls back to", () => {
+    expect(
+      reconcile(found("yarn@1.0.0"), lazyFallback("bun"), {
+        requestedName: "bun",
+        transparent: false,
+        binaryVersion: "1.2.0",
+      }),
+    ).toEqual({ name: "bun", range: "1.2.0" });
+  });
+
   // Test 40.
   it("falls back instead of erroring for a transparent command", () => {
     const fallback = lazyFallback("pnpm");

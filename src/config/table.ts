@@ -314,6 +314,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     },
     // §09.9 — bun's package manager keeps a cache of its own.
     storeCommands: [["bun", "pm", "cache"]],
+    // §03.5 — a runtime before it is a package manager, so another manager's
+    // pin does not get to refuse `bun server.ts`.
+    alsoRuntime: true,
     shimByDefault: false,
     // Version bands encode Bun's supported host set at each boundary.
     // Reversed, the newest is tested first (§02.3), so a version gets the
@@ -356,6 +359,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["deno", "init"]],
     },
+    // §03.5 — as bun's: `deno run main.ts` is a runtime request, whatever the
+    // project pins.
+    alsoRuntime: true,
     shimByDefault: false,
     // Per-target packages contain one executable at the package root.
     ranges: [
@@ -424,6 +430,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["nub", "init"], ["nub", "dlx"], ["nub", "x"], ["nubx"]],
     },
+    // §03.5 — the second half of the comment above, in data: `nub server.ts`
+    // runs a file, so another manager's pin cannot refuse the name.
+    alsoRuntime: true,
     shimByDefault: false,
     // Nub supports these eight hosts and exposes `bin/nub{exe}`.
     ranges: [["*", { ...NUB_BAND, targets: NUB_TARGETS }]],
@@ -491,6 +500,20 @@ export function toolKind(name: string): ToolKind {
 /** §02.3 — is this entry a runtime? The four questions below are the only callers. */
 export function isRuntime(name: string): boolean {
   return getDefinition(name)?.kind === "runtime";
+}
+
+/**
+ * §03.5 — is this entry a runtime, whether or not that is *all* it is?
+ *
+ * {@link isRuntime} answers which of §03's rules the entry is subject to, and
+ * bun, deno and nub are subject to the package manager's. This answers the one
+ * question §03.5 asks of the *requested* name, and is its only caller. See
+ * {@link ToolDefinition.alsoRuntime}.
+ */
+export function runsAsRuntime(name: string): boolean {
+  const definition = getDefinition(name);
+  if (definition === undefined) return false;
+  return definition.kind === "runtime" || definition.alsoRuntime === true;
 }
 
 /**

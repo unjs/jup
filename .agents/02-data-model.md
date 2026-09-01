@@ -73,6 +73,7 @@ for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
 ```ts
 {
   kind?: "package-manager" | "runtime",   // absent means package-manager
+  alsoRuntime?: boolean,                  // a package manager that is also a runtime
   default: string,                        // built-in fallback version
   tags?: Record<string, string>,          // dist-tags the table answers itself
   fetchLatestFrom: RegistrySpec,          // where "newest stable?" is answered
@@ -89,7 +90,7 @@ for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
 |---|---|---|
 | Project pin read from | `packageManager`, else `devEngines.packageManager` | `devEngines.runtime` |
 | May appear in `packageManager` | yes | **no** (§03.4) |
-| §03.5 name mismatch | enforced | never applies |
+| §03.5 name mismatch | enforced, unless `alsoRuntime` | never applies |
 | `transparent.commands` | consulted | unused — nothing to bypass |
 | `commands.use` | run by `use`/`up` | absent; a runtime installs nothing |
 | `shimByDefault` | per entry | must be `false` — a runtime's name means something outside any project, so a bare `enable` never claims it |
@@ -97,6 +98,27 @@ for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
 The split is deliberately narrow. Resolution, download, verification, caching and
 execution are identical; only which manifest field speaks, and whether standing
 in someone else's project is an error, differ.
+
+### `alsoRuntime`
+
+`bun`, `deno` and `nub` declare it. They are package managers — their pin is
+`packageManager` / `devEngines.packageManager`, that field may name them,
+`transparent.commands` and `commands.use` apply — and they are *also* runtimes,
+which `kind` has no way to say because an entry has one kind and these have two
+jobs.
+
+It changes one row of the table above and nothing else: §03.5's name mismatch is
+not enforced **against the request**. `bun server.ts` in a pnpm-pinned project
+runs bun's fallback version rather than refusing, the way `node` already does
+there — for `node` because §03.3 sends it to a different field, for these because
+this flag says the name on the command line is a runtime's too.
+
+The relaxation runs one way. The flag is read for the *requested* name, so a
+project that pins bun as its package manager still refuses `pnpm install`, and
+`bun install` in a bun-pinned project still honours the pinned version. What is
+given up is deliberate and is stated in §03.5: `bun install` in a pnpm-pinned
+project installs with bun instead of erroring, because argv is not what decides
+this — the entry is.
 
 ### `default` and `tags`
 

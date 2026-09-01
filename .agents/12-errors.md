@@ -147,6 +147,10 @@ absent or not the one being obeyed.
 
 Absolute, native-separator path, stderr, exit 1.
 
+Not raised for a requested tool that runs as a runtime — `node` by kind, `bun`,
+`deno` and `nub` by `alsoRuntime` (§03.5). It is still raised *about* one: a
+project pinning bun refuses pnpm with this message, naming bun.
+
 ## 12.6 Network and TLS (§05)
 
 ```

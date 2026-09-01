@@ -1646,6 +1646,33 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * Held at 288,000 rather than the 287,569 this leaves, on the same terms as
    * every raise above — and the lowering owed since the 256,000 entry is owed
    * still, against the same resident: `config/table.ts`, now 38,277.
+   *
+   * Re-based to 290,000 for §03.5's `alsoRuntime`: a project's package-manager
+   * pin no longer refuses bun, deno or nub, the three entries that are runtimes
+   * as well as package managers and so cannot take `node`'s way out of the
+   * mismatch — §03.3 sends `node` to a different field, while these read the
+   * very field the other manager's pin is in. 287,959 -> 289,283, **+1,324 or
+   * +0.46%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | the flag on three entries, and `runsAsRuntime` beside `isRuntime` | `config/table.ts` | +1,037 |
+   * | §03.5's one-way escape in `reconcile`, and the import reaching it | `project/manifest.ts` | +287 |
+   *
+   * Measured, `dist/index.mjs` 189,781 -> 189,919, **+138 bytes or +0.07%**.
+   * Source grew 0.46% and the chunk 0.07%, which is the signature of an entry
+   * that is almost all prose: the executable part is three booleans, a two-line
+   * predicate and one `||`.
+   *
+   * None of it can move off the warm path. The mismatch is decided on every
+   * proxy run that finds a pin, and the flag is read off the entry the caller
+   * has already loaded. The long form of the argument — why this is a flag
+   * rather than a second `kind`, and why the escape is read off the *requested*
+   * name only — was written into `types.ts`, which is type-only and outside this
+   * sum, on the same terms as the `storeCommands` entry above. What is owed is
+   * unchanged and now owed twice over against the same resident: this entry puts
+   * another kilobyte into `config/table.ts`, now 39,314, still read one band at
+   * a time by every `yarn --version`.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1657,7 +1684,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(288_000);
+    ).toBeLessThanOrEqual(290_000);
   });
 });
 

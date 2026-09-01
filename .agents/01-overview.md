@@ -29,6 +29,12 @@ Every table entry is a **tool**, and its `kind` says which sort:
 * a **runtime** (`node`) is declared in `devEngines.runtime`, is never enforced
   against, and is never a legal `packageManager` value.
 
+`bun`, `deno` and `nub` are both: package managers by `kind`, and runtimes by the
+`alsoRuntime` flag beside it (§02.3). The flag buys them the runtime's exemption
+from §03.5 and nothing else — someone else's pnpm pin cannot refuse `bun
+server.ts`, while their own pin is read, written and enforced against the way
+every package manager's is.
+
 Both kinds run through one pipeline: `jup node@22 --version` resolves, downloads,
 verifies, caches and executes by the same rules as `jup yarn@4`.
 
