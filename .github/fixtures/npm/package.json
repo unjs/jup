@@ -1,0 +1,11 @@
+{
+  "name": "setup-jup-fixture-npm",
+  "version": "0.0.0",
+  "private": true,
+  "devEngines": {
+    "packageManager": { "name": "npm", "version": "^11" }
+  },
+  "dependencies": {
+    "ms": "2.1.3"
+  }
+}

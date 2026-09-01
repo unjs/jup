@@ -1,35 +1,31 @@
-# jup's unpublished replacement for `actions/setup-node` + `corepack enable`.
-# It installs the project runtime, shims jup's table, and caches jup's store and
-# the manager's store. Inputs reach scripts through the environment, never
-# expression interpolation; only the §09 command surface and `info --json` are used.
+# Set up jup from project pins. See https://jup.unjs.io/actions.
 name: setup-jup
 description: Install the project's pinned Node.js runtime and package managers with jup.
+author: unjs
+
+branding:
+  icon: package
+  color: yellow
 
 inputs:
   node-version:
     description: >-
-      Version, range or tag for Node.js. `lts` is the default and is recorded as
-      the global default only (§09.3): a project's own `devEngines.runtime` or
-      `.nvmrc` still wins (§04.5). Empty leaves even that unrecorded and lets
-      jup's built-in default answer an unpinned project. `setup-node` spellings
-      are translated — `lts/*` becomes `lts`, `node` and `current` become
-      `latest`, and a leading `v` is dropped.
+      A Node.js version, range, or tag. Project pins take priority. An empty
+      value uses jup's default.
     required: false
     default: lts
   jup-version:
-    description: The jup release to install, as an npm spec.
+    description: The jup npm version to install. Use an exact version for repeatable jobs.
     required: false
     default: latest
   package-managers:
     description: >-
-      Package managers to shim, space-separated. `auto` (the default) is every
-      entry in jup's table, the opt-in runtimes included, so `npm`, `bun` and
-      `deno` are all shimmed. `none` shims no manager. `node` is not governed by
-      this input and is always shimmed.
+      Space-separated tools to shim. `auto` shims every tool. `none` shims no
+      package manager. Node.js is always shimmed.
     required: false
     default: auto
   cache:
-    description: Save and restore `JUP_HOME` between runs.
+    description: Save and restore `JUP_HOME`, jup's own store, between runs.
     required: false
     default: "true"
   cache-dependencies:
@@ -38,10 +34,8 @@ inputs:
     default: "true"
   install:
     description: >-
-      Install the project's dependencies with `jup install` (§09.15), after both
-      caches are restored. `true` (the default) runs the bare command, `false`
-      installs nothing, and any other value is forwarded to the pinned manager
-      verbatim — `--frozen-lockfile` is pnpm's flag, not one of jup's.
+      Install dependencies with the pinned manager. `false` skips this. Any
+      other value except `true` is passed to the manager.
     required: false
     default: "true"
   working-directory:
@@ -51,19 +45,19 @@ inputs:
 
 outputs:
   node-version:
-    description: The exact Node.js version the `node` shim resolves.
+    description: The selected Node.js version.
     value: ${{ steps.node.outputs.version }}
   node-path:
     description: Absolute path of the `node` shim.
     value: ${{ steps.node.outputs.path }}
   package-manager:
-    description: The package manager the project pins, or empty when it pins none.
+    description: The pinned package manager, or an empty value.
     value: ${{ steps.project.outputs.package-manager }}
   bin-directory:
-    description: The directory prepended to `PATH`, holding every shim.
+    description: The shim directory added to `PATH`.
     value: ${{ steps.paths.outputs.bin }}
   jup-home:
-    description: The value of `JUP_HOME` for the rest of the job.
+    description: The `JUP_HOME` value used by later steps.
     value: ${{ steps.paths.outputs.home }}
 
 runs:
@@ -81,6 +75,13 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+
+        # jup needs the runner's Node.js only to start.
+        if ! command -v node >/dev/null 2>&1; then
+          echo "::error::setup-jup needs Node.js on PATH. Install it first or run actions/setup-node."
+          exit 1
+        fi
+
         temp="${RUNNER_TEMP//\\//}"
         # Preserve caller-supplied locations; otherwise use runner-local defaults.
         home="${JUP_HOME:-$temp/jup-home}"
@@ -178,8 +179,8 @@ runs:
                 throw new Error(`jup tarball integrity mismatch: got ${actual}, expected ${expected}`);
               }
             ' "$integrity"
-            tar -xzf jup.tgz
-            payload="$work/package"
+            # Use npx if tar is missing or cannot unpack the verified file.
+            if tar -xzf jup.tgz; then payload="$work/package"; fi
           fi
         fi
 
@@ -248,7 +249,7 @@ runs:
         ' >> "$GITHUB_OUTPUT"
 
     # `JUP_HOME` contains trusted executables: bind cache reuse to the host, jup,
-    # and runtime request, and pin the cache action by digest (docs/3.ci.md, §07).
+    # and runtime request, and pin the cache action by digest (docs/4.ci.md, §07).
     #
     # The last segment is jup's own answer for which files decide a run (§09.9),
     # not a guess at their names: a workspace root above `working-directory` is

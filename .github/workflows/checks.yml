@@ -18,11 +18,9 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v6
-      # jup replaces `setup-node`, `corepack enable` and `pnpm install` in one
-      # step: it installs the runtime, shims the pinned package manager, warms
-      # both stores, and runs the manager's own install.
+      # Set up the pinned tools and install dependencies.
       - name: Setup jup
-        uses: ./.github/actions/setup-jup
+        uses: ./
       - if: runner.os == 'Linux'
         run: pnpm typecheck
       - run: pnpm vitest --coverage

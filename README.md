@@ -98,6 +98,19 @@ network settings, and shims.
 
 [Read the complete getting-started guide →](https://jup.unjs.io)
 
+## GitHub Actions
+
+`setup-jup` reads your project pins, installs the tools, restores their caches,
+and installs dependencies.
+
+```yaml
+- uses: actions/checkout@v6
+- uses: unjs/jup@v0
+- run: pnpm test
+```
+
+[See inputs, outputs, and examples →](https://jup.unjs.io/actions)
+
 ## Why jup?
 
 - **One version for the whole team.** The project records the tool it needs.
@@ -134,6 +147,7 @@ top-level `packageManager` pins remain supported.
 
 - [Get started](https://jup.unjs.io)
 - [Projects, pins, ranges, and workspaces](https://jup.unjs.io/projects)
+- [GitHub Actions](https://jup.unjs.io/actions)
 - [CI, containers, and offline installs](https://jup.unjs.io/ci)
 - [Registries, authentication, TLS, and proxies](https://jup.unjs.io/registry)
 - [Command reference](https://jup.unjs.io/commands)

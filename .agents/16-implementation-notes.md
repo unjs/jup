@@ -50,7 +50,7 @@ target.
 
 The bundle's **public surface is one function**: `src/index.ts` exports
 `runMain` and nothing else, which is what `package.json`'s `exports` gives an
-embedder (`docs/10.api.md`). `parseArgs`, `parseSpec`, `findProjectSpec`,
+embedder (`docs/11.api.md`). `parseArgs`, `parseSpec`, `findProjectSpec`,
 `resolveSpec`, `ensureInstalled`, `UsageError` and the types were all exported
 once; each was a second contract to keep stable for a caller who had not asked
 for one, and every argument routed through `runMain` already reaches them. Add
@@ -79,6 +79,24 @@ read of `process.stdout` or `process.stderr` *constructs* the stream, which load
 stream only inside the call that writes, never at module load. `node:util` itself
 is free (it is in Node's startup snapshot), and `styleText` adds one module when a
 line is actually coloured.
+
+## Published GitHub action
+
+The root `action.yml` defines the Marketplace action `setup-jup`. Local
+workflows use the same file with `uses: ./`.
+
+The action MUST use only §09 commands and `info --json`. It MUST pass inputs to
+scripts through `env:`, not expression interpolation. Keep its inputs and
+behavior in sync with `docs/3.actions.md`.
+
+`.github/workflows/setup-jup.yml` tests the action with projects in
+`.github/fixtures` and temporary unpinned projects. It installs the published
+jup release, not the working tree. A weekly run checks the current release.
+
+`.github/workflows/release-tags.yml` moves the major and minor tags, such as
+`v0` and `v0.5`, to each stable release. Treat any change to an existing input
+or default as a minor release and note it in the changelog. Publish each release
+to the Marketplace from its GitHub release page.
 
 ## Source map
 
