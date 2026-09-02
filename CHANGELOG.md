@@ -1,6 +1,26 @@
 # Changelog
 
 
+## v0.5.5
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5.4...v0.5.5)
+
+### 🩹 Fixes
+
+- Warn and skip unsupported .nvmrc aliass ([eac45f7](https://github.com/unjs/jup/commit/eac45f7))
+
+### 🏡 Chore
+
+- Apply automated updates ([c598ea8](https://github.com/unjs/jup/commit/c598ea8))
+
+### 🤖 CI
+
+- Fix action ([866b6cb](https://github.com/unjs/jup/commit/866b6cb))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.5.4
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5...v0.5.4)
