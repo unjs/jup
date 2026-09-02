@@ -133,6 +133,17 @@ tarball bytes.
   for five minutes. The cache is written temp-then-rename, degrades to "nothing
   cached" on anything malformed, and never fails a run.
 
+  The refresh MUST NOT run, and the cache MUST NOT be written, when transport
+  trust is weakened — `strict-ssl` off, or a `cafile`/`ca` replacing the
+  platform trust store (§05.1). The key document is the one response that
+  *extends* the trust root and nothing but the TLS certificate stands behind it,
+  so a merge made over an inspected connection would write the inspector's key
+  to `<home>/keys.json` permanently and silently: the cached keyid then matches
+  and no later run refreshes again. Such a run keeps the embedded set, the
+  `JUP_INTEGRITY_KEYS` override and any *previously* cached keys, and prints the
+  §12.7 advisory naming the TLS source. Automatic rotation behind an inspecting
+  proxy is traded away deliberately; §06.4's override is the remedy.
+
 ## 6.4 Disabling and overriding
 
 `JUP_INTEGRITY_KEYS` set to `""` or `0` — exactly those two values — disables

@@ -42,6 +42,11 @@ setting rather than continuing on default trust.
 verification and prints the disabled-verification warning naming its source.
 Project files can neither set auth nor weaken TLS.
 
+Weakened TLS — verification off, or a bundle replacing the platform store — also
+withdraws one capability: §06.3's signing-key refresh does not run and its cache
+is not written, because that response is the only one that extends the trust
+root.
+
 Common TLS failures are classified rather than wrapped as generic transport
 errors: unknown authority (pointing at `JUP_CAFILE` for TLS-inspecting proxies),
 expired or not-yet-valid (pointing at the clock), and hostname mismatch.

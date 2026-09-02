@@ -200,7 +200,11 @@ Refusing to install <name>@<version>: <source> provides no signature and no hash
 ⚠ jup integrity warning: <name>@<version> carries a valid signature from <keyid>, a key that expired <expires>; accepting it
 ⚠ <registry> does not publish signatures for <package>@<version>; falling back to integrity-only verification
 ⚠ Installing <name>@<version> from <source> with no signature and no pinned hash (JUP_ALLOW_UNVERIFIED=1)
+⚠ jup did not refresh npm's signing keys: TLS trust is weakened (by <source>), and keys fetched over an unverified connection cannot extend the trust store. Set JUP_INTEGRITY_KEYS to the keys you trust instead.
 ```
+
+`<source>` in the key-refresh advisory is spelled as §05.1 spells it elsewhere:
+the variable under the name the user set, or `cafile (/home/u/.npmrc)`.
 
 The hash-mismatch format is used operationally — users read the `got` value and
 paste it into their pin — so keep it.

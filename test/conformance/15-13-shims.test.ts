@@ -31,6 +31,7 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -585,6 +586,37 @@ describe("§10.6 — disable is non-destructive", () => {
       expect(existsSync(join(options.home, "shims.json"))).toBe(false);
       expect((await run(["disable", "yarn"], options)).exitCode).toBe(0);
       expect(readFileSync(real, "utf8")).toBe(body);
+    },
+  );
+
+  it.skipIf(IS_WINDOWS)(
+    "B6: a torn record does not turn disable into a silent deletion",
+    async () => {
+      const { shimDir, options } = shimFixture();
+      const real = join(shimDir, "yarn");
+      const body = "#!/bin/sh\necho the real yarn\n";
+      writeFileSync(real, body);
+      await chmod(real, 0o755);
+
+      expect((await run(["enable", "yarn", "--force"], options)).exitCode).toBe(0);
+      const record = join(options.home, "shims.json");
+      expect(existsSync(record)).toBe(true);
+
+      // What a kill between `open(O_TRUNC)` and the write used to leave behind.
+      writeFileSync(record, "");
+
+      const removed = await run(["disable", "yarn"], options);
+
+      // §10.6 — it continues: the shim is gone and the exit code is 0.
+      expect(removed.exitCode).toBe(0);
+      expect(lstatSync(real, { throwIfNoEntry: false })).toBeUndefined();
+      // But not silently. The user's yarn is still under `<home>/displaced/`,
+      // and both paths are named so it can be moved back by hand.
+      expect(removed.stderr).toContain(record);
+      expect(removed.stderr).toContain(join(options.home, "displaced"));
+      const parked = readdirSync(join(options.home, "displaced"));
+      expect(parked).toHaveLength(1);
+      expect(readFileSync(join(options.home, "displaced", parked[0]!), "utf8")).toBe(body);
     },
   );
 

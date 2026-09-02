@@ -7,8 +7,10 @@ const { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } =
 const { join } = process.getBuiltinModule("node:path");
 import { ENV, readEnv } from "../config/env-vars.ts";
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
+import { advisory, messages } from "../errors-cold.ts";
 import { envDisabled } from "../project/env.ts";
 import { httpGetJson } from "../net/http.ts";
+import { tlsSettings } from "../net/tls.ts";
 import { getTrustedKeys, UntrustedKeyidError, verifySignature } from "./integrity.ts";
 import { getHomeFolder } from "../cache/store.ts";
 import type { RegistrySignature, TrustedKey } from "../types.ts";
@@ -86,10 +88,18 @@ export async function verifySignatureWithRefresh(input: {
   let refreshed = cached.keys;
 
   if (shouldRefresh(cached, input.signatures)) {
-    const fetched = await fetchNpmKeys();
-    if (fetched !== undefined) {
-      writeKeysCache(fetched);
-      refreshed = fetched;
+    // §06.3 — a refresh *extends the trust root*, so it is the one request whose
+    // answer may not be taken over a channel the user has told us not to
+    // authenticate. See {@link weakenedTransport}.
+    const weakened = weakenedTransport();
+    if (weakened === undefined) {
+      const fetched = await fetchNpmKeys();
+      if (fetched !== undefined) {
+        writeKeysCache(fetched);
+        refreshed = fetched;
+      }
+    } else {
+      advisory(messages.keyRefreshSkippedTls(weakened));
     }
   }
 
@@ -128,6 +138,44 @@ export function shouldRefresh(
   if (envDisabled(ENV.ENABLE_NETWORK)) return false;
   if (matchesSignature(cached.keys, signatures)) return false;
   return cached.fetchedAt === undefined || Date.now() - cached.fetchedAt >= REFRESH_INTERVAL;
+}
+
+/**
+ * Where transport trust was weakened, or `undefined` when it is the platform's.
+ *
+ * §06.3 fetches this document to *add* keys to the trust root, and the only
+ * thing standing behind those bytes is the TLS certificate of
+ * `registry.npmjs.org` — there is no signature over a key list to fall back on.
+ * So under `JUP_STRICT_SSL=0`, or a `cafile`/`ca` that **replaces** the platform
+ * store (§05.1), whoever terminates the connection chooses the keys, and the
+ * merge writes their choice to `<home>/keys.json`. That poisoning is permanent
+ * and silent: the cached keyid then matches, {@link shouldRefresh} never fires
+ * again, and every later run — clean environment, verification on — accepts the
+ * attacker's signatures with no output.
+ *
+ * A weakened transport therefore buys no refresh and no cache write. What
+ * survives is the embedded set, the user's `JUP_INTEGRITY_KEYS` and whatever was
+ * cached *before*, so a machine that legitimately sits behind an inspecting
+ * proxy loses automatic key rotation and keeps §06.4's override, which §06.4
+ * already makes final. The advisory names that trade rather than leaving the
+ * run to fail at step 4 with no explanation.
+ *
+ * The string is the *source*, spelled as §05.1 spells it in every other TLS
+ * line: the variable under the name the user actually set, or
+ * `cafile (/home/u/.npmrc)` when a file supplied it.
+ *
+ * Exported for the tests for {@link shouldRefresh}'s reason: under
+ * `JUP_STRICT_SSL=0` the request would leave `globalThis.fetch` for the
+ * `node:https` transport (§05.1), so a spy on `fetch` cannot tell this rule from
+ * its absence. The decision is the observable thing, so the decision is what
+ * gets asserted.
+ */
+export function weakenedTransport(): string | undefined {
+  const settings = tlsSettings();
+  if (!settings.verify) return settings.verifySource ?? "the environment";
+  if (settings.cafile !== undefined) return settings.cafileSource ?? ENV.CAFILE;
+  if (settings.ca !== undefined) return settings.caSource ?? ".npmrc ca";
+  return undefined;
 }
 
 function matchesSignature(

@@ -262,6 +262,12 @@ atomically clears that record and backup. It never restores over a foreign entry
 installed after jup's shim, and a failed restoration is reported by path with the
 record retained for another attempt.
 
+A record that is present but cannot be read or parsed does not stop `disable`:
+it removes the shims as asked and exits 0. But it must not do so silently — the
+backups under `<home>/displaced/` are then the only copy of a binary the user
+had, and only the index to them is gone. Warn, naming both `shims.json` and
+`<home>/displaced/`, so they can be moved back by hand.
+
 `disable` never touches a name it was not asked about and is safe to repeat.
 `disable yarn` covers `yarn` and `yarnpkg`, because a name expands to its full
 binary set.

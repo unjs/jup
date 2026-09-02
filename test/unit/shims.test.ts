@@ -38,6 +38,7 @@ import {
   cliEntryNotWritable,
   cmdDisable,
   cmdEnable,
+  displacedRecordUnreadable,
   type DisplacedEntry,
   generatePosixLink,
   generateWin32Link,
@@ -1272,6 +1273,76 @@ describe("restoring what enable displaced (§10.6)", () => {
 
     expectMode(file, 0o755);
     expect(readDisplacedRecord()).toEqual([]);
+  });
+
+  it("B6: a torn record is written whole or not at all", async () => {
+    const other = join(root, "other");
+    mkdirSync(other);
+    write(join(other, "pnpm"), "#!/bin/sh\n", 0o755);
+    write(join(binDir, "pnpm"), "#!/bin/sh\n", 0o755);
+    await cmdEnable([`--install-directory=${other}`, "--force", "pnpm"], dist);
+    await cmdEnable([`--install-directory=${binDir}`, "--force", "pnpm"], dist);
+
+    // The rename is the commit point (§07.5), so a successful write leaves
+    // nothing beside the record.
+    const record = join(corepackHome, "shims.json");
+    const strays = () => readdirSync(corepackHome).filter((name) => name.endsWith(".tmp"));
+    expect(strays()).toEqual([]);
+    const before = readFileSync(record, "utf8");
+    expect(readDisplacedRecord()).toHaveLength(2);
+
+    // Block the temp file, which is the only thing between the old record and
+    // the new one. The old record has to survive intact: a stump here reads
+    // back as "nothing was displaced" and loses both parked binaries.
+    mkdirSync(`${record}.${process.pid}.tmp`);
+    await expect(cmdDisable([`--install-directory=${binDir}`, "pnpm"])).rejects.toThrow();
+
+    expect(readFileSync(record, "utf8")).toBe(before);
+    expect(readDisplacedRecord()).toHaveLength(2);
+  });
+
+  it("B6: says where the backups are when the record cannot be read", async () => {
+    const file = join(binDir, "pnpm");
+    const foreign = "#!/bin/sh\n# a real pnpm\nexit 3\n";
+    write(file, foreign, 0o755);
+    await cmdEnable([`--install-directory=${binDir}`, "--force", "pnpm"], dist);
+
+    const record = join(corepackHome, "shims.json");
+    const backup = readDisplacedRecord()[0]?.backup;
+    expect(backup).toBeDefined();
+    // A truncated write from before §07.5 covered this file, or a hand-edit.
+    writeFileSync(record, "");
+
+    // §10.6 — `disable` still does what it was asked, and still exits 0.
+    expect(await cmdDisable([`--install-directory=${binDir}`, "pnpm"])).toBe(0);
+    expect(existsSync(file)).toBe(false);
+
+    // But the parked copy is now the user's only pnpm, so it is not silent.
+    expect(warn).toHaveBeenCalledWith(
+      displacedRecordUnreadable(record, join(corepackHome, "displaced")),
+    );
+    const message = warn.mock.calls.flat().join("\n");
+    expect(message).toContain(record);
+    expect(message).toContain(join(corepackHome, "displaced"));
+    // Named, and still there to be moved back by hand.
+    expect(readFileSync(backup!, "utf8")).toBe(foreign);
+  });
+
+  it("B6: a record whose `displaced` is not an array is reported too", () => {
+    const record = join(corepackHome, "shims.json");
+    mkdirSync(corepackHome, { recursive: true });
+    writeFileSync(record, JSON.stringify({ version: 1, displaced: "gone" }));
+
+    expect(readDisplacedRecord()).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      displacedRecordUnreadable(record, join(corepackHome, "displaced")),
+    );
+  });
+
+  it("B6: an absent record is the ordinary case and stays silent", () => {
+    expect(existsSync(join(corepackHome, "shims.json"))).toBe(false);
+    expect(readDisplacedRecord()).toEqual([]);
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("leaves records for other directories alone", async () => {

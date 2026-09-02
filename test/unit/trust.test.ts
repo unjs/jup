@@ -10,7 +10,7 @@
  */
 
 import { generateKeyPairSync, type KeyObject, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +27,7 @@ import {
   sanitiseKeys,
   shouldRefresh,
   verifySignatureWithRefresh,
+  weakenedTransport,
   writeKeysCache,
 } from "../../src/verify/trust.ts";
 import { resetNpmrcCache } from "../../src/net/npmrc.ts";
@@ -157,6 +158,8 @@ beforeEach(() => {
   process.env.COREPACK_HOME = home;
   delete process.env.COREPACK_INTEGRITY_KEYS;
   delete process.env.COREPACK_ENABLE_NETWORK;
+  delete process.env.JUP_STRICT_SSL;
+  delete process.env.JUP_CAFILE;
   for (const name of PROXY_VARIABLES) {
     savedProxies[name] = process.env[name];
     delete process.env[name];
@@ -174,6 +177,8 @@ afterEach(() => {
   delete process.env.COREPACK_HOME;
   delete process.env.COREPACK_INTEGRITY_KEYS;
   delete process.env.COREPACK_ENABLE_NETWORK;
+  delete process.env.JUP_STRICT_SSL;
+  delete process.env.JUP_CAFILE;
   for (const name of PROXY_VARIABLES) {
     const value = savedProxies[name];
     if (value === undefined) delete process.env[name];
@@ -346,6 +351,111 @@ describe("verifySignatureWithRefresh — §06.3", () => {
     await expect(verify([signature(makeKeypair("SHA256:unknown"))])).rejects.toThrow(
       /SHA256:rotated/,
     );
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+
+/**
+ * §06.3 — the refresh is the one response that *extends* the trust root, and
+ * nothing but a TLS certificate stands behind it.
+ *
+ * The failure these rows exist for is not a bad install, it is a permanent one:
+ * a key merged from an inspected connection lands in `<home>/keys.json`, the
+ * cached keyid then matches, and no later run refreshes again — so every
+ * subsequent run, clean environment and verification on, accepts that key with
+ * no output at all. The invariant asserted is therefore "the file did not
+ * change", not "this run failed".
+ */
+describe("no key refresh over a weakened transport — §06.3, §05.1", () => {
+  const CERTIFICATE = "-----BEGIN CERTIFICATE-----\nZm9v\n-----END CERTIFICATE-----\n";
+
+  function cachePath(): string {
+    return join(home, KEYS_CACHE_NAME);
+  }
+
+  it("names the source that weakened it, and nothing when the platform store is in force", () => {
+    expect(weakenedTransport()).toBeUndefined();
+
+    process.env.JUP_STRICT_SSL = "0";
+    expect(weakenedTransport()).toBe("JUP_STRICT_SSL");
+    delete process.env.JUP_STRICT_SSL;
+
+    // A replaced trust store is the same exposure by a quieter route: whoever
+    // owns the bundle owns the certificate the key document arrives under.
+    process.env.JUP_CAFILE = join(home, "proxy-ca.pem");
+    expect(weakenedTransport()).toBe("JUP_CAFILE");
+    delete process.env.JUP_CAFILE;
+
+    // §11's value table: only `0` disables verification, so a typo must not.
+    process.env.JUP_STRICT_SSL = "false";
+    expect(weakenedTransport()).toBeUndefined();
+  });
+
+  it("does not fetch or cache keys under JUP_STRICT_SSL=0", async () => {
+    const rotated = makeKeypair("SHA256:attacker");
+    useEmbedded([trustedKey(makeKeypair("SHA256:shipped"))]);
+    serveKeys([trustedKey(rotated)]);
+    process.env.JUP_STRICT_SSL = "0";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(verify([signature(rotated)])).rejects.toBeInstanceOf(UntrustedKeyidError);
+
+    // The whole point: the trust store on disk is untouched, so the next run —
+    // with no flag and no proxy — still does not know this key.
+    expect(existsSync(cachePath())).toBe(false);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("did not refresh npm's signing keys"),
+    );
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("JUP_STRICT_SSL"));
+    warn.mockRestore();
+  });
+
+  it("does not fetch or cache keys under a replaced trust store", async () => {
+    const rotated = makeKeypair("SHA256:attacker");
+    useEmbedded([trustedKey(makeKeypair("SHA256:shipped"))]);
+    serveKeys([trustedKey(rotated)]);
+    writeFileSync(join(home, "proxy-ca.pem"), CERTIFICATE);
+    process.env.JUP_CAFILE = join(home, "proxy-ca.pem");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(verify([signature(rotated)])).rejects.toBeInstanceOf(UntrustedKeyidError);
+
+    // A custom CA keeps the request on `fetch` (§05.1 installs it process-wide
+    // rather than switching transport), so here the spy really does prove it.
+    expect(fetchMock).toHaveBeenCalledTimes(0);
+    expect(existsSync(cachePath())).toBe(false);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("JUP_CAFILE"));
+    warn.mockRestore();
+  });
+
+  it("still uses keys cached before the transport was weakened", async () => {
+    // Withdrawing the refresh is not withdrawing the cache: those keys arrived
+    // over a verified connection, and a laptop that moves onto an inspected
+    // network must keep installing what it could install yesterday.
+    const rotated = makeKeypair("SHA256:rotated");
+    useEmbedded([trustedKey(makeKeypair("SHA256:shipped"))]);
+    seedCache([trustedKey(rotated)]);
+    const before = cacheFile();
+    process.env.JUP_STRICT_SSL = "0";
+
+    await expect(verify([signature(rotated)])).resolves.toBeUndefined();
+
+    expect(cacheFile()).toBe(before);
+  });
+
+  it("says nothing on a run that would not have refreshed anyway", async () => {
+    // The advisory rides the failure path, not the flag: a healthy install
+    // behind a corporate proxy gets no new line on stderr.
+    const npm = makeKeypair("SHA256:shipped");
+    useEmbedded([trustedKey(npm)]);
+    process.env.JUP_STRICT_SSL = "0";
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(verify([signature(npm)])).resolves.toBeUndefined();
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
 

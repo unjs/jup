@@ -226,8 +226,8 @@ same version are content-identical and the loser discards its work; installs of
 different versions never collide. A lock would add stale-lock failures to solve a
 problem the rename already solves, and would cost the fast-path budget.
 
-The same rule governs the home-level JSON — `lastKnownGood.json`, `keys.json`
-(§04.5, §06.3). Each is replaced by a temp-then-rename in its own directory, so a
+The same rule governs the home-level JSON — `lastKnownGood.json`, `keys.json`,
+`shims.json` (§04.5, §06.3, §10.6). Each is replaced by a temp-then-rename in its own directory, so a
 reader sees one whole version or another and never a truncated file, which
 matters because these readers treat a damaged file as empty and would otherwise
 lose a default rather than notice. What the rename does **not** give is a guarded

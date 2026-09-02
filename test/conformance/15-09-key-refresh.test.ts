@@ -18,9 +18,11 @@
  * refresh that fired once from one that fires on every invocation.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { CERT } from "../_fixtures/tls.ts";
 import {
   cleanupFixtures,
   createFixture,
@@ -50,6 +52,17 @@ function keyRequests(): string[] {
 function cachedKeys(home: string): unknown {
   return JSON.parse(readFileSync(join(home, "keys.json"), "utf8"));
 }
+
+/**
+ * A PEM bundle for `JUP_CAFILE` — the §05.1 tier that **replaces** the platform
+ * trust store, which is the shape a TLS-inspecting proxy is configured in.
+ *
+ * The certificate inside it is never presented by anything here: the mock is
+ * reached over plain HTTP, so the bundle's only observable effect is that jup
+ * knows its trust store came from somewhere other than the platform.
+ */
+const caFile = join(mkdtempSync(join(tmpdir(), "jup-conf-keys-ca-")), "bundle.pem");
+writeFileSync(caFile, `${CERT}\n`);
 
 beforeAll(async () => {
   await registry.start();
@@ -237,5 +250,72 @@ describe("§06.3 — key refresh on an unknown keyid", () => {
     expect(result.stdout).toBe("6.6.2\n");
     expect(keyRequests()).toEqual([]);
     expect(existsSync(join(fixture.home, "keys.json"))).toBe(false);
+  });
+
+  /**
+   * §06.3, §05.1 — a weakened transport refreshes nothing, and the two runs
+   * are what make that worth a row.
+   *
+   * The refresh is the only response jup takes that *extends* its trust root,
+   * and the only thing standing behind it is a TLS certificate. Take it over a
+   * connection the user has told jup not to authenticate and the key that
+   * arrives is written to `<home>/keys.json` for good: the cached keyid matches
+   * from then on, so no later run refreshes, and a run with no proxy and no flag
+   * — run 2 here — installs whatever that key signed, silently. Run 2 is
+   * therefore the assertion; run 1 only sets the trap.
+   */
+  it("162: a replaced trust store refreshes nothing, and poisons nothing", async () => {
+    registry.publishedKeys = [registry.keyEntry()];
+    const fixture = createFixture({ packageManager: "pnpm@6.6.2" });
+
+    const first = await run(["pnpm", "--version"], {
+      ...fixture,
+      registry,
+      env: { JUP_CAFILE: caFile },
+    });
+
+    expect(first.exitCode).toBe(1);
+    expect(first.stderr).toContain("The package was not signed by any trusted keys");
+    // Named, so the user is not left reading this as "jup does not know npm's
+    // current key", and pointed at the override that still works.
+    expect(first.stderr).toContain("did not refresh npm's signing keys");
+    expect(first.stderr).toContain("JUP_CAFILE");
+    expect(first.stderr).toContain("JUP_INTEGRITY_KEYS");
+    expect(keyRequests()).toEqual([]);
+    expect(existsSync(join(fixture.home, "keys.json"))).toBe(false);
+
+    // Run 2: the same home, now on a clean network. Nothing was carried over
+    // from run 1, so this run must do its own refresh over its own transport.
+    registry.requests = [];
+    const second = await run(["pnpm", "--version"], { ...fixture, registry });
+
+    expect(second.exitCode).toBe(0);
+    expect(keyRequests()).toEqual(["https://registry.npmjs.org/-/npm/v1/keys"]);
+    expect(existsSync(join(fixture.home, "keys.json"))).toBe(true);
+  });
+
+  it("162: keys cached before the transport was weakened still verify", async () => {
+    // The other side of the trade: the refresh is withdrawn, the cache is not.
+    // A laptop that refreshed at home and then opened its lid behind a corporate
+    // proxy keeps installing what it could install yesterday.
+    registry.publishedKeys = [registry.keyEntry()];
+    const first = createFixture({ packageManager: "pnpm@6.6.2" });
+    expect((await run(["pnpm", "--version"], { ...first, registry })).exitCode).toBe(0);
+    const cached = readFileSync(join(first.home, "keys.json"), "utf8");
+
+    registry.requests = [];
+    const second = createFixture({ packageManager: "pnpm@6.6.3" });
+    const result = await run(["pnpm", "--version"], {
+      cwd: second.cwd,
+      home: first.home,
+      registry,
+      env: { JUP_CAFILE: caFile },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe("6.6.3\n");
+    expect(result.stderr).not.toContain("did not refresh npm's signing keys");
+    expect(keyRequests()).toEqual([]);
+    expect(readFileSync(join(first.home, "keys.json"), "utf8")).toBe(cached);
   });
 });

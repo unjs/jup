@@ -276,6 +276,16 @@ export const messages = {
   notSignedByTrustedKeys: (details: unknown) =>
     `The package was not signed by any trusted keys: ${JSON.stringify(details, undefined, 2)}`,
 
+  /**
+   * §06.3 — the refresh that did not happen. Printed only on a run that was
+   * about to spend the request anyway, so it never fires on a healthy install;
+   * it names the TLS source the way {@link strictSslDisabled} does, and names
+   * the one override that still works, because the alternative is a step-4
+   * failure that reads as "jup does not know npm's current key".
+   */
+  keyRefreshSkippedTls: (source: string) =>
+    `⚠ jup did not refresh npm's signing keys: TLS trust is weakened (by ${source}), and keys fetched over an unverified connection cannot extend the trust store. Set JUP_INTEGRITY_KEYS to the keys you trust instead.`,
+
   signatureMismatch: () => `Signature does not match`,
   unableToLocateBin: () => `Unable to locate bin in package.json`,
 

@@ -626,6 +626,19 @@ export const rehashNotice = () => `⚠ ${REHASH_ADVICE}`;
 /** §10.6 — "if a recorded entry can no longer be restored, say so and continue". */
 export const restoreFailed = (path: string, reason: string) =>
   `⚠ Unable to restore ${path}: ${reason}`;
+
+/**
+ * §10.6 — the record is there but cannot be read, so nothing can be put back.
+ *
+ * Since the record is written temp-then-rename (§07.5) this is not a tear we
+ * produce; what reaches here is a hand-edit, a full disk, or a file left behind
+ * by a version that truncated in place. Either way the parked copies under
+ * `<home>/displaced/` are still the user's only copy of a binary `enable`
+ * moved aside, and `disable` is about to free the paths they belong at — so
+ * name both, rather than exit 0 with nothing said.
+ */
+export const displacedRecordUnreadable = (file: string, backups: string) =>
+  `⚠ ${file} could not be read, so anything \`${TOOL_NAME} enable --force\` moved aside cannot be restored automatically. Copies it saved are under ${backups} and can be moved back by hand.`;
 interface ParsedArgs {
   options: ShimOptions;
   names: string[];
@@ -1662,23 +1675,43 @@ function isValidDisplacedEntry(value: unknown): value is DisplacedEntry {
   );
 }
 
+/**
+ * Said once per run without needing a flag to hold it to that: `disable` reads
+ * the record once, and `enable`'s first {@link appendDisplaced} replaces the
+ * unreadable file with a good one before the next name reads it.
+ */
+function reportRecordUnreadable(): void {
+  advisory(
+    displacedRecordUnreadable(displacedRecordPath(), join(getHomeFolder(), DISPLACED_BACKUP_DIR)),
+  );
+}
+
 export function readDisplacedRecord(): DisplacedEntry[] {
   let raw: string;
   try {
     raw = readFileSync(displacedRecordPath(), "utf8");
-  } catch {
+  } catch (error) {
+    // No record is the ordinary case: nothing has ever been displaced. Anything
+    // else — a permission error, a directory in its place — is a record we
+    // cannot see rather than one that is not there, and is worth the warning.
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") reportRecordUnreadable();
     return [];
   }
 
   try {
     const parsed = JSON.parse(raw) as DisplacedRecord;
-    if (!Array.isArray(parsed.displaced)) return [];
+    if (!Array.isArray(parsed.displaced)) {
+      reportRecordUnreadable();
+      return [];
+    }
     // A single malformed entry is dropped rather than failing the file: the rest
     // of the record is still restorable, and §10.6 asks us to continue.
     return parsed.displaced.filter((entry) => isValidDisplacedEntry(entry));
   } catch {
-    // A corrupt record is not a reason to refuse to disable; it only means there
-    // is nothing we can put back.
+    // A corrupt record is not a reason to refuse to disable — §10.6 asks us to
+    // continue — but it is not "nothing to put back" either: the backups are
+    // still on disk and only the index to them is gone. Continue, and say so.
+    reportRecordUnreadable();
     return [];
   }
 }
@@ -1691,7 +1724,30 @@ function writeDisplacedRecord(entries: DisplacedEntry[]): void {
   }
   mkdirSync(dirname(file), { recursive: true });
   const record: DisplacedRecord = { version: 1, displaced: entries };
-  writeFileSync(file, `${JSON.stringify(record, undefined, 2)}\n`);
+  const content = `${JSON.stringify(record, undefined, 2)}\n`;
+
+  // Temp-then-rename in the record's own directory, like every other home-level
+  // JSON file (§07.5): `rename` is atomic only within one filesystem. A
+  // truncating write that is killed part-way leaves a file the reader cannot
+  // parse, and for this record that is `disable` removing a shim and never
+  // putting back the binary the shim displaced.
+  let tmp: string | undefined;
+  try {
+    tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, content, "utf8");
+    renameSync(tmp, file);
+  } catch (error) {
+    if (tmp !== undefined) {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        // Nothing further to try; the original error is the one that matters.
+      }
+    }
+    // Unlike the caches in §07.5 this one is not best effort: `displace` has
+    // already moved the user's file, and losing the record loses the way back.
+    throw error;
+  }
 }
 
 /**
