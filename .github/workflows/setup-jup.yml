@@ -185,3 +185,61 @@ jobs:
             { echo "::error::the requested version did not take: $(node --version)"; exit 1; }
           [ -e "$NODE_PATH_OUT" ] ||
             { echo "::error::the node-path output does not exist: $NODE_PATH_OUT"; exit 1; }
+
+  # `action.yml` keeps jup's own copy out of the store cache with a glob
+  # negation, and a negation can only subtract from a pattern that matched more
+  # than the one directory containing it. That rule belongs to `actions/cache`,
+  # so it is measured against the same pinned release rather than assumed: save a
+  # `JUP_HOME`-shaped fixture, restore it in the same run, and look at what came
+  # back. A cache write needs a writable scope, which a fork's pull request does
+  # not have.
+  cache-paths:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      # `self` beside the store, as §07.11 lays it out, and one file at the root
+      # so the check covers more than the store directory.
+      - name: Build a JUP_HOME-shaped fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          home="$RUNNER_TEMP/cache-paths"
+          rm -rf "$home"
+          mkdir -p "$home/v1/node/1.0.0" "$home/self/0.0.0"
+          printf 'store\n' > "$home/v1/node/1.0.0/marker"
+          printf 'self\n' > "$home/self/0.0.0/marker"
+          printf 'good\n' > "$home/lastKnownGood.json"
+          echo "home=$home" >> "$GITHUB_ENV"
+
+      # The patterns and the pinned release from `action.yml`; both have to move
+      # together, so a bump that changes the glob rules fails here.
+      - uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.home }}/*
+            !${{ env.home }}/self
+          key: setup-jup-cache-paths-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Discard the fixture
+        shell: bash
+        run: rm -rf "$home"
+
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ${{ env.home }}/*
+            !${{ env.home }}/self
+          key: setup-jup-cache-paths-${{ github.run_id }}-${{ github.run_attempt }}
+          fail-on-cache-miss: true
+
+      - name: Check what the archive held
+        shell: bash
+        run: |
+          set -euo pipefail
+          find "$home" -maxdepth 2
+          [ -e "$home/v1/node/1.0.0/marker" ] ||
+            { echo "::error::the store did not survive the round trip"; exit 1; }
+          [ -e "$home/lastKnownGood.json" ] ||
+            { echo "::error::a file at the root of JUP_HOME was not cached"; exit 1; }
+          [ ! -e "$home/self" ] ||
+            { echo "::error::self/ was archived: the negation subtracted nothing, and a cache hit would replace the copy of jup this run verified"; exit 1; }

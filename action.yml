@@ -266,11 +266,22 @@ runs:
       if: inputs.cache == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        # Do not restore jup's runner-specific absolute interpreter (§10.2).
-        # `self-install` checks the source digest, so it would not repair a stale
-        # cached copy; npx already downloads the source each run (§09.12).
+        # Keep `self/` out of the archive. `self-install` puts a digest-checked
+        # copy of jup there on every run (§09.12, §07.11); restoring cached bytes
+        # over it would replace what this run verified with whatever the newest
+        # key sharing the prefix happened to hold. Leaving it out also keeps each
+        # superseded `self/<version>` from riding along on every version bump.
+        #
+        # The children are listed rather than `<home>` itself, because a bare
+        # directory is not something a negation can subtract from: `@actions/cache`
+        # resolves these patterns with `implicitDescendants: false`, so `<home>`
+        # matches one entry — the directory — and tar then archives all of it,
+        # `self/` included. `<home>/*` matches each direct child instead, which is
+        # what `!<home>/self` can remove, and tar still recurses into the rest.
+        # The `cache-paths` job in `.github/workflows/setup-jup.yml` holds that
+        # behaviour down, since it belongs to the pinned action and not to us.
         path: |
-          ${{ steps.paths.outputs.home }}
+          ${{ steps.paths.outputs.home }}/*
           !${{ steps.paths.outputs.home }}/self
         key: setup-jup-${{ runner.os }}-${{ runner.arch }}-${{ inputs.jup-version }}-${{ inputs.node-version }}-${{ steps.project.outputs.project-key }}
         restore-keys: |

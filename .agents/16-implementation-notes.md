@@ -89,9 +89,20 @@ The action MUST use only §09 commands and `info --json`. It MUST pass inputs to
 scripts through `env:`, not expression interpolation. Keep its inputs and
 behavior in sync with `docs/3.actions.md`.
 
+Its cache of `JUP_HOME` MUST NOT carry `self/`. `self-install` writes a
+digest-checked copy of jup there on every run (§09.12, §07.11), and restoring
+cached bytes over it would put whatever the newest key sharing the prefix held in
+place of what the run verified. `actions/cache` resolves its `path` patterns with
+`implicitDescendants: false`, so the exclusion has to be written against the
+children — `<home>/*` with `!<home>/self` — because a bare directory matches one
+entry and a negation has nothing to subtract from it.
+
 `.github/workflows/setup-jup.yml` tests the action with projects in
 `.github/fixtures` and temporary unpinned projects. It installs the published
-jup release, not the working tree. A weekly run checks the current release.
+jup release, not the working tree. A weekly run checks the current release. Its
+`cache-paths` job is the exception: it runs no jup at all, and saves and restores
+a `JUP_HOME`-shaped fixture through the pinned `actions/cache` release to hold
+the exclusion above down against a version bump.
 
 `.github/workflows/release-tags.yml` moves the major and minor tags, such as
 `v0` and `v0.5`, to each stable release. Treat any change to an existing input
