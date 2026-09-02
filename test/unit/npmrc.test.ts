@@ -20,6 +20,7 @@ import {
   npmrcAuthorizationFor,
   npmrcTlsSettings,
   parseNpmrc,
+  registryTrustFor,
   registryVariableFor,
   resetNpmrcCache,
   resolveRegistry,
@@ -516,5 +517,71 @@ describe("npmrcTlsSettings — §05.1's middle tier", () => {
     const { home, project } = tree();
     write(join(home, ".npmrc"), "strict-ssl=true\n");
     expect(npmrcTlsSettings(project).strictSsl?.value).toBe(true);
+  });
+});
+
+describe("registryTrustFor — who chose the origin (§05.1)", () => {
+  // Load-bearing twice over: `credentialsFor` withholds a token from a
+  // `"project"` origin, and §06.1 withholds the unsigned soft-fail from one. The
+  // predicate had no direct coverage while only the first depended on it.
+  const MIRROR = "https://npm.internal.example";
+
+  it("the built-in default is never the repository's, whatever a file says", () => {
+    const { project } = tree();
+    write(join(project, ".npmrc"), "registry=https://registry.npmjs.org\n");
+    expect(registryTrustFor("https://registry.npmjs.org", project)).toBe("user");
+  });
+
+  it("an origin only a project `.npmrc` names is the repository's", () => {
+    const { project } = tree();
+    write(join(project, ".npmrc"), `registry=${MIRROR}\n`);
+    expect(registryTrustFor(MIRROR, project)).toBe("project");
+  });
+
+  it("an origin only a project env file names is the repository's", () => {
+    const { project } = tree();
+    write(join(project, ".jup.env"), `JUP_NPM_REGISTRY=${MIRROR}\n`);
+    // §11.6 merges the file into the real environment before anything asks, so
+    // the value being present in `process.env` is what the predicate actually
+    // sees — the file is how it tells the two apart.
+    process.env.JUP_NPM_REGISTRY = MIRROR;
+    expect(registryTrustFor(MIRROR, project)).toBe("project");
+  });
+
+  it("the compatibility spelling of that variable is not a way round it", () => {
+    const { project } = tree();
+    write(join(project, ".corepack.env"), `COREPACK_NPM_REGISTRY=${MIRROR}\n`);
+    process.env.COREPACK_NPM_REGISTRY = MIRROR;
+    expect(registryTrustFor(MIRROR, project)).toBe("project");
+  });
+
+  it("the user naming the same origin settles it, whatever the project also says", () => {
+    const { home, project } = tree();
+    write(join(project, ".npmrc"), `registry=${MIRROR}\n`);
+    write(join(home, ".npmrc"), `registry=${MIRROR}\n`);
+    expect(registryTrustFor(MIRROR, project)).toBe("user");
+  });
+
+  it("a real environment variable is the user's, and the file's copy does not change that", () => {
+    const { project } = tree();
+    write(join(project, ".jup.env"), `JUP_NPM_REGISTRY=${MIRROR}\n`);
+    // The file said one thing; the exported variable says another. The value is
+    // what separates them, so the origin the user actually reaches is theirs.
+    process.env.JUP_NPM_REGISTRY = `${MIRROR}/api/npm/npm-remote`;
+    expect(registryTrustFor(`${MIRROR}/api/npm/npm-remote`, project)).toBe("user");
+  });
+
+  it("an origin nobody named is not the repository's — the rule is a deny-list", () => {
+    const { project } = tree();
+    write(join(project, ".npmrc"), `registry=${MIRROR}\n`);
+    // A `dist.tarball` on a CDN, a redirect target, a test's local server: none
+    // of these were moved by the clone, and an allow-list would break all three.
+    expect(registryTrustFor("https://cdn.example", project)).toBe("user");
+  });
+
+  it("an unparseable or absent registry is not the repository's", () => {
+    const { project } = tree();
+    expect(registryTrustFor(undefined, project)).toBe("user");
+    expect(registryTrustFor("not a url", project)).toBe("user");
   });
 });

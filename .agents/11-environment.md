@@ -50,6 +50,15 @@ A real environment variable always beats the file.
 | `JUP_NETWORK_TIMEOUT` | ms | Connect and idle timeout; default 30000 | yes |
 | `JUP_NETWORK_RETRIES` | integer | GET retry attempts; default 3, `0` disables, capped at 10 | yes |
 
+The two registry variables stay env-file eligible, but naming an origin from
+inside the repository is not the same as trusting it. An origin only a project
+file names — either of these variables in a `.jup.env`/`.corepack.env`, or
+`registry=` in a project `.npmrc` — is **project-chosen**: §05.1 withholds
+credentials from it, and §06.1 gives it tier 2 only, so it must publish a
+signature the embedded or user trust store verifies. Setting the same variable
+in your own environment, or naming the registry in `~/.npmrc`, is what makes it
+yours.
+
 ## 11.3 Execution and shims
 
 | Variable | Values | Effect | Env file |

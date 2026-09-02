@@ -31,7 +31,7 @@ import {
   parseSri,
   shouldSkipIntegrityCheck,
 } from "../verify/integrity.ts";
-import { resolveRegistry } from "../net/npmrc.ts";
+import { registryTrustFor, resolveRegistry } from "../net/npmrc.ts";
 import {
   applyRegistryOverride,
   applySourceOverride,
@@ -595,7 +595,17 @@ async function resolveExpectedIntegrity(
   // may add a fetch to a path that already knows what it expects. When §07.3
   // fetched the metadata anyway (a configured registry supplies `dist.tarball`),
   // an unsigned registry is still worth one warning.
-  if (pin.digest !== undefined) {
+  //
+  // "User-chosen" is the load-bearing half of that sentence, and it is only
+  // true when the *origin* is the user's as well. A repository that both names
+  // the registry and pins the hash has asserted nothing: it would be vouching
+  // for its own bytes with its own claim, which is §06.6's blocked row wearing
+  // row 1's clothes. So a project-chosen origin does not get the
+  // short-circuit — the tiering below runs, a signature is required, and the
+  // digest that signature covers is what the download is measured against. The
+  // pin is not discarded; §06.2 still checks it, and a pin naming bytes the
+  // registry never signed now fails there rather than deciding the outcome.
+  if (pin.digest !== undefined && registryTrustFor(registryUrl) !== "project") {
     if (source.fetched && source.signatures === undefined) {
       warnUnsignedRegistry(registryUrl, registry.package, version);
     }

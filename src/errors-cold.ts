@@ -465,6 +465,19 @@ export const messages = {
    */
   unsignedRegistry: (registry: string, packageName: string, version: string) =>
     `⚠ ${url_(registry)} does not publish signatures for ${packageName}@${version}; falling back to integrity-only verification`,
+
+  /**
+   * Tier 3's refusal for a registry the *repository* named (§06.1, §06.6).
+   *
+   * The soft-fail above is a judgement about npm, or about a mirror the person
+   * at the keyboard chose: the bytes are unsigned, but the origin is one they
+   * vouched for. A cloned repository vouches for nothing, so the same response
+   * would let it point a known tool at a host of its own and be believed —
+   * exactly the row §06.6 claims is blocked. The remedy names the user's own
+   * configuration because that is the whole distinction being drawn.
+   */
+  projectRegistryUnsigned: (registry: string, packageName: string, version: string) =>
+    `${url_(registry)} was chosen by this project and does not publish signatures for ${packageName}@${version}; set JUP_NPM_REGISTRY in your own environment, or name the registry in your user .npmrc, to trust it`,
   /**
    * A native `bin` target that could not be executed at all.
    *

@@ -17,14 +17,31 @@ An artifact is acceptable when it clears one of:
 
 | Reference has a hash? | Registry | Verification disabled? | Outcome |
 |---|---|---|---|
-| yes | any | any | Hash check only; no signature request at all |
-| no | npm | no | Signature → `integrity` → hash check, or tier 3, or refusal |
+| yes | user-chosen | any | Hash check only; no signature request at all |
+| no | user-chosen | no | Signature → `integrity` → hash check, or tier 3, or refusal |
+| any | project-chosen | no | Tier 2 only — signature required, then hash check |
 | no | any | yes | Refuse unless `JUP_ALLOW_UNVERIFIED=1` |
 
 Row 1 turns signature verification off deliberately: an explicit hash is stronger
 than the registry's claim about itself, and consulting the registry would add a
 request to a path that already knows what it expects. A registry that returned no
 signatures is still worth one warning when the metadata was fetched anyway.
+
+"User-chosen" is what makes rows 1 and 2 sound, so the tiers ask §05.1's
+question — the same `registryTrustFor` deny-list that decides whether a
+credential may be attached. An origin is **project-chosen** when a file inside
+the clone named it (`.jup.env`, `.corepack.env`, or a project `.npmrc`
+`registry=`) and the user's own environment and `~/.npmrc` did not. Such an
+origin gets neither exemption: tier 3's soft-fail is unavailable, and a hash the
+same repository pinned buys nothing, because the repository would be vouching
+for its own bytes with its own claim. The signature must verify against the
+embedded or user trust store — a repository cannot supply one, since
+`JUP_INTEGRITY_KEYS` is ineligible in a project env file (§03.2), and §6.3's
+refresh only ever asks npm.
+
+There is no opt-out for that row, by design: the remedy is to name the registry
+where the tiers can believe it, in your own environment or your user `.npmrc`.
+The refusal says so.
 
 When nothing clears a tier, the install is refused by name, pointing at both a
 pinned hash and `JUP_ALLOW_UNVERIFIED=1`. That opt-out is ambient-only — a
@@ -146,6 +163,7 @@ An expired key is never accepted silently.
 | Registry serves modified bytes for an unpinned version (npm) | yes — signature chain, given npm's key is not compromised |
 | Compromised mirror serving unpinned versions | yes — the signature covers package, version and integrity |
 | Registry that strips signatures but publishes digests | partly — tier 3, warned; `JUP_REQUIRE_SIGNATURES=1` closes it |
+| Hostile repo pointing a known tool at a registry of its own | yes — a project-chosen origin gets tier 2 only (§6.1), pinned hash included |
 | Man-in-the-middle on the wire | via verified TLS |
 | Hostile repo changing trust, disabling verification, or weakening TLS | yes — project env sources cannot set those |
 | Hostile repo pointing a known tool at an arbitrary URL | yes — blocked without ambient `JUP_ENABLE_UNSAFE_CUSTOM_URLS=1` |

@@ -17,7 +17,7 @@ import { envDisabled, envFlag } from "../project/env.ts";
 import { advisory, messages, networkError, redactUserinfo, UsageError } from "../errors-cold.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck } from "../verify/integrity.ts";
-import { registryVariableFor, resolveRegistry } from "./npmrc.ts";
+import { registryTrustFor, registryVariableFor, resolveRegistry } from "./npmrc.ts";
 import { isPrerelease, rcompare } from "../version/semver.ts";
 import { verifySignatureWithRefresh } from "../verify/trust.ts";
 import type { NpmRegistrySpec, RegistrySignature, RegistrySpec } from "../types.ts";
@@ -544,6 +544,17 @@ export async function verifyRegistryTrust(input: {
       registryOrigin: registryUrl,
     });
     return;
+  }
+
+  // §06.1 / §06.6 — who chose this origin decides whether the soft-fail is
+  // available at all. `registryTrustFor` answers exactly that (§05.1), and it
+  // is the same deny-list `credentialsFor` already consults before it attaches
+  // a token: an origin is the repository's only when a file inside the clone
+  // named it and the user's own configuration did not. Withholding the
+  // credential from such an origin but then running whatever it serves was half
+  // a defence; this is the other half.
+  if (registryTrustFor(registryUrl) === "project") {
+    throw new UsageError(messages.projectRegistryUnsigned(registryUrl, packageName, version));
   }
 
   // Tier 2. A registry that publishes signatures but no `integrity` is in the
