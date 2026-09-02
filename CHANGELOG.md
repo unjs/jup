@@ -1,6 +1,23 @@
 # Changelog
 
 
+## v0.5.4
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5...v0.5.4)
+
+### 🚀 Enhancements
+
+- Run bun/deno/nub regardless of the project's package-manager pin ([b83677a](https://github.com/unjs/jup/commit/b83677a))
+
+### 🩹 Fixes
+
+- Require a signature when the project chose the registry ([5ba9910](https://github.com/unjs/jup/commit/5ba9910))
+- Do not extend the trust root over an unverified connection ([32a9e2e](https://github.com/unjs/jup/commit/32a9e2e))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.5.3
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5.2...v0.5.3)
