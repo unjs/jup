@@ -61,16 +61,15 @@ JUP_SPEC_FILE points at <path>, which does not exist
 
 `<source>` is `CLI arguments` or the manifest path relative to the initial cwd.
 
-Version files:
+Version files — the error is the malformed file, and only that one:
 
 ```
 Invalid <source>: expected a single version, optionally with # comments and key=value lines
-Unsupported version "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"
 ```
 
-Both name `<source>` because in a monorepo *which* `.nvmrc` spoke is the reader's
-first question, and neither is a warning: falling back to the compiled-in default
-would run a version the project explicitly did not ask for.
+It names `<source>` because in a monorepo *which* `.nvmrc` spoke is the reader's
+first question. An alias jup cannot resolve is §12.11's advisory instead: that
+file is valid for nvm, so it is skipped and §3.5's default answers.
 
 ## 12.3 `devEngines` validation (§03.3)
 
@@ -293,6 +292,7 @@ All done!
 ⚠ The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing <name>@<reference>.
 │ For more details about this field, consult the documentation at https://nodejs.org/api/packages.html#packagemanager
 ⚠ Ignoring <name> from <path>: this variable can only be set in the environment
+⚠ Ignoring "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"
 ```
 
 `--no-lockfile` prints `Removed …` only when it removes an entry from the

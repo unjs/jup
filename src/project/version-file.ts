@@ -4,7 +4,6 @@
 
 const { readFileSync } = process.getBuiltinModule("node:fs");
 const { join } = process.getBuiltinModule("node:path");
-import { messages, UsageError } from "../errors.ts";
 import { isValidRange } from "../version/semver.ts";
 import type { VersionFileSpec } from "../types.ts";
 
@@ -42,25 +41,22 @@ export function loadVersionFile(dir: string, spec: VersionFileSpec): VersionFile
 }
 
 /**
- * §03.1 — the semver range a version file declares.
- *
- * `source` is the file's path relative to the initial cwd, matching what §03.4
- * reports for a manifest. Throws a {@link UsageError} rather than returning
- * `null` for either failure, because both mean the file was written to be obeyed
- * and cannot be: falling back to the compiled-in default would run a version the
- * project explicitly did not ask for.
+ * §03.1 — what the walk makes of one version file's contents. `unsupported` is
+ * an alias jup has no answer for, and is warned about and skipped; `invalid` is
+ * the file nvm refuses too, and is reported.
  */
-export function versionFileRange(file: VersionFile, source: string): string {
+export type VersionFileReading =
+  | { readonly kind: "range"; readonly range: string }
+  | { readonly kind: "unsupported"; readonly declared: string }
+  | { readonly kind: "invalid" };
+
+/** Read the content under its format's grammar. Pure — §03.1 decides what to do. */
+export function readVersionFile(file: VersionFile): VersionFileReading {
   const declared = declaredVersion(file.content);
-  if (declared === null) {
-    throw new UsageError(messages.versionFileInvalid(source));
-  }
+  if (declared === null) return { kind: "invalid" };
 
   const range = rangeFrom(declared);
-  if (range === null) {
-    throw new UsageError(messages.versionFileUnsupported(declared, source));
-  }
-  return range;
+  return range === null ? { kind: "unsupported", declared } : { kind: "range", range };
 }
 
 /**
@@ -126,8 +122,8 @@ function declaredVersion(content: string): string | null {
  * machine state rather than a project's requirement, and `system` in particular
  * asks for a node jup did not install and cannot vouch for (§06).
  *
- * All of them take the same refusal, which names the word and points at
- * `devEngines.runtime` — the field that can say anything this one cannot.
+ * All of them read as `unsupported`: one advisory naming the word and pointing
+ * at `devEngines.runtime` — the field that can say anything this one cannot.
  */
 function rangeFrom(declared: string): string | null {
   if (isValidRange(declared)) return declared;

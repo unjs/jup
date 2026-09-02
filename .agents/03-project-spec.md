@@ -75,10 +75,19 @@ resolves through `jup.lock` like any other range, and both that file and the mem
 are looked for beside the version file (`dirname(target)`). In a monorepo that is
 next to the `.nvmrc` that declared the range, not at the repository root.
 
-Contents are parsed **lazily**, as `getSpec` is: a version file that cannot be
-read fails the request that needed it, not the walk. Both failures are errors and
-neither falls back to §3.5's default — a file written to be obeyed and not
-obeyable is a mistake to report, not a reason to silently run something else.
+Two things can go wrong with the contents, and they are not the same thing:
+
+* The file names an **alias jup cannot resolve** (`lts/*` and the rest below).
+  It is skipped: one advisory naming the word and `devEngines.runtime`, and the
+  walk's own result stands, so §3.5's default answers. That file is valid for
+  the tool that wrote it, and a source consulted only where the manifest was
+  silent has no business failing a run it was never asked to decide. This much
+  is settled during the walk, which is a scan of bytes already read.
+* The file is **malformed** — it does not carry exactly one version, the input
+  nvm refuses too. That is an error, raised **lazily** as `getSpec` is: it fails
+  the request that needed the version, not the walk. Nothing can read the file,
+  so there is no reading to disregard, and guessing at one would run a version
+  nobody asked for.
 
 #### `format: "nvm"`
 
@@ -98,7 +107,7 @@ empty-key form `=20` on the version side.
 |---|---|
 | `20`, `v20`, `20.10`, `20.x`, `^20`, `>=18 <21` | itself, unchanged |
 | `node`, `stable` | the `latest` dist-tag |
-| anything else | error |
+| anything else | none — advisory, file skipped |
 
 The first row needs no translation: §04.2's partial-version grammar already
 accepts a leading `v`, so the numeric half of nvm's vocabulary — the overwhelming
@@ -109,8 +118,10 @@ data source: the launcher package's series tags stop short of the current LTS
 line, and a codename table would grow by one entry per LTS release. `system`
 asks for a node jup did not install and cannot vouch for; `iojs`, `default` and
 user-defined aliases name state in someone's `$NVM_DIR`, not a requirement of the
-project. All take one message naming the word and pointing at `devEngines.runtime`
-— the field that can express what the alias meant.
+project. All take one advisory naming the word and pointing at
+`devEngines.runtime` — the field that can express what the alias meant — after
+which the file is out of the picture for that run. `JUP_QUIET_ADVISORIES`
+(§11.3) mutes it, as it mutes every advisory jup adds.
 
 ## 3.2 Env file (`.jup.env`)
 

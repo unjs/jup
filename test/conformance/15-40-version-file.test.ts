@@ -19,7 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { hostTarget } from "../../src/config/table.ts";
+import { DEFINITIONS, hostTarget } from "../../src/config/table.ts";
 import { messages } from "../../src/errors.ts";
 import {
   cleanupFixtures,
@@ -39,6 +39,8 @@ const registry = new MockRegistry();
 
 const PINNED = "22.23.2";
 const NEWEST = "24.20.0";
+/** §03.5's answer once a version file is skipped — the table's `node` default. */
+const DEFAULT_NODE = DEFINITIONS.node!.default;
 const PNPM_VERSION = "11.1.2";
 
 /** See `15-39`'s copy: three of the six published hosts are renames. */
@@ -186,22 +188,38 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     expect(installed(fixture, NEWEST)).toBe(false);
   });
 
-  it("240: an nvm alias jup cannot resolve is refused, before any request", async () => {
+  it("240: an nvm alias jup cannot resolve is warned about and skipped", async () => {
     for (const alias of ["lts/*", "lts/jod", "system", "iojs", "default"]) {
       const fixture = createFixture({ name: "app" });
       fixture.write(".nvmrc", `${alias}\n`);
       registry.reset();
 
       const result = await run(["node", "-e", "0"], options(fixture));
-      expect(result.exitCode).toBe(1);
+      // The file is a *fallback* source, consulted only where the manifest said
+      // nothing, and it is a valid file for the tool that wrote it. Failing the
+      // run over one would break repositories that are not broken, so §03.5's
+      // default answers instead and the run goes through.
+      expect(result.exitCode).toBe(0);
+      expect(installed(fixture, DEFAULT_NODE)).toBe(true);
+
+      // Silently is the one thing it must not be: the project asked for
+      // something and did not get it.
       expect(result.stderr).toContain(messages.versionFileUnsupported(alias, ".nvmrc"));
       // `lts/*` is the one people miss, and it is not an oversight: the `node`
       // launcher publishes `latest` and `v4-lts` … `v20-lts` and the LTS series
       // tags stop there, so there is nothing to resolve it against. The message
       // names `devEngines.runtime`, which can say what the alias meant.
       expect(result.stderr).toContain("devEngines.runtime");
-      expect(registry.requests).toHaveLength(0);
     }
+  });
+
+  it("240a: the advisory is one jup adds, so `JUP_QUIET_ADVISORIES` mutes it", async () => {
+    const fixture = createFixture({ name: "app" });
+    fixture.write(".nvmrc", "lts/*\n");
+
+    const result = await run(["node", "-e", "0"], options(fixture, { JUP_QUIET_ADVISORIES: "1" }));
+    expect(result.exitCode).toBe(0);
+    expect(withoutDownloadNotices(result.stderr)).toBe("");
   });
 
   it("240b: the two `newest` aliases do resolve, to the `latest` dist-tag", async () => {
@@ -216,7 +234,7 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     }
   });
 
-  it("241: a file that does not carry exactly one version is invalid, not ignored", async () => {
+  it("241: a file that does not carry exactly one version is invalid, not skipped", async () => {
     const cases = [
       // Two bare lines: the ambiguity nvm refuses too.
       `${PINNED}\n${NEWEST}\n`,
@@ -233,8 +251,9 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
       const result = await run(["node", "-e", "0"], options(fixture));
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain(messages.versionFileInvalid(".nvmrc"));
-      // Falling back to the compiled-in default would run a version the project
-      // did not ask for, which is the one outcome worse than an error.
+      // Where an alias jup cannot answer is skipped, this is reported: nvm
+      // refuses the same input, so there is no reading of the file to
+      // disregard, and guessing at one would run a version nobody asked for.
       expect(registry.requests).toHaveLength(0);
     }
   });
@@ -257,8 +276,9 @@ describe.skipIf(!POSIX)("§03.1 version files", () => {
     const fixture = createFixture({ name: "app" });
     fixture.write(".nvmrc", "lts/*\n");
 
-    // §11.1 — "never look at the project at all" covers the version file too, so
-    // the escape hatch users reach for *because* a file is wrong still works.
+    // §11.1 — "never look at the project at all" covers the version file too,
+    // advisory included: the file is not read, so there is nothing to warn
+    // about.
     const disabled = await run(
       ["node", "-e", "0"],
       options(fixture, { COREPACK_ENABLE_PROJECT_SPEC: "0" }),

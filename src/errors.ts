@@ -235,24 +235,24 @@ export const messages = {
   /**
    * The file exists and does not carry exactly one version.
    *
-   * Not a fallback: a file written to be obeyed and unreadable is a mistake to
-   * report, not a reason to quietly run the compiled-in default. nvm refuses the
-   * same input (`nvm_nvmrc_invalid_msg`), so an `.nvmrc` this rejects was already
-   * broken for the tool that reads it every day.
+   * Still an error, where an alias jup cannot resolve is only an advisory: nvm
+   * refuses this same input (`nvm_nvmrc_invalid_msg`), so there is no reading of
+   * the file to disregard, only a file nothing can read.
    */
   versionFileInvalid: (source: string) =>
     `Invalid ${source}: expected a single version, optionally with # comments and key=value lines`,
 
   /**
-   * The file carries one version and it is not a version.
+   * The file carries one version and it is not a version — §03.1 skips the file
+   * and §03.5's default answers, so this is an advisory rather than an error.
    *
-   * `lts/*` and `lts/<codename>` are the words that reach this most often, and
-   * the message deliberately does not single them out: every nvm alias fails for
-   * its own reason and the remedy is the same one. Naming `devEngines.runtime`
-   * is the point — it is the field that can express what the alias meant.
+   * `lts/*` and `lts/<codename>` reach this most often, and the message does not
+   * single them out: every nvm alias is unanswerable for its own reason and the
+   * remedy is the same one. Naming `devEngines.runtime` is the point — it is the
+   * field that can express what the alias meant.
    */
   versionFileUnsupported: (declared: string, source: string) =>
-    `Unsupported version ${json(declared)} in ${source}: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"`,
+    `⚠ Ignoring ${json(declared)} in ${source}: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"`,
   /** Invalid sidecar integrity follows the `devEngines` `onFail` contract. */
   devEnginesBadIntegrity: (value: unknown) =>
     `Invalid "devEngines.packageManager.integrity" field: ${JSON.stringify(value) ?? String(value)}`,

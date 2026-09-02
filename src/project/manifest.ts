@@ -18,8 +18,8 @@ import {
 } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { hashFromIntegrity } from "./lockfile.ts";
-import { loadVersionFile, type VersionFile, versionFileRange } from "./version-file.ts";
-import { messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
+import { loadVersionFile, readVersionFile, type VersionFile } from "./version-file.ts";
+import { advisory, messages, UsageError, VALIDATION_WARNING_PREFIX } from "../errors.ts";
 import { warn } from "../utils/log.ts";
 import { parseManifest, scanTopLevelFields } from "../utils/json.ts";
 import { isValidRange, isValidVersion, parse, satisfies } from "../version/semver.ts";
@@ -386,7 +386,9 @@ export function findProjectSpec(
   // `specDisabled` is re-tested because it may have been set by an env file
   // found further up than a version file recorded earlier in the same walk.
   if (versionFile !== undefined && tool !== undefined && !specDisabled && result.type !== "Found") {
-    return describeVersionFile(versionFile, tool, initialCwd, result.envFilePath);
+    // `null` — an alias jup cannot resolve; warned about and out of the picture.
+    const spoke = describeVersionFile(versionFile, tool, initialCwd, result.envFilePath);
+    if (spoke !== null) return spoke;
   }
 
   return result;
@@ -406,29 +408,39 @@ export function findProjectSpec(
  * *requested* (§03.1), so the name it yields is the requested name by
  * construction.
  *
- * Parsing stays lazy for the reason `describe` keeps it lazy: a malformed file
- * must fail the request that needed it, not the walk. Routing the synthesised
- * string back through {@link parseSpec} rather than returning a descriptor
- * directly is what keeps one definition of what a spec string means.
+ * `null` when the file names an alias jup has no answer for: §03.1 warns and
+ * skips it rather than fail a run this source was never asked to decide. A
+ * **malformed** file still fails only the request that needed it, for the
+ * reason `describe` keeps its own parsing lazy. Routing the synthesised string
+ * back through {@link parseSpec} rather than returning a descriptor directly is
+ * what keeps one definition of what a spec string means.
  */
 function describeVersionFile(
   file: VersionFile,
   tool: string,
   initialCwd: string,
   envFilePath: string | undefined,
-): ProjectSpec {
+): ProjectSpec | null {
   const source = relative(initialCwd, file.path);
+  const reading = readVersionFile(file);
+  if (reading.kind === "unsupported") {
+    advisory(messages.versionFileUnsupported(reading.declared, source));
+    return null;
+  }
+
   return {
     type: "Found",
     target: file.path,
     hasPin: false,
     envFilePath,
-    getSpec: (opts?: ParseSpecOptions) =>
-      parseSpec(`${tool}@${versionFileRange(file, source)}`, {
+    getSpec: (opts?: ParseSpecOptions) => {
+      if (reading.kind === "invalid") throw new UsageError(messages.versionFileInvalid(source));
+      return parseSpec(`${tool}@${reading.range}`, {
         ...opts,
         source,
         packageManagerField: false,
-      }),
+      });
+    },
   };
 }
 

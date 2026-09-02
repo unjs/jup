@@ -13,17 +13,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { versionFileFor } from "../../src/config/table.ts";
-import { UsageError } from "../../src/errors.ts";
 import {
   loadVersionFile,
+  readVersionFile,
   type VersionFile,
-  versionFileRange,
+  type VersionFileReading,
 } from "../../src/project/version-file.ts";
 
 const NVM: VersionFile["format"] = "nvm";
 
-const rangeOf = (content: string): string =>
-  versionFileRange({ path: "/p/.nvmrc", content, format: NVM }, ".nvmrc");
+const readingOf = (content: string): VersionFileReading =>
+  readVersionFile({ path: "/p/.nvmrc", content, format: NVM });
+
+/** The range, for the rows where one is the whole point. Fails loudly otherwise. */
+const rangeOf = (content: string): string | undefined => {
+  const reading = readingOf(content);
+  return reading.kind === "range" ? reading.range : undefined;
+};
 
 describe("§03.1 version files", () => {
   let dir = "";
@@ -75,10 +81,11 @@ describe("§03.1 version files", () => {
       expect(rangeOf("=20.10.0\n")).toBe("=20.10.0");
     });
 
-    it("refuses a file that does not carry exactly one version", () => {
+    it("reads a file that does not carry exactly one version as `invalid`", () => {
+      // Distinct from `unsupported`: nvm refuses this input too, so there is no
+      // reading of the file to disregard — §03.1 reports it.
       for (const content of ["", "\n\n", "# only a comment\n", "a=1\n", "20\n22\n"]) {
-        expect(() => rangeOf(content)).toThrow(UsageError);
-        expect(() => rangeOf(content)).toThrow(/Invalid \.nvmrc/);
+        expect(readingOf(content)).toEqual({ kind: "invalid" });
       }
     });
   });
@@ -91,17 +98,18 @@ describe("§03.1 version files", () => {
       expect(rangeOf("stable\n")).toBe("latest");
     });
 
-    it("refuses the rest, naming the word and the field that can express it", () => {
+    it("reads the rest as `unsupported`, keeping the word it could not answer", () => {
       // `lts/*` has no data source: the `node` launcher publishes `latest` and
       // `v4-lts` … `v20-lts`, and the series tags stop there. `lts/<codename>`
       // would need a compiled-in codename table growing by a release per LTS
       // line. `system`, `iojs` and `default` name machine state, not a project's
       // requirement — and `system` asks for a node jup cannot vouch for (§06).
+      //
+      // The word is carried out because §03.1's advisory names it: the file is
+      // skipped rather than obeyed, and the reader is the only thing that saw
+      // what it said.
       for (const alias of ["lts/*", "lts/jod", "system", "iojs", "default", "unstable"]) {
-        expect(() => rangeOf(`${alias}\n`)).toThrow(
-          new RegExp(`Unsupported version .*${alias.replace("*", "\\*")}`),
-        );
-        expect(() => rangeOf(`${alias}\n`)).toThrow(/devEngines\.runtime/);
+        expect(readingOf(`${alias}\n`)).toEqual({ kind: "unsupported", declared: alias });
       }
     });
   });
