@@ -9,6 +9,7 @@
     "*.yml",
     "test/corepack/*.test.ts",
     "test/corepack/_registryServer.mjs",
-    "bin/**"
+    "bin/**",
+    ".scriptc-work/**"
   ]
 }
