@@ -105,7 +105,7 @@ and installs dependencies.
 
 ```yaml
 - uses: actions/checkout@v6
-- uses: unjs/jup@v0
+- uses: unjs/setup-jup@85aa1e9e4cd2995fba3bee414cde74bf88637a2c # v1.0.0
 - run: pnpm test
 ```
 

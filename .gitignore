@@ -35,14 +35,6 @@ tsconfig.tsbuildinfo
 /src/nubx.mjs
 /src/node.mjs
 
-# What the `setup-jup` workflow's installs leave in its fixture projects. The
-# manifests are committed; nothing a manager writes beside them is.
-/.github/fixtures/*/node_modules
-/.github/fixtures/*/.yarn
-/.github/fixtures/*/.pnp.*
-/.github/fixtures/*/pnpm-lock.yaml
-/.github/fixtures/*/package-lock.json
-
 # Local recording for the ported Corepack suite (NOCK_ENV=record).
 /test/corepack/nocks.db
 

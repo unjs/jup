@@ -82,32 +82,22 @@ line is actually coloured.
 
 ## Published GitHub action
 
-The root `action.yml` defines the Marketplace action `setup-jup`. Local
-workflows use the same file with `uses: ./`.
+`setup-jup` lives in [unjs/setup-jup](https://github.com/unjs/setup-jup) and is
+released on its own schedule. Nothing in this repository builds or tests it: the
+action installs jup from the registry, never from a checkout, so it was never
+bound to this tree and sharing tags only meant an action fix needed an npm
+release.
 
-The action MUST use only §09 commands and `info --json`. It MUST pass inputs to
-scripts through `env:`, not expression interpolation. Keep its inputs and
-behavior in sync with `docs/3.actions.md`.
+What that repository depends on here is the §09 command surface, and one floor:
+`info --json` MUST keep reporting the `inputs` array it gained in 0.5.2, because
+that is what a correct cache key is built from. Its `AGENTS.md` states the rest
+of the contract. Treat a change to `info --json`, `info --store-path`,
+`self-install` or `enable --all` as one that has a consumer outside this
+repository, and keep `docs/3.actions.md` in step with the action's inputs.
 
-Its cache of `JUP_HOME` MUST NOT carry `self/`. `self-install` writes a
-digest-checked copy of jup there on every run (§09.12, §07.11), and restoring
-cached bytes over it would put whatever the newest key sharing the prefix held in
-place of what the run verified. `actions/cache` resolves its `path` patterns with
-`implicitDescendants: false`, so the exclusion has to be written against the
-children — `<home>/*` with `!<home>/self` — because a bare directory matches one
-entry and a negation has nothing to subtract from it.
-
-`.github/workflows/setup-jup.yml` tests the action with projects in
-`.github/fixtures` and temporary unpinned projects. It installs the published
-jup release, not the working tree. A weekly run checks the current release. Its
-`cache-paths` job is the exception: it runs no jup at all, and saves and restores
-a `JUP_HOME`-shaped fixture through the pinned `actions/cache` release to hold
-the exclusion above down against a version bump.
-
-`.github/workflows/release-tags.yml` moves the major and minor tags, such as
-`v0` and `v0.5`, to each stable release. Treat any change to an existing input
-or default as a minor release and note it in the changelog. Publish each release
-to the Marketplace from its GitHub release page.
+`.github/workflows/checks.yml` and `autofix.yml` set this project up with that
+published action, pinned by digest. It installs the released jup rather than the
+working tree, which was already true when the action lived here.
 
 ## Source map
 

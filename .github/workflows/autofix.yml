@@ -8,7 +8,7 @@ jobs:
       - uses: actions/checkout@v6
       # Set up the pinned tools and install dependencies.
       - name: Setup jup
-        uses: ./
+        uses: unjs/setup-jup@85aa1e9e4cd2995fba3bee414cde74bf88637a2c # v1.0.0
       - run: pnpm fmt
       - name: Push the formatting fixes
         uses: autofix-ci/action@7a166d7532b277f34e16238930461bf77f9d7ed8

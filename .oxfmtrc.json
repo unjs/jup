@@ -3,7 +3,6 @@
   "ignorePatterns": [
     "CHANGELOG.md",
     ".agents/**",
-    ".github/fixtures/**",
     "*.md",
     "*.yaml",
     "*.yml",
