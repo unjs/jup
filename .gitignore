@@ -46,4 +46,5 @@ tsconfig.tsbuildinfo
 # Local recording for the ported Corepack suite (NOCK_ENV=record).
 /test/corepack/nocks.db
 
-.pi-subagents.scriptc-work/
+.pi-subagents
+.scriptc-work/
