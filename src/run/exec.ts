@@ -412,8 +412,10 @@ export function execPackageManager(
     // module graph of a JavaScript cache hit (§01.3, §16, Build shape).
     // `binName`, not `binPath`: §08.3's artifacts dispatch on `argv[0]`, and
     // `bunx` and `bun` are the same file.
+    // §08.3.2 — `ipc` rides on `handover` for the reason `reraise` does: both
+    // ask whether this process is the tool's. The argument is in `native.ts`.
     return import("./native.ts").then((native) =>
-      native.execNative(binPath, argv, env, binName, { reraise: handover }),
+      native.execNative(binPath, argv, env, binName, { reraise: handover, ipc: handover }),
     );
   }
 

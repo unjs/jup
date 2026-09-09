@@ -73,7 +73,8 @@ stdio: inherit all three, unmodified
   (`pnpx` → `pnpm dlx`). Absent an invoked name — a `commands.use` handover,
   where nothing was invoked — the path is used.
 * **stdio is inherited, never piped.** Tools detect TTYs to decide on colour,
-  progress bars and prompts.
+  progress bars and prompts. An IPC channel is fd 3 rather than one of the three
+  and is handled by §8.3.2.
 * **No new process group or session.** That would detach the child from terminal
   job control and break Ctrl-C.
 * `JUP_HOST_RUNTIME` carries the realpath of the runtime hosting a chain that has
@@ -103,6 +104,57 @@ of the boundary:
 `argv[0]` is left to the runtime here, unlike §8.3's native path: the spawned
 process *is* an interpreter, so `[execPath, binPath, …]` is what it produces on
 its own — the same array §8.2 writes by hand.
+
+### 8.3.2 The IPC channel
+
+`inherit` is fds 0, 1 and 2 and nothing else, so a caller that spawned a shim
+with an `ipc` slot — `child_process.fork`, a worker pool, a test runner waiting
+on a handshake — had its channel end *at the shim*: the runtime it meant to talk
+to came up with no channel, `process.send` undefined, and a handshake that never
+arrives. Under handover a shim therefore **relays** the channel it was given:
+
+```
+this process has a channel?   → stdio gains a fourth slot, "ipc"
+message from the caller       → forwarded to the tool, sendHandle included
+message from the tool         → forwarded to the caller, sendHandle included
+either side disconnects       → the other side is disconnected, once the
+                                forwarded messages have been written
+```
+
+Gated on handover, exactly as §8.5's re-raise is, and for the same reason: a shim
+owns neither the channel nor the messages on it, and a host application that
+called `runMain` mid-script owns both. Without handover the channel is left
+alone.
+
+**A relay, not the fd.** Passing fd 3 through and naming it in the child's
+`NODE_CHANNEL_FD` looks cheaper and cannot be done from here: the runtime deletes
+both `NODE_CHANNEL_FD` and `NODE_CHANNEL_SERIALIZATION_MODE` from the
+environment during bootstrap, so a shim can no longer say which serialisation the
+fd carries, and both processes would be reading one pipe. The relay costs a
+deserialise and reserialise per message and works against every runtime in the
+table, because bun and deno implement the same `NODE_CHANNEL_FD` convention that
+the `ipc` slot writes.
+
+Two things follow from the relay being one:
+
+* messages cross as the default JSON serialisation. A caller that spawned with
+  `serialization: "advanced"` reaches the tool with what JSON preserves of its
+  messages;
+* the process must outlive its own last write. Teardown drops the channel's
+  listeners — and with them the ref that keeps the loop alive — only once no
+  forwarded message is still in flight, or a handshake answered on the tool's
+  last tick would be lost with the pipe;
+* a disconnect relayed upward can be followed by the runtime's own, because its
+  EOF handler disconnects unconditionally and a second disconnect arrives as an
+  `error` **event** on `process` rather than as a throw. Nothing else in a shim
+  emits one, and unhandled it replaces the tool's exit code with a stack, so
+  `ERR_IPC_DISCONNECTED` is swallowed there and every other `error` is left
+  alone. The window is not theoretical: a caller that hangs up on a message it
+  cannot parse — `Bun.spawn`'s default `serialization: "advanced"`, handed the
+  JSON any Node process writes — closes its end exactly then.
+
+Extra fds beyond the channel are still not forwarded: a caller passing
+`stdio: ["pipe", "pipe", "pipe", "pipe"]` loses fd 3 onwards through a shim.
 
 ## 8.4 Exit codes
 

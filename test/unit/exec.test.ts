@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
+import type { Duplex } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors-cold.ts";
@@ -404,6 +405,173 @@ describe.skipIf(process.platform === "win32")("§10.2 — JUP_HOST_RUNTIME", () 
     // And it is not invented either: a chain that started inside the store has
     // nothing to forward, and `enable` falls through to its `PATH` walk.
     expect(await observed({ ...process.env })).toEqual(["", ""]);
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §08.3.2 — the IPC channel, relayed rather than swallowed
+ *
+ * #7: `stdio: "inherit"` is fds 0, 1 and 2, so a caller that spawned a
+ * shim with an `ipc` slot had its channel end at the shim — the runtime
+ * it meant to talk to came up with `process.send === undefined` and
+ * every handshake hung. Each case here is a real three-process chain,
+ * because a channel that exists only inside one process proves nothing:
+ * this test is the caller, the driver is the shim, and the probe stands
+ * in for the runtime handed over to.
+ * ------------------------------------------------------------------ */
+
+describe("§08.3.2 — IPC", () => {
+  /** The runtime a shim hands over to: answers a message, then disconnects. */
+  function probe(): string {
+    const file = join(root, "ipc-probe.mjs");
+    writeFileSync(
+      file,
+      [
+        `process.send?.({ send: typeof process.send });`,
+        `process.on("message", (m) => {`,
+        `  process.send?.({ echo: m });`,
+        `  process.disconnect();`,
+        // Outlive the disconnect, so a caller that saw one saw it *relayed*
+        // rather than inferred from this chain ending.
+        `  setTimeout(() => {}, 500);`,
+        `});`,
+        ``,
+      ].join("\n"),
+    );
+    return file;
+  }
+
+  /** A runtime that answers once and exits, so the *shim* disconnects first. */
+  function briefProbe(): string {
+    const file = join(root, "ipc-brief-probe.mjs");
+    writeFileSync(file, `process.send?.({ send: typeof process.send });\n`);
+    return file;
+  }
+
+  /**
+   * The shim: `execNative` with §08.3.2's `ipc` on or off, standing in for the
+   * `handover` the real stubs pass.
+   */
+  function shim(ipc: boolean): string {
+    const file = join(root, `ipc-shim-${ipc}.mjs`);
+    writeFileSync(
+      file,
+      [
+        `const { execNative } = await import(${JSON.stringify(
+          pathToFileURL(join(REPO_ROOT, "src", "run", "native.ts")).href,
+        )});`,
+        `const code = await execNative(process.execPath, [process.argv[2]], { ...process.env },`,
+        `  undefined, { reraise: false, ipc: ${ipc} });`,
+        `process.exitCode = code;`,
+        ``,
+      ].join("\n"),
+    );
+    return file;
+  }
+
+  /**
+   * Run the chain and collect what the caller saw.
+   *
+   * A message is always sent back, because the probe's `message` listener is
+   * what keeps it alive: an answer is also how it is told to finish.
+   */
+  function chain(
+    ipc: boolean,
+    send: unknown = { hello: "world" },
+  ): Promise<{ seen: unknown[]; heldOpenMs: number }> {
+    const child = spawn(process.execPath, [shim(ipc), probe()], {
+      stdio: ["ignore", "ignore", "inherit", "ipc"],
+    });
+    const seen: unknown[] = [];
+    let disconnectedAt = 0;
+    let heldOpenMs = 0;
+    child.on("message", (message: unknown) => {
+      seen.push(message);
+      if (seen.length === 1) child.send(send as never, () => {});
+    });
+    child.on("disconnect", () => {
+      disconnectedAt = Date.now();
+    });
+    // How long the chain outlived the channel closing. Every chain ends with a
+    // `disconnect`, relayed or not — the shim exiting closes the caller's
+    // channel too — so the *fact* of one proves nothing and the gap is the whole
+    // assertion: the probe holds itself open for 500 ms after disconnecting, and
+    // only a relayed disconnect can reach the caller inside that window.
+    child.on("exit", () => {
+      heldOpenMs = disconnectedAt === 0 ? 0 : Date.now() - disconnectedAt;
+    });
+    return new Promise((resolve) => {
+      child.on("close", () => resolve({ seen, heldOpenMs }));
+    });
+  }
+
+  it("reaches the runtime, so `process.send` is a function there", async () => {
+    const { seen } = await chain(true);
+    expect(seen[0]).toEqual({ send: "function" });
+  });
+
+  it("carries messages the other way too", async () => {
+    const { seen } = await chain(true, { hello: "world" });
+    expect(seen).toEqual([{ send: "function" }, { echo: { hello: "world" } }]);
+  });
+
+  it("relays the runtime's `disconnect` up to the caller", async () => {
+    const { heldOpenMs } = await chain(true);
+    expect(heldOpenMs).toBeGreaterThan(150);
+  });
+
+  /**
+   * Node's EOF handler calls `process.disconnect()` unconditionally, so a shim
+   * that already disconnected is handed an `ERR_IPC_DISCONNECTED` *event* — not
+   * a throw — on a `process` nothing else emits `error` on, and dies with a
+   * stack where the tool's exit code belongs.
+   *
+   * The window is real rather than theoretical: `Bun.spawn`'s default
+   * `serialization: "advanced"` cannot read the JSON any Node child writes, and
+   * hangs up on the first byte it fails to parse. Reproduced here without bun by
+   * owning the channel's bytes: fd 3 is an ordinary pipe the case writes into,
+   * named to the shim through `NODE_CHANNEL_FD` the way Node's own `ipc` slot
+   * names it. A message with no terminator leaves the shim mid-read, which is
+   * what keeps its channel handle open past its own disconnect; the hang-up then
+   * lands on it. The probe exits on its own so that the shim disconnects first,
+   * which is the whole of the window.
+   *
+   * The hand-built channel is also why this case, alone in this block, is POSIX:
+   * a real `ipc` slot frames its messages, so half of one can only be written by
+   * owning the bytes, and an ordinary `pipe` slot is what gives that. Node builds
+   * the two differently — `Pipe(IPC)` against `Pipe(SOCKET)`, and `readable:
+   * false, writable: true` for anything past fd 2 — and only POSIX makes the
+   * difference vanish, where both are socketpairs and duplex whatever the flags
+   * say. On Windows they are named pipes created as asked, so the read half this
+   * borrows is not there. The behaviour under test is not POSIX-only; this way of
+   * provoking it is, and the four cases above run everywhere.
+   */
+  it.skipIf(process.platform === "win32")(
+    "survives a caller that hangs up mid-message",
+    async () => {
+      const child = spawn(process.execPath, [shim(true), briefProbe()], {
+        stdio: ["ignore", "ignore", "inherit", "pipe"],
+        env: { ...process.env, NODE_CHANNEL_FD: "3" },
+      });
+      const channel = child.stdio[3] as unknown as Duplex;
+      channel.write('{"never terminated":');
+      channel.on("data", () => channel.destroy());
+
+      const [code] = await new Promise<[number | null, NodeJS.Signals | null]>((resolve) => {
+        child.on("exit", (status, signal) => resolve([status, signal]));
+      });
+      // 0 is the probe's own status. 1 was `ERR_IPC_DISCONNECTED` on stderr.
+      expect(code).toBe(0);
+    },
+  );
+
+  // The gate is `handover` (§08.3.2): a host application that called `runMain`
+  // mid-script owns its own channel, and a relay there would hand the tool
+  // messages meant for the caller. Without it the old behaviour stands, which is
+  // what the row below records rather than endorses.
+  it("leaves the channel alone for a caller that is not a shim", async () => {
+    const { seen } = await chain(false);
+    expect(seen).toEqual([]);
   });
 });
 

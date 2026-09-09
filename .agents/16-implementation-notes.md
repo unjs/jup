@@ -192,3 +192,10 @@ revisiting when the surrounding code is next touched:
 * **§12.13's inherited message warts.**
 * **The agent colour-detection list** (§09.14) is vendored from another project
   and drifts.
+* **Extra fds stop at the shim.** §08.3.2 forwards the IPC channel, which is the
+  one a caller cannot work around, and `stdio: "inherit"` still means fds 0, 1
+  and 2 for everything else: a caller passing its own fd 3 onwards loses them.
+  Forwarding those would mean guessing which fds a caller meant to pass, since
+  nothing distinguishes them from a descriptor the shim happens to hold open.
+  The relay also crosses as JSON, so a caller using
+  `serialization: "advanced"` reaches the tool with what JSON preserves.

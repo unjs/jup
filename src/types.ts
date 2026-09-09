@@ -520,16 +520,19 @@ export interface RunOptions {
   /**
    * Allow the run to take over this process (default `false`).
    *
-   * `true` selects §08.2's in-process handover for a JavaScript tool and §08.5's
-   * signal re-raise for a native one. It is what `bin/jup.mjs` and §10's shims
-   * pass — they have nothing left to do — and it costs a process: with it a warm
-   * `yarn` run is one process, without it, two.
+   * `true` selects §08.2's in-process handover for a JavaScript tool, and for a
+   * native one §08.5's signal re-raise plus §08.3.2's IPC relay — a channel this
+   * process was handed is forwarded to the tool rather than ending here. It is
+   * what `bin/jup.mjs` and §10's shims pass — they have nothing left to do — and
+   * it costs a process: with it a warm `yarn` run is one process, without it,
+   * two.
    *
    * Left `false`, a JavaScript entry point is spawned under §08.3.1's
    * interpreter instead of loaded, nothing is written to `process.argv`,
    * `process.execArgv`, `process.mainModule` or `process.env`, a signal death
-   * comes back as `128 + N` rather than killing the caller, and the returned
-   * number is the tool's real exit code rather than §08.4's placeholder `0`.
+   * comes back as `128 + N` rather than killing the caller, an IPC channel of
+   * the caller's stays the caller's (§08.3.2), and the returned number is the
+   * tool's real exit code rather than §08.4's placeholder `0`.
    */
   handover?: boolean;
 

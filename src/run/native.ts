@@ -3,6 +3,7 @@
  */
 
 const { spawn } = process.getBuiltinModule("node:child_process");
+type ChildProcess = ReturnType<typeof spawn>;
 const { realpathSync } = process.getBuiltinModule("node:fs");
 const { constants } = process.getBuiltinModule("node:os");
 import { isInsideInstallFolder } from "../cache/store.ts";
@@ -98,6 +99,123 @@ function forwardHostRuntime(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 }
 
 /**
+ * §08.3.2 — is the channel a shim was handed one we can relay?
+ *
+ * `process.send` is the whole test in spirit; `process.channel` is checked
+ * alongside it because a runtime that stubs the function without a channel
+ * behind it would pass the first half and throw on the first message.
+ */
+function hasParentChannel(): boolean {
+  return typeof process.send === "function" && process.channel != null;
+}
+
+/**
+ * §08.3.2 — hand the caller's IPC channel through to the tool.
+ *
+ * `stdio: "inherit"` is fds 0, 1 and 2 and nothing else, so a parent that
+ * spawned a shim with `stdio: [..., "ipc"]` — `child_process.fork`, a worker
+ * pool, a test runner waiting on a handshake — had its channel *terminated at
+ * the shim*: Node wires `process.send` up for the shim itself, and the runtime
+ * the caller actually meant to talk to came up with no channel at all and a
+ * `process.send` of `undefined`.
+ *
+ * The channel is therefore relayed rather than inherited. The alternative —
+ * passing the underlying fd straight through and setting `NODE_CHANNEL_FD` in
+ * the child's environment — cannot work from here: Node deletes both
+ * `NODE_CHANNEL_FD` and `NODE_CHANNEL_SERIALIZATION_MODE` from `process.env`
+ * during bootstrap, so a shim can no longer say which serialisation the fd
+ * carries, and both ends would in any case be reading one pipe. A relay costs a
+ * deserialise/reserialise per message and is what every runtime in the table can
+ * be on the far side of: bun and deno implement Node's `NODE_CHANNEL_FD`
+ * convention, so the `ipc` slot below reaches their own IPC as readily as it
+ * reaches another Node.
+ *
+ * Handles ride along — `fork`'s socket and server passing is the reason
+ * `send`'s second argument exists — and `disconnect` is relayed in both
+ * directions, so a caller that waits for one still sees it.
+ *
+ * Returns the teardown. It is deliberately *not* immediate: a message written
+ * on the way out must reach the caller before this process's channel closes, so
+ * the listeners (and with them the channel's ref, which is what keeps the loop
+ * alive) are dropped only once no write is outstanding.
+ */
+function forwardIpcChannel(child: ChildProcess): () => void {
+  let pending = 0;
+  let closing = false;
+  let torn = false;
+
+  const fromParent = (message: unknown, handle: unknown): void => {
+    // A `send` with no callback reports failure by emitting `error` on the
+    // child, which is `execNative`'s "cannot execute" path below. A closed
+    // channel is not that, so every send here carries one.
+    if (child.connected) child.send(message as never, handle as never, undefined, () => {});
+  };
+
+  const fromChild = (message: unknown, handle: unknown): void => {
+    if (!process.connected) return;
+    pending += 1;
+    process.send?.(message as never, handle as never, undefined, () => {
+      pending -= 1;
+      settle();
+    });
+  };
+
+  const onParentDisconnect = (): void => {
+    if (child.connected) child.disconnect();
+  };
+
+  /**
+   * Node's own EOF handler calls `process.disconnect()` unconditionally, and a
+   * second disconnect does not throw — it emits `error` on `process`, which
+   * nothing else in a shim ever produces and nothing is listening for, so it
+   * takes the whole process down with an `ERR_IPC_DISCONNECTED` stack in place
+   * of the tool's exit code. The race is reachable whenever the caller's end
+   * closes after ours: a message still mid-read leaves the handle open past our
+   * `disconnect`, and a caller that hangs up on the first byte it cannot parse
+   * (`Bun.spawn`'s default `serialization: "advanced"`, told JSON) closes it
+   * immediately. Swallow that one code, and leave every other `error` the
+   * unhandled event it was.
+   */
+  const onError = (error: NodeJS.ErrnoException): void => {
+    if (error.code !== "ERR_IPC_DISCONNECTED") throw error;
+  };
+
+  const onChildDisconnect = (): void => {
+    closing = true;
+    settle();
+  };
+
+  const detach = (): void => {
+    process.off("message", fromParent);
+    process.off("disconnect", onParentDisconnect);
+    process.off("error", onError);
+    child.off("message", fromChild);
+    child.off("disconnect", onChildDisconnect);
+  };
+
+  function settle(): void {
+    if (pending > 0) return;
+    // Only after the queue is empty: `disconnect` closes the pipe, and a
+    // handshake reply written on the tool's last tick would go with it.
+    if (closing && process.connected) {
+      process.on("error", onError);
+      process.disconnect?.();
+    }
+    if (torn) detach();
+  }
+
+  process.on("message", fromParent);
+  process.on("disconnect", onParentDisconnect);
+  child.on("message", fromChild);
+  child.on("disconnect", onChildDisconnect);
+
+  return (): void => {
+    torn = true;
+    settle();
+  };
+}
+
+/**
  * Run a native `bin` target directly and resolve with the exit code it earned.
  *
  * The promise resolves only when the child is gone. When the child was killed by
@@ -142,19 +260,30 @@ export function execNative(
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
   argv0?: string,
-  options?: { reraise?: boolean },
+  options?: { reraise?: boolean; ipc?: boolean },
 ): Promise<number> {
   const childEnv = forwardHostRuntime(env);
+
+  // §08.3.2 — an `ipc` slot only where this process exists to *be* the tool, which
+  // is the same question `reraise` asks and gets the same answer from the same
+  // caller. A host application that embedded `runMain` mid-script owns its
+  // channel and its messages; a shim owns neither, and swallowing the caller's
+  // channel there is what left `process.send` undefined in the runtime.
+  const ipc = options?.ipc === true && hasParentChannel();
 
   // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
   // package manager's cwd (§08.3), and the child stays in our process group so
   // terminal job control keeps working.
   const child = spawn(binPath, args, {
-    stdio: "inherit",
+    // Still fds 0, 1 and 2 unmodified (§08.3): the `ipc` slot is fd 3 and is
+    // added, never substituted, so nothing about the terminal changes.
+    stdio: ipc ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
     windowsHide: false,
     env: childEnv,
     argv0,
   });
+
+  const releaseChannel = ipc ? forwardIpcChannel(child) : undefined;
 
   const listeners = new Map<NodeJS.Signals, () => void>();
 
@@ -177,6 +306,7 @@ export function execNative(
   const release = (): void => {
     for (const [signal, listener] of listeners) process.off(signal, listener);
     listeners.clear();
+    releaseChannel?.();
   };
 
   return new Promise<number>((resolve, reject) => {
