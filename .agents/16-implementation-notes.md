@@ -106,7 +106,7 @@ and dispatch. Then follow project and config, resolution, network, verification
 and cache, and execution:
 
 ```
-src/project   discovery, env file, manifest, pin writing, jup.lock
+src/project   discovery, env file, manifest, pin writing, jup.lock, package-manager lockfiles
 src/config    the table, the trust keys, the environment inventory
 src/version   semver, resolution
 src/net       http, registry, npmrc, tls, proxy

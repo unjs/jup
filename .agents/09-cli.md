@@ -205,7 +205,9 @@ would do and why:
   per-host tool it prints the whole host map;
 * what the next run would resolve to, following §01.3's own order — `declared`
   where the answer is the package manager's own committed lockfile (§04.4),
-  which is also named on its own line under `Lockfile`;
+  which is also named on its own line under `Lockfile`, and `inferred` where the
+  project declares no spec and that same file's `lockfileVersion` names the major
+  that wrote it (§04.6), with the range it implies given as the reason;
 * every installed version, every shim and what each name on `PATH` currently
   resolves to — including entries that are not shimmed by default, because for
   `bun` the interesting answer is usually someone else's install;

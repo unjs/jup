@@ -366,7 +366,10 @@ entry either one advances stays pinned.
 
 ## 4.6 Default version selection
 
-Consulted lazily, only when the project has no usable spec:
+Consulted lazily, only when the project has no usable spec. Ahead of every step
+below sits one more question — whether the project's own lockfile names a single
+major, which "The format the project's lockfile is written in" answers — and
+where it does, that range is resolved and none of these steps is reached:
 
 ```
 0. lastKnownGood has an entry carrying a per-host digest → repair it in place
@@ -383,6 +386,56 @@ Step 1 is why a machine that has ever run online keeps working offline without a
 project spec. Step 0 is §02.4's repair, and it happens *before* the freshness
 test so that a stale entry whose refresh fails still falls back to a healed
 reference.
+
+### The format the project's lockfile is written in
+
+A project with no spec is not always silent about which major it expects. Where
+its package manager keeps a lockfile of its own (§4.4), that file records the
+*format* it was written in, and pnpm has changed formats on major boundaries:
+
+| `lockfileVersion` | written by |
+| --- | --- |
+| `9.0` | pnpm 9, 10, 11 and 12 |
+| `6.1` | pnpm 8.6.0 and 8.6.1 only, reverted in 8.6.2 |
+| `6.0` | pnpm 8 |
+| `5.4` | pnpm 7 |
+| `5.3` | pnpm 6 |
+| `5.2` | pnpm 5.10 to 5.18 |
+| `5.1` | pnpm 3.5 to 5.9 |
+| `5` | pnpm 3.0 to 3.4 |
+
+The rows below `9.0` each name one major, and that major becomes step 0's
+answer. It is worth the step because running a different one is not benign: a
+newer pnpm rewrites the file in its own format and **re-resolves the pins on the
+way** — a lockfile holding `semver@7.5.0` under `^7.0.0` comes back holding
+whatever that range resolves to today — and an install with `--frozen-lockfile`
+refuses outright rather than rewriting anything. Reading the format is what makes
+a fresh clone of an old project run the pnpm that project's lockfile is for.
+
+`9.0` is deliberately unmapped. Four current majors write it, and for one
+project their output is byte-identical, so the file says nothing beyond ">= 9" —
+which is not a statement worth preferring to a recorded default with. An
+unrecognised `lockfileVersion`, an unreadable file and a tool that keeps no
+lockfile all mean the same "no opinion", and step 1 decides as it always did.
+
+The rank is the lowest of any answer in §4.4 or here, because it is the only one
+jup *infers* rather than reads: a declared spec, a `jup.lock` entry, the declared
+resolution and the memo all outrank it, and it is consulted only where a project
+declared nothing at all. It is skipped for a transparent command (§01.4), for
+`COREPACK_ENABLE_PROJECT_SPEC=0`, for `JUP_ENABLE_PM_LOCKFILE=0` — the same
+switch that governs §4.4's read of the same file — and for a directory with no
+manifest, where a stray lockfile is nobody's statement. A range that resolves to
+nothing, or a resolution that fails, also falls through to step 1: this is a
+better guess than the global default, never a reason to fail a run.
+
+Nothing is written. The resolved version is *not* recorded in
+`lastKnownGood.json`, because what one project's lockfile implies is that
+project's business and not this machine's default; §4.8's auto-bump cannot
+promote it either, since it only ever advances an existing entry within one
+major. The read is one bounded `open`/`read`/`close` of the file's first 4 KiB —
+`lockfileVersion` is the first line of the first document, which is the manager
+document where pnpm >= 12 writes one — and the mapping table, its parser and this
+step live off the warm path entirely (§16).
 
 ### The TTL
 

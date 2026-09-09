@@ -923,6 +923,11 @@ describe("the warm fast path — §01.3 (test 96)", () => {
  */
 const COLD_PATH_MODULES = [
   "cache/install.ts",
+  // §04.6's guess about which major wrote the project's `pnpm-lock.yaml`. It is
+  // reached only where there was no spec to follow, which is the one path that
+  // was already going to read `lastKnownGood.json` or ask the registry; a run
+  // with a spec must not parse a byte of it.
+  "project/lockfile-format.ts",
   "net/http.ts",
   "net/proxy.ts",
   "verify/integrity.ts",
@@ -1698,6 +1703,39 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * the run it warms cannot disagree. It costs an exactly-pinned run nothing —
    * `usesLockfile` returns before the first `open` — and a range run one
    * `open`/`read`/`close` of 64 KiB, against a request it usually replaces.
+   *
+   * Re-based to 301,000 for §04.6's inferred default — a project that declares
+   * no spec at all runs the major its `pnpm-lock.yaml` was written by, wherever
+   * the format names exactly one — and for the split that came with it.
+   * 297,864 -> 299,879, **+2,015 or +0.68%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | `pm-lockfile.ts`: the file's name per tool, the bounded read, the document boundary, the entry patterns and the scalar reader, moved out whole | `project/pm-lockfile.ts` | +6,179 |
+   * | the same, leaving it: `lockfile.ts` keeps §04.4's *rule* and is jup.lock's module again | `project/lockfile.ts` | -4,301 |
+   * | the fallback thunk moved below the walk, carrying the `ProjectSpec` §04.6 reads the directory off | `main.ts` | +137 |
+   *
+   * So §04.6 itself costs the warm path 137 bytes and the boundary costs 1,878.
+   * Two rules wanted different lines out of one `pnpm-lock.yaml` and the second
+   * was reaching into the first's file for helpers it had to export; what the
+   * move buys is one `MANAGER_LOCKFILE_BYTES`, one `readPrefix`, one document
+   * boundary and one `JUP_ENABLE_PM_LOCKFILE` gate. The rest of it is a module
+   * header and the doc comments on three exported functions, trimmed twice
+   * already — the remainder is argument this file has always carried, and
+   * deleting it to fit a number is the one thing this ledger exists to prevent.
+   *
+   * The mapping table, its two patterns and the branch that resolves the range
+   * they imply live in `project/lockfile-format.ts`, which is in
+   * `COLD_PATH_MODULES` above and is reached only through `version/resolve.ts` —
+   * a module no run with a spec loads. What a warm run gains is one argument to
+   * a thunk it never forces.
+   *
+   * Measured, `dist/index.mjs` 194,189 -> 196,236, **+2,047 or +1.05%**: the
+   * cold module, §04.6's branch and `info`'s `inferred` status, none of which a
+   * proxy run that finds a pin parses.
+   *
+   * What is owed is unchanged, and against the same resident: `config/table.ts`,
+   * still 39,314.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1709,7 +1747,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(298_000);
+    ).toBeLessThanOrEqual(301_000);
   });
 });
 

@@ -145,15 +145,6 @@ export async function runProxy(
   const transparent =
     name !== undefined && (isTransparentCommand(binaryName, args) || isGlobalInvocation(args));
   const requestedName = name ?? binaryName;
-  const fallback: LazyResolvedSpec =
-    name === undefined
-      ? {
-          name: binaryName,
-          // An unknown binary has no default to fall back to. Reaching for one
-          // is precisely §12.2's name-only "unsupported specification" case.
-          reference: () => Promise.reject(new UsageError(messages.unsupportedSpec(binaryName))),
-        }
-      : { name, reference: () => fallbackReference(name, transparent) };
 
   // Step 3 — one `package.json` read plus at most two env-file opens per
   // directory walked. The env file it loads is applied to `process.env` here,
@@ -169,6 +160,17 @@ export async function runProxy(
   // makes `bunx` ask bun's question and `nubx` ask nub's; an unknown binary
   // answers `packageManager`, which is the path it already took to §12.2.
   const specResult = findProjectSpec(cwd, { projectSpecFlag: true, tool: requestedName });
+
+  // Below the walk: §04.6's guess reads the directory it selected. Still a thunk.
+  const fallback: LazyResolvedSpec =
+    name === undefined
+      ? {
+          name: binaryName,
+          // An unknown binary has no default to fall back to. Reaching for one
+          // is precisely §12.2's name-only "unsupported specification" case.
+          reference: () => Promise.reject(new UsageError(messages.unsupportedSpec(binaryName))),
+        }
+      : { name, reference: () => fallbackReference(name, transparent, specResult) };
 
   // §03.6 — auto-pin runs *before* reconciliation, and only here: it is a proxy
   // -mode-only behaviour, so `reconcile` deliberately leaves it to this caller.
@@ -379,9 +381,13 @@ async function resolveOrExplain(descriptor: Spec): Promise<ResolvedSpec | null> 
  * Loading the resolver here keeps fallback resolution, including LKG reads and
  * network access, lazy until the fallback is forced.
  */
-async function fallbackReference(name: string, transparent: boolean): Promise<string> {
+async function fallbackReference(
+  name: string,
+  transparent: boolean,
+  project: ProjectSpec,
+): Promise<string> {
   const { getFallbackLocator } = await import("./version/resolve.ts");
-  return await getFallbackLocator(name, { transparent }).reference();
+  return await getFallbackLocator(name, { transparent, project }).reference();
 }
 
 /**

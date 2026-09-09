@@ -1,3 +1,4 @@
+const { dirname } = process.getBuiltinModule("node:path");
 import { ENV } from "../config/env-vars.ts";
 import { getDefinition, isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
@@ -18,8 +19,9 @@ import {
   readLastKnownGood,
   recordLastKnownGood,
 } from "../cache/store.ts";
+import { readDeclaredFormat } from "../project/lockfile-format.ts";
 import { debugNote } from "../utils/log.ts";
-import type { Spec, LazyResolvedSpec, ResolvedSpec } from "../types.ts";
+import type { Spec, LazyResolvedSpec, ProjectSpec, ResolvedSpec } from "../types.ts";
 
 export interface ResolveOptions {
   allowTags?: boolean;
@@ -279,7 +281,7 @@ function healRecordedDefault(name: string, lkg: Record<string, string>): string 
  */
 export function getFallbackLocator(
   name: string,
-  options: { transparent: boolean },
+  options: { transparent: boolean; project?: ProjectSpec },
 ): LazyResolvedSpec {
   // Table lookups are pure, so doing this eagerly costs nothing; everything
   // that touches the disk or the network stays inside the thunk.
@@ -296,7 +298,60 @@ export function getFallbackLocator(
     };
   }
 
-  return { name, reference: () => getDefaultVersion(name) };
+  // §04.6 — a project with no spec is not necessarily silent: the lockfile its
+  // package manager committed names the format, and so the major, that wrote it.
+  // Only `NoSpec` offers a directory — `NoProject` found no manifest, so a
+  // `pnpm-lock.yaml` beside the user is nobody's statement — and a transparent
+  // command is not asking the project (§01.4).
+  const projectDir =
+    options.transparent || options.project?.type !== "NoSpec"
+      ? undefined
+      : dirname(options.project.target);
+
+  return {
+    name,
+    reference: async () =>
+      (await inferredDefaultVersion(name, projectDir)) ?? (await getDefaultVersion(name)),
+  };
+}
+
+/**
+ * §04.6 — the default a package manager's own lockfile implies, or `null`.
+ *
+ * `null` means "no opinion" — no file, or a format every current major writes —
+ * and §04.6's recorded default then decides as it always did. A resolution
+ * failure answers `null` too: this is a better guess than the global default,
+ * never a reason to fail a run that would otherwise have had one.
+ *
+ * The range resolves through {@link resolveSpec}, so an already-installed major
+ * answers from the store with no request (§04.1 step 4), and nothing is
+ * recorded: what one project's lockfile implies is not this machine's default.
+ */
+async function inferredDefaultVersion(
+  name: string,
+  projectDir: string | undefined,
+): Promise<string | null> {
+  if (projectDir === undefined) return null;
+  // §03.5 — "never look at the project at all" has to include this file too.
+  if (envDisabled(ENV.ENABLE_PROJECT_SPEC)) return null;
+
+  const declared = readDeclaredFormat(projectDir, name);
+  if (declared === null) return null;
+
+  try {
+    const locator = await resolveSpec({ name, range: declared.range }, { allowTags: false });
+    if (locator === null) return null;
+    debugNote(
+      `${declared.path} is lockfileVersion ${declared.format}, so ${name} defaults to ` +
+        `${locator.reference} (${declared.range}) rather than the recorded default`,
+    );
+    return locator.reference;
+  } catch (error) {
+    debugNote(
+      `could not resolve ${name}@${declared.range} from ${declared.path}: ${String(error)}`,
+    );
+    return null;
+  }
 }
 
 /**

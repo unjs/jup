@@ -10,6 +10,7 @@ const {
   statSync,
 } = process.getBuiltinModule("node:fs");
 const {
+  basename,
   delimiter,
   dirname,
   isAbsolute,
@@ -41,7 +42,6 @@ import {
   type DeclaredResolution,
   integrityForHost,
   LOCKFILE_NAME,
-  managerLockfilePath,
   readCachedEntry,
   readDeclaredEntry,
   readEntry,
@@ -51,6 +51,8 @@ import {
   resolutionKey,
   usesLockfile,
 } from "../project/lockfile.ts";
+import { type DeclaredFormat, readDeclaredFormat } from "../project/lockfile-format.ts";
+import { managerLockfilePath } from "../project/pm-lockfile.ts";
 import { findProjectSpec, NODE_MODULES_RE, parseSpec, stopsWalk } from "../project/manifest.ts";
 import {
   loadNpmrc,
@@ -126,6 +128,8 @@ export interface ResolutionInfo {
    * answers it and has not expired (§04.4); `cache` — nothing is recorded,
    * declared or memoed, but an installed version satisfies the range;
    * `network` — resolving needs a request, which `info` does not make;
+   * `inferred` — no project spec, but the package manager's own lockfile is
+   * written in a format only one major writes, so that major decides (§04.6);
    * `fallback` — no project spec, so the global default decides; `unknown` —
    * the spec is unusable.
    */
@@ -136,6 +140,7 @@ export interface ResolutionInfo {
     | "cached"
     | "cache"
     | "network"
+    | "inferred"
     | "fallback"
     | "unknown";
   name: string | null;
@@ -389,7 +394,7 @@ export function buildReport(cwd: string = process.cwd()): InfoReport {
       ttlHours: defaultTtlMs() / (60 * 60 * 1000),
     },
     shims: describeShims(),
-    inputs: describeInputs(cwd, project, envFile, lockfile),
+    inputs: describeInputs(cwd, project, envFile, lockfile, resolution),
   };
 }
 /**
@@ -666,6 +671,7 @@ function describeInputs(
   project: ProjectInfo,
   envFile: EnvFileInfo | null,
   lockfile: LockfileInfo,
+  resolution: ResolutionInfo,
 ): ProjectInputFile[] {
   const inputs: ProjectInputFile[] = [];
   const add = (
@@ -755,17 +761,20 @@ function describeInputs(
   // another. Absent counts, like every other candidate here — adding a
   // `pnpm-lock.yaml` to a repository changes what a range resolves to. `selected`
   // is whether it actually answered, which the range and specifier gates decide.
-  const managerLockfile =
-    project.name === null || lockfile.key === null
-      ? null
-      : managerLockfilePath(dirname(lockfile.path), project.name);
+  //
+  // §04.6 — a project with no spec has no key and no declared entry, and the
+  // same file still decides: the tool is the one whose format answered, and
+  // `selected` is that answer.
+  const inferred = resolution.status === "inferred" ? resolution.name : null;
+  const tool = inferred ?? (lockfile.key === null ? null : project.name);
+  const managerLockfile = tool === null ? null : managerLockfilePath(dirname(lockfile.path), tool);
   if (managerLockfile !== null) {
     inputs.push({
       kind: `pm-lockfile`,
       path: managerLockfile,
       present: exists(managerLockfile),
-      tool: project.name,
-      selected: lockfile.declared !== null,
+      tool,
+      selected: lockfile.declared !== null || inferred !== null,
     });
   }
 
@@ -882,6 +891,22 @@ function descriptorOf(project: ProjectInfo): Spec {
 }
 
 /**
+ * §04.6 — the one tool in `dir` whose own lockfile implies a major, or `null`.
+ *
+ * The table is asked in its own order and the first answer wins, which is the
+ * proxy path's rule too: there it is the *requested* tool that is asked, and a
+ * project that committed two package managers' lockfiles has a bigger problem
+ * than which one `info` names. A tool that keeps no lockfile costs no syscall.
+ */
+function inferredDefaultFor(dir: string): (DeclaredFormat & { name: string }) | null {
+  for (const name of Object.keys(DEFINITIONS)) {
+    const declared = readDeclaredFormat(dir, name);
+    if (declared !== null) return { ...declared, name };
+  }
+  return null;
+}
+
+/**
  * What the *next* run would use, decided with no request of any kind.
  *
  * The branches follow §01.3's own order — lockfile, then the cache probe, then
@@ -905,6 +930,30 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
   }
 
   if (project.status !== "found" || project.name === null || project.range === null) {
+    // §04.6 — a project with no spec is not always silent. When its package
+    // manager's own lockfile is written in a format only one major writes, that
+    // major is the default here, so reporting the global one would name a
+    // version this project would not run.
+    const inferred =
+      project.status === "no-spec" ? inferredDefaultFor(dirname(lockfile.path)) : null;
+    if (inferred !== null) {
+      // The store, never the registry: `info` makes no request, so an installed
+      // major answers and anything else is honestly left unresolved.
+      const installed = findInstalledVersion(inferred.name, inferred.range);
+      return {
+        ...base,
+        status: "inferred",
+        name: inferred.name,
+        version: installed,
+        source: inferred.path,
+        reason:
+          `the project declares no packageManager or devEngines.packageManager, but ` +
+          `${basename(inferred.path)} is lockfileVersion ${inferred.format}, which only ` +
+          `${inferred.name} ${inferred.range} writes; that range decides instead of the recorded default`,
+        installed: installed !== null,
+      };
+    }
+
     return {
       ...base,
       status: "fallback",
