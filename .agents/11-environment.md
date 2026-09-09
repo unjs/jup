@@ -30,6 +30,7 @@ A real environment variable always beats the file.
 | `JUP_ENABLE_PRERELEASES` | `1` | Allow prereleases in implicit resolution | yes |
 | `JUP_MINIMUM_RELEASE_AGE` | hours | Filter younger releases from implicit resolution; exact pins and `self-upgrade` exempt (§04.1) | yes |
 | `JUP_FROZEN_LOCKFILE` | `1` | Refuse lockfile creation, refresh, and deletion (§04.4) | yes |
+| `JUP_ENABLE_PM_LOCKFILE` | `0` | Stop reading the package manager's own committed resolution (§04.4) | yes |
 | `JUP_SPEC_FILE` | path | External file supplying the project's pin fields (§03.1) | **no** |
 | `JUP_ENV_FILE` | `0` or a path | `0` disables env files; otherwise the file to look for instead of `.jup.env` | **no** |
 | `JUP_HOME` | path | Root of the store and the global state (§07.1) | **no** |

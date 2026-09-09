@@ -38,9 +38,12 @@ import { messages, redactUserinfo, UsageError } from "../errors-cold.ts";
 import { parseManifest } from "../utils/json.ts";
 import {
   CACHE_DIRECTORY,
+  type DeclaredResolution,
   integrityForHost,
   LOCKFILE_NAME,
+  managerLockfilePath,
   readCachedEntry,
+  readDeclaredEntry,
   readEntry,
   readKnownResolution,
   readLockfile,
@@ -118,13 +121,23 @@ export interface ProjectInfo {
 export interface ResolutionInfo {
   /**
    * `pinned` — the field names the version outright; `locked` — the recorded
-   * `jup.lock` answers it; `cached` — the memo in `node_modules/.jup` answers it
-   * and has not expired (§04.4); `cache` — nothing is recorded or memoed, but an
-   * installed version satisfies the range; `network` — resolving needs a
-   * request, which `info` does not make; `fallback` — no project spec, so the
-   * global default decides; `unknown` — the spec is unusable.
+   * `jup.lock` answers it; `declared` — the package manager's own committed
+   * lockfile answers it (§04.4); `cached` — the memo in `node_modules/.jup`
+   * answers it and has not expired (§04.4); `cache` — nothing is recorded,
+   * declared or memoed, but an installed version satisfies the range;
+   * `network` — resolving needs a request, which `info` does not make;
+   * `fallback` — no project spec, so the global default decides; `unknown` —
+   * the spec is unusable.
    */
-  status: "pinned" | "locked" | "cached" | "cache" | "network" | "fallback" | "unknown";
+  status:
+    | "pinned"
+    | "locked"
+    | "declared"
+    | "cached"
+    | "cache"
+    | "network"
+    | "fallback"
+    | "unknown";
   name: string | null;
   version: string | null;
   /** `<algo>.<hex>`, the build-suffix spelling of §02.1. */
@@ -143,6 +156,12 @@ export interface LockfileInfo {
   /** `<name>@<range as written>` — the key this project's spec would use. */
   key: string | null;
   resolution: Resolution | null;
+  /**
+   * §04.4 — what the package manager itself recorded for this range, in its own
+   * committed lockfile. `null` when it keeps none, records nothing for this
+   * range, or the reader is switched off. jup reads it and never writes it.
+   */
+  declared: DeclaredResolution | null;
   /** §04.4 — whether `use` and `up` may write the recorded file. */
   frozen: boolean;
   frozenSource: typeof ENV.FROZEN_LOCKFILE | "default";
@@ -179,7 +198,7 @@ export interface EnvFileInfo {
  */
 export interface ProjectInputFile {
   /** What §03.1 would take this file for. */
-  kind: "manifest" | "version-file" | "env-file" | "lockfile";
+  kind: "manifest" | "version-file" | "env-file" | "lockfile" | "pm-lockfile";
   /** Absolute, because a path is useless to a job standing somewhere else. */
   path: string;
   present: boolean;
@@ -730,6 +749,26 @@ function describeInputs(
     selected: true,
   });
 
+  // §04.4 — the package manager's own lockfile, for the tools that keep one. It
+  // is listed for exactly the reason the recorded file is: it decides which
+  // version a run installs, so a key that ignores it caches one version and runs
+  // another. Absent counts, like every other candidate here — adding a
+  // `pnpm-lock.yaml` to a repository changes what a range resolves to. `selected`
+  // is whether it actually answered, which the range and specifier gates decide.
+  const managerLockfile =
+    project.name === null || lockfile.key === null
+      ? null
+      : managerLockfilePath(dirname(lockfile.path), project.name);
+  if (managerLockfile !== null) {
+    inputs.push({
+      kind: `pm-lockfile`,
+      path: managerLockfile,
+      present: exists(managerLockfile),
+      tool: project.name,
+      selected: lockfile.declared !== null,
+    });
+  }
+
   return inputs;
 }
 
@@ -815,12 +854,17 @@ function describeLockfile(dir: string, project: ProjectInfo): LockfileInfo {
   // expiry rule, in the one place they are written.
   const recorded = key === null ? null : readEntry(dir, descriptor);
   const memo = key === null ? null : readCachedEntry(dir, descriptor);
+  // Through the reader for the same reason: it applies §04.4's specifier and
+  // range gates, so `info` reports the entry the next run would accept rather
+  // than the line the file happens to hold.
+  const declared = key === null ? null : readDeclaredEntry(dir, descriptor);
 
   return {
     path: join(dir, LOCKFILE_NAME),
     present: data !== null,
     key,
     resolution: recorded,
+    declared,
     // Mirrors `env.isFrozenLockfile()`: `info` itself never writes either file.
     frozen: frozen?.value === "1",
     frozenSource: frozen !== undefined && frozen.value !== "" ? frozen.name : "default",
@@ -908,8 +952,21 @@ function describeResolution(project: ProjectInfo, lockfile: LockfileInfo): Resol
     };
   }
 
-  // §04.4 — nothing is recorded, so the memo in `node_modules/.jup` answers, while
-  // it is still inside its window. An expired one is not reported here: the next
+  // §04.4 — nothing is recorded by jup, so the package manager's own committed
+  // resolution answers. It outranks the memo because it is committed: the memo
+  // is this host's note about yesterday, and it is what drifts between machines.
+  if (lockfile.declared !== null) {
+    return {
+      ...base,
+      status: "declared",
+      version: lockfile.declared.resolved,
+      source: lockfile.declared.path,
+      installed: findInstalledVersion(project.name, lockfile.declared.resolved) !== null,
+    };
+  }
+
+  // §04.4 — nothing is committed either way, so the memo in `node_modules/.jup`
+  // answers, while it is still inside its window. An expired one is not reported here: the next
   // run would go and ask, and this command reports what that run would do, not
   // what it would fall back to if the registry were unreachable.
   const memo = lockfile.cache.resolution;
@@ -1301,6 +1358,10 @@ export function formatReport(report: InfoReport): string {
     } else {
       out.push(line(`integrity`, recorded ?? `(none recorded)`));
     }
+  }
+  if (report.lockfile.declared !== null) {
+    const declared = report.lockfile.declared;
+    out.push(line(`declared`, `${declared.resolved}  (${declared.path})`));
   }
   out.push(
     line(`frozen`, `${report.lockfile.frozen ? `yes` : `no`} (${report.lockfile.frozenSource})`),

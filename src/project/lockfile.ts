@@ -2,8 +2,17 @@
  * `jup.lock` records authoritative project resolutions; host-local cache entries expire. Reads stay bounded, offline failures may use stale entries, writes are atomic, and invalid state degrades to a miss.
  */
 
-const { mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } =
-  process.getBuiltinModule("node:fs");
+const {
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} = process.getBuiltinModule("node:fs");
 const { join } = process.getBuiltinModule("node:path");
 import {
   isValidRange,
@@ -12,6 +21,8 @@ import {
   satisfiesWithPrereleases,
 } from "../version/semver.ts";
 import { hostTarget, isPerHost } from "../config/table.ts";
+import { ENV } from "../config/env-vars.ts";
+import { envDisabled } from "./env.ts";
 import type { Spec, ResolvedSpec } from "../types.ts";
 
 /**
@@ -224,21 +235,195 @@ export function readCachedResolution(
   return { locator: locatorFor(descriptor, hit.entry), expired: hit.expired };
 }
 
-/** What a project's two files already know, without a request (§04.4). */
+/* ------------------------------------------------------------------ *
+ * §04.4 — the package manager's own committed resolution.
+ *
+ * pnpm >= 12, launched under a version manager (`COREPACK_ROOT`, §08.7), does
+ * not re-exec into its own pinned version: it writes the version it is
+ * *running* into the `pnpm-lock.yaml` the project commits. Unread, that file
+ * becomes a transcript of whatever this host resolved — the memo is host-local
+ * and expires, the store probe answers with whatever is installed — so two
+ * machines commit the same line two ways, forever. §04.4 has the argument.
+ *
+ * Read, never written. Ranks below `jup.lock`, above the memo.
+ * ------------------------------------------------------------------ */
+
+/** The file each package manager records its own resolution in, by tool name. */
+const MANAGER_LOCKFILES: Record<string, string> = { pnpm: "pnpm-lock.yaml" };
+
+/**
+ * How much of that file is read.
+ *
+ * The block sits in the **first** YAML document, which holds only the manager's
+ * own resolution; the project's `importers` and `packages` — the megabytes —
+ * are the document after the `---`. This keeps the read a bounded probe (§01.3).
+ */
+const MANAGER_LOCKFILE_BYTES = 64 * 1024;
+
+/** A document break. The file opens with one; that one is a start, not a break. */
+const DOCUMENT_BREAK = /^---[ \t]*$/m;
+
+/** `  .:` — the root importer, the only one whose directory is this manifest's. */
+const ROOT_IMPORTER = /^ {2}(?:\.|'\.'|"\.")[ \t]*:[ \t]*$/m;
+
+/** `    packageManagerDependencies:`, within it. */
+const MANAGER_DEPENDENCIES = /^ {4}packageManagerDependencies:[ \t]*$/m;
+
+/** The first line back out to a given indent closes the block above it. */
+const OUT_OF_IMPORTER = /^ {0,2}\S/m;
+const OUT_OF_SECTION = /^ {0,4}\S/m;
+
+/**
+ * One entry, at pnpm's own fixed indentation and in its own key order.
+ *
+ * Deliberately a regex and not a parser: one program writes this shape with a
+ * fixed-width emitter, jup carries no dependencies, and anything unmatched
+ * reads as "no answer" — the degradation every other read here makes.
+ */
+const MANAGER_ENTRY =
+  /^ {6}(?<name>[^\s:'"]+|'[^'\n]*'|"[^"\n]*")[ \t]*:[ \t]*\n {8}specifier:[ \t]*(?<specifier>\S.*?)[ \t]*\n {8}version:[ \t]*(?<version>\S.*?)[ \t]*$/gm;
+
+/** §04.4 — what a package manager recorded for this project, as it recorded it. */
+export interface DeclaredResolution {
+  /** The concrete version, validated as one. */
+  resolved: string;
+  /** The specifier it was recorded against — only ever the range as written. */
+  specifier: string;
+  /** The file it came out of, which `info` names and this module never writes. */
+  path: string;
+}
+
+/**
+ * §04.4 — the package manager's own record for `descriptor`, or `null`.
+ *
+ * Every gate is one `jup.lock` already applies: this tool, recorded against
+ * **this range exactly as written** ({@link resolutionKey}'s rule, so editing
+ * the manifest retires the record rather than reinterpreting it), and still
+ * satisfying it under §04.2's lenient test.
+ *
+ * No digest is taken. What the file records describes the npm package pnpm
+ * installs for itself, not necessarily the artifact jup's table installs for
+ * that version (§02.4). The version stands and the bytes are still verified
+ * through npm's signature (§06.3) — the tier a host-less lockfile entry gets.
+ */
+export function readDeclaredEntry(dir: string, descriptor: Spec): DeclaredResolution | null {
+  if (!usesLockfile(descriptor)) return null;
+  if (!Object.hasOwn(MANAGER_LOCKFILES, descriptor.name)) return null;
+  if (envDisabled(ENV.ENABLE_PM_LOCKFILE)) return null;
+
+  const path = join(dir, MANAGER_LOCKFILES[descriptor.name]!);
+  const text = readPrefix(path, MANAGER_LOCKFILE_BYTES);
+  if (text === null) return null;
+
+  const importer = section(firstDocument(text), ROOT_IMPORTER, OUT_OF_IMPORTER);
+  if (importer === null) return null;
+  const body = section(importer, MANAGER_DEPENDENCIES, OUT_OF_SECTION);
+  if (body === null) return null;
+
+  for (const match of body.matchAll(MANAGER_ENTRY)) {
+    const { name, specifier, version } = match.groups!;
+    if (unquote(name!) !== descriptor.name) continue;
+
+    const recorded = unquote(specifier!);
+    const resolved = unquote(version!);
+    if (recorded !== descriptor.range || !isValidVersion(resolved)) return null;
+    if (isValidRange(descriptor.range) && !satisfiesWithPrereleases(resolved, descriptor.range)) {
+      return null;
+    }
+    return { resolved, specifier: recorded, path };
+  }
+
+  return null;
+}
+
+/** §04.4 — where a tool would keep its own resolution in `dir`, if it keeps one. */
+export function managerLockfilePath(dir: string, name: string): string | null {
+  return Object.hasOwn(MANAGER_LOCKFILES, name) ? join(dir, MANAGER_LOCKFILES[name]!) : null;
+}
+
+/** {@link readDeclaredEntry} as a locator — version only, never a digest. */
+export function readDeclaredResolution(dir: string, descriptor: Spec): ResolvedSpec | null {
+  const entry = readDeclaredEntry(dir, descriptor);
+  return entry === null ? null : { name: descriptor.name, reference: entry.resolved };
+}
+
+/**
+ * The first `bytes` of `path`, or `null`.
+ *
+ * One `read` at offset 0, because `readFileSync` would pull a multi-megabyte
+ * lockfile into memory to reach its first dozen lines. `\r` goes at the door so
+ * the patterns above need not carry `\r?` on every line break.
+ */
+function readPrefix(path: string, bytes: number): string | null {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const buffer = Buffer.allocUnsafe(bytes);
+    const read = readSync(fd, buffer, 0, bytes, 0);
+    return buffer.toString("utf8", 0, read).replaceAll("\r", "");
+  } catch {
+    // Missing, unreadable, a directory: all "no answer", as every read here is.
+    return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        // Nothing further to try; the answer above stands either way.
+      }
+    }
+  }
+}
+
+/** The text up to the first document break, discounting the opening one. */
+function firstDocument(text: string): string {
+  const rest = text.startsWith("---") ? text.slice(text.indexOf("\n") + 1) : text;
+  const next = DOCUMENT_BREAK.exec(rest);
+  return next === null ? rest : rest.slice(0, next.index);
+}
+
+/** The block under `heading`, ending where `end` first matches back out of it. */
+function section(text: string, heading: RegExp, end: RegExp): string | null {
+  const match = heading.exec(text);
+  if (match === null) return null;
+
+  const body = text.slice(match.index + match[0].length);
+  const close = end.exec(body);
+  return close === null ? body : body.slice(0, close.index);
+}
+
+/**
+ * A scalar as YAML reads it, for the two shapes pnpm emits: bare, and
+ * single-quoted (`'>=12 <13'`, where `''` is a quote). A double-quoted scalar
+ * loses only its quotes; a range or a version has nothing to escape, and one
+ * that did would fail the validation above rather than be believed.
+ */
+function unquote(value: string): string {
+  const quote = value[0];
+  if (value.length < 2 || !value.endsWith(quote!)) return value;
+  if (quote === "'") return value.slice(1, -1).replaceAll("''", "'");
+  return quote === '"' ? value.slice(1, -1) : value;
+}
+
+/** What a project's committed files and its memo already know, without a request (§04.4). */
 export interface KnownResolution {
-  /** The recorded resolution, else an unexpired memo; `null` when neither answers. */
+  /**
+   * The first of §04.4's answers that stands: the recorded `jup.lock`, then the
+   * package manager's own record, then an unexpired memo. `null` when none does.
+   */
   locator: ResolvedSpec | null;
   /**
    * The memo as read, expired or not: an aged-out one is still §04.4's answer
-   * of last resort. `null` when the recorded file answered, which outranks it.
+   * of last resort. `null` when a committed file answered, which outranks it.
    */
   cached: CachedResolution | null;
 }
 
 /**
- * §04.4's read order — the recorded resolution, then an unexpired memo — in the
- * one place both callers reach for it. The proxy path and `install` (§09.2) must
- * agree to the version, or a Docker layer caches one and runs another, offline.
+ * §04.4's read order — the recorded resolution, the package manager's own
+ * record, then an unexpired memo — in the one place every caller reaches for it.
+ * The proxy path and `install` (§09.2) must agree to the version, or a Docker
+ * layer caches one and runs another, offline.
  */
 export function readKnownResolution(
   dir: string,
@@ -247,6 +432,12 @@ export function readKnownResolution(
 ): KnownResolution {
   const recorded = readResolution(dir, descriptor);
   if (recorded !== null) return { locator: recorded, cached: null };
+
+  // Committed, and written by the tool that will run: it outranks a memo about
+  // what this host asked the registry yesterday, for the same reason `jup.lock`
+  // outranks both.
+  const declared = readDeclaredResolution(dir, descriptor);
+  if (declared !== null) return { locator: declared, cached: null };
 
   const cached = readCachedResolution(dir, descriptor, now);
   return { locator: cached === null || cached.expired ? null : cached.locator, cached };

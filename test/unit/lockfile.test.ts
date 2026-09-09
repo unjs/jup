@@ -28,6 +28,8 @@ import {
   integrityFromHash,
   LOCKFILE_NAME,
   readCachedResolution,
+  readDeclaredEntry,
+  readDeclaredResolution,
   readKnownResolution,
   readLockfile,
   readResolution,
@@ -597,6 +599,172 @@ describe("the resolution cache — §04.4", () => {
   });
 });
 
+/* ------------------------------------------------------------------ *
+ * §04.4 — the package manager's own committed resolution.
+ *
+ * The reader has no parser behind it, so what it does with a shape it
+ * was not expecting is the contract: every row that is not the exact
+ * shape pnpm writes must answer `null` and cost one resolution, never
+ * a version the project did not commit.
+ * ------------------------------------------------------------------ */
+
+/** The manager's document, as pnpm writes it: `---`, then the project's own. */
+function pnpmLock(entry: string, project = "12.9.9"): string {
+  return `---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    configDependencies: {}
+    packageManagerDependencies:
+${entry}
+
+packages:
+
+  pnpm@12.3.0:
+    resolution: {integrity: sha512-nonsense}
+
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    devDependencies:
+      pnpm:
+        specifier: ^12
+        version: ${project}
+`;
+}
+
+function writeManagerLock(content: string): void {
+  writeFileSync(join(dir, "pnpm-lock.yaml"), content);
+}
+
+/** The shape under test throughout: `pnpm@^12`, recorded as 12.3.0. */
+const DECLARED = { name: "pnpm", range: "^12" };
+const ENTRY = `      pnpm:
+        specifier: ^12
+        version: 12.3.0`;
+
+describe("readDeclaredEntry — §04.4's declared resolution", () => {
+  it("reads the root importer's entry out of the first document", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+
+    expect(readDeclaredEntry(dir, DECLARED)).toEqual({
+      resolved: "12.3.0",
+      specifier: "^12",
+      path: join(dir, "pnpm-lock.yaml"),
+    });
+  });
+
+  // The project's own `importers` carry entries of exactly this shape —
+  // `<name>:` / `specifier:` / `version:` at the same indentation — so a reader
+  // that did not stop at the document break would answer with a dependency's
+  // version. The fixture's second document says `pnpm` on purpose.
+  it("never reads past the document break into the project's own importers", () => {
+    writeManagerLock(pnpmLock(ENTRY, "12.9.9"));
+
+    expect(readDeclaredEntry(dir, DECLARED)?.resolved).toBe("12.3.0");
+  });
+
+  it("answers null when the project's document is all there is", () => {
+    writeManagerLock(`lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    devDependencies:
+      pnpm:
+        specifier: ^12
+        version: 12.9.9
+`);
+
+    expect(readDeclaredEntry(dir, DECLARED)).toBeNull();
+  });
+
+  // The same keying rule as `resolutionKey`: a record stands for the range it
+  // was taken against and for no other, so editing the manifest retires it.
+  it("requires the recorded specifier to be the range exactly as written", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+
+    expect(readDeclaredEntry(dir, { name: "pnpm", range: "^12.0.0" })).toBeNull();
+  });
+
+  it("skips a version the range no longer admits", () => {
+    writeManagerLock(
+      pnpmLock(`      pnpm:
+        specifier: ^12
+        version: 11.26.0`),
+    );
+
+    expect(readDeclaredEntry(dir, DECLARED)).toBeNull();
+  });
+
+  it("skips a version that is not one", () => {
+    writeManagerLock(
+      pnpmLock(`      pnpm:
+        specifier: ^12
+        version: link:../pnpm`),
+    );
+
+    expect(readDeclaredEntry(dir, DECLARED)).toBeNull();
+  });
+
+  it("reads a quoted specifier, which is how a range with a space is written", () => {
+    writeManagerLock(
+      pnpmLock(`      pnpm:
+        specifier: '>=12 <13'
+        version: 12.3.0`),
+    );
+
+    expect(readDeclaredEntry(dir, { name: "pnpm", range: ">=12 <13" })?.resolved).toBe("12.3.0");
+  });
+
+  it("answers only for the tool asked about", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+
+    expect(readDeclaredEntry(dir, { name: "yarn", range: "^12" })).toBeNull();
+  });
+
+  // An exact pin is its own record (§04.4), so the file is not even opened.
+  it("is not consulted for an exact pin", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+
+    expect(readDeclaredEntry(dir, { name: "pnpm", range: "12.3.0" })).toBeNull();
+  });
+
+  it("answers null with no file at all", () => {
+    expect(readDeclaredEntry(dir, DECLARED)).toBeNull();
+  });
+
+  it("degrades to null on a file it cannot make sense of", () => {
+    writeManagerLock("not: [a, lockfile\n\x00\x00");
+
+    expect(readDeclaredEntry(dir, DECLARED)).toBeNull();
+  });
+
+  it("is switched off by JUP_ENABLE_PM_LOCKFILE=0", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+    process.env.JUP_ENABLE_PM_LOCKFILE = "0";
+    try {
+      expect(readDeclaredEntry(dir, DECLARED)).toBeNull();
+    } finally {
+      delete process.env.JUP_ENABLE_PM_LOCKFILE;
+    }
+  });
+
+  // §04.4 — the digest in that file describes the npm package pnpm installs for
+  // itself, which is not necessarily the artifact jup's table installs for the
+  // same version. The locator carries the version and nothing else.
+  it("never turns the file's own integrity into a locator suffix", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+
+    expect(readDeclaredResolution(dir, DECLARED)).toEqual({ name: "pnpm", reference: "12.3.0" });
+  });
+});
+
 describe("readKnownResolution — §04.4's read order", () => {
   const LOCATOR = { name: "pnpm", reference: "11.1.2" };
 
@@ -638,5 +806,30 @@ describe("readKnownResolution — §04.4's read order", () => {
 
   it("answers null for a project with neither file", () => {
     expect(readKnownResolution(dir, RANGE)).toEqual({ locator: null, cached: null });
+  });
+
+  // §04.4's middle rank. The memo is this host's note about what the registry
+  // said yesterday; the manager's lockfile is committed, so it wins — that is
+  // the whole point, since the memo is what drifts between machines.
+  it("prefers the manager's committed record to a live memo", () => {
+    const now = 1_700_000_000_000;
+    modules();
+    writeManagerLock(pnpmLock(ENTRY));
+    writeCachedResolution(dir, DECLARED, { name: "pnpm", reference: "12.3.4" }, HASH, false, now);
+
+    expect(readKnownResolution(dir, DECLARED, now + 1000).locator).toEqual({
+      name: "pnpm",
+      reference: "12.3.0",
+    });
+  });
+
+  // And it does not displace `jup.lock`, which is the project's own decision.
+  // The recorded digest is bare and pnpm's current band is per-host, so §04.4
+  // drops it and the version stands alone — which is the version being asserted.
+  it("still yields to the recorded jup.lock", () => {
+    writeManagerLock(pnpmLock(ENTRY));
+    writeResolution(dir, DECLARED, { name: "pnpm", reference: "12.3.4" }, HASH);
+
+    expect(readKnownResolution(dir, DECLARED).locator?.reference).toBe("12.3.4");
   });
 });

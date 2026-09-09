@@ -3,8 +3,9 @@
 Input: a `Spec {name, range}` (§03). Output: a `ResolvedSpec {name, reference}`
 or `null` ("no release matches").
 
-The proxy path consults, in order: the recorded `jup.lock`, an unexpired memo,
-the store, and only then the registry (§4.4). Everything below describes the
+The proxy path consults, in order: the recorded `jup.lock`, the package
+manager's own committed lockfile, an unexpired memo, the store, and only then
+the registry (§4.4). Everything below describes the
 resolver those first three steps skip.
 
 ## 4.1 The algorithm
@@ -144,7 +145,10 @@ anything they cannot read.
 | Written by | `use`; `up`, where the file already exists | any proxy run whose answer came from the registry, and the `up` that found no file |
 | Committed | yes | no — it lives in `node_modules` |
 | Expiry | never; a committed decision does not rot | 24 h stamp |
-| Rank | first | second |
+| Rank | first | third |
+
+A third file may answer between them, and jup never writes it: the **package
+manager's own** lockfile. It is described below.
 
 `<project>` is the directory of the manifest (or version file) the walk selected,
 not the cwd.
@@ -177,9 +181,69 @@ its own record.
   from now. A `node_modules` restored from an image, or written under a fast
   clock, would otherwise hold a range pinned for as long as its stamp said.
 
+### The package manager's own resolution
+
+pnpm >= 12 reads `devEngines.packageManager` itself. Run on its own it re-execs
+into the version its `pnpm-lock.yaml` records and leaves the file alone. Run
+under a version manager — which it detects by `COREPACK_ROOT` (§08.7) — it
+defers the *choice* and writes whichever version it was handed into that same
+committed file:
+
+```yaml
+importers:
+
+  .:
+    packageManagerDependencies:
+      pnpm:
+        specifier: ^12
+        version: 12.3.4
+```
+
+So under jup that field is a transcript of what jup resolved. Left unread, it is
+a *per-host* transcript: the memo is host-local and expires after a day, and the
+store probe below answers with whatever version this machine already has
+installed, indefinitely. Two machines then commit two versions of one line,
+back and forth, and `pnpm install` on a fresh clone is a diff nobody asked for.
+
+Reading it back closes the loop. Every host runs the version the project already
+committed, and pnpm rewrites the line it already agrees with — which is no write
+at all. It ranks **below `jup.lock`**, which is jup's own committed decision and
+stays the last word, and **above the memo**, which is host-local, disposable,
+and exactly what drifts.
+
+The gates are the ones `jup.lock` already applies. The entry must be for the
+requested tool; it must be recorded against **this range, exactly as written**,
+which is the keying rule of `<name>@<range>` above, so editing the manifest
+retires the record rather than reinterpreting it; and the version must still
+satisfy that range under §4.2's lenient rule. Anything else — a file that is not
+there, a shape the reader does not recognise, a `version` that is not one —
+reads as "no answer" and costs one resolution.
+
+No digest is taken from the file. What it records there describes the npm
+package pnpm installs for *itself*, which is not necessarily the artifact this
+table installs for the same version (§02.4's per-host bands). The version stands
+and the bytes are still verified through npm's signature (§06.3) — the tier a
+lockfile entry with no key for this host already gets.
+
+The read is a bounded probe: the block lives in the **first** YAML document,
+which holds only the manager's own resolution, so the first 64 KiB is opened,
+read and closed. The project's own `importers` and `packages` are the document
+after the `---` and are never looked at. Parsing is four regexes against pnpm's
+own fixed-width emitter and not a YAML reader — jup carries no dependencies, and
+a shape the patterns do not match degrades like every other read here. Only the
+**root** importer (`.`) is read, because that is the one whose directory is the
+manifest's.
+
+`JUP_ENABLE_PM_LOCKFILE=0` switches the whole thing off (§11.1), and an exact
+pin never reaches it: the pin is already its own record.
+
+The table is closed, like §02's. A package manager gets a reader here only once
+it actually keeps such a file; today that is pnpm alone.
+
 ### Reading
 
-Recorded file first; an unexpired memo second. A recorded resolution is checked
+Recorded file first; the package manager's own record second; an unexpired memo
+third. A recorded resolution is checked
 against the range it is keyed by (lenient) and skipped if it no longer satisfies
 it; a dist-tag key has no range to violate, so a recorded entry for one stands
 until a hand edit removes it, and the memo's TTL is what keeps `pnpm@latest`

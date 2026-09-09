@@ -1673,6 +1673,31 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * unchanged and now owed twice over against the same resident: this entry puts
    * another kilobyte into `config/table.ts`, now 39,314, still read one band at
    * a time by every `yarn --version`.
+   *
+   * Re-based to 298,000 for §04.4's declared resolution: the package manager's
+   * own committed lockfile becomes a resolution source, ranked below `jup.lock`
+   * and above the memo. 289,964 -> 297,864, **+7,900 or +2.72%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | `readDeclaredEntry`, its four patterns, the four helpers that slice to them, and `managerLockfilePath` for §09.9's input list | `project/lockfile.ts` | +7,842 |
+   * | `JUP_ENABLE_PM_LOCKFILE` | `config/env-vars.ts` | +58 |
+   *
+   * The biggest single-module raise in this ledger, and the one where source and
+   * chunk diverge most: `dist/index.mjs` 192,041 -> 194,189, **+2,148 or
+   * +1.12%**. Two thirds of the source delta is prose and patterns that minify
+   * to nothing; the executable part is one gated read, four regexes and a
+   * bounded `readSync`. The long form of the argument — why a committed record
+   * written by another program outranks jup's own memo, and why no digest is
+   * taken from it — is in §04.4 rather than here, on the same terms as the
+   * `types.ts` note in the `--store-path` entry above.
+   *
+   * None of it can move off the warm path: it is consulted on every proxy run
+   * whose project spec is a range, in `readKnownResolution`, which is where
+   * §04.4's order lives and which `commands/cli.ts` shares so a warmed layer and
+   * the run it warms cannot disagree. It costs an exactly-pinned run nothing —
+   * `usesLockfile` returns before the first `open` — and a range run one
+   * `open`/`read`/`close` of 64 KiB, against a request it usually replaces.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1684,7 +1709,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(290_000);
+    ).toBeLessThanOrEqual(298_000);
   });
 });
 

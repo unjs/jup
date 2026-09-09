@@ -203,7 +203,9 @@ would do and why:
 * the recorded resolution and the memo, read through the same range gate and
   expiry rule a run applies, so it reports what the next run would accept — for a
   per-host tool it prints the whole host map;
-* what the next run would resolve to, following §01.3's own order;
+* what the next run would resolve to, following §01.3's own order — `declared`
+  where the answer is the package manager's own committed lockfile (§04.4),
+  which is also named on its own line under `Lockfile`;
 * every installed version, every shim and what each name on `PATH` currently
   resolves to — including entries that are not shimmed by default, because for
   `bun` the interesting answer is usually someone else's install;
@@ -216,8 +218,9 @@ would do and why:
   (`*_TOKEN`, `*_PASSWORD`, `*_USERNAME`) are reported as present, never printed;
   long values are elided;
 * the **project inputs** — every file §03.1's discovery consults, absolute, in
-  walk order, each labelled as a manifest, a version file, an env file or the
-  lockfile, with the tool it speaks for, whether it is there, and whether it is
+  walk order, each labelled as a manifest, a version file, an env file, the
+  lockfile or the package manager's own lockfile (§04.4, listed only where it
+  answers), with the tool it speaks for, whether it is there, and whether it is
   the one of its kind the walk chose. Candidates that are **absent** are listed
   too, and are the point rather than noise: this is the set a CI cache key is
   built over, and such a key has to move when a file that was not there appears.

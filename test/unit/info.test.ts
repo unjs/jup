@@ -974,6 +974,7 @@ describe("buildReport — the reported shape (§09.9)", () => {
       "present",
       "key",
       "resolution",
+      "declared",
       "frozen",
       "frozenSource",
       "cache",
