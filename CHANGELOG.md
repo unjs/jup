@@ -1,6 +1,26 @@
 # Changelog
 
 
+## v0.5.6
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5.5...v0.5.6)
+
+### 🚀 Enhancements
+
+- Read pnpm-lock.yaml's recorded package manager version ([f2a7c77](https://github.com/unjs/jup/commit/f2a7c77))
+
+### 🩹 Fixes
+
+- Forward the IPC channel through shims ([2189433](https://github.com/unjs/jup/commit/2189433))
+
+### 🏡 Chore
+
+- Move the setup-jup action to unjs/setup-jup ([82aec26](https://github.com/unjs/jup/commit/82aec26))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.5.5
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5.4...v0.5.5)
