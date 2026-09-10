@@ -136,6 +136,21 @@ what keeps `default` versions and digests current, §02 deliberately documents t
 table's *shape* and points at the code for its values; do not reintroduce a copy
 of the data into the docs.
 
+A refresh is one command — `pnpm refresh --commit`, which is the command the
+workflow runs:
+
+| Flag | Effect |
+| --- | --- |
+| *(none)* | rewrite in place, leaving the diff in the working tree |
+| `--commit` | rewrite, then commit exactly the paths it wrote, with the moved values as the message body |
+| `--check` | write nothing, exit 1 if anything is stale |
+
+`--commit` refuses before writing anything if one of those paths is already
+modified, because a commit that swallowed a hand edit is no longer a generated
+diff — and the hand edit it would most often swallow, `NODE_LTS_LINE` moving to a
+new major, is exactly the change review is for. Unrelated work elsewhere in the
+tree is left alone: the commit is pathspec-limited.
+
 The same script writes every sanctioned copy of table data outside `src/config/`,
 and each is sanctioned because nothing hand-maintains it:
 

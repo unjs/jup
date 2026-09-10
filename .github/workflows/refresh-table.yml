@@ -1,11 +1,12 @@
 # §16, Built-in table and trust keys — the calendar reminder this repository
 # does not want to rely on a human keeping.
 #
-# `scripts/refresh-table.mjs` is the whole refresh: it verifies and rewrites
-# every `default`, drops expired trust keys, and stamps the sanctioned copies of
-# those values (the two bootstrap installers, the unit suite's `default`
-# literals). This job runs it weekly, proves the result passes `pnpm test`, and
-# opens a PR.
+# `pnpm refresh --commit` (`scripts/refresh-table.mjs`) is the whole refresh: it
+# verifies and rewrites every `default`, drops expired trust keys, stamps the
+# sanctioned copies of those values (the two bootstrap installers, the unit
+# suite's `default` literals) and commits exactly what it wrote. This job runs it
+# weekly, proves the result passes `pnpm test`, and opens a PR — so what CI does
+# and what a maintainer does locally are the same command.
 #
 # **It must not auto-merge**, and nothing here does: a bad `default` bricks every
 # machine that has no recorded default of its own. Two things in the diff always
@@ -32,8 +33,20 @@ jobs:
         id: refresh
         run: |
           set -euo pipefail
-          node scripts/refresh-table.mjs | tee refresh.log
-          if git diff --quiet; then
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # One long-lived branch, so a run that lands on an open PR updates it
+          # instead of opening a second one nobody closes.
+          git checkout -B chore/refresh-table
+          before=$(git rev-parse HEAD)
+
+          # `--commit` is the refresh: it writes the table, the trust store and
+          # every stamped copy, then commits exactly those paths with the same
+          # list of moved values it printed here.
+          # `--silent`, so the log this PR quotes is the script's output alone.
+          pnpm --silent run refresh --commit | tee refresh.log
+
+          if [ "$before" = "$(git rev-parse HEAD)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -52,21 +65,15 @@ jobs:
         run: |
           set -euo pipefail
           branch=chore/refresh-table
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git checkout -B "$branch"
-          git commit -am "chore: refresh the built-in table"
           git push --force origin "$branch"
 
-          # One long-lived branch, so a run that lands on an open PR updates it
-          # instead of opening a second one nobody closes.
           open=$(gh pr list --head "$branch" --state open --json number --jq '.[].number')
           if [ -n "$open" ]; then
             exit 0
           fi
 
           {
-            echo 'Ran `node scripts/refresh-table.mjs` (§16, Built-in table and trust keys).'
+            echo 'Ran `pnpm refresh --commit` (§16, Built-in table and trust keys).'
             echo
             echo '```'
             cat refresh.log

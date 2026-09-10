@@ -25,35 +25,46 @@
  * alone would be refused on every machine with no `lastKnownGood.json` — that
  * is, every fresh install. Nothing here trusts a digest it was merely told.
  *
- * Usage:
- *   node scripts/refresh-table.mjs           # rewrite in place
- *   node scripts/refresh-table.mjs --check   # exit 1 if anything is stale
+ * Usage (`pnpm refresh` runs the same thing, and is what CI runs):
+ *   pnpm refresh              # rewrite in place
+ *   pnpm refresh --commit     # rewrite, then commit exactly what was rewritten
+ *   pnpm refresh --check      # write nothing; exit 1 if anything is stale
  *
  * The workflow that runs it opens a PR and does **not** auto-merge: a bad
  * `default` bricks every machine that has no recorded default of its own.
  */
 
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { compareDigest, parseSri, verifySignature } from "../src/verify/integrity.ts";
 
-const SRC = join(import.meta.dirname, "..", "src", "config");
+const ROOT = join(import.meta.dirname, "..");
+const SRC = join(ROOT, "src", "config");
 const TABLE = join(SRC, "table.ts");
 const KEYS = join(SRC, "keys.ts");
 
 // The unit suite's review gates. Stamped, not authored: see
 // {@link stampReviewGates}.
-const CONFIG_TEST = join(import.meta.dirname, "..", "test", "unit", "config.test.ts");
+const CONFIG_TEST = join(ROOT, "test", "unit", "config.test.ts");
 
 // The two bootstrap installers. They are stamped, not authored: see
 // {@link stampInstallers}.
-const PUBLIC = join(import.meta.dirname, "..", "docs", "public");
+const PUBLIC = join(ROOT, "docs", "public");
 const INSTALL_SH = join(PUBLIC, "install.sh");
 const INSTALL_PS1 = join(PUBLIC, "install.ps1");
 
 const NPM_REGISTRY = "https://registry.npmjs.org";
 const check = process.argv.includes("--check");
+const commit = process.argv.includes("--commit");
+
+if (check && commit) {
+  console.error(
+    "--check and --commit are opposites: one refuses to write, the other writes twice.",
+  );
+  process.exit(2);
+}
 
 /** Every rewrite this run wants to make, for the summary and for `--check`. */
 const changes = [];
@@ -504,6 +515,74 @@ function stampReviewGates(table) {
 }
 
 /**
+ * `git` in the repository this script lives in, output captured **verbatim**.
+ *
+ * Untrimmed on purpose: `status --porcelain` puts the two status columns in the
+ * first two bytes, and an unstaged modification's first byte is a space, so a
+ * convenience trim here silently eats the first character of the first path.
+ */
+function git(...args) {
+  return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" });
+}
+
+/**
+ * §16 — the two refusals `--commit` owes the "human review of generated
+ * changes" rule, both about not signing someone else's work.
+ *
+ * A file this run is about to write that was *already* modified cannot produce a
+ * commit which is only this run's doing, and the hand edit it would swallow is
+ * precisely the kind §16 wants looked at — `NODE_LTS_LINE` moving to a new major
+ * is the common one. A `--commit` outside a work tree is a flag that would
+ * otherwise do nothing quietly.
+ *
+ * Both stop the run *before* anything is written, so a refusal leaves the tree
+ * exactly as it was found.
+ */
+function assertCommittable(paths) {
+  const refuse = (reason) => {
+    console.error(`\n${reason}`);
+    process.exit(1);
+  };
+
+  try {
+    git("rev-parse", "--is-inside-work-tree");
+  } catch {
+    refuse(`--commit needs a git work tree; ${ROOT} is not inside one.`);
+  }
+
+  const dirty = git("status", "--porcelain", "--", ...paths)
+    .split("\n")
+    .filter((line) => line !== "")
+    .map((line) => line.slice(3));
+
+  if (dirty.length > 0) {
+    refuse(
+      `--commit would swallow uncommitted changes to:\n  ${dirty.join("\n  ")}\n` +
+        "Commit or revert those first, then refresh (nothing has been written).",
+    );
+  }
+}
+
+/**
+ * §16 — `--commit`, so a refresh is one command and the commit says what the
+ * run said.
+ *
+ * The message body is {@link changes} verbatim: every line the run printed is a
+ * value that moved, which is exactly what a reviewer of a table refresh needs in
+ * `git log` and what the PR quotes back. Nothing is invented for it.
+ *
+ * The commit is pathspec-limited to the files this script wrote, so an unrelated
+ * staged change stays staged and unrelated work in the tree stays in the tree.
+ */
+function commitRefresh(paths) {
+  execFileSync("git", ["commit", "--quiet", "--file", "-", "--", ...paths], {
+    cwd: ROOT,
+    input: `chore: refresh the built-in table\n\n${changes.join("\n")}\n`,
+  });
+  return git("rev-parse", "--short", "HEAD").trim();
+}
+
+/**
  * §02.6 — npm's published signing keys, expired ones dropped.
  *
  * Shipping a key that has expired is dead weight at best: §06.5 refuses it at
@@ -611,13 +690,28 @@ if (check) {
   process.exit(1);
 }
 
-writeFileSync(TABLE, table);
-writeFileSync(KEYS, keys);
-writeFileSync(INSTALL_SH, installers.sh);
-writeFileSync(INSTALL_PS1, installers.ps1);
-writeFileSync(CONFIG_TEST, configTest);
+/**
+ * Everything this run writes, and therefore everything `--commit` commits.
+ *
+ * One list for both, so the commit cannot fall behind the rewrite: a stamped
+ * file added here is committed by the same edit that starts writing it.
+ */
+const written = {
+  [TABLE]: table,
+  [KEYS]: keys,
+  [INSTALL_SH]: installers.sh,
+  [INSTALL_PS1]: installers.ps1,
+  [CONFIG_TEST]: configTest,
+};
+
+// Before the first write, so a refusal leaves the tree as it was found.
+if (commit) assertCommittable(Object.keys(written));
+
+for (const [path, content] of Object.entries(written)) writeFileSync(path, content);
+
+console.log("\nRewritten: table, trust store, installers and the unit suite's `default` literals.");
+if (commit) console.log(`Committed ${commitRefresh(Object.keys(written))}.`);
 console.log(
-  "\nRewritten: table, trust store, installers and the unit suite's `default` literals.\n" +
-    "A bin-path change still needs a new `ranges` entry, and a new LTS line still needs\n" +
+  "A bin-path change still needs a new `ranges` entry, and a new LTS line still needs\n" +
     "`NODE_LTS_LINE` moved by hand — both are human review (§16, Built-in table and trust keys).",
 );

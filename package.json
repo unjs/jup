@@ -39,6 +39,7 @@
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
     "prepack": "pnpm build",
+    "refresh": "node scripts/refresh-table.mjs",
     "release": "pnpm test && pnpm build && changelogen --release && pnpm publish && git push --follow-tags",
     "test": "pnpm lint && pnpm typecheck && vitest run --coverage",
     "typecheck": "tsc --noEmit --skipLibCheck",
