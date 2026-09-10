@@ -49,7 +49,7 @@ import { resolveBin } from "../../src/cache/install.ts";
  * filesystem. The file's own imports stay on the real `node:fs`, so a fixture
  * written by the test never lands in those counts.
  */
-const fs = vi.hoisted(() => {
+const { fs, mkdirSyncActual } = vi.hoisted(() => {
   const actual = process.getBuiltinModule("node:fs");
   const patched = {
     ...actual,
@@ -63,10 +63,11 @@ const fs = vi.hoisted(() => {
   const original = process.getBuiltinModule;
   process.getBuiltinModule = ((id: string) =>
     id === "node:fs" ? patched : original.call(process, id)) as typeof process.getBuiltinModule;
-  return patched;
+  // Captured here, before the patch is installed: reading it back off
+  // `getBuiltinModule` afterwards hands out the spy, and feeding a spy its own
+  // implementation is a cycle.
+  return { fs: patched, mkdirSyncActual: actual.mkdirSync };
 });
-
-const mkdirSyncActual = process.getBuiltinModule("node:fs").mkdirSync;
 
 let home: string;
 
