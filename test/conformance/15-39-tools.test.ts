@@ -29,7 +29,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { hostTarget } from "../../src/config/table.ts";
+import { DEFINITIONS, hostTarget } from "../../src/config/table.ts";
 import { messages } from "../../src/errors.ts";
 import {
   cleanupFixtures,
@@ -48,7 +48,8 @@ const POSIX = process.platform !== "win32";
 const registry = new MockRegistry();
 
 const NODE_VERSION = "22.23.2";
-const NODE_OTHER = "24.20.0";
+/** The newer line, and node's compiled-in default: row 233 falls back to it. */
+const NODE_OTHER = DEFINITIONS.node!.default;
 const PNPM_VERSION = "11.1.2";
 
 /**
@@ -182,8 +183,8 @@ describe.skipIf(!POSIX)("§02.3 node, and tools that are not package managers", 
       devEngines: { runtime: { name: "node", version: "22.x" } },
     });
 
-    // The runtime resolves *within its own range* — 24.20.0 is `latest` and is
-    // not what this project asked for — while the package manager resolves from
+    // The runtime resolves *within its own range* — the 24 line is `latest` and
+    // is not what this project asked for — while the package manager resolves from
     // the pin. One manifest, two answers, no conflict: they describe different
     // tools, so §03.3's cross-checks have nothing to compare.
     expect((await run(["node", "-e", "0"], options(fixture))).exitCode).toBe(0);

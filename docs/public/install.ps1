@@ -66,7 +66,7 @@ $nodeMinMinor = 18
 # to be edited by hand. Table data lives in `src/config/`; this is a copy because
 # a bootstrap runs before there is a jup to ask, and the stamper is what keeps it
 # from becoming a second, drifting source. install.sh carries the same literal.
-$nodeVersion = '24.20.0'
+$nodeVersion = '24.21.0'
 
 # `JUP_NPM_REGISTRY` is jup's own setting (section 11.2) and is honoured here for
 # the machine that has to reach a mirror for everything, bootstrap included.

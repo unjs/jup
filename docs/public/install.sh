@@ -71,7 +71,7 @@ NODE_MIN_MINOR=18
 #
 # `NODE_VERSION` is `node.default` from `src/config/table.ts`. Any other version
 # is the duplicate-download bug: jup would want its own on the first command.
-NODE_VERSION=24.20.0
+NODE_VERSION=24.21.0
 
 # §02.6's trust store for the default registry, each key the base64 DER
 # SubjectPublicKeyInfo `src/config/keys.ts` holds, space separated.

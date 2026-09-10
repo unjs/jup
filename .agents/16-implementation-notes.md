@@ -136,12 +136,24 @@ what keeps `default` versions and digests current, §02 deliberately documents t
 table's *shape* and points at the code for its values; do not reintroduce a copy
 of the data into the docs.
 
-The same script stamps the two values `docs/public/install.{sh,ps1}` have to
-carry as literals — node's `default` and, for the sh half, §02.6's keys — because
-a bootstrap runs before there is a jup to ask for either. That is the only
-sanctioned copy of table data outside `src/config/`, and it is sanctioned because
-nothing hand-maintains it: `test/unit/install-scripts.test.ts` fails on drift,
-and §07.11 explains what each stale value costs.
+The same script writes every sanctioned copy of table data outside `src/config/`,
+and each is sanctioned because nothing hand-maintains it:
+
+* the two values `docs/public/install.{sh,ps1}` carry as literals — node's
+  `default` and, for the sh half, §02.6's keys — because a bootstrap runs before
+  there is a jup to ask for either. `test/unit/install-scripts.test.ts` fails on
+  drift, and §07.11 explains what each stale value costs;
+* the three `default` literals in `test/unit/config.test.ts` (yarn, aube, nub).
+  Those assertions are deliberately literals — a derived one is a tautology that
+  passes against any drift — so a refresh that did not stamp them would fail the
+  suite meant to review it.
+
+Node is refreshed like every other entry, with one number held back: the script
+tracks the newest release on `NODE_LTS_LINE` and writes both `default` and
+`tags.lts` from it, but which major is in LTS is a human's to move, for the reason
+§02.3 gives — npm's `node` dist-tags stop at `v20-lts`, and nodejs.org is the
+second source §02.2 refuses. Every run prints the line it tracked, so confirming
+it against Node's release schedule is part of reviewing the PR.
 
 Refresh npm trust keys from `https://registry.npmjs.org/-/npm/v1/keys` and check
 origin, key IDs, SPKI bytes, expiry and rollover. The refresh script removes

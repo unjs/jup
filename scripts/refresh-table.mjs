@@ -2,10 +2,17 @@
  * §16, Built-in table and trust keys — keep the embedded table (§02.5) and
  * trust store (§02.6) from rotting.
  *
- * The table goes stale in three ways, and only two of them can be automated:
- * package managers publish new versions, npm rotates its signing keys, and bin
- * paths move between majors. This script does the first two and prints a notice
- * for the third, because a new `ranges` entry needs human review.
+ * The table goes stale in four ways, and only two of them can be automated:
+ * package managers publish new versions, npm rotates its signing keys, bin paths
+ * move between majors, and Node moves LTS to a new major. This script does the
+ * first two — for every entry, node included — and prints a notice for the last
+ * two, because a new `ranges` entry and a new LTS line both need human review.
+ *
+ * It also writes every sanctioned copy of a table value that lives outside
+ * `src/config/`: the two bootstrap installers ({@link stampInstallers}) and the
+ * unit suite's `default` literals ({@link stampReviewGates}). A refresh is one
+ * command and one PR, never a command followed by a hunt for what it left
+ * behind.
  *
  * This is why it exists rather than being someone's calendar reminder: a
  * compiled-in `default` pointing at a release unsupported for six years —
@@ -34,6 +41,10 @@ import { compareDigest, parseSri, verifySignature } from "../src/verify/integrit
 const SRC = join(import.meta.dirname, "..", "src", "config");
 const TABLE = join(SRC, "table.ts");
 const KEYS = join(SRC, "keys.ts");
+
+// The unit suite's review gates. Stamped, not authored: see
+// {@link stampReviewGates}.
+const CONFIG_TEST = join(import.meta.dirname, "..", "test", "unit", "config.test.ts");
 
 // The two bootstrap installers. They are stamped, not authored: see
 // {@link stampInstallers}.
@@ -153,6 +164,27 @@ async function nativeDefault(launcher, artifactFor, pinnedVersion) {
 }
 
 /**
+ * The newest stable `<line>.x.y` a packument holds.
+ *
+ * Two entries pick a `default` from a **line** rather than from `latest`, for
+ * unrelated reasons — pnpm because upstream's tag lags the line jup ships
+ * ({@link PNPM_LINE}), node because npm's tags cannot name an LTS at all
+ * ({@link NODE_LTS_LINE}) — and both want the same answer from the same data:
+ * the highest release on that major, prereleases excluded.
+ */
+function newestOnLine(packument, line, name) {
+  const stable = new RegExp(`^${line}\\.(\\d+)\\.(\\d+)$`);
+  const found = Object.keys(packument.versions ?? {})
+    .map((version) => [version, stable.exec(version)])
+    .filter(([, match]) => match !== null)
+    .map(([version, match]) => [version, Number(match[1]), Number(match[2])])
+    .sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+
+  if (found.length === 0) throw new Error(`${name} publishes no stable ${line}.x release`);
+  return found[found.length - 1][0];
+}
+
+/**
  * §02.5 — the major line jup ships as pnpm's compiled-in `default`.
  *
  * pnpm is the only entry whose `default` is not simply the `latest` dist-tag.
@@ -184,15 +216,7 @@ const PNPM_LINE = 12;
  */
 async function pnpmDefault() {
   const packument = await getJson(`${NPM_REGISTRY}/pnpm`);
-  const stable = new RegExp(`^${PNPM_LINE}\\.(\\d+)\\.(\\d+)$`);
-  const line = Object.keys(packument.versions ?? {})
-    .map((version) => [version, stable.exec(version)])
-    .filter(([, match]) => match !== null)
-    .map(([version, match]) => [version, Number(match[1]), Number(match[2])])
-    .sort((a, b) => a[1] - b[1] || a[2] - b[2]);
-
-  if (line.length === 0) throw new Error(`pnpm publishes no stable ${PNPM_LINE}.x release`);
-  const version = line[line.length - 1][0];
+  const version = newestOnLine(packument, PNPM_LINE, "pnpm");
 
   // The band decides the pin, not the caller. Reading it from the table would
   // make the check circular (see {@link NATIVE_TARGETS}), so the boundary is
@@ -200,6 +224,41 @@ async function pnpmDefault() {
   return PNPM_LINE >= 12
     ? await nativeDefault("pnpm", NATIVE_TARGETS.pnpm, version)
     : await npmDefault("pnpm");
+}
+
+/**
+ * §02.3 — the LTS line jup ships as node's compiled-in `default` and answers
+ * `node@lts` with.
+ *
+ * This is the one number in this file a release cannot compute, and the reason
+ * is npm's, not ours: the `node` package's dist-tags stop at `v20-lts` (20.11.1)
+ * while the same package publishes 22.x and 24.x, so every reading of them names
+ * a line two majors stale. `nodejs.org/dist/index.json` knows the answer and is
+ * exactly the second source §02.2 refuses.
+ *
+ * So the *line* is the review gate and the *patch* is not: a human moves this
+ * number when Node's release schedule moves LTS, and the script keeps the table
+ * on that line's newest release in between. {@link reviewNodeLine} prints the
+ * question on every run.
+ */
+const NODE_LTS_LINE = 24;
+
+/**
+ * §02.3 — node's `default`, and the `lts` tag that names the same release.
+ *
+ * Bare, like bun's and deno's and for the same reason (§07.6): node's artifact
+ * is per-host, so there is no portable digest to pin, and the check that
+ * replaces one is {@link nativeDefault}'s — does every host the table promises
+ * actually have a signed build of this release?
+ *
+ * `tags.lts` moves with `default` because they answer the same question. §02.3
+ * makes `default` "the current LTS line", so a `default` the `lts` tag did not
+ * name would mean `jup use node` and `jup use node@lts` installing two Nodes.
+ */
+async function nodeDefault() {
+  const packument = await getJson(`${NPM_REGISTRY}/node`);
+  const version = newestOnLine(packument, NODE_LTS_LINE, "node");
+  return await nativeDefault("node", NATIVE_TARGETS.node, version);
 }
 
 /**
@@ -256,6 +315,18 @@ const NATIVE_TARGETS = {
     "win32-arm64": "@endevco/aube-win32-arm64",
     "win32-x64": "@endevco/aube-win32-x64",
   },
+  // §02.3 — three of node's six are renames: the packages are
+  // `node-<platform>-<arch>` with `win32` spelled `win`, and on Apple Silicon the
+  // prefix is `node-bin-` because `node-darwin-arm64` belongs to an unrelated
+  // publisher.
+  node: {
+    "darwin-arm64": "node-bin-darwin-arm64",
+    "darwin-x64": "node-darwin-x64",
+    "linux-arm64": "node-linux-arm64",
+    "linux-x64": "node-linux-x64",
+    "win32-arm64": "node-win-arm64",
+    "win32-x64": "node-win-x64",
+  },
   nub: {
     "darwin-arm64": "@nubjs/nub-darwin-arm64",
     "darwin-x64": "@nubjs/nub-darwin-x64",
@@ -298,6 +369,32 @@ function rewriteDefault(source, name, field, reference) {
   return source.replace(block, (_all, open, _body, close) => open + rewritten + close);
 }
 
+/**
+ * Replace one `tags: { <tag>: "…" }` literal inside a named entry's block.
+ *
+ * Separate from {@link rewriteDefault} because the shapes differ, not because
+ * the values do: `tags` is an inline object, so the key being rewritten is not
+ * at a predictable indent and the `default` matcher would not see it.
+ */
+function rewriteTag(source, name, tag, reference) {
+  const block = new RegExp(`(\\n  ${name}: \\{)([\\s\\S]*?)(\\n  \\},\\n)`);
+  const found = block.exec(source);
+  if (found === null) throw new Error(`No ${name} block in ${TABLE}`);
+
+  const body = found[2];
+  const literal = new RegExp(`(tags: \\{ ${tag}: ")([^"]*)(")`);
+  const current = literal.exec(body);
+  if (current === null) throw new Error(`No ${name}.tags.${tag} in ${TABLE}`);
+  if (current[2] === reference) return source;
+
+  changes.push(`${name}.tags.${tag}: ${current[2]} -> ${reference}`);
+  const rewritten = body.replace(
+    literal,
+    (_all, before, _old, after) => before + reference + after,
+  );
+  return source.replace(block, (_all, open, _body, close) => open + rewritten + close);
+}
+
 /** One `default:` literal read back out, for the installers to be stamped with. */
 function readDefault(source, name) {
   const block = new RegExp(`\\n  ${name}: \\{([\\s\\S]*?)\\n  \\},\\n`).exec(source);
@@ -314,6 +411,21 @@ function readTrustKeys(source) {
   const found = [...block[1].matchAll(/\n      key: "([^"]*)",/g)].map((match) => match[1]);
   if (found.length === 0) throw new Error(`No keys in ${KEYS}`);
   return found;
+}
+
+/**
+ * Rewrite the one capture group `pattern` finds in `source`, and record it.
+ *
+ * The single-capture shape is the contract every stamped copy of a table value
+ * shares: a pattern that matches more than one place, or none, is a stamper that
+ * has quietly stopped stamping, so both are errors rather than no-ops.
+ */
+function stamp(path, source, label, pattern, value) {
+  const found = pattern.exec(source);
+  if (found === null) throw new Error(`No ${label} in ${path}`);
+  if (found[1] === value) return source;
+  changes.push(`${label}: ${found[1]} -> ${value}`);
+  return source.replace(pattern, (all) => all.replace(found[1], value));
 }
 
 /**
@@ -342,14 +454,6 @@ function stampInstallers(table, keys) {
   const version = readDefault(table, "node");
   const trusted = readTrustKeys(keys).join(" ");
 
-  const stamp = (path, source, label, pattern, value) => {
-    const found = pattern.exec(source);
-    if (found === null) throw new Error(`No ${label} in ${path}`);
-    if (found[1] === value) return source;
-    changes.push(`${label}: ${found[1]} -> ${value}`);
-    return source.replace(pattern, (all) => all.replace(found[1], value));
-  };
-
   let sh = readFileSync(INSTALL_SH, "utf8");
   sh = stamp(INSTALL_SH, sh, "install.sh NODE_VERSION", /^NODE_VERSION=(.*)$/m, version);
   sh = stamp(INSTALL_SH, sh, "install.sh NPM_TRUST_KEYS", /^NPM_TRUST_KEYS="([^"]*)"$/m, trusted);
@@ -358,6 +462,45 @@ function stampInstallers(table, keys) {
   ps1 = stamp(INSTALL_PS1, ps1, "install.ps1 nodeVersion", /^\$nodeVersion = '([^']*)'$/m, version);
 
   return { sh, ps1 };
+}
+
+/**
+ * §13 — the three assertions in `test/unit/config.test.ts` that name a `default`
+ * outright, kept honest the same way the installers are.
+ *
+ * They are literals on purpose and must stay literals: `expect(yarn.default)
+ * .toBe(yarn.transparent.default)` is a tautology that passes just as well
+ * against a table that has drifted back to Yarn Classic, and the aube and nub
+ * rows are what makes a `default` change something a human has to look at rather
+ * than something that lands in a diff nobody reads. What the literal must not be
+ * is *hand-maintained*: a refresh that leaves them behind fails the suite it was
+ * supposed to be checked by, and the fix is then a second manual edit made under
+ * a red build. So the script writes them and the PR shows them.
+ */
+function stampReviewGates(table) {
+  let source = readFileSync(CONFIG_TEST, "utf8");
+
+  // Yarn's is the wrapped `const supported = "…"` both of its fields compare
+  // against; §02.5 keeps `default` and `transparent.default` on one release.
+  source = stamp(
+    CONFIG_TEST,
+    source,
+    "config.test.ts yarn default",
+    /const supported =\n\s+"([^"]*)";/,
+    readDefault(table, "yarn"),
+  );
+
+  for (const name of ["aube", "nub"]) {
+    source = stamp(
+      CONFIG_TEST,
+      source,
+      `config.test.ts ${name} default`,
+      new RegExp(`expect\\(DEFINITIONS\\.${name}!\\.default\\)\\.toBe\\("([^"]*)"\\)`),
+      readDefault(table, name),
+    );
+  }
+
+  return source;
 }
 
 /**
@@ -404,7 +547,7 @@ async function refreshKeys(source) {
 }
 
 let table = readFileSync(TABLE, "utf8");
-const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
+const [npm, pnpm, yarn, bun, deno, aube, nub, node] = await Promise.all([
   npmDefault("npm"),
   pnpmDefault(),
   // §02.5 — Berry is an npm package now, so it takes the same verified path as
@@ -417,6 +560,7 @@ const [npm, pnpm, yarn, bun, deno, aube, nub] = await Promise.all([
   nativeDefault("deno", NATIVE_TARGETS.deno),
   nativeDefault("@endevco/aube", NATIVE_TARGETS.aube),
   nativeDefault("@nubjs/nub", NATIVE_TARGETS.nub),
+  nodeDefault(),
 ]);
 
 table = rewriteDefault(table, "npm", "default", npm);
@@ -430,32 +574,30 @@ table = rewriteDefault(table, "bun", "default", bun);
 table = rewriteDefault(table, "deno", "default", deno);
 table = rewriteDefault(table, "aube", "default", aube);
 table = rewriteDefault(table, "nub", "default", nub);
+// §02.3 — the LTS line is {@link NODE_LTS_LINE}'s to say and the patch is this
+// script's; `default` and `tags.lts` name the same release for the reason
+// {@link nodeDefault} gives.
+table = rewriteDefault(table, "node", "default", node);
+table = rewriteTag(table, "node", "lts", node);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 
-// After both rewrites, so a rotated key and a hand-edited `node.default` are
-// stamped in the same run that produced them.
+// After every rewrite, so a rotated key and a new `node.default` are stamped in
+// the same run that produced them.
 const installers = stampInstallers(table, keys);
+const configTest = stampReviewGates(table);
 
 /**
- * §02.3 — `node`'s `lts` is the one table value this script cannot compute.
+ * §02.3 — which major is in LTS is the one table value this script cannot
+ * compute, so it is asked rather than answered.
  *
- * npm's `node` dist-tags stop at `v20-lts` (20.11.1) while the same package
- * publishes 22.x and 24.x, so no query over them yields the line actually in
- * maintenance, and §02.2 rules out reaching for `nodejs.org/dist/index.json` to
- * get it. So it is flagged, never rewritten: a human checks it against Node's
- * release schedule, exactly as §16 says a human checks a `ranges` change.
+ * {@link NODE_LTS_LINE} explains why npm's tags cannot say. The patch within the
+ * line is refreshed like any other `default`; only the line itself waits on a
+ * human, exactly as §16 says a `ranges` change does.
  */
-function reviewNodeLts(source) {
-  const current = /tags:\s*\{\s*lts:\s*"([^"]+)"/.exec(source)?.[1];
-  if (current === undefined) {
-    console.warn("! node has no `tags.lts`; §02.3 requires one.");
-    return;
-  }
-  console.log(`review: node tags.lts is ${current} — confirm against Node's LTS schedule (§02.3).`);
-}
-
-reviewNodeLts(table);
+console.log(
+  `review: node tracks the ${NODE_LTS_LINE} line (now ${node}) — confirm against Node's LTS schedule (§02.3).`,
+);
 
 if (changes.length === 0) {
   console.log("The embedded table and trust store are current.");
@@ -473,6 +615,9 @@ writeFileSync(TABLE, table);
 writeFileSync(KEYS, keys);
 writeFileSync(INSTALL_SH, installers.sh);
 writeFileSync(INSTALL_PS1, installers.ps1);
+writeFileSync(CONFIG_TEST, configTest);
 console.log(
-  "\nRewritten. A bin-path change still needs a new `ranges` entry and human review (§16, Built-in table and trust keys).",
+  "\nRewritten: table, trust store, installers and the unit suite's `default` literals.\n" +
+    "A bin-path change still needs a new `ranges` entry, and a new LTS line still needs\n" +
+    "`NODE_LTS_LINE` moved by hand — both are human review (§16, Built-in table and trust keys).",
 );

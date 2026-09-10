@@ -189,7 +189,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.1.0",
+    default: "12.4.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -307,7 +307,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // §02.4 — the entries the table's per-host machinery exists for;
   // `BUN_BAND` above explains the launcher-versus-artifact split they share.
   bun: {
-    default: "1.4.0",
+    default: "1.4.2",
     fetchLatestFrom: { type: "npm", package: "bun" },
     transparent: {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
@@ -394,7 +394,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.2.0",
+    default: "2.2.4",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
@@ -420,7 +420,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // file. Being a package manager is not what earns a place in the default shim
   // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
-    default: "0.8.1",
+    default: "0.9.0",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
     // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
     // reached under its own name as `nubx` — fetches into a throwaway
@@ -445,7 +445,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // The current LTS line, bare per §02.3: node's artifact is per-host, so
     // there is no portable digest to pin and the registry signature over this
     // host's own `node-<target>` is what clears §06.1's tier.
-    default: "24.20.0",
+    default: "24.21.0",
     // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
     //
     // The `node` package's dist-tags are `v4-lts` … `v20-lts` plus `latest`:
@@ -456,11 +456,14 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // knows the answer and is exactly the second source jup refuses.
     //
     // A literal is the honest remaining option, and it is the same kind of
-    // literal as `default` above: human-reviewed, refreshed by the §16 "Built-in
-    // table and trust keys" script,
-    // and correct at the moment someone looked. Bare, for the reason `default`
-    // is bare — node's artifact is per-host, so there is no portable digest.
-    tags: { lts: "24.20.0" },
+    // literal as `default` above: written by the §16 "Built-in table and trust
+    // keys" script from the newest release on the line its `NODE_LTS_LINE` names,
+    // which is the one number of the two a human still moves. It names the same
+    // release as `default` — §02.3 makes `default` the current LTS line, so a
+    // `lts` tag naming another would install a second Node. Bare, for the reason
+    // `default` is bare — node's artifact is per-host, so there is no portable
+    // digest.
+    tags: { lts: "24.21.0" },
     fetchLatestFrom: { type: "npm", package: "node" },
     // Empty, and not an oversight: §01.4's transparency exists to let a
     // bootstrapping command escape §03.5's enforcement, and a runtime is never

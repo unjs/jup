@@ -47,7 +47,7 @@
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { hostTarget } from "../../src/config/table.ts";
+import { DEFINITIONS, hostTarget } from "../../src/config/table.ts";
 import {
   cleanupFixtures,
   createFixture,
@@ -64,7 +64,8 @@ const POSIX = process.platform !== "win32";
 
 const registry = new MockRegistry();
 
-const BUN_VERSION = "1.4.0";
+/** Row 270 falls back to bun's compiled-in default, so this has to be it. */
+const BUN_VERSION = DEFINITIONS.bun!.default;
 const DENO_VERSION = "2.9.5";
 
 /** The per-host package each entry's `{target}` resolves to on *this* machine. */

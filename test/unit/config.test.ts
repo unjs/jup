@@ -106,7 +106,9 @@ describe("registry table — shape (§02.5)", () => {
    *
    * The assertion is the *literal*, not `expect(yarn.default).toBe(
    * yarn.transparent.default)` — the tautology would pass just as well against
-   * a table that had drifted back to Classic in both fields.
+   * a table that had drifted back to Classic in both fields. `scripts/
+   * refresh-table.mjs` stamps the literal, so a release moves it in the same PR
+   * that moves the table and a human still sees both lines change (§16).
    */
   it("puts yarn's default on the supported major, hash-pinned (§02.5)", () => {
     const yarn = DEFINITIONS.yarn!;
@@ -869,8 +871,10 @@ describe("aube — §03.1's third per-host entry", () => {
   });
 
   it("carries a bare default, because one version is many artifacts", () => {
+    // The literal is stamped by `scripts/refresh-table.mjs`; see nub's row below
+    // for what it is for and why it is not derived from the table.
     expect(parse(DEFINITIONS.aube!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.aube!.default).toBe("2.2.0");
+    expect(DEFINITIONS.aube!.default).toBe("2.2.4");
   });
 
   it("gives all three names one file, for argv[0] dispatch", () => {
@@ -989,11 +993,13 @@ describe("nub — §03.1's fourth per-host entry", () => {
     expect(spec.commands).toEqual({ use: ["nub", "install"], run: ["nub", "run"] });
     expect(isPerHost({ name: "nub", reference: "0.7.5" })).toBe(true);
     // Bare, because one version is many artifacts (§02.3). The literal is the
-    // review gate `scripts/refresh-table.mjs` has to walk a human through (§16);
-    // the assertion beside it is the invariant a refresh must never break, and
-    // it is the one this row is actually about.
+    // review gate a refresh has to walk a human through (§16) — stamped by
+    // `scripts/refresh-table.mjs`, never derived from the table, because a
+    // derived assertion would pass against any drift at all. The assertion
+    // beside it is the invariant a refresh must never break, and it is the one
+    // this row is actually about.
     expect(parse(DEFINITIONS.nub!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.nub!.default).toBe("0.8.1");
+    expect(DEFINITIONS.nub!.default).toBe("0.9.0");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {

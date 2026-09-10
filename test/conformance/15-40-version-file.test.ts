@@ -38,9 +38,10 @@ const POSIX = process.platform !== "win32";
 const registry = new MockRegistry();
 
 const PINNED = "22.23.2";
-const NEWEST = "24.20.0";
 /** §03.5's answer once a version file is skipped — the table's `node` default. */
 const DEFAULT_NODE = DEFINITIONS.node!.default;
+/** The newer of the two published lines, which is the default the table names. */
+const NEWEST = DEFAULT_NODE;
 const PNPM_VERSION = "11.1.2";
 
 /** See `15-39`'s copy: three of the six published hosts are renames. */
