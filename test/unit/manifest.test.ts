@@ -806,6 +806,47 @@ describe("devEngines — §03.3", () => {
     expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
   });
 
+  // §03.3 — pnpm's `onFail: "download"`. Silent only where jup has already
+  // performed the remediation it asks for, which means the member won the read.
+  it("stays silent on a name mismatch with onFail: download when the member wins", () => {
+    expect(
+      read({
+        packageManager: "pnpm@6.6.2",
+        devEngines: { packageManager: { name: "yarn", version: "4.x", onFail: "download" } },
+      }),
+    ).toEqual({
+      raw: "yarn@4.x",
+      range: { name: "yarn", range: "4.x", onFail: "download" },
+      devEngines: { name: "yarn", version: "4.x", onFail: "download" },
+      hasPin: true,
+      // The member won the read, so the spec did not come from `packageManager`.
+      fromPackageManagerField: false,
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  // The member names no version, so `packageManager` answers and jup runs a tool
+  // the declaration did not ask for. Nothing was remediated, so it still warns.
+  it("warns on a name mismatch with onFail: download when the member names no version", () => {
+    expect(read(nameMismatch("download"))).toEqual({
+      raw: "pnpm@6.6.2",
+      range: undefined,
+      devEngines: { name: "yarn", onFail: "download" },
+      hasPin: true,
+      fromPackageManagerField: true,
+    });
+    expect(warn).toHaveBeenCalledWith(`${VALIDATION_WARNING_PREFIX}${nameMismatchMessage}`);
+  });
+
+  // A malformed member is discarded, so there is no declared version for jup to
+  // have downloaded — `download` degrades like any unrecognised value.
+  it("warns on a malformed member with onFail: download", () => {
+    read({ devEngines: { packageManager: { name: "yarn", version: "!", onFail: "download" } } });
+    expect(warn).toHaveBeenCalledWith(
+      `${VALIDATION_WARNING_PREFIX}${messages.devEnginesBadVersion("!")}`,
+    );
+  });
+
   it("treats a non-string packageManager as a name mismatch", () => {
     expectUsageError(
       () => read({ packageManager: 42, devEngines: { packageManager: { name: "yarn" } } }),
@@ -824,6 +865,18 @@ describe("devEngines — §03.3", () => {
     },
   });
   const versionMismatchMessage = `"packageManager" field is set to "pnpm@6.6.2" which does not match the value defined in "devEngines.packageManager" for "pnpm" of "10.x"`;
+
+  it("stays silent on a version mismatch with onFail: download", () => {
+    expect(read(versionMismatch("download"))).toEqual({
+      raw: "pnpm@10.x",
+      range: { name: "pnpm", range: "10.x", onFail: "download" },
+      devEngines: { name: "pnpm", version: "10.x", onFail: "download" },
+      hasPin: true,
+      // The member won the read, so the spec did not come from `packageManager`.
+      fromPackageManagerField: false,
+    });
+    expect(warn).not.toHaveBeenCalled();
+  });
 
   // Test 34.
   it("warns on a version mismatch with onFail: warn", () => {

@@ -193,12 +193,16 @@ outcome:
 | `version` present and not a valid semver **range** | `warnOrThrow`; return `pm` |
 | `integrity` present and not a usable SRI string | `warnOrThrow`; ignore it |
 
+None of these three is remediated: each discards what the member declared, so
+`onFail: "download"` warns rather than staying silent.
+
 Then cross-check against `packageManager`:
 
 * **`pm` set:** if it does not start with `` `${de.name}@` ``, or `de.version` is
   set and the pinned version does not `satisfies` it (**strict** semver here),
-  `warnOrThrow`. Either way the answer is decided by `de.version`, not by the
-  warning: return `` `${de.name}@${de.version}` `` when it is set, else `pm`.
+  `warnOrThrow`, **remediated** when `de.version` is set. Either way the answer is
+  decided by `de.version`, not by the warning: return
+  `` `${de.name}@${de.version}` `` when it is set, else `pm`.
 * **`pm` absent:** return `` `${de.name}@${de.version ?? "*"}` ``.
 
 **A valid `de` naming a version wins over `packageManager`.** It is the richer
@@ -219,8 +223,9 @@ as a build suffix (§3.7's sidecar form). If both spellings are present and
 disagree, that is a `warnOrThrow`.
 
 ```
-warnOrThrow(message, onFail):
+warnOrThrow(message, onFail, remediated):
   "ignore"              → nothing
+  "download"            → nothing when `remediated`, else warn
   "error" | undefined   → throw UsageError (exit 1)
   anything else         → warn `⚠ jup validation warning: <message>`
 ```
@@ -228,6 +233,21 @@ warnOrThrow(message, onFail):
 The default is **error**, and an unrecognised value degrades to a warning. That
 is an inconsistent enum inherited from corepack; it is currently load-bearing for
 compatibility, and changing it is a deliberate decision, not a cleanup.
+
+`"download"` is pnpm's fourth value — "remediate the failure by downloading the
+declared version" — which npm documents no support for. jup performs that
+remediation by construction: when the member wins the read, the version jup
+resolves and runs *is* the declared one, so there is nothing left to report and
+the failure is silent. `remediated` is what the call site knows about that, and
+it is true only for the two cross-checks below, and only when the member
+declares a version.
+
+Every other failure degrades to a warning, because jup cannot remediate it: a
+malformed `name` or `version` discards the member and lets `packageManager`
+answer, a member naming no version does the same, and a digest jup had to drop
+or two digests that disagree leave a weaker guarantee about the bytes than the
+manifest asked for. `download` asks jup to fetch a version, not to stop checking
+what arrives.
 
 ### Runtimes
 

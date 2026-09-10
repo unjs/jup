@@ -361,7 +361,8 @@ verification window before merging. §06.3 has the algorithm, §11.2 the overrid
 }
 ```
 
-`version` is a semver **range**; `onFail` is `ignore` | `warn` | `error`;
+`version` is a semver **range**; `onFail` is `ignore` | `warn` | `error` |
+`download` (§03.3);
 `integrity` is §03.7's sidecar digest. The two `devEngines` members are validated
 by one rule with the member name substituted into its messages, and are read
 independently — which one speaks is decided by the `kind` of the tool being

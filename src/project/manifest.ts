@@ -719,7 +719,7 @@ export function readSpecFromManifest(
 
   if (pm !== undefined && pm !== null) {
     if (typeof pm !== "string" || !pm.startsWith(`${name}@`)) {
-      warnOrThrow(messages.devEnginesNameMismatch(pm, name), onFail);
+      warnOrThrow(messages.devEnginesNameMismatch(pm, name), onFail, range !== undefined);
     } else if (
       typeof version === "string" &&
       // §04.4 — the cross-check compares a *version* against a range, so it
@@ -735,7 +735,7 @@ export function readSpecFromManifest(
       // Strict satisfaction (§04.2): a prerelease pin does *not* silently pass a
       // plain range here, unlike the band lookup in §02.3.
     ) {
-      warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail);
+      warnOrThrow(messages.devEnginesVersionMismatch(pm, name, version), onFail, true);
     }
     // §03.3 — the third cross-check, and the one the member's own precedence
     // would otherwise skip past. `withSidecarIntegrity` reports two disagreeing
@@ -853,22 +853,35 @@ function withSidecarIntegrity(
 /**
  * §03.3 — `onFail` routing. Default is **error**; an unrecognised value degrades
  * to a warning rather than being rejected. Both must be preserved.
+ *
+ * `remediated` says whether jup is about to run the version the failing member
+ * declared. It matters only to `"download"`.
  */
-export function warnOrThrow(message: string, onFail?: unknown): void {
+export function warnOrThrow(message: string, onFail?: unknown, remediated = false): void {
   switch (onFail) {
     case "ignore": {
       return;
+    }
+    // §03.3 — pnpm's fourth value: remediate by downloading the declared
+    // version. jup does that by construction when the member wins the read, so
+    // there is nothing left to report. Everywhere else it degrades to a warning
+    // like any unrecognised value, digest failures included: `download` asks to
+    // fetch a version, not to stop checking what arrives.
+    case "download": {
+      if (remediated) return;
+      break;
     }
     case "error":
     case undefined: {
       throw new UsageError(message);
     }
     default: {
-      // Includes `"warn"` — and anything unrecognised, which degrades here
-      // rather than becoming an error about the error handling.
-      warn(`${VALIDATION_WARNING_PREFIX}${message}`);
+      break;
     }
   }
+  // Includes `"warn"` — and anything unrecognised, which degrades here rather
+  // than becoming an error about the error handling.
+  warn(`${VALIDATION_WARNING_PREFIX}${message}`);
 }
 
 /**
