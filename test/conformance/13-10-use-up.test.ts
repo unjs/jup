@@ -218,9 +218,7 @@ describe("§13.10 use / up", () => {
       /The requested version of yarn@1\.22\.4\+sha512\.[\da-f]+ does not match the devEngines specification \(pnpm@1\.x\)/,
     );
     expect(result.stdout).toContain("Installing yarn@1.22.4 in the project...");
-    expect(result.stdout).toContain(
-      "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
-    );
+    expect(result.stdout).toContain("$ jup use [--here] [--no-integrity] [--lock] <pattern>");
     expect(withoutDownloadNotices(result.stderr)).toBe("");
     // The pin was never written: the pnpm declaration is exactly as the fixture
     // left it, and no `packageManager` was created beside it.

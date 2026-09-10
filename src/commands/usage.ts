@@ -20,8 +20,8 @@ export const USAGE_LINES: Record<string, string> = {
   run: "$ jup run [...args]",
   "self-install": "$ jup self-install [--install-directory <path>|--system] [--force]",
   "self-upgrade": "$ jup self-upgrade [--install-directory <path>|--system] [--force]",
-  up: "$ jup up [--here] [--no-integrity] [--no-lockfile]",
-  use: "$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>",
+  up: "$ jup up [--here] [--no-integrity] [--lock]",
+  use: "$ jup use [--here] [--no-integrity] [--lock] <pattern>",
 };
 
 /**
@@ -99,7 +99,7 @@ function paintEnvNames(line: string, colors: Palette): string {
 }
 
 /**
- * `--install-directory`, `-o`, `--no-integrity`, `--no-lockfile`.
+ * `--install-directory`, `-o`, `--no-integrity`, `--lock`.
  *
  * The lookbehind is what keeps it off the prose: a hyphen inside a word
  * ("package-manager", "read-only", "self-install") is not the start of a flag,
@@ -179,8 +179,8 @@ export const HELP_TEXT = `Usage: jup <command>
   jup run [...args]
   jup self-install [--install-directory <path>|--system] [--force]
   jup self-upgrade [--install-directory <path>|--system] [--force]
-  jup up [--here] [--no-integrity] [--no-lockfile]
-  jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>
+  jup up [--here] [--no-integrity] [--lock]
+  jup use [--here] [--no-integrity] [--lock] <name[@<version>]>
   jup --version
   jup --help
 
@@ -215,9 +215,11 @@ SRI integrity key beside a clean version in devEngines, or the
 read identically. Pass --no-integrity to pin the version alone and drop any
 digest already there.
 
-A range pin also records the release it resolved to, in jup.lock beside the
-manifest. Pass --no-lockfile to pin the range alone and drop any entry already
-recorded for it. An exact pin never records one.
+A range pin also records the release it resolved to. Pass --lock to record
+it in jup.lock beside the manifest, which every checkout then shares; without
+it the release is remembered under node_modules for this machine alone. A
+project that already has a jup.lock keeps it up to date either way. An exact pin
+never records one.
 
 With no names, enable and disable target every supported package manager,
 including npm. Pass --exclude npm to keep npm unchanged. Pass --all to shim

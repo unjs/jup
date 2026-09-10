@@ -21,8 +21,8 @@ jup pack [--json] [-o|--output <path>] [...name[@<version>]]
 jup run [...args]
 jup self-install [--install-directory <path>|--system] [--force]
 jup self-upgrade [--install-directory <path>|--system] [--force]
-jup up  [--here] [--no-integrity] [--no-lockfile]
-jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>
+jup up  [--here] [--no-integrity] [--lock]
+jup use [--here] [--no-integrity] [--lock] <name[@<version>]>
 jup --version
 jup --help | -h | help
 ```
@@ -35,12 +35,13 @@ Three flags apply to every mutating command:
   Otherwise, `devEngines` stores the digest in `integrity`, while the top-level
   `packageManager` stores it in `<version>+<algo>.<hex>`. Both forms are read the
   same way (§03.7).
-* `--no-lockfile` writes no resolution to `jup.lock` and removes any resolution
-  already recorded for the pin. It names the file only when the file changed
-  (§12.11). Only range and tag pins record resolutions (§04.4), so the flag does
-  nothing for an exact pin. A range is still resolved, installed, and written to
-  the manifest. `JUP_FROZEN_LOCKFILE=1` refuses the run if an entry would be
-  removed.
+* `--lock` records the release a range resolved to in a committed
+  `jup.lock`, creating the file if the project has none. Without it the
+  resolution goes to the host-local memo instead — but a project that already
+  commits a `jup.lock` has one refreshed either way, its existence being the
+  same opt-in `up` reads (§04.4). Only range and tag pins record resolutions, so
+  the flag does nothing for an exact pin. `JUP_FROZEN_LOCKFILE=1` refuses the
+  run wherever the committed file would change.
 
 Every mutating command prints each path it changed.
 
@@ -92,11 +93,12 @@ resolve because a range already says how far the user will move. `^2.0.0` derive
 from a `~2.1.0` pin would pick a version the pin itself rejects. The memo for
 that key is retired at the same time.
 
-`up` refreshes that file; it never creates it (§04.4). On a project with no
-`jup.lock` the resolution goes to the memo instead, no path is printed — nothing
-committed changed — and `JUP_FROZEN_LOCKFILE=1` does not bind a run that writes
-nothing. Where the file *is* there, the flag makes the refresh a hard error. A
-dist-tag pin is refused either way.
+`up` refreshes that file; it creates one only under `--lock` (§04.4). On a
+project with no `jup.lock` and no flag the resolution goes to the memo instead,
+no path is printed — nothing committed changed — and `JUP_FROZEN_LOCKFILE=1` does
+not bind a run that writes nothing. Where the file *is* there, or the flag asks
+for one, the freeze makes the write a hard error. A dist-tag pin is refused
+either way.
 
 **Otherwise** — an exact pin — two resolves, both with `useCache: false` and tags
 **not** allowed:
@@ -128,11 +130,13 @@ Parse the pattern (`requireVersion: false`), resolve it with tags allowed and
 then write the pin (§03.7).
 
 **A typed semver range** — so neither a bare `jup use pnpm` nor a dist-tag — goes
-into the field as written, and the version it resolved to is recorded in
-`jup.lock` beside the manifest. Both paths are printed, the digest goes to the
-lockfile rather than the field, the replaced key's resolution is retired, and
-`JUP_FROZEN_LOCKFILE=1` refuses the command *before* it resolves. Every other
-pattern pins exactly.
+into the field as written, and the version it resolved to is recorded. Under
+`--lock`, or in a project that already commits one, that record is
+`jup.lock` beside the manifest: both paths are printed, and the digest goes to
+the lockfile rather than the field. Otherwise it is the memo, and only the
+manifest path is printed. Either way the replaced key's resolution is retired,
+and `JUP_FROZEN_LOCKFILE=1` refuses the command *before* it resolves wherever the
+committed file would change. Every other pattern pins exactly.
 
 Then, if the resolved band declares `commands.use`:
 

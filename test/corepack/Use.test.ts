@@ -49,7 +49,7 @@ describe(`UseCommand`, () => {
       });
     });
     // SKIP (jup §09): the usage line printed with the error carries
-    // jup's extra flags — `$ corepack use [--here] [--no-integrity] [--no-lockfile]
+    // jup's extra flags — `$ corepack use [--here] [--no-integrity] [--lock]
     // <pattern>` — where Corepack has `$ corepack use <pattern>`. The refusal
     // itself, and its message, match. The second half of the row diverges twice
     // more under §03.7: the declared `2.x` is replaced by the version pinned

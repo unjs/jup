@@ -142,7 +142,7 @@ anything they cannot read.
 
 | | `<project>/jup.lock` | `<project>/node_modules/.jup/jup.lock` |
 |---|---|---|
-| Written by | `use`; `up`, where the file already exists | any proxy run whose answer came from the registry, and the `up` that found no file |
+| Written by | `use --lock`; `use` and `up`, where the file already exists | any proxy run whose answer came from the registry, and the `use`/`up` that found no file |
 | Committed | yes | no — it lives in `node_modules` |
 | Expiry | never; a committed decision does not rot | 24 h stamp |
 | Rank | first | third |
@@ -271,22 +271,22 @@ a silent permanent pin.
   package manager's own directory — possibly in a repository holding nothing but
   an `.nvmrc` — for a run asked only to print a version is not jup's to do. The
   `.jup` directory inside it is jup's own and is created on demand.
-* `use <name>@<range>` creates the **recorded** resolution and retires the
-  replaced key's; `up` refreshes one the project already commits.
-* `up` **does not create** `jup.lock`. A project that has never committed one has
-  chosen the memo, and a command asked to move a range forward is not an
-  invitation to add a file to the tree; it records its answer in the memo
-  instead, exactly where the proxy run it replaces would have put it. `use` is
-  what starts the file. Existence is the test, not readability: a file too
-  damaged to parse is still the project's, and is refreshed like any other.
+* Creating `jup.lock` is **opt-in**: `--lock` (§09) is what starts the file,
+  on `use` and on `up` alike. A project that has never committed one has chosen
+  the memo, and a command asked to pin or to move a range forward is not an
+  invitation to add a file to the tree unasked; without the flag it records its
+  answer in the memo instead, exactly where the proxy run it replaces would have
+  put it.
+* Where the file **already exists**, `use` and `up` refresh it with no flag: the
+  project asked for the record once, and a stale entry beside a moved pin is
+  worse than either. Existence is the test, not readability: a file too damaged
+  to parse is still the project's, and is refreshed like any other.
+* `use <name>@<range>` also retires the replaced key's resolution, flag or no
+  flag, so restoring the old pin cannot resurrect a stale answer.
 * A write to the **recorded** file then drops the memo for that key, which would
   otherwise answer alone wherever the recorded file is not visible — an
   uncommitted write, a `git stash`, a CI cache that restores `node_modules` but
   not the lockfile — with the version just superseded.
-* `--no-lockfile` (§09) writes no resolution. It removes the matching recorded
-  resolution and memo so the next run does not reuse them. The range still goes
-  into the manifest, and its selected release is still resolved and installed.
-  If `jup.lock` changed, §12.11's `Removed …` line names it.
 * Serialisation is chosen for `git diff`: two-space indent, sorted keys, sorted
   host maps, trailing newline. An unchanged file is not rewritten, so mtime and
   `git status` stay quiet. Writes are temp-then-rename in the destination's own
@@ -299,12 +299,11 @@ a silent permanent pin.
 `JUP_FROZEN_LOCKFILE=1` refuses creation, refresh **and deletion** — the flag
 governs the file, not one syntax of pin, so an exact `use` over a project that
 currently declares a range is refused too, because removing that entry is a
-write. The refusal happens before anything is resolved or downloaded. The same
-rule applies to `--no-lockfile`: it is refused when it would remove an entry for
-the range or pin being replaced. It binds a command only where that command
-would change the file, so `up` on a project with no `jup.lock` — which writes
-none — runs under the flag: there is nothing to freeze, and refusing there would
-break every `up` in a frozen job over a file that does not exist.
+write. The refusal happens before anything is resolved or downloaded. It binds a
+command only where that command would change the file, so a range pinned into a
+project with no `jup.lock` and no `--lock` — which writes none — runs under
+the flag: there is nothing to freeze, and refusing there would break every `use`
+and `up` in a frozen job over a file that does not exist.
 
 Unknown `version` values, malformed entries, and unreadable files all read as "no
 resolutions", entry by entry, so one damaged record cannot poison the others and

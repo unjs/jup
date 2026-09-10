@@ -1287,7 +1287,7 @@ describe("use (§09.5, tests 105-110)", () => {
     // appends the `Usage Error:` block to the same stream (§12.1).
     expect(stdout).toBe(`Installing yarn@1.22.4 in the project...\n`);
     expect(stderr).toBe("");
-    expect(USAGE_LINES.use).toBe("$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>");
+    expect(USAGE_LINES.use).toBe("$ jup use [--here] [--no-integrity] [--lock] <pattern>");
     expect(readManifest().packageManager).toBeUndefined();
   });
 
@@ -1319,7 +1319,7 @@ describe("use (§09.5, tests 105-110)", () => {
     // A memo from an earlier run under the very range being recorded now.
     await memo({ "yarn@2.x": { resolved: "2.1.0", expires: Date.now() + 60_000 } });
 
-    await expect(cmdUse(["yarn@2.x"])).resolves.toBe(0);
+    await expect(cmdUse(["--lock", "yarn@2.x"])).resolves.toBe(0);
 
     // §03.7 — the range pin lands in the member; §04.4 keeps its resolution in
     // `jup.lock`, which is unchanged by where the range itself is written.
@@ -1903,9 +1903,7 @@ describe("--version, --help and dispatch (§09.10, test 146)", () => {
     for (const args of [["--help"], ["-h"], ["help"], []]) {
       stdout = "";
       await expect(runManagementCommand(args)).resolves.toBe(0);
-      expect(stdout).toContain(
-        `jup use [--here] [--no-integrity] [--no-lockfile] <name[@<version>]>`,
-      );
+      expect(stdout).toContain(`jup use [--here] [--no-integrity] [--lock] <name[@<version>]>`);
       expect(stdout).toContain(`jup cache clean`);
       expect(stderr).toBe("");
     }

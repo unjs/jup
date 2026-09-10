@@ -551,7 +551,7 @@ async function installFromArchive(
 /** §09.4 — the two-step resolve is what confines the update to the current major line. */
 export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
   const parsed = parseArgs(args, {
-    booleans: ["--here", "--no-integrity", "--no-lockfile"],
+    booleans: ["--here", "--no-integrity", "--lock"],
   });
   if (parsed.positionals.length > 0) {
     throw new UsageError(`The 'jup up' command takes no arguments`);
@@ -560,11 +560,9 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
   // §03.1 — `--here` reads and writes `cwd`'s own manifest, ignoring the walk.
   const here = hasFlag(parsed, "--here");
   const integrity = !hasFlag(parsed, "--no-integrity");
-  // §04.4 — `--no-lockfile` records nothing and retires what is recorded. It
-  // reaches only the range branch below: an exact pin never wrote a resolution
-  // in the first place, and the one it *removes* is the removal this flag wants
-  // anyway, so `pinToProject`'s behaviour is already the flag's behaviour.
-  const lockfile = !hasFlag(parsed, "--no-lockfile");
+  // §04.4 — `jup.lock` is opt-in: `--lock` is what starts one. It reaches
+  // only the range branch below, since an exact pin records no resolution.
+  const createLockfile = hasFlag(parsed, "--lock");
   const { descriptor, lookup } = resolveProjectSpec({ mutating: true, here });
   const { name, range } = descriptor;
 
@@ -592,17 +590,17 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
       throw new UsageError(messages.upNotSemver());
     }
     const dir = dirname(lookup.target);
-    // §04.4 — `up` refreshes a committed resolution; it does not start the file.
-    // A project that has never committed one has chosen the memo, and a command
-    // asked to move the range forward is not the moment to add a file to the
-    // user's tree — `use` is what creates one. The memo below carries the
-    // decision instead.
-    const commit = lockfile && hasLockfile(dir);
+    // §04.4 — `up` refreshes a committed resolution; on its own it does not
+    // start the file. A project that has never committed one has chosen the
+    // memo, and a command asked to move the range forward is not the moment to
+    // add a file to the user's tree unasked — `--lock` is the asking. The
+    // memo below carries the decision otherwise.
+    const commit = createLockfile || hasLockfile(dir);
 
     // §04.4's flag governs the *file*. It is refused only where this run would
-    // still change it: the refresh above, and — under `--no-lockfile`, which
-    // writes nothing — the removal below, on the projects that hold the entry.
-    if (isFrozenLockfile() && (commit || (!lockfile && holdsResolution(dir, pin)))) {
+    // still change it, which since the write became opt-in is exactly the
+    // refresh — and the creation `--lock` asks for — above.
+    if (isFrozenLockfile() && commit) {
       throw new UsageError(messages.lockfileUnresolved(pin.name, pin.range));
     }
 
@@ -612,10 +610,10 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
     // would pick a version the range itself rejects, which the next run would
     // then discard as unsatisfying.
     //
-    // The resolve and the install happen under `--no-lockfile` too: the flag is
+    // The resolve and the install happen with no `jup.lock` too: the file is
     // about what gets *committed*, not about what `up` means. The newest release
     // the range allows is still selected, installed and handed over; the only
-    // difference is that nothing records which one it was.
+    // difference is where the answer is recorded.
     const refreshed = await resolveOrThrow(pin, { useCache: false });
     return applyToProject(
       refreshed,
@@ -632,7 +630,7 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
           removeCachedResolution(dir, resolutionKey(pin));
           // §12.11 — the resolution file is what changed, so that is what is named.
           out(`${messages.updatedManifest(join(dir, LOCKFILE_NAME), pin.name, reference)}\n`);
-        } else if (lockfile) {
+        } else {
           // Nothing committed to refresh: the answer came from the registry, so
           // it goes where an ordinary proxy run would have put it (§04.4). The
           // stale entry it replaces is the same key, so this overwrites it rather
@@ -640,8 +638,6 @@ export async function cmdUp(args: string[], run?: RunOptions): Promise<number> {
           // §12.11 names what changed in the project, and the memo is host-local
           // derived state no command announces.
           writeCachedResolution(dir, pin, locator, spec.hash, isPerHost(refreshed));
-        } else {
-          dropRecordedResolution(dir, pin);
         }
         // The field is unchanged, so that is what the package manager migrates from.
         return `${pin.name}@${pin.range}`;
@@ -691,7 +687,7 @@ function declaredPin(lookup: Extract<ProjectSpec, { type: "Found" }>): Spec | un
 /** §09.5 — writes the pin, then runs the package manager's `use` command. */
 export async function cmdUse(args: string[], run?: RunOptions): Promise<number> {
   const parsed = parseArgs(args, {
-    booleans: ["--here", "--no-integrity", "--no-lockfile"],
+    booleans: ["--here", "--no-integrity", "--lock"],
   });
   const [pattern, ...extra] = parsed.positionals;
   if (pattern === undefined) {
@@ -701,10 +697,12 @@ export async function cmdUse(args: string[], run?: RunOptions): Promise<number> 
     throw new UsageError(`The 'jup use' command accepts a single package manager pattern`);
   }
 
-  // §03.7 / §04.4 — both are recorded by default, and both flags are opt-outs
-  // that also retire what a previous run recorded.
+  // §03.7 — the digest is recorded by default, and `--no-integrity` is the
+  // opt-out that also retires what a previous run recorded. §04.4's `jup.lock`
+  // runs the other way: `--lock` is what creates one, and a project already
+  // committing the file keeps its resolution refreshed without the flag.
   const integrity = !hasFlag(parsed, "--no-integrity");
-  const lockfile = !hasFlag(parsed, "--no-lockfile");
+  const createLockfile = hasFlag(parsed, "--lock");
 
   const descriptor = parseSpec(pattern, { source: CLI_SOURCE, requireVersion: false });
 
@@ -726,15 +724,14 @@ export async function cmdUse(args: string[], run?: RunOptions): Promise<number> 
   // too, and for the same reason, whenever the committed file actually holds the
   // entry it would remove.
   //
-  // `--no-lockfile` puts the range form on that same footing: it writes nothing,
-  // so it is refused only where it would remove something. Two keys can go —
-  // the range this run pins and the pin it replaces — so both are offered to
-  // {@link recordedPinToRetire}, which answers with whichever the file holds.
+  // A range form is refused only where it would write: `--lock` creates the
+  // file, and a project already committing one has its entry refreshed. A range
+  // pinned into a project with neither writes nothing to freeze.
   if (isFrozenLockfile()) {
     const frozen =
-      range && lockfile
+      range && commitsResolution(here, descriptor.name, createLockfile)
         ? descriptor
-        : recordedPinToRetire(here, descriptor.name, lockfile ? undefined : descriptor);
+        : recordedPinToRetire(here, descriptor.name);
     if (frozen !== undefined) {
       throw new UsageError(messages.lockfileUnresolved(frozen.name, frozen.range));
     }
@@ -745,28 +742,26 @@ export async function cmdUse(args: string[], run?: RunOptions): Promise<number> 
 
   const options = { here, integrity };
   return range
-    ? pinRangeToProject(descriptor, resolved, options, lockfile, run)
+    ? pinRangeToProject(descriptor, resolved, options, createLockfile, run)
     : pinToProject(resolved, options, run);
 }
 
 /**
- * §04.4 / §09.5 — `use <name>@<range>`: the range goes in the field, the
- * version it resolved to goes in `jup.lock`.
+ * §04.4 / §09.5 — `use <name>@<range>`: the range goes in the field, and the
+ * version it resolved to goes in `jup.lock` where the project commits one.
  *
- * This path creates the recorded resolution and retires the replaced field's
- * resolution; `up` only refreshes an existing record.
- *
- * Under `--no-lockfile` the range still goes into the manifest — that is the pin
- * the user asked for — and the resolution simply is not recorded. What *was*
- * recorded for that range comes out with it, for the reason §09 gives the
- * integrity opt-out: a flag that asked for no lockfile and left the old entry
- * standing would have changed nothing about what the next run resolves.
+ * `--lock` is what *creates* that file; without it a project that has never
+ * committed one records the resolution in the memo instead, exactly where the
+ * proxy run this replaces would have put it. An existing file is refreshed
+ * either way — its existence is the project having asked for it already, which
+ * is the same test `up` applies. Either way the replaced field's resolution is
+ * retired, so restoring the old pin cannot resurrect a stale answer.
  */
 function pinRangeToProject(
   descriptor: Spec,
   locator: ResolvedSpec,
   options?: PinOptions,
-  lockfile = true,
+  createLockfile = false,
   run?: RunOptions,
 ): Promise<number> {
   return applyToProject(
@@ -782,22 +777,27 @@ function pinRangeToProject(
       );
 
       const dir = dirname(target);
-      if (lockfile) {
+      const commit = createLockfile || hasLockfile(dir);
+      if (commit) {
         writeResolution(dir, descriptor, locator, spec.hash, isPerHost(locator));
         // The committed resolution supersedes any host-local memo for this key.
         removeCachedResolution(dir, resolutionKey(descriptor));
+      } else {
+        // No committed file to write: the answer came from the registry, so it
+        // goes where an ordinary proxy run would have put it (§04.4). Nothing is
+        // named for it — §12.11 names what changed in the project, and the memo
+        // is host-local derived state no command announces.
+        writeCachedResolution(dir, descriptor, locator, spec.hash, isPerHost(locator));
       }
 
       // §03.7, §12.11 — both files changed, so both are named, in the order they
       // are read back: the field that declares the range, then the file that says
       // what it currently means.
       out(`${messages.updatedManifest(target, descriptor.name, written)}\n`);
-      if (lockfile) {
+      if (commit) {
         out(
           `${messages.updatedManifest(join(dir, LOCKFILE_NAME), descriptor.name, locator.reference)}\n`,
         );
-      } else {
-        dropRecordedResolution(dir, descriptor);
       }
 
       const stale = staleResolutionKey(previousPackageManager);
@@ -981,22 +981,14 @@ function pinToProject(
  * no recorded entry has nothing to freeze, and refusing there would break every
  * `use` in CI for a file that does not exist.
  *
- * `also` is the second key a `--no-lockfile` run can remove: the range it is
- * pinning, whose entry a previous run may have recorded under exactly this key.
- * It is checked first because it is the one the caller knows about; the declared
- * pin is the one being replaced. Either answers the question the caller asks,
- * which is "would this run change the file", so the first hit wins.
- *
  * The walk is the mutating one, with the same `--here` and the same tool, so the
  * manifest read here is the manifest the caller is about to write.
  */
-function recordedPinToRetire(here: boolean, tool: string, also?: Spec): Spec | undefined {
+function recordedPinToRetire(here: boolean, tool: string): Spec | undefined {
   const lookup = findProjectSpec(process.cwd(), { mutating: true, here, tool });
   if (lookup.type !== "Found") return undefined;
 
   const dir = dirname(lookup.target);
-  if (also !== undefined && holdsResolution(dir, also)) return also;
-
   let pin: Spec;
   try {
     pin = lookup.getSpec({ requireVersion: false });
@@ -1008,34 +1000,25 @@ function recordedPinToRetire(here: boolean, tool: string, also?: Spec): Spec | u
   return holdsResolution(dir, pin) ? pin : undefined;
 }
 
+/**
+ * §04.4 — would a range pin write `jup.lock` in the project this run is about to
+ * edit? `--lock` says so outright; otherwise the file's own existence does,
+ * which is the test the write itself applies once the walk has run.
+ *
+ * The walk is the mutating one, with the same `--here` and the same tool, so the
+ * directory answered for is the directory the write lands in.
+ */
+function commitsResolution(here: boolean, tool: string, create: boolean): boolean {
+  if (create) return true;
+  const lookup = findProjectSpec(process.cwd(), { mutating: true, here, tool });
+  return hasLockfile(dirname(lookup.target));
+}
+
 /** §04.4 — does the committed `jup.lock` in `dir` hold this descriptor's entry? */
 function holdsResolution(dir: string, descriptor: Spec): boolean {
   if (!usesLockfile(descriptor)) return false;
   const data = readLockfile(dir);
   return data !== null && Object.hasOwn(data.resolutions, resolutionKey(descriptor));
-}
-
-/**
- * §04.4 / §09 — `--no-lockfile`'s half of the write: retire the recorded
- * resolution, and name the file when the removal actually changed it.
- *
- * The memo under `node_modules` goes with it — {@link removeResolution} drops
- * both — because a memo left behind answers the same key alone wherever the
- * recorded file is not visible, which is precisely the stale resolution the flag
- * was asked to stop committing.
- *
- * §12.11 requires the path to be printed *because it changed*, so the check
- * comes first: a removal that removed nothing changed no path, and naming one
- * would be a false statement about the user's tree.
- */
-function dropRecordedResolution(dir: string, descriptor: Spec): void {
-  const held = holdsResolution(dir, descriptor);
-  removeResolution(dir, resolutionKey(descriptor));
-  if (held) {
-    out(
-      `${messages.removedResolution(join(dir, LOCKFILE_NAME), descriptor.name, descriptor.range)}\n`,
-    );
-  }
 }
 
 /**

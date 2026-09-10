@@ -57,11 +57,11 @@ From your project directory:
 jup use pnpm@^12
 ```
 
-This keeps the range in `package.json` and records the selected release in
-`jup.lock`. To keep the range without committing a lockfile:
+This keeps the range in `package.json`. To also record the selected release in a
+committed `jup.lock`:
 
 ```sh
-jup use --no-lockfile pnpm@^12
+jup use --lock pnpm@^12
 ```
 
 Without a project `jup.lock`, each checkout chooses a matching release

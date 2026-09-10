@@ -116,10 +116,14 @@ afterAll(async () => {
 beforeEach(() => registry.reset());
 
 describe("§04.4 ranges and jup.lock", () => {
-  it("181: `use` with a range keeps the range and records what it resolved to", async () => {
+  it("181: `use --lock` keeps the range and records what it resolved to", async () => {
     const fixture = createFixture({ name: "demo" });
 
-    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+    const result = await run(["use", "--lock", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
 
     expect(result.exitCode).toBe(0);
     // The range is the statement of intent, so the pin goes on making it.
@@ -243,7 +247,11 @@ describe("§04.4 ranges and jup.lock", () => {
   it("182: a run with that lockfile present makes no network request", async () => {
     const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
 
-    const first = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+    const first = await run(["use", "--lock", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
     expect(first.exitCode).toBe(0);
     expect(registry.requests.length).toBeGreaterThan(0);
 
@@ -642,7 +650,11 @@ describe("§04.4 ranges and jup.lock", () => {
       devEngines: { packageManager: { name: "pnpm", version: ">=10", onFail: "error" } },
     });
 
-    const used = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
+    const used = await run(["use", "--lock", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
     expect(used.exitCode).toBe(0);
 
     const afterUse = fixture.json("package.json") as {
@@ -818,7 +830,11 @@ describe("§04.4 ranges and jup.lock", () => {
   it("use replaces a range with an exact pin and retires its resolution", async () => {
     const fixture = withModules({ name: "demo" });
 
-    const first = await run(["use", "pnpm@^10.0.0"], { ...fixture, registry, env: env() });
+    const first = await run(["use", "--lock", "pnpm@^10.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
     expect(first.exitCode).toBe(0);
     expect(lockOf(fixture).resolutions["pnpm@^10.0.0"]?.resolved).toBe("10.5.0");
 
@@ -838,74 +854,71 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(fixture.exists(MEMO)).toBe(false);
   });
 
-  // §09 — the opt-out. The pin is unchanged; only the record is skipped.
-  it("--no-lockfile keeps the range and records nothing", async () => {
+  // §04.4 / §09 — the file is opt-in. The pin is unchanged; the resolution goes
+  // where an ordinary proxy run would have put it.
+  it("a range with no `--lock` keeps the range and memoes what it resolved to", async () => {
     const fixture = withModules({ name: "demo" });
 
-    const result = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
-      ...fixture,
-      registry,
-      env: env(),
-    });
+    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
     expect(result.stdout).toContain(`Updated ${fixture.path("package.json")} to use pnpm@^11.0.0`);
-    // No file, so no line naming one (§12.11).
+    // No file was added to the tree, so no line naming one (§12.11).
     expect(fixture.exists("jup.lock")).toBe(false);
     expect(result.stdout).not.toContain("jup.lock");
+    // The answer is not thrown away, though: the memo carries it, host-locally.
+    expect(memoOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
 
-    // Still a working project: the range resolves, it just resolves afresh.
+    // Still a working project, and the memo spares it the resolution.
+    registry.requests.length = 0;
     const rerun = await run(["pnpm", "--version"], { ...fixture, registry, env: env() });
     expect(rerun.exitCode).toBe(0);
     expect(rerun.stdout).toBe("11.1.2\n");
+    expect(registry.requests).toEqual([]);
   });
 
-  // A flag that asked for no lockfile and left the old entry standing would not
-  // have changed what the next run resolves, which is the whole point of it.
-  it("--no-lockfile retires an entry a previous run recorded, and says so", async () => {
+  // A project that has never committed the file has chosen the memo; a project
+  // that commits one has asked for the record, and asking once is enough.
+  it("a range refreshes a `jup.lock` the project already commits, flag or no flag", async () => {
     const fixture = withModules({ packageManager: "pnpm@^11.0.0" });
     record(fixture, "pnpm@^11.0.0", "11.0.0");
-    // A run under the range, so there is a memo to retire beside the record.
+    // A run under the range, so there is a stale memo beside the record.
     expect((await run(["pnpm", "--version"], { ...fixture, registry, env: env() })).exitCode).toBe(
       0,
     );
 
-    const result = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
-      ...fixture,
-      registry,
-      env: env(),
-    });
+    const result = await run(["use", "pnpm@^11.0.0"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
-    // §12.11 — the removal changed the file, so the file is named.
-    expect(result.stdout).toContain(`Removed pnpm@^11.0.0 from ${fixture.path("jup.lock")}`);
+    // §12.11 — the record changed, so the file is named.
+    expect(result.stdout).toContain(`Updated ${fixture.path("jup.lock")} to use pnpm@11.1.2`);
+    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]).toEqual({
+      resolved: "11.1.2",
+      integrity: sriOf(registry.tarballOf("pnpm", "11.1.2")),
+    });
     // The memo goes with it, or it would answer alone for the same key.
-    expect(fixture.exists("jup.lock")).toBe(false);
     expect(fixture.exists(MEMO)).toBe(false);
   });
 
-  it("`up --no-lockfile` drops the record and still moves the project forward", async () => {
+  it("`up --lock` starts the file a project has never committed", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
-    record(fixture, "pnpm@^11.0.0", "11.0.0");
 
-    const result = await run(["up", "--no-lockfile"], { ...fixture, registry, env: env() });
+    const result = await run(["up", "--lock"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
-    // The newest release the range allows is still resolved and installed — the
-    // flag governs what is committed, not what `up` means.
     expect(result.stdout).toContain("Installing pnpm@11.1.2 in the project...");
-    expect(result.stdout).toContain(`Removed pnpm@^11.0.0 from ${fixture.path("jup.lock")}`);
-    expect(fixture.exists("jup.lock")).toBe(false);
+    expect(result.stdout).toContain(`Updated ${fixture.path("jup.lock")} to use pnpm@11.1.2`);
+    expect(lockOf(fixture).resolutions["pnpm@^11.0.0"]?.resolved).toBe("11.1.2");
     // The range in the manifest is untouched, as it is for an ordinary `up`.
     expect(effectivePin(fixture.json("package.json"))).toBe("pnpm@^11.0.0");
   });
 
-  it("`up --no-lockfile` on a project with no record changes nothing and names nothing", async () => {
+  it("`up` on a project with no record changes nothing and names nothing", async () => {
     const fixture = createFixture({ packageManager: "pnpm@^11.0.0" });
 
-    const result = await run(["up", "--no-lockfile"], { ...fixture, registry, env: env() });
+    const result = await run(["up"], { ...fixture, registry, env: env() });
 
     expect(result.exitCode).toBe(0);
     expect(fixture.exists("jup.lock")).toBe(false);
@@ -913,24 +926,45 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(result.stdout).not.toContain("jup.lock");
   });
 
-  // §04.4 — the flag writes nothing, so the freeze binds it only where it would
-  // still change the committed file.
-  it("--no-lockfile is refused under JUP_FROZEN_LOCKFILE=1 only when it would remove", async () => {
+  // §09 — the opt-out is gone with the opt-in default it belonged to, and an
+  // option jup does not have is an error rather than a silent no-op.
+  it("--no-lockfile is no longer an option", async () => {
+    const fixture = createFixture({ name: "demo" });
+
+    const result = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toContain(`Usage Error: Unsupported option name ("--no-lockfile")`);
+    expect(registry.requests).toEqual([]);
+    expect(fixture.json("package.json")).toEqual({ name: "demo" });
+  });
+
+  // §04.4 — the freeze binds a command only where it would change the committed
+  // file, which since the write became opt-in is where the file is asked for.
+  it("a range that writes no file runs under JUP_FROZEN_LOCKFILE=1", async () => {
     const clean = createFixture({ name: "demo" });
-    const allowed = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+
+    const allowed = await run(["use", "pnpm@^11.0.0"], {
       ...clean,
       registry,
       env: env({ JUP_FROZEN_LOCKFILE: "1" }),
     });
+
     expect(allowed.exitCode).toBe(0);
     expect(effectivePin(clean.json("package.json"))).toBe("pnpm@^11.0.0");
     expect(clean.exists("jup.lock")).toBe(false);
+  });
 
+  it("a range refreshing a committed file is refused under JUP_FROZEN_LOCKFILE=1", async () => {
     const recorded = createFixture({ packageManager: "pnpm@^11.0.0" });
     record(recorded, "pnpm@^11.0.0", "11.0.0");
     const before = recorded.read("jup.lock");
 
-    const refused = await run(["use", "--no-lockfile", "pnpm@^11.0.0"], {
+    const refused = await run(["use", "pnpm@^11.0.0"], {
       ...recorded,
       registry,
       env: env({ JUP_FROZEN_LOCKFILE: "1" }),
@@ -943,10 +977,10 @@ describe("§04.4 ranges and jup.lock", () => {
     expect(recorded.read("jup.lock")).toBe(before);
   });
 
-  it("use refuses to record under an explicit JUP_FROZEN_LOCKFILE=1", async () => {
+  it("use --lock refuses to create one under an explicit JUP_FROZEN_LOCKFILE=1", async () => {
     const fixture = createFixture({ name: "demo" });
 
-    const result = await run(["use", "pnpm@^11.0.0"], {
+    const result = await run(["use", "--lock", "pnpm@^11.0.0"], {
       ...fixture,
       registry,
       env: env({ JUP_FROZEN_LOCKFILE: "1" }),

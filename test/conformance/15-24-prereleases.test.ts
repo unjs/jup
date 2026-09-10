@@ -35,8 +35,8 @@ function pinOf(fixture: { json(relative: string): unknown }): string | undefined
 }
 
 /**
- * §04.4 — what `use <name>@<range>` recorded, since a typed range stays in the
- * field and the version it resolved to goes here instead.
+ * §04.4 — what `use --lock <name>@<range>` recorded, since a typed range
+ * stays in the field and the version it resolved to goes here instead.
  */
 function resolvedOf(fixture: { json(relative: string): unknown }, key: string): string | undefined {
   return (
@@ -78,7 +78,11 @@ describe("§04.1 prereleases in implicit resolution", () => {
   it("184: a bare range does the same — `pnpm@>=11` skips 11.2.0-dev.1005", async () => {
     const fixture = createFixture({ name: "project" });
 
-    const result = await run(["use", "pnpm@>=11"], { ...fixture, registry, env: env() });
+    const result = await run(["use", "--lock", "pnpm@>=11"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
 
     expect(result.exitCode).toBe(0);
     // §04.4 — the range is what the user typed, so it is what the field keeps;
@@ -172,7 +176,11 @@ describe("§04.1 prereleases in implicit resolution", () => {
 
     // "unless the range itself names a prerelease": the user asked for the
     // prerelease band explicitly, so nothing is being chosen on their behalf.
-    const result = await run(["use", "pnpm@>=11.0.0-0"], { ...fixture, registry, env: env() });
+    const result = await run(["use", "--lock", "pnpm@>=11.0.0-0"], {
+      ...fixture,
+      registry,
+      env: env(),
+    });
 
     expect(result.exitCode).toBe(0);
     expect(pinOf(fixture)).toBe("pnpm@>=11.0.0-0");

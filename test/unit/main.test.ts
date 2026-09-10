@@ -419,7 +419,7 @@ describe("presentError — §08.4, §12.1", () => {
     expect(code).toBe(1);
     expect(sink.err.join("")).toBe("");
     expect(sink.out.join("")).toBe(
-      "Usage Error: boom\n\n$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>\n",
+      "Usage Error: boom\n\n$ jup use [--here] [--no-integrity] [--lock] <pattern>\n",
     );
   });
 

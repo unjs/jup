@@ -286,7 +286,7 @@ describe.skipIf(!POSIX)("§02.3 node, and tools that are not package managers", 
   it("234: `use node@<range>` keeps the range in the member and records it", async () => {
     const fixture = createFixture({ name: "app" });
 
-    const result = await run(["use", "node@22.x"], options(fixture));
+    const result = await run(["use", "--lock", "node@22.x"], options(fixture));
     expect(result.exitCode).toBe(0);
 
     const manifest = fixture.json("package.json") as {

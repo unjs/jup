@@ -41,7 +41,7 @@ for a bug. The management-mode shape:
 ```
 Usage Error: The requested version of yarn@1.22.4+sha512.… does not match the devEngines specification (yarn@2.x)
 
-$ jup use [--here] [--no-integrity] [--no-lockfile] <pattern>
+$ jup use [--here] [--no-integrity] [--lock] <pattern>
 ```
 
 The usage line is keyed by the command word, falling back to `$ jup <command>`.
@@ -286,7 +286,6 @@ Hydrating <name>@<reference> for immediate activation...
 Installing <name>@<reference>...
 Installing <name>@<reference> in the project...
 Updated <path> to use <name>@<reference>
-Removed <name>@<range> from <path>
 All done!
 ↓ Downloading <name> <version> from <url>
 ⚠ The local project doesn't define a package manager. jup will now add a 'devEngines.packageManager' entry referencing <name>@<reference>.
@@ -294,9 +293,6 @@ All done!
 ⚠ Ignoring <name> from <path>: this variable can only be set in the environment
 ⚠ Ignoring "<declared>" in <source>: jup resolves semver versions and ranges, not nvm aliases - write a version or range there, or declare it in "devEngines.runtime"
 ```
-
-`--no-lockfile` prints `Removed …` only when it removes an entry from the
-committed `jup.lock` (§09).
 
 The four `Preparing`/`Hydrating` lines are corepack's own, printed only under
 corepack's name (§09.11). `Preparing` names the **range** the user typed, not the
