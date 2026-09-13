@@ -402,20 +402,24 @@ export function execPackageManager(
 
   if (execMode === "native") {
     // §08.7 — what goes in front of `PATH` for a native artifact is the
-    // directory holding it. This branch spawns, so it has a real child
-    // environment: the entry is written into *that* and `process.env.PATH` is
-    // never touched, which is "MUST NOT leak into the tool's own process" in its
-    // literal form.
+    // directory holding it. This branch spawns or replaces the process
+    // (§08.3.3), and either way hands the tool an environment block of its own:
+    // the entry is written into *that* and `process.env.PATH` is never touched,
+    // which is "MUST NOT leak into the tool's own process" in its literal form.
     const env = childEnvironment(dirname(binPath), handover);
 
     // Imported here and nowhere else: `node:child_process` must not enter the
     // module graph of a JavaScript cache hit (§01.3, §16, Build shape).
     // `binName`, not `binPath`: §08.3's artifacts dispatch on `argv[0]`, and
     // `bunx` and `bun` are the same file.
-    // §08.3.2 — `ipc` rides on `handover` for the reason `reraise` does: both
-    // ask whether this process is the tool's. The argument is in `native.ts`.
+    // §08.3.2, §08.3.3 — `ipc` and `replace` ride on `handover` as `reraise`
+    // does: all ask whether this process is the tool's (see `native.ts`).
     return import("./native.ts").then((native) =>
-      native.execNative(binPath, argv, env, binName, { reraise: handover, ipc: handover }),
+      native.execNative(binPath, argv, env, binName, {
+        reraise: handover,
+        ipc: handover,
+        replace: handover,
+      }),
     );
   }
 

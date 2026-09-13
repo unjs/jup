@@ -23,6 +23,7 @@ import {
 import { envFlag } from "../project/env.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
 import { debugNote, err, errColors } from "../utils/log.ts";
+import { isProgramHead } from "../utils/program-image.ts";
 import { httpGet } from "../net/http.ts";
 import {
   assertSupportedAlgo,
@@ -371,33 +372,13 @@ async function chooseSource(
   return source;
 }
 
-/**
- * The leading bytes of a file the kernel would agree to execute, for
- * {@link isProgramImage}.
- *
- * A shebang, ELF, and Mach-O in its four single-architecture forms plus the
- * universal-binary wrapper. Windows never reaches this — a `.exe` runs because
- * of its name — so `MZ` is deliberately absent.
- */
-const PROGRAM_MAGIC: readonly (readonly number[])[] = [
-  [0x23, 0x21], // `#!` — any interpreted script
-  [0x7f, 0x45, 0x4c, 0x46], // ELF: Linux, the BSDs, Solaris
-  [0xfe, 0xed, 0xfa, 0xce], // Mach-O, 32-bit, big-endian
-  [0xfe, 0xed, 0xfa, 0xcf], // Mach-O, 64-bit, big-endian
-  [0xce, 0xfa, 0xed, 0xfe], // Mach-O, 32-bit, little-endian
-  [0xcf, 0xfa, 0xed, 0xfe], // Mach-O, 64-bit, little-endian
-  [0xca, 0xfe, 0xba, 0xbe], // Mach-O universal binary
-];
-
-/** Whether `path` begins with one of {@link PROGRAM_MAGIC}. */
+/** Whether `path` begins with a program image's magic bytes ({@link isProgramHead}). */
 async function isProgramImage(path: string): Promise<boolean> {
   const file = await open(path, "r");
   try {
     const head = Buffer.alloc(4);
     const { bytesRead } = await file.read(head, 0, 4, 0);
-    return PROGRAM_MAGIC.some(
-      (magic) => magic.length <= bytesRead && magic.every((byte, at) => head[at] === byte),
-    );
+    return isProgramHead(head, bytesRead);
   } finally {
     await file.close();
   }

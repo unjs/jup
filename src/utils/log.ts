@@ -45,8 +45,15 @@ export type Target = "stdout" | "stderr";
  * writing.
  */
 function streamOf(target: Target): NodeJS.WriteStream {
+  openedStreams.add(target);
   return target === "stdout" ? process.stdout : process.stderr;
 }
+
+/**
+ * The streams constructed here, for §08.3.3 to flush and restore before
+ * `execve`. Tracked, not probed: the probe *is* the construction deferred above.
+ */
+export const openedStreams: Set<Target> = new Set();
 
 /**
  * The environment variables an AI coding agent announces itself with, taken from
@@ -186,12 +193,12 @@ function markers(text: string, colors: Palette): string {
 
 /** §09.14 — informational output is stdout, unbuffered, unprefixed. */
 export function out(text: string): void {
-  process.stdout.write(markers(text, outColors));
+  streamOf("stdout").write(markers(text, outColors));
 }
 
 /** The same, on stderr: notices that must not corrupt a piped stdout (§09.14). */
 export function err(text: string): void {
-  process.stderr.write(markers(text, errColors));
+  streamOf("stderr").write(markers(text, errColors));
 }
 
 /**
@@ -203,6 +210,7 @@ export function err(text: string): void {
  * runs with colour off.
  */
 export function warn(message: string): void {
+  openedStreams.add("stderr");
   console.warn(markers(message, errColors));
 }
 

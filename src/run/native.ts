@@ -1,14 +1,15 @@
 /**
- * Spawn-and-wait must emulate direct execution. `child_process` remains dynamically isolated from JavaScript cache hits.
+ * Spawn-and-wait must emulate direct execution. `child_process` remains dynamically isolated from JavaScript cache hits, and is loaded only once a spawn is certain.
  */
 
-const { spawn } = process.getBuiltinModule("node:child_process");
-type ChildProcess = ReturnType<typeof spawn>;
+import type { ChildProcess } from "node:child_process";
 const { realpathSync } = process.getBuiltinModule("node:fs");
 const { constants } = process.getBuiltinModule("node:os");
 import { isInsideInstallFolder } from "../cache/store.ts";
 import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";
+import { openedStreams } from "../utils/log.ts";
+import { willExecute } from "../utils/program-image.ts";
 
 /**
  * §09.9 — run a tool and *read* what it printed, instead of handing it the
@@ -39,6 +40,7 @@ export function captureNative(
   argv0: string | undefined,
   timeoutMs: number,
 ): Promise<{ code: number | null; stdout: string }> {
+  const { spawn } = process.getBuiltinModule("node:child_process");
   const child = spawn(binPath, args, {
     stdio: ["ignore", "pipe", "ignore"],
     // Unlike a handover, nothing here is the user's session: a console window
@@ -216,6 +218,131 @@ function forwardIpcChannel(child: ChildProcess): () => void {
 }
 
 /**
+ * §08.3.3 — the signals Node's own startup ignores, and so the ones `execve`
+ * would hand the tool as ignored: the kernel resets a *caught* signal to its
+ * default across `execve` but carries an ignored one through, and Node sets
+ * `SIGPIPE` and `SIGXFSZ` to `SIG_IGN` before any of our code runs. A spawned
+ * child never saw that, because libuv resets every disposition in the child;
+ * a replaced one would, and a tool writing into a closed pipe would get `EPIPE`
+ * where a directly-invoked one dies quietly. Listening turns each into a caught
+ * signal for the instant before `execve`, which is all it takes.
+ */
+const RESET_ACROSS_EXEC: NodeJS.Signals[] = ["SIGPIPE", "SIGXFSZ"];
+
+/**
+ * `execve`'s `E2BIG`, which Node turns into an abort, has two thresholds. One
+ * string of more than Linux's `MAX_ARG_STRLEN` (128 KiB, its NUL included) is
+ * refused outright; and a whole block past roughly half of macOS's `ARG_MAX`,
+ * the smaller host's, may be. Linux also caps the block at a quarter of the
+ * stack limit, which can sit lower still and is not checked: the caller's own
+ * `execve` of the shim already fit under it, so only jup's additions can cross.
+ */
+const EXEC_STRING_LIMIT = 128 * 1024;
+const EXEC_BLOCK_LIMIT = 512 * 1024;
+
+/**
+ * §08.3.3 — may this process become the tool, rather than wait on it? The
+ * questions about the *process*; {@link willExecute} asks the file's.
+ *
+ * * **`process.execve` exists.** It does not on Windows, on Deno, or on Node
+ *   before 22.15 — each takes the spawn below, unchanged.
+ * * **It will not refuse up front.** A worker thread and the permission model
+ *   both throw, after Node has queued its `ExperimentalWarning` — which would
+ *   then print over the spawn that stands in.
+ * * **No IPC channel.** Node marks every inherited descriptor above 2
+ *   close-on-exec during startup (`uv_disable_stdio_inheritance`), so the
+ *   channel fd a caller handed the shim would not survive into the tool, and
+ *   there is no API left from JavaScript to clear the flag. §08.3.2's relay is
+ *   the only way that channel reaches the tool, and a relay needs a process.
+ */
+function canReplaceProcess(): boolean {
+  if (typeof process.execve !== "function" || hasParentChannel()) return false;
+  if (!process.getBuiltinModule("node:worker_threads").isMainThread) return false;
+  const permission = (process as { permission?: { has(scope: string): boolean } }).permission;
+  return permission === undefined || permission.has("child");
+}
+
+/**
+ * §08.3.3 — leave stdout and stderr as a directly-invoked tool would find them.
+ *
+ * Only the streams something of ours constructed ({@link openedStreams}): a
+ * warm run has printed nothing and pays nothing here, and constructing the other
+ * would cost the 20 modules `log.ts` defers. For each:
+ *
+ * * **a write still pending** is waited for — pipes are asynchronous outside
+ *   Linux, and a download notice lost to `execve` is a notice never shown. Only
+ *   when one is pending, and with an `error` listener held throughout: a reader
+ *   that hung up turns the wait into an `EPIPE` event, which unheard would kill
+ *   jup before the tool ever ran, where a spawned tool meets the closed pipe
+ *   itself. The listener stays — this process is about to stop being ours.
+ * * **the pipe is set blocking again.** libuv put its shared file description
+ *   into non-blocking mode, which Node undoes at exit and `execve` never reaches.
+ *
+ * A stream Node constructed for itself — its own warnings print through the
+ * console — is not seen here, and is left as Node left it.
+ */
+async function releaseStreams(): Promise<void> {
+  for (const target of openedStreams) {
+    const stream = target === "stdout" ? process.stdout : process.stderr;
+    stream.on("error", () => {});
+    if (stream.writableLength > 0 && !stream.destroyed) {
+      await new Promise<void>((resolve) => {
+        stream.once("drain", resolve);
+        stream.once("close", resolve);
+        stream.once("error", resolve);
+        // `drain` fires only for a write that crossed the high-water mark.
+        stream.write("", () => resolve());
+      });
+    }
+    (
+      stream as { _handle?: { setBlocking?: (blocking: boolean) => number } }
+    )._handle?.setBlocking?.(true);
+  }
+}
+
+/**
+ * §08.3.3 — become the tool: same pid, same process group, same descriptors.
+ *
+ * Returns only when the tool cannot be exec'd without risking an abort
+ * ({@link willExecute}, and an argument block the kernel may refuse), or when
+ * `execve` threw before reaching the kernel — Bun's does, where Node's aborts.
+ * The caller spawns instead. The signal listeners are left in place on that
+ * path: removing the last one restores the default, not the `SIG_IGN` Node
+ * started with, and a jup writing its error into a closed pipe would die of it.
+ */
+function replaceProcess(
+  binPath: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  argv0: string | undefined,
+): void {
+  const argv = [argv0 ?? binPath, ...args];
+  // `execve` takes strings only, and `process.env`'s type admits `undefined`.
+  const block: Record<string, string> = {};
+  let size = 0;
+  let longest = 0;
+  const count = (bytes: number): void => {
+    size += bytes + 8; // and its pointer
+    longest = Math.max(longest, bytes);
+  };
+  for (const value of argv) count(Buffer.byteLength(value) + 1);
+  for (const [key, value] of Object.entries(env)) {
+    if (value === undefined) continue;
+    block[key] = value;
+    count(Buffer.byteLength(key) + Buffer.byteLength(value) + 2);
+  }
+  if (longest > EXEC_STRING_LIMIT || size > EXEC_BLOCK_LIMIT) return;
+  if (!willExecute(binPath)) return;
+
+  for (const signal of RESET_ACROSS_EXEC) process.on(signal, () => {});
+  try {
+    process.execve!(binPath, argv, block);
+  } catch {
+    // Spawned instead, by the caller.
+  }
+}
+
+/**
  * Run a native `bin` target directly and resolve with the exit code it earned.
  *
  * The promise resolves only when the child is gone. When the child was killed by
@@ -255,14 +382,26 @@ function forwardIpcChannel(child: ChildProcess): () => void {
  * §08.3's forwarded host runtime is added on the same terms; see
  * {@link forwardHostRuntime}.
  */
-export function execNative(
+export async function execNative(
   binPath: string,
   args: string[],
   env: NodeJS.ProcessEnv = process.env,
   argv0?: string,
-  options?: { reraise?: boolean; ipc?: boolean },
+  options?: { reraise?: boolean; ipc?: boolean; replace?: boolean },
 ): Promise<number> {
   const childEnv = forwardHostRuntime(env);
+
+  // §08.3.3 — where this process exists to *be* the tool, it becomes it: the
+  // pid a caller spawned is then the tool's, so `SIGKILL`, `SIGSTOP` and every
+  // pid-based check reach the tool itself rather than a wrapper that dies alone
+  // and leaves the tool orphaned. Gated with `reraise` and `ipc` on handover,
+  // for the reason they are — only a shim has nothing left to run afterwards.
+  if (options?.replace === true && canReplaceProcess()) {
+    await releaseStreams();
+    // Only returns when the file failed its checks, asked immediately before
+    // `execve` so the stream release above does not widen the window.
+    replaceProcess(binPath, args, childEnv, argv0);
+  }
 
   // §08.3.2 — an `ipc` slot only where this process exists to *be* the tool, which
   // is the same question `reraise` asks and gets the same answer from the same
@@ -274,6 +413,9 @@ export function execNative(
   // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
   // package manager's cwd (§08.3), and the child stays in our process group so
   // terminal job control keeps working.
+  // Loaded only now: a replaced process never reaches this line, and the 37
+  // modules behind `node:child_process` are the largest thing it would skip.
+  const { spawn } = process.getBuiltinModule("node:child_process");
   const child = spawn(binPath, args, {
     // Still fds 0, 1 and 2 unmodified (§08.3): the `ipc` slot is fd 3 and is
     // added, never substituted, so nothing about the terminal changes.
@@ -309,7 +451,7 @@ export function execNative(
     releaseChannel?.();
   };
 
-  return new Promise<number>((resolve, reject) => {
+  return await new Promise<number>((resolve, reject) => {
     child.on("error", (error: NodeJS.ErrnoException) => {
       release();
       // `EACCES` here means the executable bit did not survive extraction

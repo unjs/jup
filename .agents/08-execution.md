@@ -57,7 +57,9 @@ core cannot know whether it is the last thing that will run.
 
 For a band declaring `exec: "native"` there is no interpreter to choose — the
 `bin` targets are real executables and are run directly, which makes a native
-tool the *cheaper* handover.
+tool the *cheaper* handover. Under handover, where it can, jup does not spawn
+at all and becomes the tool instead (§8.3.3). What follows is the spawn: the
+fallback there, and the only model without handover.
 
 ```
 argv := [binPath, ...binArgs, ...args]      with argv[0] set to the INVOKED NAME
@@ -156,6 +158,71 @@ Two things follow from the relay being one:
 Extra fds beyond the channel are still not forwarded: a caller passing
 `stdio: ["pipe", "pipe", "pipe", "pipe"]` loses fd 3 onwards through a shim.
 
+### 8.3.3 Becoming the tool
+
+A spawned tool is a second pid, and the pid a caller holds is the shim's. That
+is invisible until the pid matters, and then it is wrong: `SIGKILL` and
+`SIGSTOP` cannot be forwarded, so killing the pid kills the shim alone and the
+tool — reparented to init — keeps its stdio, its ports and its own children's
+channels open; pidfiles, supervisors, `process.ppid` and `/proc/<pid>` all see
+the wrapper. Under handover a native run therefore **replaces the process
+image** with `process.execve` rather than spawning:
+
+```
+handover, and process.execve exists     (not Windows, Deno, or Node < 22.15)
+main thread, permission model allows child processes
+no IPC channel                          (§8.3.2 — see below)
+  → release the streams jup wrote to
+  → argv + env block under 512 KiB, and the kernel will take binPath
+      → reset SIGPIPE/SIGXFSZ, execve(binPath, argv, env)
+otherwise, or execve threw (Bun's does on failure)
+  → §8.3's spawn
+```
+
+`argv` and `env` are §8.3's, `argv[0]` the invoked name included. The pid, the
+process group, the controlling terminal and fds 0–2 are the caller's by
+construction, and every signal reaches the tool with no forwarding at all.
+
+* **A channel keeps the spawn.** Node marks every inherited descriptor above 2
+  close-on-exec during its own startup (`uv_disable_stdio_inheritance`), and no
+  JavaScript API clears the flag, so an IPC fd cannot survive into the replaced
+  image. §8.3.2's relay is the only way the channel reaches the tool, and a relay
+  needs a process — so a shim spawned with an `ipc` slot is still two pids, and
+  still orphans the tool on `SIGKILL`. Extra fds are lost either way, as §8.3.2
+  records.
+* **A refusal is checked for, not caught.** Node's `execve` does not throw when
+  the syscall fails: it prints the errno and aborts, perhaps leaving a core file
+  in the user's project, where a spawn reports §12.8's `Unable to execute`. So
+  the kernel's questions are asked of the file first, immediately before the
+  call, and any doubt spawns: executable by us; an ELF of this byte order and
+  machine whose `PT_INTERP` loader is executable (a glibc build on a host with
+  no glibc loader fails exactly there); a Mach-O carrying this architecture, on
+  macOS only; a script whose `#!` interpreter passes the same test within the
+  kernel's line and nesting limits. A single argument or environment string
+  over Linux's 128 KiB `MAX_ARG_STRLEN`, or a block over 512 KiB, spawns too.
+  What is not checked still aborts: `ETXTBSY`, a concurrent `cache clean`
+  removing the entry in the instant before the call, and a block under 512 KiB
+  that jup's additions push past Linux's quarter-of-the-stack-limit cap.
+* **Refusals that throw are avoided.** A worker thread and the permission model
+  make `execve` throw after Node has queued an `ExperimentalWarning`, which would
+  print over the spawn; both are checked for instead.
+* **stdio is left as found, for the streams jup wrote to.** `execve` skips the
+  exit hooks that flush a pending write and undo libuv's non-blocking mode on a
+  piped stdout or stderr. Each stream jup's own writers constructed has any
+  pending write waited for — with an `error` listener held, since a caller that
+  hung up turns the wait into an `EPIPE` that would otherwise kill jup before the
+  tool ran — and is set blocking. A stream jup never wrote to is not touched:
+  constructing it costs the modules a warm run defers, and a warm run printed
+  nothing and pays nothing. A stream only Node itself wrote to — its own warnings
+  print through the console — is not seen, and is left as Node left it.
+* **Signals are left at their defaults.** Node sets `SIGPIPE` and `SIGXFSZ` to
+  ignored before any of jup runs, and an ignored disposition survives `execve`.
+  A listener on each turns them into caught signals, which the kernel resets —
+  matching the spawn, where libuv resets every disposition in the child. The
+  listeners stay if `execve` throws: removing the last one would restore the
+  default rather than Node's ignore, and jup would die writing its error into a
+  closed pipe.
+
 ## 8.4 Exit codes
 
 | The tool does | jup exits with |
@@ -190,8 +257,8 @@ The stdout-vs-stderr split between the two modes is real and test-asserted.
 
 ## 8.5 Signals
 
-The in-process model inherits signal behaviour for free. The spawning path must
-not regress it:
+The in-process model and §8.3.3's replacement inherit signal behaviour for free:
+there is one process, and it is the tool. The spawning path must not regress it:
 
 * **Install no handler that swallows a signal.** `SIGINT` from a terminal goes to
   the whole foreground process group, so the child receives it directly; jup

@@ -224,5 +224,21 @@ revisiting when the surrounding code is next touched:
   and 2 for everything else: a caller passing its own fd 3 onwards loses them.
   Forwarding those would mean guessing which fds a caller meant to pass, since
   nothing distinguishes them from a descriptor the shim happens to hold open.
-  The relay also crosses as JSON, so a caller using
+  §08.3.3's `execve` does not change that: Node marks them close-on-exec at
+  startup. The relay also crosses as JSON, so a caller using
   `serialization: "advanced"` reaches the tool with what JSON preserves.
+* **A shim with an IPC channel is still two processes.** §08.3.3 replaces the
+  shim with a native tool only when there is no channel, for the reason above,
+  so `SIGKILL` on a `fork`ed shim's pid still orphans the tool. Closing it needs
+  a shim whose interpreter does not close descriptors at startup — a
+  `#!/bin/sh` stub, and the per-invocation fork §10.2's note already refuses.
+* **§08.3.3 can still abort on what it does not check.** The pre-`execve`
+  checks follow the kernel's own for the file and the per-string argument
+  limit; `ETXTBSY`, `ENOMEM`, a store entry removed by a concurrent
+  `cache clean` in the instant before the call, and an argument block that
+  jup's additions push past Linux's stack-derived cap still reach Node's abort
+  rather than §12.8's message.
+* **§08.3.3 releases only the streams jup wrote to.** A stream only Node itself
+  wrote to — its own warnings print through the console — is left non-blocking
+  for the tool, and on macOS a warning still pending may be lost. Releasing both
+  unconditionally costs 3–4 ms of stream construction on every native run.
