@@ -146,7 +146,7 @@ export const messages = {
       outsideProject === true
         ? ` (this manifest is outside any project — a stray "${field}" field there affects every directory)`
         : ""
-    }`,
+    }\nSet JUP_ENABLE_STRICT=0 to bypass this.`,
   /** Users read the `got` value and paste it into their `packageManager` field. Keep the format. */
   mismatchHashes: (expected: string, actual: string) =>
     `Mismatch hashes. Expected ${expected}, got ${actual}`,

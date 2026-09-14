@@ -458,7 +458,7 @@ describe("runProxy — project enforcement (tests 38, 39)", () => {
     expect(result.status).toBe(1);
     // Test 39 asserts this byte for byte, including the absolute manifest path.
     expect(result.stderr).toBe(
-      `This project is configured to use yarn because ${join(cwd, "package.json")} has a "packageManager" field\n`,
+      `This project is configured to use yarn because ${join(cwd, "package.json")} has a "packageManager" field\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
     expect(result.stdout).toBe("");
   });

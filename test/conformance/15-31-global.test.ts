@@ -65,7 +65,7 @@ describe("§01.4 — a global invocation is transparent (row 197)", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
-      `This project is configured to use yarn because ${join(fixture.cwd, "package.json")} has a "packageManager" field\n`,
+      `This project is configured to use yarn because ${join(fixture.cwd, "package.json")} has a "packageManager" field\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
   });
 

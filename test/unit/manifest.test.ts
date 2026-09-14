@@ -73,6 +73,9 @@ function expectUsageError(fn: () => unknown, message: string): void {
   expect((caught as Error).message).toBe(message);
 }
 
+/** §12.5's bypass hint, appended after the project-mismatch sentence. */
+const STRICT_BYPASS_HINT = `\nSet JUP_ENABLE_STRICT=0 to bypass this.`;
+
 function lazyFallback(name = "yarn"): LazyResolvedSpec {
   return { name, reference: () => Promise.resolve("9.9.9") };
 }
@@ -1004,7 +1007,7 @@ describe("reconcile — §03.5", () => {
     const result = found("yarn@1.0.0");
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
-      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field`,
+      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field${STRICT_BYPASS_HINT}`,
     );
   });
 
@@ -1018,7 +1021,7 @@ describe("reconcile — §03.5", () => {
 
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
-      `This project is configured to use yarn because ${join(root, "package.json")} has a "devEngines.packageManager" field`,
+      `This project is configured to use yarn because ${join(root, "package.json")} has a "devEngines.packageManager" field${STRICT_BYPASS_HINT}`,
     );
   });
 
@@ -1031,7 +1034,7 @@ describe("reconcile — §03.5", () => {
 
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
-      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field`,
+      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field${STRICT_BYPASS_HINT}`,
     );
   });
 
@@ -1053,7 +1056,7 @@ describe("reconcile — §03.5", () => {
     const result = findProjectSpec(root);
     expectUsageError(
       () => reconcile(result, lazyFallback("pnpm"), { requestedName: "pnpm", transparent: false }),
-      `This project is configured to use bun because ${join(root, "package.json")} has a "packageManager" field`,
+      `This project is configured to use bun because ${join(root, "package.json")} has a "packageManager" field${STRICT_BYPASS_HINT}`,
     );
 
     // And bun in its own project still gets the pin, not the fallback.
@@ -1128,7 +1131,7 @@ describe("reconcile — §03.5", () => {
           transparent: false,
           binaryVersion: "9",
         }),
-      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field`,
+      `This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field${STRICT_BYPASS_HINT}`,
     );
   });
 
