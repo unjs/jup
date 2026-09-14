@@ -19,6 +19,12 @@ does not receive the wrapper's invocation name. Every stub and wrapper is mode
 looks for — except the Windows wrappers, whose bodies are byte-exact, and which
 are recognised by their exact generated contents instead.
 
+Outside Windows, a stub's first statement after its builtins stops Node reading
+a caller's IPC channel, and it resumes the read once `runMain` returns: §08.3.3
+can hand the channel to a tool that replaces the process only while Node has read
+nothing from it. `enable` also writes §08.3.3's addon into `<home>` (§07.2),
+best-effort.
+
 jup's own two names are not stubs at all: §10.9 points them straight at the CLI
 entry, which passes argv through unchanged.
 

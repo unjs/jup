@@ -27,6 +27,7 @@ rather than migrating them.
 ├── keys.json              # refreshed npm trust keys (§06.3) — outside v1
 ├── shims.json             # entries displaced by `enable --force` (§10.6)
 ├── self/<version>/        # jup's own copy (§7.11) — outside v1
+├── addon/execve-<digest16>.node  # §08.3.3's execve addon: `enable`, `self-install`, or on demand — outside v1
 └── v1/
     ├── jup-<pid>-<hex>/   # transient temp dirs, on the same filesystem
     └── <name>/<reference>/

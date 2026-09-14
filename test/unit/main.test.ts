@@ -951,6 +951,9 @@ const COLD_PATH_MODULES = [
   // package manager is handed over to in-process (§08.2) and must not pay for
   // the machinery that exists for the ones that are not JavaScript.
   "run/native.ts",
+  // §08.3.3's `execve` addon and the per-host bytes it is extracted from.
+  "run/addon.ts",
+  "run/addon-binaries.ts",
   // §09.9's `--store-path` probe: the one place a tool is run for its *output*
   // rather than handed the terminal. It borrows `exec.ts`'s child environment
   // and §08.1's bin lookup, so the direction has to stay cold-imports-warm.

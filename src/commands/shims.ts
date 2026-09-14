@@ -98,6 +98,7 @@ import {
   STUB_FOLDER_NAME,
 } from "../utils/self.ts";
 import { getHomeFolder, isInsideInstallFolder } from "../cache/store.ts";
+import { extractAddon } from "../run/addon.ts";
 
 /** Our own binary name — what §10.5's `PATH` verification and lookup search for. */
 const TOOL_NAME = "jup";
@@ -1169,6 +1170,20 @@ function realpathOr(directory: string): string {
  * worst failure this module can produce. Deno 2.8's `node:module` has no
  * `enableCompileCache`, so that runtime is not hypothetical.
  *
+ * The channel lines are §08.3.3's. A caller that spawned the shim with an IPC
+ * slot may write to it at once, and Node starts reading the pipe during
+ * bootstrap: any message it takes off before the tool replaces this process is
+ * a message the tool never sees, so the tool could only have been reached
+ * through §08.3.2's relay. Stopping the read here — the stub's first statement
+ * after its builtins, before any `await` lets the loop poll — leaves every byte
+ * in the kernel for whichever process ends up owning the channel. Windows has no
+ * `execve` and keeps reading. A preload (`--import`) that awaits can let the loop
+ * poll first, which costs nothing but the relay. Node keeps the
+ * pipe under a symbol on `process`, the one place it can be reached; a runtime
+ * without it gets `undefined` and changes nothing. The read resumes after
+ * `runMain` for the JavaScript handover, whose package manager reads the
+ * channel in this very process, and the relay resumes it itself.
+ *
  * `{ handover: true }` is §08.2's in-process handover, asked for explicitly
  * because `runMain` does not assume it: a stub *is* the package manager for the
  * rest of this process's life and has nothing after the `await`, which is the
@@ -1196,10 +1211,16 @@ export function shimSource(entry: string, binName: string, interpreter?: string)
     `const { realpathSync } = process.getBuiltinModule("node:fs");`,
     `const nodeModule = process.getBuiltinModule("node:module");`,
     `const { pathToFileURL } = process.getBuiltinModule("node:url");`,
+    // §08.3.3 — hold a caller's IPC channel unread before anything can turn
+    // the loop, so a tool that replaces this process receives every message.
+    // Not on Windows, which has no `execve` to hand the channel to.
+    `const channel = process.platform !== "win32" && process.channel && process[Object.getOwnPropertySymbols(process).find((key) => key.description === "kChannelHandle")];`,
+    `channel?.readStop?.();`,
     `nodeModule.enableCompileCache?.();`,
     `const entry = new URL(${JSON.stringify(entry)}, pathToFileURL(realpathSync(import.meta.filename)));`,
     `const { runMain } = await import(entry.href);`,
     `const { code } = await runMain([${name}, ...process.argv.slice(2)], { handover: true });`,
+    `channel?.readStart?.();`,
     `if (code !== 0) process.exitCode = code;`,
     "",
   ].join("\n");
@@ -2427,6 +2448,10 @@ export async function cmdEnable(
     }),
   );
 
+  // §08.3.3 — the addon a shim needs to become its tool with a caller's IPC
+  // channel intact. Best-effort, and POSIX only: Windows has no `execve`.
+  if (process.platform !== "win32") extractAddon();
+
   verifyOnPath(
     installDirectory,
     installed.filter((entry) => entry !== undefined),
@@ -2569,6 +2594,10 @@ export async function installSelfShims(
       return shim === undefined ? undefined : [binName, shim];
     }),
   );
+
+  // §08.3.3 — as `enable` does, so `jup <name>` can hand a caller's IPC
+  // channel to the tool it replaces itself with.
+  if (!isWindows) extractAddon();
 
   return installed.filter((entry) => entry !== undefined);
 }

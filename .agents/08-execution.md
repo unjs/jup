@@ -128,14 +128,14 @@ owns neither the channel nor the messages on it, and a host application that
 called `runMain` mid-script owns both. Without handover the channel is left
 alone.
 
-**A relay, not the fd.** Passing fd 3 through and naming it in the child's
-`NODE_CHANNEL_FD` looks cheaper and cannot be done from here: the runtime deletes
-both `NODE_CHANNEL_FD` and `NODE_CHANNEL_SERIALIZATION_MODE` from the
-environment during bootstrap, so a shim can no longer say which serialisation the
-fd carries, and both processes would be reading one pipe. The relay costs a
-deserialise and reserialise per message and works against every runtime in the
-table, because bun and deno implement the same `NODE_CHANNEL_FD` convention that
-the `ipc` slot writes.
+**The relay is the fallback.** Where the tool can take the channel itself —
+§8.3.3's replacement through the addon — it does, and nothing is relayed. The
+relay remains for everything else: a host with no addon build (Windows among
+them), a home the addon cannot be written into or loaded from, a worker thread
+or the permission model, a shim interpreter that is not Node, a channel Node has
+already read from, and an `advanced` channel to a tool other than `node`. It costs a deserialise and reserialise per message
+and works against every runtime in the table, because bun and deno implement the
+same `NODE_CHANNEL_FD` convention that the `ipc` slot writes.
 
 Two things follow from the relay being one:
 
@@ -166,46 +166,96 @@ is invisible until the pid matters, and then it is wrong: `SIGKILL` and
 tool — reparented to init — keeps its stdio, its ports and its own children's
 channels open; pidfiles, supervisors, `process.ppid` and `/proc/<pid>` all see
 the wrapper. Under handover a native run therefore **replaces the process
-image** with `process.execve` rather than spawning:
+image** rather than spawning:
 
 ```
-handover, and process.execve exists     (not Windows, Deno, or Node < 22.15)
-main thread, permission model allows child processes
-no IPC channel                          (§8.3.2 — see below)
-  → release the streams jup wrote to
-  → argv + env block under 512 KiB, and the kernel will take binPath
-      → reset SIGPIPE/SIGXFSZ, execve(binPath, argv, env)
-otherwise, or execve threw (Bun's does on failure)
-  → §8.3's spawn
+handover, main thread, permission model allows child processes
+  the addon loads from <home>/addon/
+    IPC channel? only if Node has read nothing from it
+      → NODE_CHANNEL_FD, NODE_CHANNEL_SERIALIZATION_MODE back into env
+    → release the streams jup wrote to
+    → reset SIGPIPE/SIGXFSZ, addon execve(binPath, argv, env, channel fd)
+  no addon, no IPC channel, process.execve exists (not Windows, Deno, Node < 22.15)
+    → release the streams jup wrote to
+    → argv + env block under 512 KiB, and the kernel will take binPath
+        → reset SIGPIPE/SIGXFSZ, process.execve(binPath, argv, env)
+otherwise, or execve returned
+  → §8.3's spawn, and §8.3.2's relay for a channel
 ```
 
 `argv` and `env` are §8.3's, `argv[0]` the invoked name included. The pid, the
 process group, the controlling terminal and fds 0–2 are the caller's by
 construction, and every signal reaches the tool with no forwarding at all.
 
-* **A channel keeps the spawn.** Node marks every inherited descriptor above 2
-  close-on-exec during its own startup (`uv_disable_stdio_inheritance`), and no
-  JavaScript API clears the flag, so an IPC fd cannot survive into the replaced
-  image. §8.3.2's relay is the only way the channel reaches the tool, and a relay
-  needs a process — so a shim spawned with an `ipc` slot is still two pids, and
-  still orphans the tool on `SIGKILL`. Extra fds are lost either way, as §8.3.2
-  records.
-* **A refusal is checked for, not caught.** Node's `execve` does not throw when
-  the syscall fails: it prints the errno and aborts, perhaps leaving a core file
-  in the user's project, where a spawn reports §12.8's `Unable to execute`. So
-  the kernel's questions are asked of the file first, immediately before the
-  call, and any doubt spawns: executable by us; an ELF of this byte order and
-  machine whose `PT_INTERP` loader is executable (a glibc build on a host with
-  no glibc loader fails exactly there); a Mach-O carrying this architecture, on
-  macOS only; a script whose `#!` interpreter passes the same test within the
-  kernel's line and nesting limits. A single argument or environment string
-  over Linux's 128 KiB `MAX_ARG_STRLEN`, or a block over 512 KiB, spawns too.
-  What is not checked still aborts: `ETXTBSY`, a concurrent `cache clean`
-  removing the entry in the instant before the call, and a block under 512 KiB
-  that jup's additions push past Linux's quarter-of-the-stack-limit cap.
+**The addon.** `native/execve.zig` is a Node-API library of one function:
+`execve` with a descriptor to keep, which returns the errno when the kernel
+refuses. It exists for the two things `process.execve` cannot do:
+
+* **carry the IPC channel.** Node marks every inherited descriptor above 2
+  close-on-exec during startup (`uv_disable_stdio_inheritance`), and no
+  JavaScript API clears the flag. The addon clears it on the channel's fd — and
+  on 0–2, as Node's own does — immediately before the call, and restores the
+  flags if the call returns;
+* **fail.** Node's `execve` prints the errno and aborts on any refusal, perhaps
+  leaving a core file in the user's project. The addon's returns, and the spawn
+  that stands in reports §12.8's `Unable to execute` for the same refusal.
+
+`scripts/build-addon.mjs` builds it with a pinned Zig for §02.4's POSIX hosts —
+Intel macOS aside, as legacy: it keeps the rules without an addon — and
+writes `src/run/addon-binaries.ts`: per host, the SHA-256, the size and the
+raw-deflated bytes, committed so a checkout builds and tests without Zig. The
+Linux files link no C library — the system calls are made directly — so one per
+architecture serves glibc and musl; the macOS ones bind `execve` and `fcntl`
+from libSystem. Every Node-API symbol resolves against the loading process.
+
+`enable` and `self-install` — and a run with a channel that finds the file missing
+or damaged, which is how an upgrade gets its own — inflate this host's bytes,
+check them against the digest, and rename them into `<home>/addon/execve-<digest16>.node` — the first 16 hex
+digits of the digest (§07.2) —
+best-effort: a home that will not take the file costs the shims their
+replacement under a channel, not the command. A run loads the file by that name
+with `process.dlopen` and checks its `abi` export; a missing, unloadable or
+mismatched file is no addon, and the rules without one apply.
+
+**The channel.** Node deletes `NODE_CHANNEL_FD` and
+`NODE_CHANNEL_SERIALIZATION_MODE` from `process.env` during bootstrap, and begins
+reading the pipe at once. So:
+
+* the pipe is reached through `process[kChannelHandle]`, the symbol Node keeps it
+  under — `process.channel` hides it. Its `fd` restores `NODE_CHANNEL_FD`, and the
+  buffers Node gave it name the serialisation (`kMessageBuffer` is `advanced`).
+  `advanced` is Node's own framing — bun and deno read nothing of it and hang — so
+  an `advanced` channel is handed only to a tool invoked as `node`; the relay
+  speaks JSON to the rest;
+* nothing may have been read. A message Node took off the pipe is in this
+  process and would never reach the tool, so `bytesRead` is checked immediately
+  before the call, and anything non-zero keeps the relay;
+* §10.1's stubs therefore stop the read with the handle's `readStop()` before
+  their first `await` — before the loop can poll — and resume it after `runMain`
+  returns, for a JavaScript tool handed over in process. The relay resumes it
+  itself. A run that was not started by a stub (`jup <name>`), or whose preload
+  (`--import`) let the loop poll first, replaces only when nothing was read;
+* the checks are asked again after the stream release's `await`: a channel closed
+  in it keeps the spawn.
+
+**Without the addon**, a channel keeps the spawn, and the kernel's questions are
+asked of the file before `process.execve`, immediately before the call, with
+any doubt spawning: executable by us; an ELF of this byte order and machine
+whose `PT_INTERP` loader is executable (a glibc build on a host with no glibc
+loader fails exactly there); a Mach-O carrying this architecture, on macOS only;
+a script whose `#!` interpreter passes the same test within the kernel's line
+and nesting limits. A single argument or environment string over Linux's 128 KiB
+`MAX_ARG_STRLEN`, or a block over 512 KiB, spawns too. What is not checked still
+aborts: `ETXTBSY`, a concurrent `cache clean` removing the entry in the instant
+before the call, and a block under 512 KiB that jup's additions push past
+Linux's quarter-of-the-stack-limit cap.
+
+Either way:
+
 * **Refusals that throw are avoided.** A worker thread and the permission model
-  make `execve` throw after Node has queued an `ExperimentalWarning`, which would
-  print over the spawn; both are checked for instead.
+  make Node's `execve` throw after it has queued an `ExperimentalWarning`, which
+  would print over the spawn, and the addon's would take every other thread with
+  it; both are checked for instead.
 * **stdio is left as found, for the streams jup wrote to.** `execve` skips the
   exit hooks that flush a pending write and undo libuv's non-blocking mode on a
   piped stdout or stderr. Each stream jup's own writers constructed has any
@@ -219,9 +269,10 @@ construction, and every signal reaches the tool with no forwarding at all.
   ignored before any of jup runs, and an ignored disposition survives `execve`.
   A listener on each turns them into caught signals, which the kernel resets —
   matching the spawn, where libuv resets every disposition in the child. The
-  listeners stay if `execve` throws: removing the last one would restore the
+  listeners stay if `execve` returns: removing the last one would restore the
   default rather than Node's ignore, and jup would die writing its error into a
   closed pipe.
+* **Extra fds are lost**, as §8.3.2 records: only the channel is handed through.
 
 ## 8.4 Exit codes
 

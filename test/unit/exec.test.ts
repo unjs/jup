@@ -13,8 +13,10 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, sep } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { messages } from "../../src/errors-cold.ts";
+import { shimSource } from "../../src/commands/shims.ts";
+import { addonPath, extractAddon } from "../../src/run/addon.ts";
 import { pathWith, resolveBinPath, SHIM_MARKER } from "../../src/run/exec.ts";
 import { execNative } from "../../src/run/native.ts";
 import type { BinSpec } from "../../src/types.ts";
@@ -94,6 +96,16 @@ afterAll(() => {
 afterEach(() => {
   vi.unstubAllEnvs();
 });
+
+/**
+ * A `COREPACK_HOME` below a regular file: nothing can be created in it, so a run
+ * that would write §08.3.3's addon on demand finds none and keeps the relay.
+ */
+function unwritableHome(): string {
+  const blocker = join(root, "not-a-directory");
+  writeFileSync(blocker, "");
+  return join(blocker, "home");
+}
 
 describe("resolveBinPath — §08.1", () => {
   it("resolves a bin map entry against the install location", () => {
@@ -421,6 +433,12 @@ describe.skipIf(process.platform === "win32")("§10.2 — JUP_HOST_RUNTIME", () 
  * ------------------------------------------------------------------ */
 
 describe("§08.3.2 — IPC", () => {
+  // A home no addon can be written into, so the shim cannot replace itself
+  // (§08.3.3) and what is under test is the relay.
+  beforeEach(() => {
+    vi.stubEnv("COREPACK_HOME", unwritableHome());
+  });
+
   /** The runtime a shim hands over to: answers a message, then disconnects. */
   function probe(): string {
     const file = join(root, "ipc-probe.mjs");
@@ -460,8 +478,8 @@ describe("§08.3.2 — IPC", () => {
         `const { execNative } = await import(${JSON.stringify(
           pathToFileURL(join(REPO_ROOT, "src", "run", "native.ts")).href,
         )});`,
-        // `replace` rides with `ipc`, as it does from a real shim: a channel is
-        // what must keep the relay, and so the process, in place (§08.3.3).
+        // `replace` rides with `ipc`, as it does from a real shim. The suite's
+        // home holds no addon, so the channel keeps the relay (§08.3.3).
         `const code = await execNative(process.execPath, [process.argv[2]], { ...process.env },`,
         `  undefined, { reraise: false, ipc: ${ipc}, replace: ${ipc} });`,
         `process.exitCode = code;`,
@@ -588,272 +606,474 @@ describe("§08.3.2 — IPC", () => {
  * tool, because `$$` is the pid the kernel actually gave it.
  * ------------------------------------------------------------------ */
 
-describe.skipIf(process.platform === "win32" || typeof process.execve !== "function")(
-  "§08.3.3 — process replacement",
-  () => {
-    const NATIVE_URL = pathToFileURL(join(REPO_ROOT, "src", "run", "native.ts")).href;
-    const LOG_URL = pathToFileURL(join(REPO_ROOT, "src", "utils", "log.ts")).href;
-    /** A shim prelude that prints through jup's own writer, as a notice does. */
-    const NOTICE = `(await import(${JSON.stringify(LOG_URL)})).err("notice\\n");`;
+/**
+ * Run twice: once through `process.execve`, with a home holding no addon, and
+ * once through the addon `enable` extracts — which must pass every case the
+ * first does, and then carry an IPC channel as well.
+ */
+const REPLACEMENT_MODES = [
+  { mode: "process.execve", addon: false },
+  { mode: "the addon", addon: true },
+].filter(({ addon }) => (addon ? addonPath() !== undefined : typeof process.execve === "function"));
 
-    /** An executable `#!/bin/sh` script. */
-    function tool(name: string, body: string): string {
-      const file = join(root, `replace-${name}.sh`);
-      writeFileSync(file, `#!/bin/sh\n${body}\n`);
-      chmodSync(file, 0o755);
-      return file;
+describe
+  .skipIf(process.platform === "win32" || REPLACEMENT_MODES.length === 0)
+  .each(REPLACEMENT_MODES)("§08.3.3 — process replacement through $mode", ({ addon }) => {
+  let home: string;
+
+  beforeAll(() => {
+    // Without the addon, a home it cannot be extracted into on demand either.
+    home = addon ? join(root, "replace-home") : unwritableHome();
+    if (addon) {
+      mkdirSync(home, { recursive: true });
+      vi.stubEnv("COREPACK_HOME", home);
+      const extracted = extractAddon();
+      vi.unstubAllEnvs();
+      expect(extracted).toBe(join(home, "addon", addonPath()!.split(sep).pop()!));
     }
+  });
 
-    let shims = 0;
+  beforeEach(() => {
+    vi.stubEnv("COREPACK_HOME", home);
+  });
 
-    /**
-     * The shim: `execNative` as a handover calls it, or with every handover
-     * option off. `prelude` runs first, for a case that needs the shim to have
-     * done something before it hands over; `wrap` names the call, for a case
-     * that has to make it from somewhere other than the main thread.
-     */
-    function shim(replace: boolean, prelude: string[] = []): string {
-      const file = join(root, `replace-shim-${(shims += 1)}.mjs`);
-      writeFileSync(
-        file,
-        [
-          ...prelude,
-          `const { execNative } = await import(${JSON.stringify(NATIVE_URL)});`,
-          `const [bin, ...args] = process.argv.slice(2);`,
-          `const options = { reraise: ${replace}, ipc: ${replace}, replace: ${replace} };`,
-          `await execNative(bin, args, { ...process.env }, undefined, options).then(`,
-          `  (code) => { process.exitCode = code; },`,
-          `  (error) => { console.error(error.message); process.exitCode = 1; },`,
-          `);`,
-          ``,
-        ].join("\n"),
-      );
-      return file;
-    }
+  const NATIVE_URL = pathToFileURL(join(REPO_ROOT, "src", "run", "native.ts")).href;
+  const LOG_URL = pathToFileURL(join(REPO_ROOT, "src", "utils", "log.ts")).href;
+  /** A shim prelude that prints through jup's own writer, as a notice does. */
+  const NOTICE = `(await import(${JSON.stringify(LOG_URL)})).err("notice\\n");`;
 
-    function runShim(replace: boolean, bin: string, args: string[] = [], prelude: string[] = []) {
-      return spawnSync(process.execPath, [shim(replace, prelude), bin, ...args], {
-        encoding: "utf8",
-      });
-    }
+  /** An executable `#!/bin/sh` script. */
+  function tool(name: string, body: string): string {
+    const file = join(root, `replace-${name}.sh`);
+    writeFileSync(file, `#!/bin/sh\n${body}\n`);
+    chmodSync(file, 0o755);
+    return file;
+  }
 
-    /** Resolve with the first line the chain prints, and the chain itself. */
-    function start(replace: boolean, bin: string): Promise<[number, ReturnType<typeof spawn>]> {
-      const child = spawn(process.execPath, [shim(replace), bin], {
-        stdio: ["ignore", "pipe", "inherit"],
-      });
-      return new Promise((resolve) => {
-        let text = "";
-        child.stdout!.on("data", (chunk: Buffer) => {
-          text += chunk.toString("utf8");
-          if (text.includes("\n")) resolve([Number(text.split("\n")[0]), child]);
-        });
-      });
-    }
+  let shims = 0;
 
-    function alive(pid: number): boolean {
-      try {
-        process.kill(pid, 0);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-
-    it("hands the caller the tool's pid", async () => {
-      const [pid, child] = await start(true, tool("pid", "echo $$"));
-      expect(pid).toBe(child.pid);
-    });
-
-    it("keeps a caller that is not a shim on the spawn, and its second pid", async () => {
-      const [pid, child] = await start(false, tool("pid", "echo $$"));
-      expect(pid).not.toBe(child.pid);
-    });
-
-    it("lets `SIGKILL` on that pid reach the tool, leaving nothing orphaned", async () => {
-      // `exec`, so `sleep` keeps the pid the script printed.
-      const [pid, child] = await start(true, tool("sleep", "echo $$\nexec sleep 30"));
-      const exited = new Promise((resolve) => child.on("exit", (...status) => resolve(status)));
-      child.kill("SIGKILL");
-      expect(await exited).toEqual([null, "SIGKILL"]);
-      expect(alive(pid)).toBe(false);
-    });
-
-    it("hands the tool its arguments, and the caller its exit code and death", () => {
-      const echo = runShim(true, tool("args", 'printf "%s|" "$@"\nexit 7'), ["a b", "--c"]);
-      expect(echo.stdout).toBe("a b|--c|");
-      expect(echo.status).toBe(7);
-
-      const killed = runShim(true, tool("kill", "kill -TERM $$"));
-      expect(killed.signal).toBe("SIGTERM");
-    });
-
-    it.skipIf(process.platform !== "linux")(
-      "does not hand the tool the signals Node's startup ignores",
-      () => {
-        const result = runShim(true, tool("sigign", "grep SigIgn /proc/$$/status"));
-        const ignored = BigInt(`0x${/SigIgn:\s*([0-9a-f]+)/.exec(result.stdout)?.[1] ?? "ff"}`);
-        // Bit N-1 for signal N: SIGPIPE is 13, SIGXFSZ is 25. A spawned tool has
-        // both at their default, because libuv resets every disposition.
-        expect(ignored & (1n << 12n)).toBe(0n);
-        expect(ignored & (1n << 24n)).toBe(0n);
-      },
+  /**
+   * The shim: `execNative` as a handover calls it, or with every handover
+   * option off. `prelude` runs first, for a case that needs the shim to have
+   * done something before it hands over; `wrap` names the call, for a case
+   * that has to make it from somewhere other than the main thread.
+   */
+  function shim(replace: boolean, prelude: string[] = []): string {
+    const file = join(root, `replace-shim-${addon}-${(shims += 1)}.mjs`);
+    writeFileSync(
+      file,
+      [
+        ...prelude,
+        `const { execNative } = await import(${JSON.stringify(NATIVE_URL)});`,
+        `const [bin, ...args] = process.argv.slice(2);`,
+        `const options = { reraise: ${replace}, ipc: ${replace}, replace: ${replace} };`,
+        `await execNative(bin, args, { ...process.env }, undefined, options).then(`,
+        `  (code) => { process.exitCode = code; },`,
+        `  (error) => { console.error(error.message); process.exitCode = 1; },`,
+        `);`,
+        ``,
+      ].join("\n"),
     );
+    return file;
+  }
 
-    it.skipIf(process.platform !== "linux")(
-      "flushes what the shim printed, and leaves a piped stderr blocking",
-      () => {
-        // A notice through the shim's own writer constructs the stream, and with
-        // it libuv's non-blocking pipe — the state Node undoes only at exit.
-        const result = runShim(true, tool("flags", "grep flags /proc/$$/fdinfo/2"), [], [NOTICE]);
-        expect(result.status).toBe(0);
-        expect(result.stderr).toBe("notice\n");
-        const flags = Number.parseInt(/flags:\s*([0-7]+)/.exec(result.stdout)?.[1] ?? "4000", 8);
-        expect(flags & 0o4000).toBe(0);
-      },
+  function runShim(replace: boolean, bin: string, args: string[] = [], prelude: string[] = []) {
+    return spawnSync(process.execPath, [shim(replace, prelude), bin, ...args], {
+      encoding: "utf8",
+    });
+  }
+
+  /** Resolve with the first line the chain prints, and the chain itself. */
+  function start(replace: boolean, bin: string): Promise<[number, ReturnType<typeof spawn>]> {
+    const child = spawn(process.execPath, [shim(replace), bin], {
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    return new Promise((resolve) => {
+      let text = "";
+      child.stdout!.on("data", (chunk: Buffer) => {
+        text += chunk.toString("utf8");
+        if (text.includes("\n")) resolve([Number(text.split("\n")[0]), child]);
+      });
+    });
+  }
+
+  function alive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it("hands the caller the tool's pid", async () => {
+    const [pid, child] = await start(true, tool("pid", "echo $$"));
+    expect(pid).toBe(child.pid);
+  });
+
+  it("keeps a caller that is not a shim on the spawn, and its second pid", async () => {
+    const [pid, child] = await start(false, tool("pid", "echo $$"));
+    expect(pid).not.toBe(child.pid);
+  });
+
+  it("lets `SIGKILL` on that pid reach the tool, leaving nothing orphaned", async () => {
+    // `exec`, so `sleep` keeps the pid the script printed.
+    const [pid, child] = await start(true, tool("sleep", "echo $$\nexec sleep 30"));
+    const exited = new Promise((resolve) => child.on("exit", (...status) => resolve(status)));
+    child.kill("SIGKILL");
+    expect(await exited).toEqual([null, "SIGKILL"]);
+    expect(alive(pid)).toBe(false);
+  });
+
+  it("hands the tool its arguments, and the caller its exit code and death", () => {
+    const echo = runShim(true, tool("args", 'printf "%s|" "$@"\nexit 7'), ["a b", "--c"]);
+    expect(echo.stdout).toBe("a b|--c|");
+    expect(echo.status).toBe(7);
+
+    const killed = runShim(true, tool("kill", "kill -TERM $$"));
+    expect(killed.signal).toBe("SIGTERM");
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "does not hand the tool the signals Node's startup ignores",
+    () => {
+      const result = runShim(true, tool("sigign", "grep SigIgn /proc/$$/status"));
+      const ignored = BigInt(`0x${/SigIgn:\s*([0-9a-f]+)/.exec(result.stdout)?.[1] ?? "ff"}`);
+      // Bit N-1 for signal N: SIGPIPE is 13, SIGXFSZ is 25. A spawned tool has
+      // both at their default, because libuv resets every disposition.
+      expect(ignored & (1n << 12n)).toBe(0n);
+      expect(ignored & (1n << 24n)).toBe(0n);
+    },
+  );
+
+  it.skipIf(process.platform !== "linux")(
+    "flushes what the shim printed, and leaves a piped stderr blocking",
+    () => {
+      // A notice through the shim's own writer constructs the stream, and with
+      // it libuv's non-blocking pipe — the state Node undoes only at exit.
+      const result = runShim(true, tool("flags", "grep flags /proc/$$/fdinfo/2"), [], [NOTICE]);
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe("notice\n");
+      const flags = Number.parseInt(/flags:\s*([0-7]+)/.exec(result.stdout)?.[1] ?? "4000", 8);
+      expect(flags & 0o4000).toBe(0);
+    },
+  );
+
+  it("runs the tool when the caller has hung up a stream the shim never wrote", async () => {
+    // The caller closes stdout; the shim writes its notice to stderr. Touching
+    // stdout on the way out used to raise an unheard `EPIPE`, and jup died with
+    // it before the tool — which here only exits — was ever run.
+    // The pause lets the hang-up land before the shim touches any stream, so the
+    // `EPIPE` is certain rather than a race against `execve`.
+    const pause = `await new Promise((resolve) => setTimeout(resolve, 100));`;
+    const child = spawn(process.execPath, [shim(true, [pause, NOTICE]), tool("exit", "exit 7")], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    child.stdout!.destroy();
+    let stderr = "";
+    child.stderr!.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
+    const [code] = await new Promise<[number | null]>((resolve) =>
+      child.on("close", (status) => resolve([status])),
     );
+    expect(stderr).toBe("notice\n");
+    expect(code).toBe(7);
+  });
 
-    it("runs the tool when the caller has hung up a stream the shim never wrote", async () => {
-      // The caller closes stdout; the shim writes its notice to stderr. Touching
-      // stdout on the way out used to raise an unheard `EPIPE`, and jup died with
-      // it before the tool — which here only exits — was ever run.
-      // The pause lets the hang-up land before the shim touches any stream, so the
-      // `EPIPE` is certain rather than a race against `execve`.
-      const pause = `await new Promise((resolve) => setTimeout(resolve, 100));`;
-      const child = spawn(process.execPath, [shim(true, [pause, NOTICE]), tool("exit", "exit 7")], {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      child.stdout!.destroy();
-      let stderr = "";
-      child.stderr!.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
-      const [code] = await new Promise<[number | null]>((resolve) =>
-        child.on("close", (status) => resolve([status])),
-      );
-      expect(stderr).toBe("notice\n");
-      expect(code).toBe(7);
+  it("spawns from a worker thread, where `execve` refuses, without its warning", () => {
+    const driver = join(root, "replace-worker.mjs");
+    writeFileSync(
+      driver,
+      [
+        `import { Worker } from "node:worker_threads";`,
+        `const [bin] = process.argv.slice(2);`,
+        `const source = \`const { execNative } = await import(\${JSON.stringify(${JSON.stringify(NATIVE_URL)})});`,
+        `const code = await execNative(\${JSON.stringify(bin)}, [], { ...process.env }, undefined, { replace: true, reraise: false });`,
+        `(await import("node:worker_threads")).parentPort.postMessage(code);\`;`,
+        `new Worker(new URL("data:text/javascript," + encodeURIComponent(source)))`,
+        `  .on("message", (code) => { process.exitCode = code; });`,
+        ``,
+      ].join("\n"),
+    );
+    const result = spawnSync(process.execPath, [driver, tool("exit", "exit 7")], {
+      encoding: "utf8",
     });
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(7);
+  });
 
-    it("spawns from a worker thread, where `execve` refuses, without its warning", () => {
-      const driver = join(root, "replace-worker.mjs");
-      writeFileSync(
-        driver,
-        [
-          `import { Worker } from "node:worker_threads";`,
-          `const [bin] = process.argv.slice(2);`,
-          `const source = \`const { execNative } = await import(\${JSON.stringify(${JSON.stringify(NATIVE_URL)})});`,
-          `const code = await execNative(\${JSON.stringify(bin)}, [], { ...process.env }, undefined, { replace: true, reraise: false });`,
-          `(await import("node:worker_threads")).parentPort.postMessage(code);\`;`,
-          `new Worker(new URL("data:text/javascript," + encodeURIComponent(source)))`,
-          `  .on("message", (code) => { process.exitCode = code; });`,
-          ``,
-        ].join("\n"),
-      );
-      const result = spawnSync(process.execPath, [driver, tool("exit", "exit 7")], {
-        encoding: "utf8",
-      });
-      expect(result.stderr).toBe("");
-      expect(result.status).toBe(7);
-    });
+  /*
+   * Every case below is a file `execve` would refuse. Node aborts on that —
+   * `SIGABRT`, a native stack and its own errno line — where a spawn reports
+   * §12.8's sentence, so each asserts the sentence *and* that nothing aborted.
+   */
 
-    /*
-     * Every case below is a file `execve` would refuse. Node aborts on that —
-     * `SIGABRT`, a native stack and its own errno line — where a spawn reports
-     * §12.8's sentence, so each asserts the sentence *and* that nothing aborted.
-     */
+  it("leaves a file without the execute bit to the spawn, which names it", () => {
+    const file = join(root, "replace-data");
+    writeFileSync(file, "not a program\n");
+    chmodSync(file, 0o644);
+    const result = runShim(true, file);
+    expect(result.signal).toBe(null);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(messages.cannotExecute(file, "EACCES"));
+  });
 
-    it("leaves a file without the execute bit to the spawn, which names it", () => {
-      const file = join(root, "replace-data");
-      writeFileSync(file, "not a program\n");
-      chmodSync(file, 0o644);
-      const result = runShim(true, file);
+  it("leaves a script whose interpreter is missing to the spawn", () => {
+    const file = join(root, "replace-no-interpreter");
+    writeFileSync(file, "#!/nonexistent/jup-test-sh\nexit 0\n");
+    chmodSync(file, 0o755);
+    const result = runShim(true, file);
+    expect(result.signal).toBe(null);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(messages.cannotExecute(file, "ENOENT"));
+  });
+
+  it("leaves an executable with no program header to the spawn", () => {
+    // No magic at all: what happens next is the spawn's, whichever way it
+    // goes — `/bin/sh` runs it on glibc — and is not an abort.
+    const file = join(root, "replace-no-header");
+    writeFileSync(file, "exit 7\n");
+    chmodSync(file, 0o755);
+    const result = runShim(true, file);
+    expect(result.signal).toBe(null);
+    expect(result.stderr).not.toContain("process.execve failed");
+  });
+
+  it.skipIf(process.platform !== "linux")(
+    "leaves an environment string past `MAX_ARG_STRLEN` to the spawn",
+    () => {
+      // Set inside the shim: a caller cannot hand one over, because its own
+      // spawn of the shim would be refused first. A project env file can.
+      const big = `process.env.JUP_TEST_BIG = "x".repeat(200 * 1024);`;
+      const file = tool("big-env", "exit 0");
+      const result = runShim(true, file, [], [big]);
       expect(result.signal).toBe(null);
       expect(result.status).toBe(1);
-      expect(result.stderr).toContain(messages.cannotExecute(file, "EACCES"));
-    });
+      // The spawn's own refusal, thrown from `spawn` itself rather than raised
+      // as §12.8's `error` event — as it was before replacement existed.
+      expect(result.stderr).toContain("E2BIG");
+      expect(result.stderr).not.toContain("process.execve failed");
+    },
+  );
 
-    it("leaves a script whose interpreter is missing to the spawn", () => {
-      const file = join(root, "replace-no-interpreter");
-      writeFileSync(file, "#!/nonexistent/jup-test-sh\nexit 0\n");
+  it.skipIf(process.platform !== "linux")(
+    "leaves an ELF whose loader is missing to the spawn",
+    (context) => {
+      // `/bin/true`, with the loader it names renamed to one that does not
+      // exist: what a glibc build of a tool looks like on a host without glibc.
+      const image = readFileSync("/bin/true");
+      const loader = /\/[^\0]*ld-[^\0]*\.so[^\0]*/.exec(image.toString("latin1"));
+      if (loader === null) return context.skip();
+      const broken = Buffer.from(image);
+      broken.write("/nonexistent".padEnd(loader[0].length, "x"), loader.index, "latin1");
+      const file = join(root, "replace-no-loader");
+      writeFileSync(file, broken);
       chmodSync(file, 0o755);
+
       const result = runShim(true, file);
       expect(result.signal).toBe(null);
       expect(result.status).toBe(1);
       expect(result.stderr).toContain(messages.cannotExecute(file, "ENOENT"));
-    });
+    },
+  );
 
-    it("leaves an executable with no program header to the spawn", () => {
-      // No magic at all: what happens next is the spawn's, whichever way it
-      // goes — `/bin/sh` runs it on glibc — and is not an abort.
-      const file = join(root, "replace-no-header");
-      writeFileSync(file, "exit 7\n");
-      chmodSync(file, 0o755);
-      const result = runShim(true, file);
-      expect(result.signal).toBe(null);
-      expect(result.stderr).not.toContain("process.execve failed");
-    });
-
-    it.skipIf(process.platform !== "linux")(
-      "leaves an environment string past `MAX_ARG_STRLEN` to the spawn",
-      () => {
-        // Set inside the shim: a caller cannot hand one over, because its own
-        // spawn of the shim would be refused first. A project env file can.
-        const big = `process.env.JUP_TEST_BIG = "x".repeat(200 * 1024);`;
-        const file = tool("big-env", "exit 0");
-        const result = runShim(true, file, [], [big]);
-        expect(result.signal).toBe(null);
-        expect(result.status).toBe(1);
-        // The spawn's own refusal, thrown from `spawn` itself rather than raised
-        // as §12.8's `error` event — as it was before replacement existed.
-        expect(result.stderr).toContain("E2BIG");
-        expect(result.stderr).not.toContain("process.execve failed");
-      },
-    );
-
-    it.skipIf(process.platform !== "linux")(
-      "leaves an ELF whose loader is missing to the spawn",
-      (context) => {
-        // `/bin/true`, with the loader it names renamed to one that does not
-        // exist: what a glibc build of a tool looks like on a host without glibc.
-        const image = readFileSync("/bin/true");
-        const loader = /\/[^\0]*ld-[^\0]*\.so[^\0]*/.exec(image.toString("latin1"));
-        if (loader === null) return context.skip();
+  it.skipIf(process.platform !== "linux" || (process.arch !== "x64" && process.arch !== "arm64"))(
+    "leaves an ELF whose program headers the kernel rejects to the spawn",
+    () => {
+      // `/bin/true` with an empty program-header table, then with entries of
+      // the wrong size: both `ENOEXEC` in the kernel, both once accepted here.
+      const image = readFileSync("/bin/true");
+      for (const [field, value] of [
+        [56, 0], // e_phnum
+        [54, 64], // e_phentsize
+      ] as const) {
         const broken = Buffer.from(image);
-        broken.write("/nonexistent".padEnd(loader[0].length, "x"), loader.index, "latin1");
-        const file = join(root, "replace-no-loader");
+        broken.writeUInt16LE(value, field);
+        const file = join(root, `replace-bad-phdr-${field}`);
         writeFileSync(file, broken);
         chmodSync(file, 0o755);
 
         const result = runShim(true, file);
         expect(result.signal).toBe(null);
-        expect(result.status).toBe(1);
-        expect(result.stderr).toContain(messages.cannotExecute(file, "ENOENT"));
-      },
+        expect(result.stderr).not.toContain("process.execve failed");
+      }
+    },
+  );
+
+  /*
+   * The IPC channel (#8's own repro): a caller that `fork`s the shim. Only the
+   * addon can hand the channel through; `process.execve` keeps §08.3.2's relay,
+   * and with it the second pid.
+   */
+
+  /** §10.1's stub lines: stop Node reading the channel before the loop turns. */
+  const HOLD_CHANNEL = [
+    `const channel = process.channel && process[Object.getOwnPropertySymbols(process).find((key) => key.description === "kChannelHandle")];`,
+    `channel?.readStop?.();`,
+  ];
+  /** The work a cold run does before it hands over: the loop turns. */
+  const PAUSE = `await new Promise((resolve) => setTimeout(resolve, 100));`;
+
+  /** Every chain a case forked, killed after it so a hung one cannot hold the run open. */
+  const forked = new Set<ReturnType<typeof spawn>>();
+  afterEach(() => {
+    for (const child of forked) child.kill("SIGKILL");
+    forked.clear();
+  });
+
+  /** A Node tool that reports its pid, counts messages, and answers `done`. */
+  function ipcTool(): string {
+    const file = join(root, "replace-ipc-tool.mjs");
+    writeFileSync(
+      file,
+      [
+        `let count = 0;`,
+        `let maps = 0;`,
+        `process.send({ pid: process.pid });`,
+        `process.on("message", (message) => {`,
+        `  count += 1;`,
+        `  if (message instanceof Map) maps += 1;`,
+        `  if (message !== "done") return;`,
+        `  process.send({ count, maps, back: new Map([[1, 2]]) });`,
+        `  process.disconnect();`,
+        `});`,
+        ``,
+      ].join("\n"),
     );
+    return file;
+  }
 
-    it.skipIf(process.platform !== "linux" || (process.arch !== "x64" && process.arch !== "arm64"))(
-      "leaves an ELF whose program headers the kernel rejects to the spawn",
-      () => {
-        // `/bin/true` with an empty program-header table, then with entries of
-        // the wrong size: both `ENOEXEC` in the kernel, both once accepted here.
-        const image = readFileSync("/bin/true");
-        for (const [field, value] of [
-          [56, 0], // e_phnum
-          [54, 64], // e_phentsize
-        ] as const) {
-          const broken = Buffer.from(image);
-          broken.writeUInt16LE(value, field);
-          const file = join(root, `replace-bad-phdr-${field}`);
-          writeFileSync(file, broken);
-          chmodSync(file, 0o755);
-
-          const result = runShim(true, file);
-          expect(result.signal).toBe(null);
-          expect(result.stderr).not.toContain("process.execve failed");
+  /**
+   * Fork the shim with the tool, send `burst` messages before it can have
+   * handed over, and collect what comes back.
+   */
+  function forkChain(
+    prelude: string[],
+    options: { burst?: number; serialization?: "json" | "advanced"; kill?: boolean } = {},
+  ): Promise<{ pid: number; seen: unknown[]; child: ReturnType<typeof spawn> }> {
+    const child = spawn(process.execPath, [shim(true, prelude), process.execPath, ipcTool()], {
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      serialization: options.serialization ?? "json",
+    });
+    forked.add(child);
+    const advanced = options.serialization === "advanced";
+    for (let index = 0; index < (options.burst ?? 100); index += 1) {
+      child.send(advanced ? new Map([[index, index]]) : index);
+    }
+    if (options.kill !== true) child.send("done");
+    const seen: unknown[] = [];
+    return new Promise((resolve) => {
+      child.on("message", (message: { pid?: number }) => {
+        seen.push(message);
+        if (options.kill === true && message.pid !== undefined) {
+          resolve({ pid: message.pid, seen, child });
         }
-      },
+      });
+      child.on("close", () =>
+        resolve({ pid: (seen[0] as { pid: number } | undefined)?.pid ?? 0, seen, child }),
+      );
+    });
+  }
+
+  it(`${addon ? "hands" : "relays"} a held channel to the tool, every message included`, async () => {
+    // Without the addon the stub's hold must still be released, or the relay
+    // reads nothing and the tool waits for ever.
+    const { pid, seen, child } = await forkChain([...HOLD_CHANNEL, PAUSE]);
+    expect(pid === child.pid).toBe(addon);
+    expect(seen[1]).toEqual({ count: 101, maps: 0, back: {} });
+  });
+
+  it.runIf(addon)('keeps `serialization: "advanced"` advanced for the tool', async () => {
+    const { pid, seen, child } = await forkChain(HOLD_CHANNEL, { serialization: "advanced" });
+    expect(pid).toBe(child.pid);
+    expect(seen[1]).toEqual({ count: 101, maps: 100, back: new Map([[1, 2]]) });
+  });
+
+  it("relays an `advanced` channel to a tool that is not Node", async () => {
+    // bun and deno cannot read Node's `advanced` framing, so only a `node` tool
+    // may be handed it; anything else keeps the relay, which speaks JSON to it.
+    const prelude = [
+      ...HOLD_CHANNEL,
+      `const { execNative: run } = await import(${JSON.stringify(NATIVE_URL)});`,
+      `process.exitCode = await run(process.execPath, [${JSON.stringify(ipcTool())}], { ...process.env }, "bun", { reraise: true, ipc: true, replace: true });`,
+      // Exit with the tool's status before the shim's own `execNative` runs.
+      `process.exit(process.exitCode);`,
+    ];
+    const { pid, seen, child } = await forkChain(prelude, { serialization: "advanced" });
+    expect(pid).not.toBe(child.pid);
+    expect(seen[1]).toEqual({ count: 101, maps: 0, back: {} });
+  });
+
+  /**
+   * The real §10.1 stub, from `shimSource`, around a stand-in entry: the hold
+   * and its release are the stub's own lines, not a copy of them.
+   */
+  function realStub(kind: "js" | "native"): string {
+    const folder = join(root, `replace-stub-${addon}-${kind}`);
+    mkdirSync(folder, { recursive: true });
+    const tool = ipcTool();
+    writeFileSync(
+      join(folder, "entry.mjs"),
+      [
+        `export async function runMain() {`,
+        `  await new Promise((resolve) => setTimeout(resolve, 100));`,
+        kind === "js"
+          ? `  process.nextTick(() => import(${JSON.stringify(pathToFileURL(tool).href)})); return { code: 0 };`
+          : `  const { execNative } = await import(${JSON.stringify(NATIVE_URL)});\n` +
+            `  return { code: await execNative(process.execPath, [${JSON.stringify(tool)}], { ...process.env }, undefined, { reraise: true, ipc: true, replace: true }) };`,
+        `}`,
+        ``,
+      ].join("\n"),
     );
-  },
-);
+    const stub = join(folder, "tool.mjs");
+    writeFileSync(stub, shimSource("./entry.mjs", "tool"));
+    return stub;
+  }
+
+  it.each(["js", "native"] as const)(
+    "delivers every message through a real stub handing over to a %s tool",
+    async (kind) => {
+      const child = spawn(process.execPath, [realStub(kind)], {
+        stdio: ["ignore", "inherit", "inherit", "ipc"],
+      });
+      forked.add(child);
+      for (let index = 0; index < 100; index += 1) child.send(index);
+      child.send("done");
+      const seen: Array<{ pid?: number }> = [];
+      child.on("message", (message: { pid?: number }) => seen.push(message));
+      await new Promise((resolve) => child.on("close", resolve));
+      // In process for JavaScript; replaced for a native tool only by the addon.
+      expect(seen[0]?.pid === child.pid).toBe(kind === "js" || addon);
+      expect(seen[1]).toEqual({ count: 101, maps: 0, back: {} });
+    },
+  );
+
+  it.runIf(addon)("writes the addon on demand for a channel, as after an upgrade", async () => {
+    // A home `enable` never ran against: the run extracts its own and replaces.
+    const fresh = join(root, "replace-home-on-demand");
+    vi.stubEnv("COREPACK_HOME", fresh);
+    const { pid, seen, child } = await forkChain(HOLD_CHANNEL);
+    expect(pid).toBe(child.pid);
+    expect(seen[1]).toEqual({ count: 101, maps: 0, back: {} });
+    expect(readFileSync(addonPath()!).length).toBeGreaterThan(0);
+  });
+
+  it.runIf(addon)("lets `SIGKILL` on a forked shim's pid reach the tool", async () => {
+    const { pid, child } = await forkChain(HOLD_CHANNEL, { kill: true, burst: 0 });
+    expect(pid).toBe(child.pid);
+    const exited = new Promise((resolve) => child.on("exit", (...status) => resolve(status)));
+    child.kill("SIGKILL");
+    expect(await exited).toEqual([null, "SIGKILL"]);
+    expect(alive(pid)).toBe(false);
+  });
+
+  it("relays a channel Node has already read from, losing nothing", async () => {
+    // No hold: the pause lets Node take the burst off the pipe, which only a
+    // relay can still deliver — so the tool keeps a pid of its own.
+    const { pid, seen, child } = await forkChain([PAUSE]);
+    expect(pid).not.toBe(child.pid);
+    expect(seen[1]).toEqual({ count: 101, maps: 0, back: {} });
+  });
+});
 
 /* ------------------------------------------------------------------ *
  * §08.3 — the resolved package manager on `PATH`

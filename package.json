@@ -35,6 +35,7 @@
   "scripts": {
     "bench": "node scripts/bench.mjs",
     "build": "obuild",
+    "build:addon": "node scripts/build-addon.mjs",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",

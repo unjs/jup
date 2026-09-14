@@ -34,6 +34,12 @@ now ship as static files that import the bundle by a relative specifier:
 | `bin/<B>.mjs` | §10.1's per-name stubs, one per table binary, read on every platform | `pnpm build` |
 | `src/bin.ts` | the CLI entry a source checkout runs (`node src/bin.ts`) | — |
 
+`native/execve.zig` is §08.3.3's addon, and not part of `pnpm build`: its per-host
+output is embedded in `src/run/addon-binaries.ts` by `pnpm build:addon` and
+committed (see Known debts). It is bundled like any cold module and written to
+disk by `enable`, `self-install` or a run that needs it (§08.3.3), never shipped as
+a file of its own.
+
 `bin/` is a sibling of `dist/`, not a child, because the bundler empties `dist/`
 on every run and §10.8 wants files a read-only installation still has. One
 directory holds both kinds: they address the bundle the same way.
@@ -225,19 +231,33 @@ revisiting when the surrounding code is next touched:
   Forwarding those would mean guessing which fds a caller meant to pass, since
   nothing distinguishes them from a descriptor the shim happens to hold open.
   §08.3.3's `execve` does not change that: Node marks them close-on-exec at
-  startup. The relay also crosses as JSON, so a caller using
+  startup, and the addon clears the flag on the channel alone. The relay also crosses as JSON, so a caller using
   `serialization: "advanced"` reaches the tool with what JSON preserves.
-* **A shim with an IPC channel is still two processes.** §08.3.3 replaces the
-  shim with a native tool only when there is no channel, for the reason above,
-  so `SIGKILL` on a `fork`ed shim's pid still orphans the tool. Closing it needs
-  a shim whose interpreter does not close descriptors at startup — a
-  `#!/bin/sh` stub, and the per-invocation fork §10.2's note already refuses.
-* **§08.3.3 can still abort on what it does not check.** The pre-`execve`
+* **A shim with an IPC channel is two processes without the addon.** §08.3.3
+  hands the channel to a native tool only through `<home>/addon/`, which
+  `enable` writes and a run with a channel writes on demand; a home that will not
+  take the file, a shim interpreter other than Node, a run whose loop read the
+  channel, and an `advanced` channel to a tool other than `node` keep §08.3.2's
+  relay, and `SIGKILL` on that pid still orphans the tool.
+  The handover leans on two Node internals — `process[kChannelHandle]` and its
+  `kMessageBuffer` — and checks both, so a Node that moves them falls back to the
+  relay rather than losing messages. A `#!/bin/sh` stub was the alternative:
+  a shell fork on every warm run, a second Node start for every JavaScript tool
+  under a channel, and a new shim format.
+* **§08.3.3 can still abort without the addon.** The pre-`process.execve`
   checks follow the kernel's own for the file and the per-string argument
   limit; `ETXTBSY`, `ENOMEM`, a store entry removed by a concurrent
   `cache clean` in the instant before the call, and an argument block that
   jup's additions push past Linux's stack-derived cap still reach Node's abort
-  rather than §12.8's message.
+  rather than §12.8's message. The addon's `execve` returns instead.
+* **The addon is committed build output.** `src/run/addon-binaries.ts` is what
+  `pnpm build:addon` writes from `native/execve.zig` with Zig pinned in
+  `scripts/build-addon.mjs`, so a checkout needs no Zig; `--check` rebuilds and
+  fails on drift, and `test/unit/addon.test.ts` checks every entry against its
+  digest and that the Linux files name no C library. CI runs `--check` on Linux
+  with Zig pinned. The macOS files bind lazily, so a host missing one of their
+  symbols would fail at the first call rather than at `dlopen`; Node and Bun
+  export all of them, and `macos-latest` is the only place they are exercised.
 * **§08.3.3 releases only the streams jup wrote to.** A stream only Node itself
   wrote to — its own warnings print through the console — is left non-blocking
   for the tool, and on macOS a warning still pending may be lost. Releasing both

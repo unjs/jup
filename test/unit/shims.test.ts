@@ -71,6 +71,7 @@ import {
   whichFile,
   win32ScriptPath,
 } from "../../src/commands/shims.ts";
+import { addonPath } from "../../src/run/addon.ts";
 import { isOurShim, shimDirectoryCandidates, systemShimDirectory } from "../../src/run/exec.ts";
 import { writeStubFolder } from "../../build.config.ts";
 
@@ -216,6 +217,18 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
   rmSync(root, { recursive: true, force: true });
+});
+
+describe("§08.3.3 — the execve addon", () => {
+  it.skipIf(process.platform === "win32" || addonPath() === undefined)(
+    "is extracted into `<home>` by `enable`",
+    async () => {
+      expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
+      const file = addonPath()!;
+      expect(file.startsWith(join(corepackHome, "addon"))).toBe(true);
+      expect(existsSync(file)).toBe(true);
+    },
+  );
 });
 
 describe("target set (§10.7)", () => {

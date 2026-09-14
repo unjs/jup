@@ -10,6 +10,7 @@ import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";
 import { openedStreams } from "../utils/log.ts";
 import { willExecute } from "../utils/program-image.ts";
+import { encodeExecBlock, loadAddon } from "./addon.ts";
 
 /**
  * §09.9 — run a tool and *read* what it printed, instead of handing it the
@@ -121,14 +122,12 @@ function hasParentChannel(): boolean {
  * the caller actually meant to talk to came up with no channel at all and a
  * `process.send` of `undefined`.
  *
- * The channel is therefore relayed rather than inherited. The alternative —
- * passing the underlying fd straight through and setting `NODE_CHANNEL_FD` in
- * the child's environment — cannot work from here: Node deletes both
- * `NODE_CHANNEL_FD` and `NODE_CHANNEL_SERIALIZATION_MODE` from `process.env`
- * during bootstrap, so a shim can no longer say which serialisation the fd
- * carries, and both ends would in any case be reading one pipe. A relay costs a
- * deserialise/reserialise per message and is what every runtime in the table can
- * be on the far side of: bun and deno implement Node's `NODE_CHANNEL_FD`
+ * The channel is therefore relayed wherever it cannot be handed over whole.
+ * Handing it over — the fd itself, named in the tool's `NODE_CHANNEL_FD` — needs
+ * the tool to *replace* this process, or both would be reading one pipe, and
+ * that is §08.3.3's {@link replacement} through the addon. Everything else lands
+ * here. A relay costs a deserialise/reserialise per message and is what every
+ * runtime in the table can be on the far side of: bun and deno implement Node's `NODE_CHANNEL_FD`
  * convention, so the `ipc` slot below reaches their own IPC as readily as it
  * reaches another Node.
  *
@@ -242,24 +241,51 @@ const EXEC_BLOCK_LIMIT = 512 * 1024;
 
 /**
  * §08.3.3 — may this process become the tool, rather than wait on it? The
- * questions about the *process*; {@link willExecute} asks the file's.
+ * questions about the *process*; {@link replacement} asks the rest.
  *
- * * **`process.execve` exists.** It does not on Windows, on Deno, or on Node
- *   before 22.15 — each takes the spawn below, unchanged.
- * * **It will not refuse up front.** A worker thread and the permission model
- *   both throw, after Node has queued its `ExperimentalWarning` — which would
- *   then print over the spawn that stands in.
- * * **No IPC channel.** Node marks every inherited descriptor above 2
- *   close-on-exec during startup (`uv_disable_stdio_inheritance`), so the
- *   channel fd a caller handed the shim would not survive into the tool, and
- *   there is no API left from JavaScript to clear the flag. §08.3.2's relay is
- *   the only way that channel reaches the tool, and a relay needs a process.
+ * * **The main thread.** `execve` from a worker would take every other thread
+ *   with it, and Node's own refuses there.
+ * * **The permission model allows children.** Replacing the process runs a
+ *   program as surely as spawning one does, and Node's `execve` throws under
+ *   it — after queuing an `ExperimentalWarning` that would then print over the
+ *   spawn that stands in.
  */
 function canReplaceProcess(): boolean {
-  if (typeof process.execve !== "function" || hasParentChannel()) return false;
   if (!process.getBuiltinModule("node:worker_threads").isMainThread) return false;
   const permission = (process as { permission?: { has(scope: string): boolean } }).permission;
   return permission === undefined || permission.has("child");
+}
+
+/** The libuv pipe behind `process.channel`, as far as the tool needs it. */
+interface ChannelHandle {
+  fd: number;
+  bytesRead: number;
+  readStart(): number;
+  readStop(): number;
+}
+
+/**
+ * §08.3.3 — the pipe Node opened on the caller's `NODE_CHANNEL_FD`, or
+ * `undefined` without one.
+ *
+ * `process.channel` hides it; Node keeps it on `process` under its
+ * `kChannelHandle` symbol, which is the only way to it. Everything here is
+ * checked rather than assumed, so a runtime that lays this out differently
+ * finds no handle and takes §08.3.2's relay.
+ */
+export function channelHandle(): ChannelHandle | undefined {
+  if (process.channel == null) return undefined;
+  const key = Object.getOwnPropertySymbols(process).find(
+    (symbol) => symbol.description === "kChannelHandle",
+  );
+  const handle = (key && (process as unknown as Record<symbol, unknown>)[key]) as
+    | Partial<ChannelHandle>
+    | undefined;
+  return typeof handle?.fd === "number" &&
+    typeof handle.bytesRead === "number" &&
+    typeof handle.readStart === "function"
+    ? (handle as ChannelHandle)
+    : undefined;
 }
 
 /**
@@ -301,45 +327,98 @@ async function releaseStreams(): Promise<void> {
 }
 
 /**
- * §08.3.3 — become the tool: same pid, same process group, same descriptors.
+ * §08.3.3 — how this process would become the tool: same pid, same process
+ * group, same descriptors. `undefined` when it cannot, and the caller spawns.
  *
- * Returns only when the tool cannot be exec'd without risking an abort
- * ({@link willExecute}, and an argument block the kernel may refuse), or when
- * `execve` threw before reaching the kernel — Bun's does, where Node's aborts.
- * The caller spawns instead. The signal listeners are left in place on that
- * path: removing the last one restores the default, not the `SIG_IGN` Node
- * started with, and a jup writing its error into a closed pipe would die of it.
+ * With the addon ({@link loadAddon}), `execve` is its own: a refusal comes back
+ * as an errno instead of Node's abort, so nothing about the file needs asking
+ * first — the spawn that stands in meets the same refusal and reports §12.8's
+ * message for it. Without, `process.execve`, and only for a file that passes
+ * {@link willExecute} and an argument block the kernel will not refuse.
+ *
+ * **An IPC channel needs the addon**, and writes it on demand when it is
+ * missing ({@link loadAddon}) — how an upgrade that never re-ran `enable` gets
+ * its own. Node marks every inherited descriptor
+ * above 2 close-on-exec during startup (`uv_disable_stdio_inheritance`), which
+ * nothing in JavaScript can clear, and deletes `NODE_CHANNEL_FD` and
+ * `NODE_CHANNEL_SERIALIZATION_MODE` from `process.env`. The addon clears the
+ * flag; the handle still says which descriptor and — by the buffers Node gave
+ * it — which serialisation, so both variables go back into the tool's block.
+ * And **only while Node has read nothing from it**: a message Node already
+ * took off the pipe is in this process and would never reach the tool. §10.1's
+ * stubs stop the read before anything can turn the loop, so a shim's channel
+ * arrives untouched; a run that did read keeps the relay.
+ *
+ * The returned function asks those last questions itself, immediately before
+ * `execve`, so the stream release between the two widens no window. It returns
+ * only when `execve` did not happen — Bun's `execve` throws where Node's aborts
+ * — and leaves the signal listeners in place on that path: removing the last
+ * one restores the default, not the `SIG_IGN` Node started with, and a jup
+ * writing its error into a closed pipe would die of it.
  */
-function replaceProcess(
+function replacement(
   binPath: string,
   args: string[],
   env: NodeJS.ProcessEnv,
   argv0: string | undefined,
-): void {
+): (() => void) | undefined {
+  const channel = hasParentChannel() ? channelHandle() : undefined;
+  if (hasParentChannel() && channel === undefined) return undefined;
+  // Node's `advanced` framing is Node's alone: bun and deno, handed it, read
+  // nothing and hang, where the relay speaks JSON to them.
+  const advanced =
+    channel !== undefined &&
+    Object.getOwnPropertySymbols(channel).some((key) => key.description === "kMessageBuffer");
+  if (advanced && (argv0 ?? binPath.split(/[\\/]/).pop()) !== "node") return undefined;
+  // Asked only once nothing above has already chosen the relay.
+  const addon = loadAddon({ extract: channel !== undefined });
+  if (channel !== undefined && addon === undefined) return undefined;
+  if (addon === undefined && typeof process.execve !== "function") return undefined;
+
   const argv = [argv0 ?? binPath, ...args];
   // `execve` takes strings only, and `process.env`'s type admits `undefined`.
   const block: Record<string, string> = {};
+  for (const [key, value] of Object.entries(env)) if (value !== undefined) block[key] = value;
+  if (channel !== undefined) {
+    block.NODE_CHANNEL_FD = String(channel.fd);
+    delete block.NODE_CHANNEL_SERIALIZATION_MODE;
+    if (advanced) block.NODE_CHANNEL_SERIALIZATION_MODE = "advanced";
+  }
+
+  if (addon !== undefined) {
+    const encoded = encodeExecBlock(binPath, argv, block);
+    if (encoded === undefined) return undefined;
+    return () => {
+      // Asked again after the stream release's `await`: a caller that hung up
+      // in it closed the handle, and a read of any kind moved the count.
+      if (channel !== undefined && (process.channel == null || channel.fd < 0)) return;
+      if (channel !== undefined && channel.bytesRead !== 0) return;
+      for (const signal of RESET_ACROSS_EXEC) process.on(signal, () => {});
+      addon.execve(encoded.block, encoded.argc, encoded.envc, channel?.fd ?? -1);
+    };
+  }
+
   let size = 0;
   let longest = 0;
-  const count = (bytes: number): void => {
+  for (const value of [
+    ...argv,
+    ...Object.entries(block).map(([key, value]) => `${key}=${value}`),
+  ]) {
+    const bytes = Buffer.byteLength(value) + 1;
     size += bytes + 8; // and its pointer
     longest = Math.max(longest, bytes);
-  };
-  for (const value of argv) count(Buffer.byteLength(value) + 1);
-  for (const [key, value] of Object.entries(env)) {
-    if (value === undefined) continue;
-    block[key] = value;
-    count(Buffer.byteLength(key) + Buffer.byteLength(value) + 2);
   }
-  if (longest > EXEC_STRING_LIMIT || size > EXEC_BLOCK_LIMIT) return;
-  if (!willExecute(binPath)) return;
+  if (longest > EXEC_STRING_LIMIT || size > EXEC_BLOCK_LIMIT) return undefined;
 
-  for (const signal of RESET_ACROSS_EXEC) process.on(signal, () => {});
-  try {
-    process.execve!(binPath, argv, block);
-  } catch {
-    // Spawned instead, by the caller.
-  }
+  return () => {
+    if (!willExecute(binPath)) return;
+    for (const signal of RESET_ACROSS_EXEC) process.on(signal, () => {});
+    try {
+      process.execve!(binPath, argv, block);
+    } catch {
+      // Spawned instead, by the caller.
+    }
+  };
 }
 
 /**
@@ -396,11 +475,13 @@ export async function execNative(
   // pid-based check reach the tool itself rather than a wrapper that dies alone
   // and leaves the tool orphaned. Gated with `reraise` and `ipc` on handover,
   // for the reason they are — only a shim has nothing left to run afterwards.
-  if (options?.replace === true && canReplaceProcess()) {
+  const replace =
+    options?.replace === true && canReplaceProcess()
+      ? replacement(binPath, args, childEnv, argv0)
+      : undefined;
+  if (replace !== undefined) {
     await releaseStreams();
-    // Only returns when the file failed its checks, asked immediately before
-    // `execve` so the stream release above does not widen the window.
-    replaceProcess(binPath, args, childEnv, argv0);
+    replace();
   }
 
   // §08.3.2 — an `ipc` slot only where this process exists to *be* the tool, which
@@ -425,6 +506,9 @@ export async function execNative(
     argv0,
   });
 
+  // A §10.1 stub stopped the read in case the tool could take the channel
+  // itself (§08.3.3). It could not, so the relay reads it.
+  if (ipc) channelHandle()?.readStart();
   const releaseChannel = ipc ? forwardIpcChannel(child) : undefined;
 
   const listeners = new Map<NodeJS.Signals, () => void>();
