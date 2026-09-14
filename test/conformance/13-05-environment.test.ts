@@ -96,7 +96,7 @@ describe("§13.5 environment variables", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
-      `This project is configured to use yarn because ${join(fixture.cwd, "package.json")} has a "packageManager" field\n`,
+      `This project is configured to use yarn because ${join(fixture.cwd, "package.json")} has a "packageManager" field\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
     expect(result.stdout).toBe("");
   });

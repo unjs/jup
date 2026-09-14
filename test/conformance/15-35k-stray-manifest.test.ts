@@ -66,7 +66,7 @@ describe("§12.5 — a manifest outside any project says so (row 205)", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
       `This project is configured to use yarn because ${join(fixture.root, "package.json")} ` +
-        `has a "packageManager" field ${SUFFIX}\n`,
+        `has a "packageManager" field ${SUFFIX}\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
   });
 
@@ -84,7 +84,7 @@ describe("§12.5 — a manifest outside any project says so (row 205)", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
       `This project is configured to use yarn because ${join(fixture.root, "package.json")} ` +
-        `has a "devEngines.packageManager" field ${suffixFor("devEngines.packageManager")}\n`,
+        `has a "devEngines.packageManager" field ${suffixFor("devEngines.packageManager")}\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
   });
 
@@ -115,7 +115,7 @@ describe("§12.5 — a manifest outside any project says so (row 205)", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
       `This project is configured to use yarn because ${join(fixture.cwd, "package.json")} ` +
-        `has a "packageManager" field\n`,
+        `has a "packageManager" field\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
     expect(result.stderr).not.toContain("outside any project");
   });

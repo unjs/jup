@@ -67,7 +67,7 @@ describe("§03.1 — JUP_SPEC_FILE overrides the manifest", () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toBe(
       `This project is configured to use pnpm because ${fixture.path("vendor/spec.json")} ` +
-        `has a "packageManager" field\n`,
+        `has a "packageManager" field\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
     );
   });
 
