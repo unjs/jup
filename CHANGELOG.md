@@ -1,6 +1,44 @@
 # Changelog
 
 
+## v0.6.0
+
+[compare changes](https://github.com/unjs/jup/compare/v0.5.6...v0.6.0)
+
+### 🚀 Enhancements
+
+- Infer the pnpm major from pnpm-lock.yaml's lockfileVersion ([9f8c796](https://github.com/unjs/jup/commit/9f8c796))
+- Support devEngines onFail "download" ([bfc7fc8](https://github.com/unjs/jup/commit/bfc7fc8))
+- ⚠️  Make jup.lock creation opt-in behind --lock ([4f098db](https://github.com/unjs/jup/commit/4f098db))
+- Better error message for packageManager check ([#9](https://github.com/unjs/jup/pull/9))
+- Let npm run in foreign-pinned projects with a warning ([f0c1e16](https://github.com/unjs/jup/commit/f0c1e16))
+
+### 🔥 Performance
+
+- Compress the embedded addon with zstd instead of deflate ([ca3987d](https://github.com/unjs/jup/commit/ca3987d))
+
+### 🩹 Fixes
+
+- **test:** Capture the real mkdirSync before patching getBuiltinModule ([32c2558](https://github.com/unjs/jup/commit/32c2558))
+- Replace the shim process with native tools instead of spawning ([4e39ee6](https://github.com/unjs/jup/commit/4e39ee6))
+- Hand the IPC channel to native tools with an execve addon ([502a12a](https://github.com/unjs/jup/commit/502a12a))
+
+### 🏡 Chore
+
+- Update lockfile ([eaf3638](https://github.com/unjs/jup/commit/eaf3638))
+- Refresh the built-in table ([92379ef](https://github.com/unjs/jup/commit/92379ef))
+- Commit the refresh from the refresh script ([7f06a84](https://github.com/unjs/jup/commit/7f06a84))
+- Lint ([ede19c5](https://github.com/unjs/jup/commit/ede19c5))
+
+#### ⚠️ Breaking Changes
+
+- ⚠️  Make jup.lock creation opt-in behind --lock ([4f098db](https://github.com/unjs/jup/commit/4f098db))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Anthony Fu <github@antfu.me>
+
 ## v0.5.6
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5.5...v0.5.6)
