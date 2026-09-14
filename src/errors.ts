@@ -135,18 +135,21 @@ export const messages = {
    * `devEngines.packageManager` is sent to a field that either is not there or
    * is not the one being obeyed — and this message exists to say which manifest
    * and which field to edit.
+   *
+   * `runningAnyway` turns the refusal into the `warnOnMismatch` advisory (§03.5).
    */
   projectConfigured: (
     name: string,
     manifestPath: string,
     outsideProject?: boolean,
     field: string = "packageManager",
+    runningAnyway?: string,
   ) =>
-    `This project is configured to use ${name} because ${manifestPath} has a "${field}" field${
+    `${runningAnyway === undefined ? "" : "⚠ "}This project is configured to use ${name} because ${manifestPath} has a "${field}" field${
       outsideProject === true
         ? ` (this manifest is outside any project — a stray "${field}" field there affects every directory)`
         : ""
-    }\nSet JUP_ENABLE_STRICT=0 to bypass this.`,
+    }${runningAnyway === undefined ? "\nSet JUP_ENABLE_STRICT=0 to bypass this." : `; running ${runningAnyway} anyway`}`,
   /** Users read the `got` value and paste it into their `packageManager` field. Keep the format. */
   mismatchHashes: (expected: string, actual: string) =>
     `Mismatch hashes. Expected ${expected}, got ${actual}`,

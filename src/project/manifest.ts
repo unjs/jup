@@ -15,6 +15,7 @@ import {
   isSupportedPackageManager,
   runsAsRuntime,
   versionFileFor,
+  warnsOnMismatch,
 } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
 import { hashFromIntegrity } from "./lockfile.ts";
@@ -937,14 +938,17 @@ export function reconcile(
         if (transparent || runsAsRuntime(requestedName)) {
           return withBinaryVersion(fallback);
         }
-        throw new UsageError(
-          messages.projectConfigured(
-            spec.name,
-            result.target,
-            isOutsideProject(result.target),
-            result.specField,
-          ),
+        const warns = warnsOnMismatch(requestedName);
+        const message = messages.projectConfigured(
+          spec.name,
+          result.target,
+          isOutsideProject(result.target),
+          result.specField,
+          warns ? requestedName : undefined,
         );
+        if (!warns) throw new UsageError(message);
+        advisory(message);
+        return withBinaryVersion(fallback);
       }
       return withBinaryVersion(spec);
     }

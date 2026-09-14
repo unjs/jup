@@ -74,6 +74,7 @@ for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
 {
   kind?: "package-manager" | "runtime",   // absent means package-manager
   alsoRuntime?: boolean,                  // a package manager that is also a runtime
+  warnOnMismatch?: boolean,               // a foreign project pin warns instead of refusing
   default: string,                        // built-in fallback version
   tags?: Record<string, string>,          // dist-tags the table answers itself
   fetchLatestFrom: RegistrySpec,          // where "newest stable?" is answered
@@ -119,6 +120,19 @@ project that pins bun as its package manager still refuses `pnpm install`, and
 given up is deliberate and is stated in §03.5: `bun install` in a pnpm-pinned
 project installs with bun instead of erroring, because argv is not what decides
 this — the entry is.
+
+### `warnOnMismatch`
+
+`npm` declares it. Its registry commands — `npm trust`, `npm publish`,
+`npm access`, `npm token` — have no counterpart in the other package managers,
+so a yarn- or pnpm-pinned project still has to reach for npm to do them, and
+refusing that is refusing the only tool that can.
+
+It changes the same row as `alsoRuntime`, differently: §03.5's name mismatch is
+reported as an advisory (§12.5) and the request runs on its fallback, instead of
+raising the error. It is one-way for the same reason — a project that pins npm
+still refuses `yarn` and `pnpm`. `npm install` in a pnpm project still warns,
+because jup does not read argv to tell a registry command from an install.
 
 ### `default` and `tags`
 

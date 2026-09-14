@@ -1049,6 +1049,38 @@ describe("reconcile — §03.5", () => {
     }
   });
 
+  // §03.5 — npm's registry commands (`npm trust`, `npm publish`, …) have no
+  // counterpart in the pinned manager, so a mismatch warns and runs npm.
+  it("warns and falls back for an entry that declares warnOnMismatch", () => {
+    const fallback = lazyFallback("npm");
+    expect(
+      reconcile(found("yarn@1.0.0"), fallback, { requestedName: "npm", transparent: false }),
+    ).toBe(fallback);
+    expect(warn).toHaveBeenCalledWith(
+      `⚠ This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field; running npm anyway`,
+    );
+  });
+
+  it("stays silent for npm when the mismatch is already opted out of", () => {
+    const fallback = lazyFallback("npm");
+    expect(
+      reconcile(found("yarn@1.0.0"), fallback, { requestedName: "npm", transparent: true }),
+    ).toBe(fallback);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("still refuses other managers in an npm-pinned project", () => {
+    manifest(".", { packageManager: "npm@11.0.0" });
+    expectUsageError(
+      () =>
+        reconcile(findProjectSpec(root), lazyFallback("yarn"), {
+          requestedName: "yarn",
+          transparent: false,
+        }),
+      `This project is configured to use npm because ${join(root, "package.json")} has a "packageManager" field${STRICT_BYPASS_HINT}`,
+    );
+  });
+
   it("still enforces the pin the other way round, and against every other name", () => {
     // Read off the *requested* name: a project pinning bun is a project that
     // has chosen bun, and §03.5 is what stops a colleague's pnpm running in it.

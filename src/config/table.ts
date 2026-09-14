@@ -173,6 +173,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["npm", "init"], ["npx"]],
     },
+    warnOnMismatch: true,
     // §09.9 — one candidate; see {@link ToolDefinition.storeCommands}.
     storeCommands: [["npm", "config", "get", "cache"]],
     ranges: [
@@ -517,6 +518,11 @@ export function runsAsRuntime(name: string): boolean {
   const definition = getDefinition(name);
   if (definition === undefined) return false;
   return definition.kind === "runtime" || definition.alsoRuntime === true;
+}
+
+/** §03.5 — see {@link ToolDefinition.warnOnMismatch}. */
+export function warnsOnMismatch(name: string): boolean {
+  return getDefinition(name)?.warnOnMismatch === true;
 }
 
 /**

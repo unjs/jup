@@ -128,9 +128,10 @@ the *request* (§04.4).
 
 ```
 This project is configured to use <name> because <absolute path> has a "<field>" field
+Set JUP_ENABLE_STRICT=0 to bypass this.
 ```
 
-with this clause appended when that path resolves to the home directory or above,
+with this clause appended to the first line when that path resolves to the home directory or above,
 making the manifest's unusually broad scope explicit:
 
 ```
@@ -145,6 +146,16 @@ the field to edit, and since the member outranks the top-level field, naming
 absent or not the one being obeyed.
 
 Absolute, native-separator path, stderr, exit 1.
+
+For a requested tool that declares `warnOnMismatch` (`npm`, §03.5), the same
+sentence is an advisory instead — stderr, exit status that of the tool, muted by
+`JUP_QUIET_ADVISORIES=1` — with the second line replaced:
+
+```
+⚠ This project is configured to use <name> because <absolute path> has a "<field>" field; running <requested name> anyway
+```
+
+The outside-project clause is appended before `; running`, exactly as above.
 
 Not raised for a requested tool that runs as a runtime — `node` by kind, `bun`,
 `deno` and `nub` by `alsoRuntime` (§03.5). It is still raised *about* one: a

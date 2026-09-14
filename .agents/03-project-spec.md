@@ -312,7 +312,9 @@ NoSpec    → auto-pin if enabled (§3.6); fallback
 Found     → spec = getSpec({requireVersion: !binaryVersion})
             name mismatch → transparent || requested entry runs as a runtime
                               ? fallback
-                              : UsageError "This project is configured to use …"
+                              : requested entry declares warnOnMismatch
+                                ? advisory "⚠ This project is configured to use …; running <name> anyway"; fallback
+                                : UsageError "This project is configured to use …"
             else spec
 ```
 
@@ -347,6 +349,13 @@ A version file arrives here as a `Found`, resolved during discovery, so the name
 mismatch cannot arise for it (the name comes from the entry that declared the
 file). The `NoSpec` branch, and with it auto-pin, is reached only when the version
 file was absent, unreadable, or not looked for.
+
+`npm` declares `warnOnMismatch` (§2.3): `npm trust` in a pnpm-pinned project
+prints §12.5's advisory and runs npm's fallback version. The advisory is not
+printed for a transparent command, for a global invocation, or under
+`JUP_ENABLE_STRICT=0` — each already chose the fallback — and
+`JUP_QUIET_ADVISORIES=1` mutes it. A project that pins npm still refuses
+`yarn` and `pnpm`.
 
 With `JUP_ENABLE_STRICT=0`, invoking a *different* package manager falls back to
 that tool's global default, while invoking the project's *own* still honours the

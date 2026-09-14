@@ -260,6 +260,22 @@ export interface ToolDefinition {
    * Absent means no — a package manager and nothing else.
    */
   alsoRuntime?: boolean;
+  /**
+   * §03.5, §02.3 — a project pin naming a *different* package manager warns
+   * rather than refuses this entry.
+   *
+   * npm is the registry's own client: `npm trust`, `npm publish`, `npm access`,
+   * `npm token` and the rest have no equivalent in the other managers, so a
+   * yarn- or pnpm-pinned project still reaches for npm to do them. Refusing
+   * those is refusing the only tool that can. The advisory keeps the mismatch
+   * visible, since `npm install` there is still the wrong tool.
+   *
+   * One-way, like {@link alsoRuntime}: a project that pins *this* entry still
+   * refuses every other package manager.
+   *
+   * Absent means no.
+   */
+  warnOnMismatch?: boolean;
   /** Compiled-in fallback version, hash-pinned. */
   default: string;
   /**

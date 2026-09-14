@@ -40,7 +40,8 @@ function yarnProject() {
   return { fixture, options: { cwd: fixture.cwd, home: fixture.home } };
 }
 
-const MISMATCH = "This project is configured to use yarn because";
+/** §03.5 — npm declares `warnOnMismatch`, so a non-global npm run warns and runs. */
+const MISMATCH = "⚠ This project is configured to use yarn because";
 
 afterAll(cleanupFixtures);
 
@@ -58,14 +59,14 @@ describe("§01.4 — a global invocation is transparent (row 197)", () => {
     expect(result.stdout).toBe(`npm@${versionOf(NPM_DEFAULT)} install -g corepack@latest\n`);
   });
 
-  it("197: the control — the same command without the flag still errors", async () => {
+  it("197: the control — the same command without the flag still warns", async () => {
     const { fixture, options } = yarnProject();
 
     const result = await run(["npm", "install", "corepack@latest"], options);
 
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe(
-      `This project is configured to use yarn because ${join(fixture.cwd, "package.json")} has a "packageManager" field\nSet JUP_ENABLE_STRICT=0 to bypass this.\n`,
+      `⚠ This project is configured to use yarn because ${join(fixture.cwd, "package.json")} has a "packageManager" field; running npm anyway\n`,
     );
   });
 
@@ -107,7 +108,7 @@ describe("§01.4 — where the scan stops (row 197)", () => {
    * Each of these carries a `-g` that belongs to whatever the package manager is
    * about to run, not to the package manager. Recognising one would let a
    * project's pin be bypassed by an argument the user never wrote — so every one
-   * of them must still hit §03.5's mismatch.
+   * of them must still hit §03.5's mismatch, which for npm is its advisory.
    */
   it.for([
     [["npm", "run", "build", "--", "-g"]],
@@ -119,9 +120,8 @@ describe("§01.4 — where the scan stops (row 197)", () => {
   ])("197: %s is not global", async ([args]) => {
     const { options } = yarnProject();
     const result = await run(args!, options);
-    expect(result.exitCode).toBe(1);
+    expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain(MISMATCH);
-    expect(result.stdout).toBe("");
   });
 
   it("197: a global invocation of the project's own package manager still honours the pin", async () => {

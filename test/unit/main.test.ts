@@ -477,6 +477,25 @@ describe("runProxy — project enforcement (tests 38, 39)", () => {
     expect(result.stderr).not.toContain("    at ");
   });
 
+  it("warns and runs npm in a project pinned to another package manager", () => {
+    const { cwd, home } = makeProject({ packageManager: `yarn@1.0.0` });
+    installFake(home, "yarn", "1.0.0");
+    installFake(home, "npm", NPM_DEFAULT);
+
+    const result = run(cwd, home, ["npm", "trust", "--help"]);
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`npm@${versionOf(NPM_DEFAULT)} trust --help\n`);
+    expect(result.stderr).toBe(
+      `⚠ This project is configured to use yarn because ${join(cwd, "package.json")} has a "packageManager" field; running npm anyway\n`,
+    );
+
+    // §11.3 — the advisory mutes like every other.
+    const quiet = run(cwd, home, ["npm", "trust", "--help"], { JUP_QUIET_ADVISORIES: "1" });
+    expect(quiet.status).toBe(0);
+    expect(quiet.stderr).toBe("");
+  });
+
   it("lets a transparent command through in a foreign project (test 42)", () => {
     const { cwd, home } = makeProject({ packageManager: `npm@${versionOf(NPM_DEFAULT)}` });
     installFake(home, "npm", NPM_DEFAULT);
@@ -1739,6 +1758,23 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    *
    * What is owed is unchanged, and against the same resident: `config/table.ts`,
    * still 39,314.
+   *
+   * Re-based to 302,000 for §03.5's `warnOnMismatch`: npm in a project pinned to
+   * another package manager warns and runs instead of refusing, because
+   * `npm trust`, `npm publish` and the rest of the registry client have no
+   * counterpart in the manager the project pins. 300,745 -> 301,384, **+639 or
+   * +0.21%**:
+   *
+   * | Change | Module | Bytes |
+   * |---|---|---|
+   * | the flag on npm, and `warnsOnMismatch` beside `runsAsRuntime` | `config/table.ts` | +202 |
+   * | §12.5's message gains its advisory form | `errors.ts` | +234 |
+   * | the advisory branch in `reconcile`, and the import reaching it | `project/manifest.ts` | +203 |
+   *
+   * None of it can move off the warm path, on the same terms as `alsoRuntime`
+   * above: the mismatch is decided on every proxy run that finds a pin. The
+   * argument for the flag is in `types.ts`, outside this sum. `config/table.ts`
+   * is now 39,742.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1750,7 +1786,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(301_000);
+    ).toBeLessThanOrEqual(302_000);
   });
 });
 
