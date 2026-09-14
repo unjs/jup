@@ -39,3 +39,4 @@ tsconfig.tsbuildinfo
 /test/corepack/nocks.db
 
 .pi-subagents
+.scriptc-work/
