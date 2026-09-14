@@ -12,7 +12,7 @@ import {
   satisfiesWithPrereleases,
 } from "../version/semver.ts";
 import { hostTarget, isPerHost } from "../config/table.ts";
-import { managerLockfilePath, readManagerDependency, readManagerDocument } from "./pm-lockfile.ts";
+import { readManagerDependency, readManagerDocument } from "./pm-lockfile.ts";
 import type { Spec, ResolvedSpec } from "../types.ts";
 
 /**
