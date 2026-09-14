@@ -203,13 +203,13 @@ refuses. It exists for the two things `process.execve` cannot do:
 `scripts/build-addon.mjs` builds it with a pinned Zig for §02.4's POSIX hosts —
 Intel macOS aside, as legacy: it keeps the rules without an addon — and
 writes `src/run/addon-binaries.ts`: per host, the SHA-256, the size and the
-raw-deflated bytes, committed so a checkout builds and tests without Zig. The
+zstd-compressed bytes, committed so a checkout builds and tests without Zig. The
 Linux files link no C library — the system calls are made directly — so one per
 architecture serves glibc and musl; the macOS ones bind `execve` and `fcntl`
 from libSystem. Every Node-API symbol resolves against the loading process.
 
 `enable` and `self-install` — and a run with a channel that finds the file missing
-or damaged, which is how an upgrade gets its own — inflate this host's bytes,
+or damaged, which is how an upgrade gets its own — decompress this host's bytes,
 check them against the digest, and rename them into `<home>/addon/execve-<digest16>.node` — the first 16 hex
 digits of the digest (§07.2) —
 best-effort: a home that will not take the file costs the shims their

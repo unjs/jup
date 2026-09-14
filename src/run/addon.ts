@@ -75,7 +75,7 @@ function open(): ExecAddon | null {
  * model forbidding it, or a file answering another ABI. Never throws.
  *
  * `extract` writes the file first when it is missing or damaged — once per
- * process, and only for a caller that needs it: inflating and hashing it is
+ * process, and only for a caller that needs it: decompressing and hashing it is
  * cold-path work a run without a channel has `process.execve` to spare it.
  */
 export function loadAddon(options?: { extract?: boolean }): ExecAddon | undefined {
@@ -105,7 +105,7 @@ function presentAtSize(): boolean {
  * replacement under an IPC channel and nothing else, which is no reason to fail
  * the `enable` that asked. Returns the path when the file is in place.
  *
- * The bytes are inflated and checked against the digest the build recorded
+ * The bytes are decompressed and checked against the digest the build recorded
  * before anything is written, and land by rename, so no reader ever loads half
  * a library. A file already under the name is kept only when it hashes to that
  * digest, so a damaged one is replaced rather than handed to `dlopen` again.
@@ -118,13 +118,13 @@ export function extractAddon(): string | undefined {
   if (binary === undefined || file === undefined) return undefined;
   const folder = join(getHomeFolder(), ADDON_FOLDER_NAME);
   try {
-    // First, so a home that will not take the file costs no inflating or hashing.
+    // First, so a home that will not take the file costs no decompressing or hashing.
     mkdirSync(folder, { recursive: true, mode: 0o755 });
   } catch {
     return undefined;
   }
 
-  const { inflateRawSync } = process.getBuiltinModule("node:zlib");
+  const { zstdDecompressSync } = process.getBuiltinModule("node:zlib");
   const { createHash, randomBytes } = process.getBuiltinModule("node:crypto");
   try {
     if (createHash("sha256").update(readFileSync(file)).digest("hex") === binary.sha256) {
@@ -134,7 +134,7 @@ export function extractAddon(): string | undefined {
     // Not there yet.
   }
 
-  const bytes = inflateRawSync(Buffer.from(binary.deflated, "base64"));
+  const bytes = zstdDecompressSync(Buffer.from(binary.zstd, "base64"));
   if (
     bytes.length !== binary.size ||
     createHash("sha256").update(bytes).digest("hex") !== binary.sha256

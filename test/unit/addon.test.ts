@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inflateRawSync } from "node:zlib";
+import { zstdDecompressSync } from "node:zlib";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { ADDON_BINARIES } from "../../src/run/addon-binaries.ts";
 import { addonPath, encodeExecBlock, extractAddon, loadAddon } from "../../src/run/addon.ts";
@@ -40,9 +40,9 @@ describe("ADDON_BINARIES", () => {
   });
 
   it.each(Object.entries(ADDON_BINARIES))(
-    "inflates %s to the bytes its digest names",
+    "decompresses %s to the bytes its digest names",
     (_, entry) => {
-      const bytes = inflateRawSync(Buffer.from(entry.deflated, "base64"));
+      const bytes = zstdDecompressSync(Buffer.from(entry.zstd, "base64"));
       expect(bytes.length).toBe(entry.size);
       expect(createHash("sha256").update(bytes).digest("hex")).toBe(entry.sha256);
     },
@@ -111,7 +111,7 @@ describe("the Linux addons", () => {
   it.each(["linux-x64", "linux-arm64"])("%s needs nothing but Node-API", (host) => {
     const entry = ADDON_BINARIES[host]!;
     const { segments, needed, undefinedSymbols } = elfNeeds(
-      inflateRawSync(Buffer.from(entry.deflated, "base64")),
+      zstdDecompressSync(Buffer.from(entry.zstd, "base64")),
     );
     expect(segments).not.toContain(3); // PT_INTERP
     expect(needed).toEqual([]);
