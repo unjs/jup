@@ -31,11 +31,15 @@ const HOME = "COREPACK_HOME";
 const NODE_DEFAULT = DEFINITIONS.node!.default;
 
 let previousHome: string | undefined;
+let previousUserHome: string | undefined;
+let previousProfile: string | undefined;
 let previousLatest: string | undefined;
 let previousNetwork: string | undefined;
 
 beforeEach(() => {
   previousHome = process.env[HOME];
+  previousUserHome = process.env.HOME;
+  previousProfile = process.env.USERPROFILE;
   previousLatest = process.env.COREPACK_DEFAULT_TO_LATEST;
   previousNetwork = process.env.COREPACK_ENABLE_NETWORK;
   // "0" keeps the fallback default offline and deterministic — the compiled-in
@@ -47,6 +51,8 @@ beforeEach(() => {
 afterEach(() => {
   for (const [key, value] of [
     [HOME, previousHome],
+    ["HOME", previousUserHome],
+    ["USERPROFILE", previousProfile],
     ["COREPACK_DEFAULT_TO_LATEST", previousLatest],
     ["COREPACK_ENABLE_NETWORK", previousNetwork],
   ] as const) {
@@ -57,10 +63,18 @@ afterEach(() => {
 
 afterAll(cleanupFixtures);
 
-/** Point the store at a fresh fixture and return it. */
+/**
+ * Point the store at a fresh fixture and return it.
+ *
+ * `HOME`/`USERPROFILE` come along (§05.3): these rows run in the worker, not a
+ * spawned child, so without this the developer's own `~/.npmrc` would be an
+ * input to every resolution the way it never is for a `run()` row.
+ */
 function fixture(manifest?: unknown) {
   const created = createFixture(manifest);
   process.env[HOME] = created.home;
+  process.env.HOME = created.home;
+  process.env.USERPROFILE = created.home;
   return created;
 }
 

@@ -16,6 +16,7 @@
  */
 
 const { basename, delimiter, dirname, join } = process.getBuiltinModule("node:path");
+const { realpathSync } = process.getBuiltinModule("node:fs");
 import { SYSTEM_ENV } from "../config/env-vars.ts";
 import { getTableSpec, isRuntime, resolveSpecBin, SUPPORTED_NAMES } from "../config/table.ts";
 import { findProjectSpec, reconcile } from "../project/manifest.ts";
@@ -227,6 +228,82 @@ function inferDialect(): ShellDialect | undefined {
 }
 
 /**
+ * §09.18 — `--use-on-cd`: the registration block that re-runs the line above
+ * every time the directory changes.
+ *
+ * Every dialect's hook body calls the **base** command — `jup env --shell
+ * <dialect>`, the flag deliberately dropped — so what the hook evaluates is one
+ * `PATH` line and nothing else: no registration, no second resolution at
+ * startup, no recursion. Registration itself is idempotent per dialect, so
+ * evaluating `--use-on-cd` output twice registers the hook once.
+ *
+ * The per-dialect mechanics, each the canonical mechanism for that shell:
+ *
+ * * zsh — `add-zsh-hook chpwd`, deleted before it is added, which is the
+ *   idempotency (the same pair fnm's hook uses);
+ * * bash — a `PROMPT_COMMAND` entry, appended only when absent. Scalar
+ *   `PROMPT_COMMAND` semantics: a bash ≥5.1 *array* assignment would need its
+ *   own dedup dance, and converting one silently is worse than the documented
+ *   scalar behaviour;
+ * * fish — `--on-variable PWD`, which the shell fires on every directory
+ *   change; redefining the function is the idempotency;
+ * * powershell — no directory-change hook exists, so the `prompt` function is
+ *   wrapped: it runs once per prompt, gated on the location having moved. The
+ *   original prompt is captured under a sentinel global the first time only,
+ *   which is what keeps a re-evaluation from wrapping the wrapper.
+ */
+function useOnCdBlock(dialect: ShellDialect): string {
+  switch (dialect) {
+    case "zsh": {
+      return [
+        "_jup_env() {",
+        `  eval "$(jup env --shell zsh 2>/dev/null)"`,
+        "}",
+        "autoload -Uz add-zsh-hook",
+        "add-zsh-hook -D chpwd _jup_env",
+        "add-zsh-hook chpwd _jup_env",
+        "",
+      ].join("\n");
+    }
+    case "bash": {
+      return [
+        "_jup_env() {",
+        `  eval "$(jup env --shell bash 2>/dev/null)"`,
+        "}",
+        'case ";${PROMPT_COMMAND:-};" in',
+        '*";_jup_env;"*) ;;',
+        '*) PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}_jup_env" ;;',
+        "esac",
+        "",
+      ].join("\n");
+    }
+    case "fish": {
+      return [
+        "function _jup_env --on-variable PWD",
+        "  jup env --shell fish 2>/dev/null | source",
+        "end",
+        "",
+      ].join("\n");
+    }
+    case "powershell": {
+      return [
+        "if ($null -eq $global:__JUP_ORIG_PROMPT) {",
+        "  $global:__JUP_ORIG_PROMPT = $function:prompt",
+        "}",
+        "function global:prompt {",
+        "  if ($global:__JUP_PWD -ne $PWD.Path) {",
+        "    $global:__JUP_PWD = $PWD.Path",
+        "    jup env --shell powershell 2>$null | Out-String | Invoke-Expression",
+        "  }",
+        "  & $global:__JUP_ORIG_PROMPT",
+        "}",
+        "",
+      ].join("\n");
+    }
+  }
+}
+
+/**
  * §09.18 — print, for `eval`, the one `PATH` assignment that accelerates this
  * directory's runtimes.
  *
@@ -243,26 +320,54 @@ function inferDialect(): ShellDialect | undefined {
  */
 export const ENV_REPORT_VERSION = 1;
 
+/**
+ * §09.18 — is this `PATH` entry one this command (or a previous line of its
+ * output) put there, and therefore one the strip owns?
+ *
+ * {@link isInsideInstallFolder} compares against the **realpath** of the
+ * install folder, and an entry can be spelled the way this command prepends it
+ * — literally, through a symlinked home, which is what `$TMPDIR` on macOS and
+ * an `XDG_CACHE_HOME` behind a link both are. The entry's own realpath settles
+ * the two spellings; a missing entry is simply not ours.
+ */
+function isStorePathEntry(entry: string): boolean {
+  if (isInsideInstallFolder(entry)) return true;
+  try {
+    return isInsideInstallFolder(realpathSync(entry));
+  } catch {
+    return false;
+  }
+}
+
 export async function cmdEnv(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, { booleans: ["--json"], strings: ["--shell"] });
+  const parsed = parseArgs(args, {
+    booleans: ["--json", "--use-on-cd"],
+    strings: ["--shell"],
+  });
   if (parsed.positionals.length > 0) {
     throw new UsageError(`The 'jup env' command takes no arguments`);
   }
 
   const json = hasFlag(parsed, "--json");
+  const useOnCd = hasFlag(parsed, "--use-on-cd");
   const requested = firstValue(parsed, "--shell");
   // The two views are different documents: JSON is for programs, the line is
   // for eval. A script parsing one while asking for the other would be parsing
   // output that never came, which is the same reason `cache clean` refuses
-  // `--json` (§09.7).
+  // `--json` (§09.7). `--use-on-cd` is shell code by definition, so it is
+  // refused the same way.
   if (json && requested !== undefined) {
     throw new UsageError(`The 'jup env' command cannot take --json and --shell together`);
+  }
+  if (json && useOnCd) {
+    throw new UsageError(`The 'jup env' command cannot take --json and --use-on-cd together`);
   }
 
   // Resolved and validated before any resolution work: a mistyped flag should
   // fail fast, not after the network. `undefined` is the JSON view, and it is
   // what keeps the rendering below out of that branch's type.
   let render: ((entries: string[]) => string) | undefined;
+  let hook: string | undefined;
   if (!json) {
     if (requested !== undefined && !Object.hasOwn(SHELL_DIALECTS, requested)) {
       throw new UsageError(
@@ -276,6 +381,7 @@ export async function cmdEnv(args: string[]): Promise<number> {
       );
     }
     render = SHELL_DIALECTS[dialect];
+    if (useOnCd) hook = useOnCdBlock(dialect);
   }
 
   // The failure policy lives in the resolver (§09.18): a shell hook runs this
@@ -296,11 +402,13 @@ export async function cmdEnv(args: string[]): Promise<number> {
 
   const kept = (process.env[SYSTEM_ENV.PATH] ?? "")
     .split(delimiter)
-    .filter((entry) => entry !== "" && !isInsideInstallFolder(entry));
+    .filter((entry) => entry !== "" && !isStorePathEntry(entry));
   const entries = [...binDirs, ...kept];
   // An empty value would export an empty `PATH`, which is not the strip — it
   // is the shell with nothing left to run. Where there is nothing to say, the
-  // command says nothing.
+  // command says nothing; the hook below is still registered, because the
+  // directory the user moves to next is the point of it.
   if (render !== undefined && entries.length > 0) out(`${render(entries)}\n`);
+  if (hook !== undefined) out(hook);
   return 0;
 }

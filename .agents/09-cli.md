@@ -14,7 +14,7 @@ jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
 jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
-jup env [--shell <bash|zsh|fish|powershell>] [--json]
+jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]
 jup info [--json]
 jup info --store-path [<name>]
 jup install [...args]
@@ -599,6 +599,17 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
   `error` field, because a report that cannot say "no answer" is not a report.
   The flag refuses `--shell`: one output, not two that a script would have to
   tell apart.
+* `--use-on-cd` appends the registration block that re-runs the line every
+  directory change, so each project directory gets its own runtime — the
+  issue #11 shape, official. The hook body calls the **base** command with the
+  flag dropped, so what it evaluates is one `PATH` line and nothing else: no
+  registration, no recursion, no second resolution at startup. Registration is
+  idempotent per dialect — `add-zsh-hook -D` before `add` on zsh, an
+  absent-only `PROMPT_COMMAND` append on bash (scalar semantics, documented),
+  function redefinition on fish's `--on-variable PWD`, and a sentinel-guarded
+  `prompt` wrapper on powershell, which has no directory-change hook of its
+  own. A hook costs one jup run per directory change; that is the trade the
+  flag's user has made.
 * `--shell` selects the dialect — `bash`, `zsh` (one POSIX `export` spelling),
   `fish` (a `set -gx` list) and `powershell`. `SHELL`'s basename infers it when
   the flag is absent (§11.5), with anything POSIX-shaped answering `bash`. A

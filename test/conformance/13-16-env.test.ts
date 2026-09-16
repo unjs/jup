@@ -11,10 +11,13 @@
  */
 
 import { delimiter, join } from "node:path";
+import { symlinkSync } from "node:fs";
 import { afterAll, describe, expect, it } from "vitest";
 import { cleanupFixtures, createFixture, run, seedPackageManager } from "./_harness/index.ts";
 
 afterAll(cleanupFixtures);
+
+const POSIX = process.platform !== "win32";
 
 /** A fixture whose `.nvmrc` names a seeded node, plus the seeded bin dir. */
 function pinned(seeded = "24.21.0", pin = seeded) {
@@ -70,6 +73,34 @@ describe("jup env", () => {
     });
 
     expect(result.stdout).toBe(`export PATH='${binDir}:/usr/bin'\n`);
+  });
+
+  // POSIX only: the row's home is reached through a symlink, which Windows
+  // cannot create without a privilege the suite must not assume.
+  describe.skipIf(!POSIX)("behind a symlinked home", () => {
+    it("strips entries spelled through the link", async () => {
+      const fixture = createFixture();
+      // A home behind a link is spelled differently from its realpath, which
+      // is how `$TMPDIR` on macOS and an `XDG_CACHE_HOME` behind a link both
+      // spell it. The strip owns both spellings (§09.18) — or the entry a
+      // previous line added would survive every later one.
+      const linked = join(fixture.root, "linked");
+      symlinkSync(fixture.home, linked);
+      fixture.write(".nvmrc", "24.21.0\n");
+      seedPackageManager(fixture.home, "node", "24.21.0");
+      seedPackageManager(fixture.home, "node", "24.20.0");
+      const binDir = join(linked, "v1", "node", "24.21.0", "bin");
+      const stale = join(linked, "v1", "node", "24.20.0", "bin");
+
+      const result = await run(["env", "--shell", "zsh"], {
+        cwd: fixture.cwd,
+        home: linked,
+        env: { PATH: [stale, "/usr/bin"].join(delimiter) },
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toBe(`export PATH='${binDir}:/usr/bin'\n`);
+    });
   });
 
   it("prints the strip alone for a pin that is not installed", async () => {
@@ -165,7 +196,7 @@ describe("jup env", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe(
       `Usage Error: Unsupported shell "csh"; jup env supports bash, zsh, fish and powershell\n\n` +
-        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json]\n`,
+        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]\n`,
     );
   });
 
@@ -180,7 +211,9 @@ describe("jup env", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("jup env cannot tell which shell to target");
-    expect(result.stdout).toContain("$ jup env [--shell <bash|zsh|fish|powershell>] [--json]");
+    expect(result.stdout).toContain(
+      "$ jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]",
+    );
   });
 
   it("takes no positional arguments", async () => {
@@ -248,7 +281,141 @@ describe("jup env --json", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe(
       `Usage Error: The 'jup env' command cannot take --json and --shell together\n\n` +
-        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json]\n`,
+        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]\n`,
+    );
+  });
+});
+
+describe("jup env --use-on-cd", () => {
+  it("appends the zsh registration after the line", async () => {
+    const { fixture, binDir } = pinned();
+
+    const result = await run(["env", "--shell", "zsh", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "/usr/bin" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      [
+        `export PATH='${binDir}:/usr/bin'`,
+        "_jup_env() {",
+        `  eval "$(jup env --shell zsh 2>/dev/null)"`,
+        "}",
+        "autoload -Uz add-zsh-hook",
+        "add-zsh-hook -D chpwd _jup_env",
+        "add-zsh-hook chpwd _jup_env",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("registers through PROMPT_COMMAND on bash, absent-only", async () => {
+    const { fixture } = pinned();
+
+    const result = await run(["env", "--shell", "bash", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "/usr/bin" },
+    });
+
+    expect(result.stdout).toContain(
+      [
+        "_jup_env() {",
+        `  eval "$(jup env --shell bash 2>/dev/null)"`,
+        "}",
+        'case ";${PROMPT_COMMAND:-};" in',
+        '*";_jup_env;"*) ;;',
+        '*) PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}_jup_env" ;;',
+        "esac",
+      ].join("\n"),
+    );
+  });
+
+  it("hooks fish's PWD variable and powershell's prompt", async () => {
+    const { fixture } = pinned();
+
+    const fish = await run(["env", "--shell", "fish", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "/usr/bin" },
+    });
+    const powershell = await run(["env", "--shell", "powershell", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "/usr/bin" },
+    });
+
+    expect(fish.stdout).toContain(
+      [
+        "function _jup_env --on-variable PWD",
+        "  jup env --shell fish 2>/dev/null | source",
+        "end",
+      ].join("\n"),
+    );
+    expect(powershell.stdout).toContain(
+      [
+        "if ($null -eq $global:__JUP_ORIG_PROMPT) {",
+        "  $global:__JUP_ORIG_PROMPT = $function:prompt",
+        "}",
+        "function global:prompt {",
+        "  if ($global:__JUP_PWD -ne $PWD.Path) {",
+        "    $global:__JUP_PWD = $PWD.Path",
+        "    jup env --shell powershell 2>$null | Out-String | Invoke-Expression",
+        "  }",
+        "  & $global:__JUP_ORIG_PROMPT",
+        "}",
+      ].join("\n"),
+    );
+  });
+
+  it("registers the hook even when there is no line to print", async () => {
+    const fixture = createFixture({
+      devEngines: { runtime: { name: "node", version: "^99.0.0" } },
+    });
+
+    const result = await run(["env", "--shell", "zsh", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "", COREPACK_ENABLE_NETWORK: "0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).not.toContain("export PATH=");
+    expect(result.stdout).toContain("add-zsh-hook chpwd _jup_env");
+  });
+
+  it("evaluates the base command, never itself", async () => {
+    const { fixture } = pinned();
+
+    const result = await run(["env", "--shell", "zsh", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "/usr/bin" },
+    });
+
+    // The hook body must call the flag-free command: a hook that re-evaluated
+    // its own registration would recurse, and one that re-resolved twice would
+    // double the startup cost. The flag never appears in any output byte.
+    expect(result.stdout).toContain(`eval "$(jup env --shell zsh 2>/dev/null)"`);
+    expect(result.stdout).not.toContain("--use-on-cd");
+  });
+
+  it("refuses --json together with --use-on-cd", async () => {
+    const fixture = createFixture();
+
+    const result = await run(["env", "--json", "--use-on-cd"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      `Usage Error: The 'jup env' command cannot take --json and --use-on-cd together\n\n` +
+        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]\n`,
     );
   });
 });
