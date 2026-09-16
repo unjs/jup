@@ -25,17 +25,22 @@ import { findInstalledVersion, isInsideInstallFolder, readInstalledSpec } from "
 import { messages, UsageError } from "../errors-cold.ts";
 import { parse, isValidVersion } from "../version/semver.ts";
 import { out } from "../utils/log.ts";
-import { firstValue, parseArgs } from "./cli.ts";
+import { firstValue, hasFlag, parseArgs } from "./cli.ts";
 import type { LazyResolvedSpec, ResolvedSpec, Spec } from "../types.ts";
 
 /**
  * What `jup env` resolves for one runtime entry: the reference §01.3 would
  * settle on, and where its executables are, when they are already in the store.
+ *
+ * `reference: null` is a failed resolution, carried as a value rather than
+ * thrown because both views of this data degrade rather than die — the shell
+ * line because a hook must not break the prompt (§09.18), the JSON because a
+ * report that cannot say "no answer" is not a report.
  */
 export interface RuntimeEnvironment {
   name: string;
   /** The resolved reference, exactly as a locator carries it (§04.1). */
-  reference: string;
+  reference: string | null;
   /**
    * The directory holding the runtime's own executables, or `null` when the
    * resolved version is not installed — this command installs nothing, and a
@@ -43,25 +48,36 @@ export interface RuntimeEnvironment {
    */
   binDir: string | null;
   installed: boolean;
+  /** Why the resolution failed, in the throwing error's own words. */
+  error?: string;
 }
 
 /**
  * Resolve every runtime the table declares (§02.3 — `node` is the only one
  * today), as a run of that runtime from `cwd` would resolve it.
  *
- * Throws whatever the resolution throws; the caller owns the policy that a
- * failing resolution must never break a shell. Deliberately narrower than the
- * proxy path in the one place it may be: an expired memo does **not** stand in
- * when the registry is unreachable (§04.4's availability fallback). The shim
- * would answer from it, and this command would rather say nothing than guess
- * where the store cannot confirm — a `PATH` that falls back to the shims is
- * slow and correct, which is the failure mode this command already has.
+ * Deliberately narrower than the proxy path in the one place it may be: an
+ * expired memo does **not** stand in when the registry is unreachable (§04.4's
+ * availability fallback). The shim would answer from it, and this command would
+ * rather say nothing than guess where the store cannot confirm — a `PATH` that
+ * falls back to the shims is slow and correct, which is the failure mode this
+ * command already has.
  */
 export async function resolveRuntimeEnvironments(cwd: string): Promise<RuntimeEnvironment[]> {
   const resolved: RuntimeEnvironment[] = [];
   for (const name of SUPPORTED_NAMES) {
     if (!isRuntime(name)) continue;
-    resolved.push(await resolveRuntimeEnvironment(cwd, name));
+    try {
+      resolved.push(await resolveRuntimeEnvironment(cwd, name));
+    } catch (error) {
+      resolved.push({
+        name,
+        reference: null,
+        binDir: null,
+        installed: false,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return resolved;
 }
@@ -220,39 +236,63 @@ function inferDialect(): ShellDialect | undefined {
  * store entries and survive), and the resolved `bin` directories go in front.
  * Evaluating the output twice therefore changes nothing, and a store directory a
  * previous directory-selection put there never outlives the one that replaced it.
+ *
+ * `--json` prints the resolution itself instead — the same answer, for a
+ * program rather than a shell — shape-versioned the way `info`'s report is, so
+ * a field may be added without breaking a reader that ignores it.
  */
+export const ENV_REPORT_VERSION = 1;
+
 export async function cmdEnv(args: string[]): Promise<number> {
-  const parsed = parseArgs(args, { strings: ["--shell"] });
+  const parsed = parseArgs(args, { booleans: ["--json"], strings: ["--shell"] });
   if (parsed.positionals.length > 0) {
     throw new UsageError(`The 'jup env' command takes no arguments`);
   }
 
+  const json = hasFlag(parsed, "--json");
   const requested = firstValue(parsed, "--shell");
-  if (requested !== undefined && !Object.hasOwn(SHELL_DIALECTS, requested)) {
-    throw new UsageError(
-      `Unsupported shell "${requested}"; jup env supports bash, zsh, fish and powershell`,
-    );
-  }
-  const dialect = (requested ?? inferDialect()) as ShellDialect | undefined;
-  if (dialect === undefined) {
-    throw new UsageError(
-      `jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)`,
-    );
+  // The two views are different documents: JSON is for programs, the line is
+  // for eval. A script parsing one while asking for the other would be parsing
+  // output that never came, which is the same reason `cache clean` refuses
+  // `--json` (§09.7).
+  if (json && requested !== undefined) {
+    throw new UsageError(`The 'jup env' command cannot take --json and --shell together`);
   }
 
-  // The resolution failure policy lives here rather than in the resolver: a
-  // shell hook runs this on every directory change, and a hook that breaks the
-  // prompt is worse than a `PATH` without the acceleration. Failure still
-  // prints the strip, so whatever a previous directory put on `PATH` comes off
-  // and the shims — the correctness layer — answer instead.
-  let binDirs: string[] = [];
-  try {
-    binDirs = (await resolveRuntimeEnvironments(process.cwd()))
-      .map((runtime) => runtime.binDir)
-      .filter((binDir): binDir is string => binDir !== null);
-  } catch {
-    // Deliberately swallowed; see above.
+  // Resolved and validated before any resolution work: a mistyped flag should
+  // fail fast, not after the network. `undefined` is the JSON view, and it is
+  // what keeps the rendering below out of that branch's type.
+  let render: ((entries: string[]) => string) | undefined;
+  if (!json) {
+    if (requested !== undefined && !Object.hasOwn(SHELL_DIALECTS, requested)) {
+      throw new UsageError(
+        `Unsupported shell "${requested}"; jup env supports bash, zsh, fish and powershell`,
+      );
+    }
+    const dialect = (requested ?? inferDialect()) as ShellDialect | undefined;
+    if (dialect === undefined) {
+      throw new UsageError(
+        `jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)`,
+      );
+    }
+    render = SHELL_DIALECTS[dialect];
   }
+
+  // The failure policy lives in the resolver (§09.18): a shell hook runs this
+  // on every directory change, and a hook that breaks the prompt is worse than
+  // a `PATH` without the acceleration. Failure still prints the strip, so
+  // whatever a previous directory put on `PATH` comes off and the shims — the
+  // correctness layer — answer instead.
+  const runtimes = await resolveRuntimeEnvironments(process.cwd());
+
+  if (json) {
+    out(`${JSON.stringify({ version: ENV_REPORT_VERSION, runtimes })}\n`);
+    return 0;
+  }
+
+  const binDirs = runtimes
+    .map((runtime) => runtime.binDir)
+    .filter((binDir): binDir is string => binDir !== null);
 
   const kept = (process.env[SYSTEM_ENV.PATH] ?? "")
     .split(delimiter)
@@ -261,6 +301,6 @@ export async function cmdEnv(args: string[]): Promise<number> {
   // An empty value would export an empty `PATH`, which is not the strip — it
   // is the shell with nothing left to run. Where there is nothing to say, the
   // command says nothing.
-  if (entries.length > 0) out(`${SHELL_DIALECTS[dialect]!(entries)}\n`);
+  if (render !== undefined && entries.length > 0) out(`${render(entries)}\n`);
   return 0;
 }

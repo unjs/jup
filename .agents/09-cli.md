@@ -14,7 +14,7 @@ jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
 jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
-jup env [--shell <bash|zsh|fish|powershell>]
+jup env [--shell <bash|zsh|fish|powershell>] [--json]
 jup info [--json]
 jup info --store-path [<name>]
 jup install [...args]
@@ -591,6 +591,14 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
   prompt. The expired memo does **not** stand in the way it does for a run
   (§04.4): wherever this command cannot agree with what the shims would answer,
   the shims stay authoritative and `PATH` falls back to them.
+* `--json` prints the resolution itself instead of the shell line — the same
+  answer, for a program: `{"version":1,"runtimes":[{name, reference, binDir,
+  installed}]}`, shape-versioned the way `info`'s report is (§09.9) so a field
+  may be added without breaking a reader that ignores it. A failed resolution
+  is reported there as `reference: null` with the failure's own sentence in an
+  `error` field, because a report that cannot say "no answer" is not a report.
+  The flag refuses `--shell`: one output, not two that a script would have to
+  tell apart.
 * `--shell` selects the dialect — `bash`, `zsh` (one POSIX `export` spelling),
   `fish` (a `set -gx` list) and `powershell`. `SHELL`'s basename infers it when
   the flag is absent (§11.5), with anything POSIX-shaped answering `bash`. A

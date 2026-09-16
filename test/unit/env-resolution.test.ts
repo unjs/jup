@@ -32,10 +32,12 @@ const NODE_DEFAULT = DEFINITIONS.node!.default;
 
 let previousHome: string | undefined;
 let previousLatest: string | undefined;
+let previousNetwork: string | undefined;
 
 beforeEach(() => {
   previousHome = process.env[HOME];
   previousLatest = process.env.COREPACK_DEFAULT_TO_LATEST;
+  previousNetwork = process.env.COREPACK_ENABLE_NETWORK;
   // "0" keeps the fallback default offline and deterministic — the compiled-in
   // line, never a registry lookup (§04.6). The conformance harness sets the
   // same variable for the same reason.
@@ -46,6 +48,7 @@ afterEach(() => {
   for (const [key, value] of [
     [HOME, previousHome],
     ["COREPACK_DEFAULT_TO_LATEST", previousLatest],
+    ["COREPACK_ENABLE_NETWORK", previousNetwork],
   ] as const) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -113,6 +116,19 @@ describe("resolveRuntimeEnvironments", () => {
 
     await expect(resolveRuntimeEnvironments(created.cwd)).resolves.toEqual([
       { name: "node", reference: NODE_DEFAULT, binDir: null, installed: false },
+    ]);
+  });
+
+  it("reports a failed resolution as a value rather than throwing", async () => {
+    const created = fixture({ devEngines: { runtime: { name: "node", version: "^99.0.0" } } });
+    process.env.COREPACK_ENABLE_NETWORK = "0";
+
+    // §09.18 — both views of this data degrade rather than die, so the failure
+    // is an entry with a null reference, not an exception the caller must
+    // remember to catch. The error's own words are not pinned here; they are
+    // whichever sentence the registry refusal printed.
+    await expect(resolveRuntimeEnvironments(created.cwd)).resolves.toEqual([
+      expect.objectContaining({ name: "node", reference: null, binDir: null, installed: false }),
     ]);
   });
 });

@@ -228,7 +228,7 @@ export function firstValue(parsed: ParsedArgs, ...names: string[]): string | und
   return undefined;
 }
 
-function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
+export function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
   return names.some((name) => parsed.flags.has(name));
 }
 /**

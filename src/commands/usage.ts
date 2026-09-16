@@ -14,7 +14,7 @@ export const USAGE_LINES: Record<string, string> = {
   disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
   enable:
     "$ jup enable [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] ...",
-  env: "$ jup env [--shell <bash|zsh|fish|powershell>]",
+  env: "$ jup env [--shell <bash|zsh|fish|powershell>] [--json]",
   info: "$ jup info [--json] | jup info --store-path [<name>]",
   install: "$ jup install [...args]",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
@@ -173,7 +173,7 @@ export const HELP_TEXT = `Usage: jup <command>
   jup cache list [--json]
   jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
   jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
-  jup env [--shell <bash|zsh|fish|powershell>]
+  jup env [--shell <bash|zsh|fish|powershell>] [--json]
   jup info [--json]
   jup info --store-path [<name>]
   jup install [...args]
@@ -243,7 +243,9 @@ would and installs nothing: a pin that is not in the store leaves the shims
 answering, and a resolution that fails strips what an earlier line added rather
 than guessing. Each line replaces what a previous one put there, so it is safe
 to evaluate again on every directory change. --shell names the dialect; the
-basename of $SHELL infers it when the flag is absent.
+basename of $SHELL infers it when the flag is absent. --json prints the same
+resolution as JSON for programs instead of the shell line, and cannot be
+combined with --shell.
 
 Configuration uses environment variables only. Every artifact download prints a
 notice to stderr naming the URL it is about to fetch, and asks nothing.

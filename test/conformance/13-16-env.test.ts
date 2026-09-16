@@ -165,7 +165,7 @@ describe("jup env", () => {
     expect(result.stderr).toBe("");
     expect(result.stdout).toBe(
       `Usage Error: Unsupported shell "csh"; jup env supports bash, zsh, fish and powershell\n\n` +
-        `$ jup env [--shell <bash|zsh|fish|powershell>]\n`,
+        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json]\n`,
     );
   });
 
@@ -180,7 +180,7 @@ describe("jup env", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("jup env cannot tell which shell to target");
-    expect(result.stdout).toContain("$ jup env [--shell <bash|zsh|fish|powershell>]");
+    expect(result.stdout).toContain("$ jup env [--shell <bash|zsh|fish|powershell>] [--json]");
   });
 
   it("takes no positional arguments", async () => {
@@ -193,5 +193,62 @@ describe("jup env", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain("The 'jup env' command takes no arguments");
+  });
+});
+
+describe("jup env --json", () => {
+  it("prints the resolution as one JSON document", async () => {
+    const { fixture, binDir } = pinned();
+
+    const result = await run(["env", "--json"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { PATH: "/usr/bin", SHELL: undefined },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      `${JSON.stringify({
+        version: 1,
+        runtimes: [{ name: "node", reference: "24.21.0", binDir, installed: true }],
+      })}\n`,
+    );
+  });
+
+  it("reports a failed resolution instead of failing the run", async () => {
+    const fixture = createFixture({
+      devEngines: { runtime: { name: "node", version: "^99.0.0" } },
+    });
+
+    const result = await run(["env", "--json"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+      env: { COREPACK_ENABLE_NETWORK: "0" },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const report = JSON.parse(result.stdout) as {
+      runtimes: Array<{ reference: string | null; error?: string }>;
+    };
+    expect(report.runtimes).toHaveLength(1);
+    expect(report.runtimes[0]!.reference).toBeNull();
+    expect(typeof report.runtimes[0]!.error).toBe("string");
+  });
+
+  it("refuses --json together with --shell", async () => {
+    const fixture = createFixture();
+
+    const result = await run(["env", "--json", "--shell", "zsh"], {
+      cwd: fixture.cwd,
+      home: fixture.home,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(
+      `Usage Error: The 'jup env' command cannot take --json and --shell together\n\n` +
+        `$ jup env [--shell <bash|zsh|fish|powershell>] [--json]\n`,
+    );
   });
 });
