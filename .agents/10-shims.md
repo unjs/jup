@@ -309,11 +309,15 @@ regardless of the default set.
 `enable node` claims `node` on `PATH`, and on many machines something else
 already has it — nvm being the common case. There is no arbitration and none is
 needed: whichever shim directory comes first on `PATH` wins, and nvm re-prepends
-its own on every shell start and `nvm use`. This is why a runtime is never in the
-default set: the collision exists only for someone who typed `jup enable node`,
+its own on every shell start and `nvm use`. This is why a runtime is never in
+the default set: the collision exists only for someone who typed `jup enable node`,
 which is a deliberate act with a predictable outcome. The matching rule is that
-jup *reads* `.nvmrc` and leaves everything else alone — no shell hooks, no
-profile writes, and it never removes or shadows another tool's directory.
+jup *reads* `.nvmrc` and leaves everything else alone — no profile writes, and
+it never removes or shadows another tool's directory. `jup env` (§09.18) is the
+one, explicit exception and not a softening of the rule: nothing is hooked and
+no file is written until the user evaluates the command's output themselves,
+and the deliberate act §10.7 describes is exactly what that evaluation asks
+for.
 
 ## 10.8 Read-only installations
 

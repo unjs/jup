@@ -15,14 +15,17 @@
  * the direction of the shims staying authoritative.
  */
 
-const { dirname, join } = process.getBuiltinModule("node:path");
+const { basename, delimiter, dirname, join } = process.getBuiltinModule("node:path");
+import { SYSTEM_ENV } from "../config/env-vars.ts";
 import { getTableSpec, isRuntime, resolveSpecBin, SUPPORTED_NAMES } from "../config/table.ts";
 import { findProjectSpec, reconcile } from "../project/manifest.ts";
 import { getFallbackLocator, resolveSpec } from "../version/resolve.ts";
 import { readKnownResolution, usesLockfile } from "../project/lockfile.ts";
-import { findInstalledVersion, readInstalledSpec } from "../cache/store.ts";
+import { findInstalledVersion, isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
 import { messages, UsageError } from "../errors-cold.ts";
 import { parse, isValidVersion } from "../version/semver.ts";
+import { out } from "../utils/log.ts";
+import { firstValue, parseArgs } from "./cli.ts";
 import type { LazyResolvedSpec, ResolvedSpec, Spec } from "../types.ts";
 
 /**
@@ -151,4 +154,113 @@ function exactPin(descriptor: Spec): ResolvedSpec | null {
   if (!isValidVersion(descriptor.range)) return null;
   const cached = findInstalledVersion(descriptor.name, descriptor.range);
   return { name: descriptor.name, reference: cached ?? descriptor.range };
+}
+
+/**
+ * §09.18 — the dialects `--shell` names. `bash` and `zsh` share the POSIX
+ * `export` spelling, so the dialect a user names and the bytes it produces are
+ * free to differ; what the dialect decides is quoting and list shape only.
+ *
+ * `csh` and `cmd` are not here on purpose: `cmd` has no eval, and a session
+ * `set` is not an integration — the error names the four that are.
+ *
+ * A `PATH` value's list separator belongs to the platform, not to the shell:
+ * PowerShell on macOS and Linux uses `:`, the same as `sh`. Every dialect
+ * therefore joins with `path.delimiter`, which is this host's separator.
+ */
+type ShellDialect = "bash" | "zsh" | "fish" | "powershell";
+
+const SHELL_DIALECTS: Record<ShellDialect, (entries: string[]) => string> = {
+  bash: posixExport,
+  zsh: posixExport,
+  fish: (entries) => `set -gx PATH ${entries.map(shQuote).join(" ")}`,
+  powershell: (entries) => `$env:PATH = ${psQuote(entries.join(delimiter))}`,
+};
+
+function posixExport(entries: string[]): string {
+  return `export PATH=${shQuote(entries.join(delimiter))}`;
+}
+
+/** Single-quote a string for sh-family shells; no expansion, no splitting. */
+function shQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+/** Single-quote a string for PowerShell, where the escape is a doubled quote. */
+function psQuote(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`;
+}
+
+/**
+ * §11.5 — `SHELL`'s basename, when the flag is absent. Anything POSIX-shaped
+ * (`sh`, `dash`, `ksh`, a login `-zsh`) answers `bash`, the dialect whose
+ * spelling it runs; only a shell nobody can eval for — none — is an error.
+ */
+function inferDialect(): ShellDialect | undefined {
+  const shell = process.env[SYSTEM_ENV.SHELL];
+  if (shell === undefined || shell === "") return undefined;
+
+  const name = basename(shell)
+    .replace(/^[-]+/, "")
+    .replace(/\.exe$/i, "")
+    .toLowerCase();
+  if (name === "fish") return "fish";
+  if (name === "pwsh" || name === "powershell") return "powershell";
+  if (name === "zsh") return "zsh";
+  return "bash";
+}
+
+/**
+ * §09.18 — print, for `eval`, the one `PATH` assignment that accelerates this
+ * directory's runtimes.
+ *
+ * The value is computed here rather than by shell code, so the strip-and-prepend
+ * rule has one implementation: every `PATH` entry inside the install folder is
+ * dropped (§10.2's boundary — the shims jup itself installed elsewhere are not
+ * store entries and survive), and the resolved `bin` directories go in front.
+ * Evaluating the output twice therefore changes nothing, and a store directory a
+ * previous directory-selection put there never outlives the one that replaced it.
+ */
+export async function cmdEnv(args: string[]): Promise<number> {
+  const parsed = parseArgs(args, { strings: ["--shell"] });
+  if (parsed.positionals.length > 0) {
+    throw new UsageError(`The 'jup env' command takes no arguments`);
+  }
+
+  const requested = firstValue(parsed, "--shell");
+  if (requested !== undefined && !Object.hasOwn(SHELL_DIALECTS, requested)) {
+    throw new UsageError(
+      `Unsupported shell "${requested}"; jup env supports bash, zsh, fish and powershell`,
+    );
+  }
+  const dialect = (requested ?? inferDialect()) as ShellDialect | undefined;
+  if (dialect === undefined) {
+    throw new UsageError(
+      `jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)`,
+    );
+  }
+
+  // The resolution failure policy lives here rather than in the resolver: a
+  // shell hook runs this on every directory change, and a hook that breaks the
+  // prompt is worse than a `PATH` without the acceleration. Failure still
+  // prints the strip, so whatever a previous directory put on `PATH` comes off
+  // and the shims — the correctness layer — answer instead.
+  let binDirs: string[] = [];
+  try {
+    binDirs = (await resolveRuntimeEnvironments(process.cwd()))
+      .map((runtime) => runtime.binDir)
+      .filter((binDir): binDir is string => binDir !== null);
+  } catch {
+    // Deliberately swallowed; see above.
+  }
+
+  const kept = (process.env[SYSTEM_ENV.PATH] ?? "")
+    .split(delimiter)
+    .filter((entry) => entry !== "" && !isInsideInstallFolder(entry));
+  const entries = [...binDirs, ...kept];
+  // An empty value would export an empty `PATH`, which is not the strip — it
+  // is the shell with nothing left to run. Where there is nothing to say, the
+  // command says nothing.
+  if (entries.length > 0) out(`${SHELL_DIALECTS[dialect]!(entries)}\n`);
+  return 0;
 }

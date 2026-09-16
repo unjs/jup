@@ -86,9 +86,9 @@ finds it too.
 | `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase forms | Proxy configuration (§05.1); lowercase is consulted first |
 | `XDG_CACHE_HOME`, `LOCALAPPDATA`, `HOME`/`USERPROFILE` | Store location chain (§07.1) |
 | `XDG_BIN_HOME`, `ProgramData` | Shim directory candidates (§10.5) |
-| `PATH`, `PATHEXT` | Shim directory choice, executable lookup |
+| `PATH`, `PATHEXT` | Shim directory choice, executable lookup, and `env`'s `PATH` rewrite (§09.18) |
 | `npm_config_prefix`, `PREFIX` | Locating the global `.npmrc` (§05.3) |
-| `SHELL`, `PSModulePath` | Shell detection for `enable`'s `PATH` hint |
+| `SHELL`, `PSModulePath` | Shell detection for `enable`'s `PATH` hint, and `env`'s `--shell` inference (§09.18) |
 | `DEBUG` | Containing `jup` (or `corepack`) enables diagnostic logging to stderr |
 | `NO_COLOR`, `FORCE_COLOR`, `TERM` | Colour decisions (§09.14). `FORCE_COLOR` wins over both `NO_COLOR` and agent detection |
 | The agent variables | An AI coding agent announces itself; jup's own output is not coloured (§09.14). The list is vendored from `unjs/std-env`'s agent table and includes three agents detected by value rather than by a variable of their own |

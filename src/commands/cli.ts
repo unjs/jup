@@ -167,8 +167,11 @@ interface ParsedArgs {
  * A deliberately tiny parser: `--flag`, `--flag value`, `--flag=value`, `-o
  * value`, `-o=value`, and `--` to end option parsing. Anything unrecognised is a
  * usage error rather than a silently-ignored typo.
+ *
+ * Exported for `env.ts`, which owns its own flag set the same way the `cache`
+ * subcommands do — one parser, so a typo reports the same sentence everywhere.
  */
-function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
+export function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
   const booleans = new Set(spec.booleans ?? []);
   const strings = new Set(spec.strings ?? []);
 
@@ -217,7 +220,7 @@ function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
   return { flags, values, positionals };
 }
 
-function firstValue(parsed: ParsedArgs, ...names: string[]): string | undefined {
+export function firstValue(parsed: ParsedArgs, ...names: string[]): string | undefined {
   for (const name of names) {
     const value = parsed.values.get(name);
     if (value !== undefined) return value;
@@ -1431,6 +1434,11 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
     }
     case "disable": {
       return import("./shims.ts").then(({ cmdDisable }) => cmdDisable(rest));
+    }
+    // §09.18 — lazily, like `enable`/`disable`: the shell rendering and the
+    // resolution behind it are this command's alone, and nothing else pays.
+    case "env": {
+      return import("./env.ts").then(({ cmdEnv }) => cmdEnv(rest));
     }
     // §09.15, §09.16 — runs, not mutations: they write nothing and forward
     // everything after the command word to the package manager. Under the

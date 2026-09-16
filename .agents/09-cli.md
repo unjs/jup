@@ -14,6 +14,7 @@ jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
 jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
+jup env [--shell <bash|zsh|fish|powershell>]
 jup info [--json]
 jup info --store-path [<name>]
 jup install [...args]
@@ -561,3 +562,49 @@ project error. The word is a script name, not a command jup has usage for.
 `jup <script>` never shadows §01.2's proxy mode: `parseArgs` classifies argv[0]
 first, so a word the table knows as a binary — or any word with an `@` in it —
 is a tool invocation and never reaches this switch.
+
+## 9.18 `env`
+
+Shell integration for the runtimes (§02.3), and the feature §10.7's "no shell
+hooks" was written before: this command is the explicit opt-in that puts a
+runtime's own `bin` directory on `PATH` ahead of the shims, so a warm `node`
+costs what a native install costs instead of a trampoline.
+
+It resolves what a run of each runtime from `cwd` would use — §01.3's own
+order, steps 3–6, composed from the same primitives the proxy composes them
+from — and prints, for `eval`, **one complete `PATH` assignment**:
+
+* The value is computed in jup, not by generated shell code, from the `PATH`
+  the invocation inherited: every entry inside the install folder (§10.2's
+  boundary) is dropped, and the resolved `bin` directories go in front. One
+  implementation of the rule, and the output is idempotent however often it is
+  evaluated — a store directory a previous directory-selection put on `PATH`
+  never outlives the one that replaced it.
+* Nothing is installed and no project file is written. The one derived-state
+  write that can happen is §04.6's default refresh inside the shared resolver,
+  which is the same write any run makes. A pin whose version is not in the
+  store prints the strip alone: the shims download on demand, and a `PATH`
+  entry jup cannot confirm against the store would be a guess.
+* A resolution that fails — an unresolvable range, the network down — is
+  **not an error**: the same strip-only line prints and the command exits 0,
+  so a shell hook can run it on every directory change without breaking the
+  prompt. The expired memo does **not** stand in the way it does for a run
+  (§04.4): wherever this command cannot agree with what the shims would answer,
+  the shims stay authoritative and `PATH` falls back to them.
+* `--shell` selects the dialect — `bash`, `zsh` (one POSIX `export` spelling),
+  `fish` (a `set -gx` list) and `powershell`. `SHELL`'s basename infers it when
+  the flag is absent (§11.5), with anything POSIX-shaped answering `bash`. A
+  name outside the four, or no `SHELL` and no flag, is a `UsageError` naming
+  them. Every dialect joins the entries with the host's `PATH` separator:
+  PowerShell on macOS and Linux uses `:`, exactly as `sh` does, so the
+  separator comes from the platform rather than from the shell's name. `csh`
+  and `cmd` are refused on purpose: `cmd` has no eval, and a session `set` is
+  not an integration.
+* An empty result — nothing to prepend and nothing to strip — prints nothing
+  at all, because `export PATH=''` would be the shell with nothing left to run
+  rather than the strip.
+
+The agreement the whole feature rests on is test-asserted: the `node` this
+command puts on `PATH` is the `node` the shim hands over. A custom-URL runtime
+pin (§04.1 step 1) is the one reference left unaccelerated — the store has no
+marker keyed by the URL, and the shims own fetching what a URL names.
