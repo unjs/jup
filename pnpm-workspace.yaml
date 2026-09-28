@@ -1,7 +1,0 @@
-# https://pnpm.io/settings
-
-allowBuilds: { '@parcel/watcher': false }
-blockExoticSubdeps: true
-dedupePeers: true
-ignoreWorkspaceRootCheck: true
-trustPolicy: no-downgrade
