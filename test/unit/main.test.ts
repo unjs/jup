@@ -487,7 +487,7 @@ describe("runProxy — project enforcement (tests 38, 39)", () => {
     expect(result.status).toBe(0);
     expect(result.stdout).toBe(`npm@${versionOf(NPM_DEFAULT)} trust --help\n`);
     expect(result.stderr).toBe(
-      `⚠ This project is configured to use yarn because ${join(cwd, "package.json")} has a "packageManager" field; running npm anyway\n`,
+      `⚠ This project is configured to use yarn because ${join(cwd, "package.json")} has a "packageManager" field\n`,
     );
 
     // §11.3 — the advisory mutes like every other.

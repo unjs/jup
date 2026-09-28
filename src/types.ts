@@ -270,6 +270,11 @@ export interface ToolDefinition {
    * those is refusing the only tool that can. The advisory keeps the mismatch
    * visible, since `npm install` there is still the wrong tool.
    *
+   * aube and upm declare it for a different reason: they install from the
+   * other managers' lockfiles, so running them in a pnpm- or yarn-pinned
+   * project is a supported way to use them rather than the wrong tool. nub
+   * reads those lockfiles too, but {@link alsoRuntime} already lets it through.
+   *
    * One-way, like {@link alsoRuntime}: a project that pins *this* entry still
    * refuses every other package manager.
    *

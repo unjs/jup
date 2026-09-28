@@ -123,15 +123,18 @@ this — the entry is.
 
 ### `warnOnMismatch`
 
-`npm` declares it. Its registry commands — `npm trust`, `npm publish`,
-`npm access`, `npm token` — have no counterpart in the other package managers,
-so a yarn- or pnpm-pinned project still has to reach for npm to do them, and
-refusing that is refusing the only tool that can.
+`npm`, `aube` and `upm` declare it. npm's registry commands — `npm trust`,
+`npm publish`, `npm access`, `npm token` — have no counterpart in the other
+package managers, so a yarn- or pnpm-pinned project still has to reach for npm
+to do them, and refusing that is refusing the only tool that can. aube and upm
+install from the other managers' lockfiles, so running them in a project pinned
+to one of those managers is a supported use, not a mistake. nub reads those
+lockfiles too, but `alsoRuntime` already lets it through silently.
 
 It changes the same row as `alsoRuntime`, differently: §03.5's name mismatch is
 reported as an advisory (§12.5) and the request runs on its fallback, instead of
-raising the error. It is one-way for the same reason — a project that pins npm
-still refuses `yarn` and `pnpm`. `npm install` in a pnpm project still warns,
+raising the error. It is one-way for the same reason — a project that pins npm,
+aube or upm still refuses `yarn` and `pnpm`. `npm install` in a pnpm project still warns,
 because jup does not read argv to tell a registry command from an install.
 
 ### `default` and `tags`

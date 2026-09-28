@@ -406,6 +406,9 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["aube", "init"], ["aube", "create"], ["aube", "dlx"], ["aubx"]],
     },
+    // §03.5 — aube installs from another manager's lockfile, so a foreign pin
+    // warns rather than refuses; see {@link ToolDefinition.warnOnMismatch}.
+    warnOnMismatch: true,
     // The musl boundary at `1.0.0-beta.12` is unexpressible: §02.3
     // matches bands with `satisfiesWithPrereleases`, which strips the prerelease
     // from both sides, so `>=1.0.0-beta.12` and `>=1.0.0` are the same range and
@@ -452,6 +455,8 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     transparent: {
       commands: [["upm", "init"], ["upm", "create"], ["upx"]],
     },
+    // §03.5 — as aube above: upm reads the other managers' lockfiles.
+    warnOnMismatch: true,
     ranges: [
       [
         "*",

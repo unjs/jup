@@ -147,15 +147,15 @@ absent or not the one being obeyed.
 
 Absolute, native-separator path, stderr, exit 1.
 
-For a requested tool that declares `warnOnMismatch` (`npm`, §03.5), the same
+For a requested tool that declares `warnOnMismatch` (`npm`, `aube`, `upm`, §03.5), the same
 sentence is an advisory instead — stderr, exit status that of the tool, muted by
-`JUP_QUIET_ADVISORIES=1` — with the second line replaced:
+`JUP_QUIET_ADVISORIES=1` — prefixed with `⚠ ` and without the second line:
 
 ```
-⚠ This project is configured to use <name> because <absolute path> has a "<field>" field; running <requested name> anyway
+⚠ This project is configured to use <name> because <absolute path> has a "<field>" field
 ```
 
-The outside-project clause is appended before `; running`, exactly as above.
+The outside-project clause is appended exactly as above.
 
 Not raised for a requested tool that runs as a runtime — `node` by kind, `bun`,
 `deno` and `nub` by `alsoRuntime` (§03.5). It is still raised *about* one: a

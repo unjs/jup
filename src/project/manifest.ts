@@ -944,7 +944,7 @@ export function reconcile(
           result.target,
           isOutsideProject(result.target),
           result.specField,
-          warns ? requestedName : undefined,
+          warns,
         );
         if (!warns) throw new UsageError(message);
         advisory(message);

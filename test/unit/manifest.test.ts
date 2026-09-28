@@ -1050,16 +1050,20 @@ describe("reconcile — §03.5", () => {
   });
 
   // §03.5 — npm's registry commands (`npm trust`, `npm publish`, …) have no
-  // counterpart in the pinned manager, so a mismatch warns and runs npm.
-  it("warns and falls back for an entry that declares warnOnMismatch", () => {
-    const fallback = lazyFallback("npm");
-    expect(
-      reconcile(found("yarn@1.0.0"), fallback, { requestedName: "npm", transparent: false }),
-    ).toBe(fallback);
-    expect(warn).toHaveBeenCalledWith(
-      `⚠ This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field; running npm anyway`,
-    );
-  });
+  // counterpart in the pinned manager, and aube and upm install from its
+  // lockfile, so a mismatch warns and runs the requested entry.
+  it.for(["npm", "aube", "upm"])(
+    "warns and falls back for %s, which declares warnOnMismatch",
+    (requestedName) => {
+      const fallback = lazyFallback(requestedName);
+      expect(reconcile(found("yarn@1.0.0"), fallback, { requestedName, transparent: false })).toBe(
+        fallback,
+      );
+      expect(warn).toHaveBeenCalledWith(
+        `⚠ This project is configured to use yarn because ${join(root, "package.json")} has a "packageManager" field`,
+      );
+    },
+  );
 
   it("stays silent for npm when the mismatch is already opted out of", () => {
     const fallback = lazyFallback("npm");
