@@ -1,6 +1,38 @@
 # Changelog
 
 
+## v0.6.2
+
+[compare changes](https://github.com/unjs/jup/compare/v0.6.1...v0.6.2)
+
+### 🚀 Enhancements
+
+- Relax package manager mismatch for aube and upm ([5bb1ae6](https://github.com/unjs/jup/commit/5bb1ae6))
+
+### 🩹 Fixes
+
+- Respect devEngines onFail for package manager mismatch ([0a69e19](https://github.com/unjs/jup/commit/0a69e19))
+- Keep IPC disconnect guard after relay teardown ([a0c558d](https://github.com/unjs/jup/commit/a0c558d))
+
+### 🏡 Chore
+
+- Use upm ([71e91d7](https://github.com/unjs/jup/commit/71e91d7))
+- Update pkg scripts ([b11477f](https://github.com/unjs/jup/commit/b11477f))
+- Bump default versions ([db52054](https://github.com/unjs/jup/commit/db52054))
+- Allow using npm/upm for publish ([77985da](https://github.com/unjs/jup/commit/77985da))
+
+### ✅ Tests
+
+- Scrub npm_config_prefix and PREFIX from the suite environment ([2e6b0a4](https://github.com/unjs/jup/commit/2e6b0a4))
+
+### 🤖 CI
+
+- Use upm ([efa7718](https://github.com/unjs/jup/commit/efa7718))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.1
 
 [compare changes](https://github.com/unjs/jup/compare/v0.6.0...v0.6.1)
