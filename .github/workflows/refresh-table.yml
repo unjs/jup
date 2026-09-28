@@ -1,11 +1,11 @@
 # §16, Built-in table and trust keys — the calendar reminder this repository
 # does not want to rely on a human keeping.
 #
-# `pnpm refresh --commit` (`scripts/refresh-table.mjs`) is the whole refresh: it
+# `upm refresh --commit` (`scripts/refresh-table.mjs`) is the whole refresh: it
 # verifies and rewrites every `default`, drops expired trust keys, stamps the
 # sanctioned copies of those values (the two bootstrap installers, the unit
 # suite's `default` literals) and commits exactly what it wrote. This job runs it
-# weekly, proves the result passes `pnpm test`, and opens a PR — so what CI does
+# weekly, proves the result passes `upm test`, and opens a PR — so what CI does
 # and what a maintainer does locally are the same command.
 #
 # **It must not auto-merge**, and nothing here does: a bad `default` bricks every
@@ -44,7 +44,7 @@ jobs:
           # every stamped copy, then commits exactly those paths with the same
           # list of moved values it printed here.
           # `--silent`, so the log this PR quotes is the script's output alone.
-          pnpm --silent run refresh --commit | tee refresh.log
+          upm --silent run refresh --commit | tee refresh.log
 
           if [ "$before" = "$(git rev-parse HEAD)" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
@@ -57,7 +57,7 @@ jobs:
       # stamped, and every conformance fixture that tracks a default is resolved
       # from the table it rewrote.
       - if: steps.refresh.outputs.changed == 'true'
-        run: pnpm test
+        run: upm test
 
       - name: Open the review PR
         if: steps.refresh.outputs.changed == 'true'
@@ -73,7 +73,7 @@ jobs:
           fi
 
           {
-            echo 'Ran `pnpm refresh --commit` (§16, Built-in table and trust keys).'
+            echo 'Ran `upm refresh --commit` (§16, Built-in table and trust keys).'
             echo
             echo '```'
             cat refresh.log
