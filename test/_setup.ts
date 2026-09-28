@@ -39,7 +39,7 @@
 import { lstatSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
-import { isToolEnvName } from "../src/config/env-vars.ts";
+import { SYSTEM_ENV, isToolEnvName } from "../src/config/env-vars.ts";
 
 /**
  * Read before the scrub below takes it away: where this machine's own `enable`
@@ -50,6 +50,14 @@ const ambientShimDirectory = process.env.JUP_SHIM_DIRECTORY ?? process.env.COREP
 for (const key of Object.keys(process.env)) {
   if (isToolEnvName(key)) delete process.env[key];
 }
+
+/**
+ * §05.3's global `.npmrc` is located by `npm_config_prefix`, then `PREFIX` — and
+ * `npm run test` exports the former into the suite as the machine's own npm
+ * prefix, which outranks the `PREFIX` a fixture sets. Neither is the fixture's.
+ */
+delete process.env[SYSTEM_ENV.NPM_CONFIG_PREFIX];
+delete process.env[SYSTEM_ENV.PREFIX];
 
 /**
  * A directory holding `jup` itself is a jup installation, whether or not
