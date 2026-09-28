@@ -61,7 +61,8 @@
   "devEngines": {
     "packageManager": {
       "name": "upm",
-      "version": "^1"
+      "version": "^1",
+      "onFail": "ignore"
     }
   },
   "engines": {
