@@ -439,6 +439,32 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ranges: [["*", { ...NUB_BAND, targets: NUB_TARGETS }]],
   },
 
+  // §02.5 — a JavaScript package manager, the shape npm, pnpm < 12 and yarn
+  // have: one signed tarball for every host, so `default` is sha512-pinned and
+  // `upm` joins a bare `jup enable` as they do. `upm init` and `upm create`
+  // hand off to npm's and scaffold a project; `upx` is `upm exec`, which
+  // installs into a throwaway project when the current one lacks the package —
+  // `npx`'s reason. upm has no store-path command, so none is declared.
+  upm: {
+    default:
+      "1.1.0+sha512.a28b34def60ca858c886146454d1274073f35eb1102d637822a5eab5379250950cf596585dcb122ca88825ef96939b969ee4eff9f88de33b8010a002bd063839",
+    fetchLatestFrom: { type: "npm", package: "upm" },
+    transparent: {
+      commands: [["upm", "init"], ["upm", "create"], ["upx"]],
+    },
+    ranges: [
+      [
+        "*",
+        {
+          url: "https://registry.npmjs.org/upm/-/upm-{}.tgz",
+          bin: { upm: "./dist/upm.mjs", upx: "./dist/upx.mjs" },
+          registry: { type: "npm", package: "upm" },
+          commands: { use: ["upm", "install"], run: ["upm", "run"] },
+        },
+      ],
+    ],
+  },
+
   // §02.3 — the first entry that is not a package manager. `kind` is the only
   // field that says so, and the four things it decides all live in §03 and §10.
   node: {

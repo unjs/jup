@@ -11,7 +11,7 @@
 
 **jup** (can be pronounced “yup” too!) manages versions of package managers and runtimes.
 It is fast, small, and has no dependencies. It supports npm, pnpm, Yarn, aube,
-Bun, Deno, nub, and Node.js.
+upm, Bun, Deno, nub, and Node.js.
 
 Each project can choose a version. jup downloads and checks that version, saves
 it on your computer, and runs it. After the exact version is installed, jup can

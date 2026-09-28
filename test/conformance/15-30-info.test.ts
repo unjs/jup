@@ -486,6 +486,9 @@ describe("§09.9 corepack info", () => {
       // decides is that `nub` names something outside a project (§10.7).
       "nub",
       "nubx",
+      // upm is a JS package manager, so a bare `enable` claims it as it does npm.
+      "upm",
+      "upx",
       // §02.3 — a runtime is never in the default set (§10.7 requires it), so
       // `node` joins the reported-but-not-installed group with bun and deno.
       "node",

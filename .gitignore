@@ -33,6 +33,8 @@ tsconfig.tsbuildinfo
 /src/aubx.mjs
 /src/nub.mjs
 /src/nubx.mjs
+/src/upm.mjs
+/src/upx.mjs
 /src/node.mjs
 
 # Local recording for the ported Corepack suite (NOCK_ENV=record).

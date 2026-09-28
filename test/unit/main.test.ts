@@ -1775,6 +1775,13 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * above: the mismatch is decided on every proxy run that finds a pin. The
    * argument for the flag is in `types.ts`, outside this sum. `config/table.ts`
    * is now 39,742.
+   *
+   * Re-based to 303,000 for §02.5's `upm`, a JavaScript package manager and so
+   * npm's shape: one band, no `targets`, no `artifactRegistry`, a sha512-pinned
+   * `default`. 301,363 -> 302,473, **+1,110 or +0.37%**, all of it
+   * `config/table.ts` — the entry and the comment above it, and nothing a
+   * warm run executes beyond reading one more key. Measured, `dist/index.mjs`
+   * 209,974 -> 210,442, **+468 or +0.22%**. `config/table.ts` is now 40,852.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1786,7 +1793,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(302_000);
+    ).toBeLessThanOrEqual(303_000);
   });
 });
 

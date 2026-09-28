@@ -22,7 +22,8 @@ Running `yarn` under jup must be indistinguishable from running an installed
 
 Every table entry is a **tool**, and its `kind` says which sort:
 
-* a **package manager** (`npm`, `pnpm`, `yarn`, `bun`, `deno`, `aube`, `nub`) is
+* a **package manager** (`npm`, `pnpm`, `yarn`, `bun`, `deno`, `aube`, `nub`,
+  `upm`) is
   what a project declares in `devEngines.packageManager` — or in `packageManager`,
   which is still read and still written when it is there (§03.3, §03.7) — and is
   what §03.5 enforces when you stand in someone else's project;

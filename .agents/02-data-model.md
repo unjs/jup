@@ -305,6 +305,7 @@ jup answers to, and the set of shims `enable` creates (§10).
 | deno | pm | `deno` | yes | yes | no |
 | aube | pm | `aube`, `aubr`, `aubx` | yes | yes | yes |
 | nub | pm | `nub`, `nubx` | yes | yes | no |
+| upm | pm | `upm`, `upx` | no | no | yes |
 | node | runtime | `node` | yes | yes | no |
 
 Entry-specific rules that are *rules*, not values:

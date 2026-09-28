@@ -149,7 +149,7 @@ describe("§03.1 version files", () => {
       // §02.3 — one entry in the table, no code. If a second tool ever declares
       // one, this is the only line that has to change.
       expect(versionFileFor("node")).toEqual({ path: ".nvmrc", format: "nvm" });
-      for (const name of ["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub"]) {
+      for (const name of ["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "upm"]) {
         expect(versionFileFor(name)).toBeUndefined();
       }
       expect(versionFileFor("nonesuch")).toBeUndefined();

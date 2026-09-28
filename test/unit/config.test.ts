@@ -40,7 +40,7 @@ function getSpecUrl(locator: ResolvedSpec): string {
 }
 
 describe("registry table — shape (§02.5)", () => {
-  it("supports exactly npm, pnpm, yarn, bun, deno, aube, nub and node", () => {
+  it("supports exactly npm, pnpm, yarn, bun, deno, aube, nub, upm and node", () => {
     expect([...SUPPORTED_NAMES]).toEqual([
       "npm",
       "pnpm",
@@ -49,6 +49,7 @@ describe("registry table — shape (§02.5)", () => {
       "deno",
       "aube",
       "nub",
+      "upm",
       // §02.3 — the first entry that is not a package manager. It is in
       // `SUPPORTED_NAMES` like any other: the table is a table of *tools*, and
       // `kind` is read in §03 and §10 only.
@@ -96,7 +97,7 @@ describe("registry table — shape (§02.5)", () => {
       }
     }
     // The loop must actually have run over the whole table.
-    expect(seen).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "node"]);
+    expect(seen).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "upm", "node"]);
   });
 
   /**
@@ -1098,6 +1099,57 @@ describe("nub — §03.1's fourth per-host entry", () => {
     ]);
     expect(DEFINITIONS.nub!.transparent.commands).not.toContainEqual(["nub", "run"]);
     expect(DEFINITIONS.nub!.transparent.default).toBeUndefined();
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §02.5 — upm                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * upm is a JavaScript package manager, so it takes npm's shape rather than the
+ * per-host one: one signed tarball for every host, a sha512-pinned `default`,
+ * and a place in the default shim set because `upm` and `upx` name nothing
+ * outside a project.
+ */
+describe("upm — a JavaScript package manager", () => {
+  it("installs one tarball for every host", () => {
+    const spec = getSpecFor("upm", "1.1.0");
+    expect(spec.registry).toEqual({ type: "npm", package: "upm" });
+    expect(spec.artifactRegistry).toBeUndefined();
+    expect(spec.exec).toBeUndefined();
+    expect(DEFINITIONS.upm!.fetchLatestFrom).toEqual({ type: "npm", package: "upm" });
+    expect(spec.commands).toEqual({ use: ["upm", "install"], run: ["upm", "run"] });
+    expect(isPerHost({ name: "upm", reference: "1.1.0" })).toBe(false);
+    expect(getSpecUrl({ name: "upm", reference: "1.1.0" })).toBe(
+      "https://registry.npmjs.org/upm/-/upm-1.1.0.tgz",
+    );
+    expect(DEFINITIONS.upm!.ranges.map(([range]) => range)).toEqual(["*"]);
+  });
+
+  it("names `upm` and `upx` as the package's own `bin` does", () => {
+    expect(resolveSpecBin(getSpecFor("upm", "1.1.0"))).toEqual({
+      upm: "./dist/upm.mjs",
+      upx: "./dist/upx.mjs",
+    });
+    expect(getBinariesFor("upm")).toEqual(["upm", "upx"]);
+    for (const name of ["upm", "upx"]) expect(getPackageManagerFor(name)).toBe("upm");
+  });
+
+  it("joins the default shim set, and exempts only project-independent commands (§03.5)", () => {
+    expect(shimsByDefault("upm")).toBe(true);
+    // `upm init` and `upm create` scaffold a project; `upx` is `upm exec`, which
+    // installs into a throwaway project when the current one lacks the package
+    // — `npx`'s reason. `upm run` and `upm install` act on the project and stay
+    // enforced.
+    expect(DEFINITIONS.upm!.transparent.commands).toEqual([
+      ["upm", "init"],
+      ["upm", "create"],
+      ["upx"],
+    ]);
+    expect(DEFINITIONS.upm!.transparent.commands).not.toContainEqual(["upm", "run"]);
+    expect(DEFINITIONS.upm!.transparent.default).toBeUndefined();
+    expect(storeCommandsFor("upm")).toEqual([]);
   });
 });
 

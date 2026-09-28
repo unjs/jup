@@ -13,6 +13,7 @@
     "package-manager",
     "pnpm",
     "runtime",
+    "upm",
     "version-manager",
     "yarn"
   ],
