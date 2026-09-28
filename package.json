@@ -40,10 +40,10 @@
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
-    "prepack": "pnpm build",
+    "prepack": "upm build",
     "refresh": "node scripts/refresh-table.mjs",
-    "release": "pnpm test && pnpm build && changelogen --release && pnpm publish && git push --follow-tags",
-    "test": "pnpm lint && pnpm typecheck && vitest run --coverage",
+    "release": "upm test && upm build && changelogen --release && upm publish && git push --follow-tags",
+    "test": "upm lint && upm typecheck && vitest run --coverage",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test:corepack": "JUP_COREPACK_COMPAT=1 vitest run --config test/corepack/vitest.config.ts"
   },
