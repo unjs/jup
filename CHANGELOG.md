@@ -1,6 +1,18 @@
 # Changelog
 
 
+## v0.6.1
+
+[compare changes](https://github.com/unjs/jup/compare/v0.6.0...v0.6.1)
+
+### 🚀 Enhancements
+
+- Support upm ([77a9ce8](https://github.com/unjs/jup/commit/77a9ce8))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.0
 
 [compare changes](https://github.com/unjs/jup/compare/v0.5.6...v0.6.0)
