@@ -176,6 +176,10 @@ function forwardIpcChannel(child: ChildProcess): () => void {
    * (`Bun.spawn`'s default `serialization: "advanced"`, told JSON) closes it
    * immediately. Swallow that one code, and leave every other `error` the
    * unhandled event it was.
+   *
+   * Once attached it stays, through {@link detach}: the caller's EOF can land
+   * after the tool has exited and the relay is torn down, and that late EOF is
+   * the one this exists for.
    */
   const onError = (error: NodeJS.ErrnoException): void => {
     if (error.code !== "ERR_IPC_DISCONNECTED") throw error;
@@ -189,7 +193,6 @@ function forwardIpcChannel(child: ChildProcess): () => void {
   const detach = (): void => {
     process.off("message", fromParent);
     process.off("disconnect", onParentDisconnect);
-    process.off("error", onError);
     child.off("message", fromChild);
     child.off("disconnect", onChildDisconnect);
   };
