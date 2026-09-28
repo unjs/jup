@@ -938,7 +938,10 @@ export function reconcile(
         if (transparent || runsAsRuntime(requestedName)) {
           return withBinaryVersion(fallback);
         }
-        const warns = warnsOnMismatch(requestedName);
+        // §03.3 — the pinning member's `onFail` decides; without one, the table.
+        const onFail = result.devEngines?.name === spec.name ? result.devEngines.onFail : undefined;
+        if (onFail === "ignore") return withBinaryVersion(fallback);
+        const warns = onFail === undefined ? warnsOnMismatch(requestedName) : onFail !== "error";
         const message = messages.projectConfigured(
           spec.name,
           result.target,

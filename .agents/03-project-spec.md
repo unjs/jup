@@ -312,6 +312,10 @@ NoSpec    → auto-pin if enabled (§3.6); fallback
 Found     → spec = getSpec({requireVersion: !binaryVersion})
             name mismatch → transparent || requested entry runs as a runtime
                               ? fallback
+                              : pinning devEngines member has onFail
+                                ? per onFail: ignore → fallback;
+                                  error → UsageError;
+                                  warn, download, other → advisory; fallback
                               : requested entry declares warnOnMismatch
                                 ? advisory "⚠ This project is configured to use …"; fallback
                                 : UsageError "This project is configured to use …"
@@ -358,6 +362,13 @@ printed for a transparent command, for a global invocation, or under
 they install from the other managers' lockfiles: `aube install` in a
 pnpm-pinned project warns and runs. A project that pins any of the three still
 refuses `yarn` and `pnpm`.
+
+When the pin's name comes with a `devEngines.packageManager` member naming the
+same manager, that member's `onFail` decides the mismatch instead of the table,
+in both directions: `"ignore"` runs the requested entry's fallback silently,
+`"error"` refuses even `npm`, and `"warn"` (or `"download"`, which cannot
+remediate a different manager, or any unrecognised string) prints the advisory
+and runs it. A member that names another manager lends no `onFail`.
 
 With `JUP_ENABLE_STRICT=0`, invoking a *different* package manager falls back to
 that tool's global default, while invoking the project's *own* still honours the

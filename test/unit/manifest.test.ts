@@ -1073,6 +1073,67 @@ describe("reconcile — §03.5", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
+  // §03.3 — the pinning member's `onFail` governs the mismatch against it.
+  describe("with a devEngines.packageManager onFail", () => {
+    const pinned = (onFail: unknown) => {
+      manifest(".", { devEngines: { packageManager: { name: "yarn", version: "1.0.0", onFail } } });
+      return findProjectSpec(root);
+    };
+    const advisoryText = () =>
+      `⚠ This project is configured to use yarn because ${join(root, "package.json")} has a "devEngines.packageManager" field`;
+
+    it.for(["npm", "pnpm"])("runs %s silently under ignore", (requestedName) => {
+      const fallback = lazyFallback(requestedName);
+      expect(reconcile(pinned("ignore"), fallback, { requestedName, transparent: false })).toBe(
+        fallback,
+      );
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it.for(["warn", "download", "nonsense"])("warns and runs pnpm under %s", (onFail) => {
+      const fallback = lazyFallback("pnpm");
+      expect(
+        reconcile(pinned(onFail), fallback, { requestedName: "pnpm", transparent: false }),
+      ).toBe(fallback);
+      expect(warn).toHaveBeenCalledWith(advisoryText());
+    });
+
+    it("refuses npm under error", () => {
+      expectUsageError(
+        () =>
+          reconcile(pinned("error"), lazyFallback("npm"), {
+            requestedName: "npm",
+            transparent: false,
+          }),
+        `${advisoryText().slice(2)}${STRICT_BYPASS_HINT}`,
+      );
+    });
+
+    it("keeps the table's answer when onFail is absent", () => {
+      expectUsageError(
+        () =>
+          reconcile(pinned(undefined), lazyFallback("pnpm"), {
+            requestedName: "pnpm",
+            transparent: false,
+          }),
+        `${advisoryText().slice(2)}${STRICT_BYPASS_HINT}`,
+      );
+    });
+
+    it("does not borrow onFail from a member naming another manager", () => {
+      manifest(".", {
+        packageManager: "yarn@1.0.0",
+        devEngines: { packageManager: { name: "pnpm", onFail: "ignore" } },
+      });
+      expect(() =>
+        reconcile(findProjectSpec(root), lazyFallback("pnpm"), {
+          requestedName: "pnpm",
+          transparent: false,
+        }),
+      ).toThrow();
+    });
+  });
+
   it("still refuses other managers in an npm-pinned project", () => {
     manifest(".", { packageManager: "npm@11.0.0" });
     expectUsageError(
