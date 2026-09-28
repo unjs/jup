@@ -168,7 +168,7 @@ const PNPM_EXE_TARGETS = {
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default:
-      "12.0.2+sha512.b885e890b9418fa1693544d05f53e64f9a73ec194837d4258b15fecdd692347b1dd2a517b1b0cbaf9d31cd8e92c3b70956bd2ecc72833a57b4b3098f5bfa7943",
+      "12.1.0+sha512.17286eeb6a4dc7bd180acff9f9d1262504c556648ac2fa39080d2abc19060d1a686f8d8c27a1b6450dad77178a3389d89c8643aa4600c4482ab687a39fd406b5",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
       commands: [["npm", "init"], ["npx"]],
@@ -190,7 +190,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.4.0",
+    default: "12.6.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -257,7 +257,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // major but remain separate fields. The SHA-1 digest covers the signed npm
     // tarball and is refreshed by `scripts/refresh-table.mjs`.
     default:
-      "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e",
+      "4.18.1+sha512.107f80e13c40b41597284d03190c56f41a3d72b5c72c9ef799fc634d026ebfc5e89cd5964e97a2f014392637331c9354f4644e4f27303059fc88ebd12195d470",
     // §04.6 — the package `default` above is refreshed from, and the one the
     // band that covers it downloads. Corepack asks the legacy `yarn` package,
     // whose `latest` is Classic's 1.22.x: self-consistent for its Classic
@@ -265,7 +265,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     fetchLatestFrom: { type: "npm", package: "@yarnpkg/cli-dist" },
     transparent: {
       default:
-        "4.18.0+sha512.595f47fbf3bc04f1253bb18aceb2a2a53b4236df3f80109425a34010ec3853fc76935eda663b1e633965e10869644e3122c12fa3c6cae8abe386c5ee1eb7253e",
+        "4.18.1+sha512.107f80e13c40b41597284d03190c56f41a3d72b5c72c9ef799fc634d026ebfc5e89cd5964e97a2f014392637331c9354f4644e4f27303059fc88ebd12195d470",
       commands: [
         ["yarn", "init"],
         ["yarn", "dlx"],
@@ -395,7 +395,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.2.4",
+    default: "2.5.1",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
@@ -424,7 +424,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // file. Being a package manager is not what earns a place in the default shim
   // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
-    default: "0.9.0",
+    default: "0.9.5",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
     // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
     // reached under its own name as `nubx` — fetches into a throwaway
@@ -450,7 +450,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // `npx`'s reason. upm has no store-path command, so none is declared.
   upm: {
     default:
-      "1.1.0+sha512.a28b34def60ca858c886146454d1274073f35eb1102d637822a5eab5379250950cf596585dcb122ca88825ef96939b969ee4eff9f88de33b8010a002bd063839",
+      "1.2.0+sha512.3cdb4e7cd2da4176fd4b2771928f84fe1468e1eb804f22823d9cd540997b8667f4d2c7f570c27669a8f5fb3c0db8f3329348a32b30d1ca265ab15a1c27d21a05",
     fetchLatestFrom: { type: "npm", package: "upm" },
     transparent: {
       commands: [["upm", "init"], ["upm", "create"], ["upx"]],

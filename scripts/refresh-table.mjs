@@ -5,8 +5,9 @@
  * The table goes stale in four ways, and only two of them can be automated:
  * package managers publish new versions, npm rotates its signing keys, bin paths
  * move between majors, and Node moves LTS to a new major. This script does the
- * first two — for every entry, node included — and prints a notice for the last
- * two, because a new `ranges` entry and a new LTS line both need human review.
+ * first two — for every entry, node included — and *detects* the last two from
+ * registry metadata ({@link reviews}), printing a `warning:` line for each,
+ * because a new `ranges` entry and a new LTS line both need human review.
  *
  * It also writes every sanctioned copy of a table value that lives outside
  * `src/config/`: the two bootstrap installers ({@link stampInstallers}) and the
@@ -38,7 +39,9 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { getSpecFor, hasRangeBand, isPerHostSpec } from "../src/config/table.ts";
 import { compareDigest, parseSri, verifySignature } from "../src/verify/integrity.ts";
+import { binDrift, nodeLtsDue, publishedBins } from "./refresh-review.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const SRC = join(ROOT, "src", "config");
@@ -68,6 +71,30 @@ if (check && commit) {
 
 /** Every rewrite this run wants to make, for the summary and for `--check`. */
 const changes = [];
+
+/**
+ * Every question this run found for a human: a bin that moved under a band, a
+ * version no band declares, a Node major that is probably LTS by now. Printed as
+ * `warning:` lines, which the workflow turns into a draft PR. Never written into
+ * the table — each is a decision §16 keeps for review.
+ */
+const reviews = [];
+
+/** A release's version without its `+sha…` pin. */
+function bare(reference) {
+  return reference.split("+")[0];
+}
+
+/**
+ * §16 — the band the table would use for `version`, or `undefined` with a review
+ * recorded when no declared band covers it (§07.7's fallback band keeps the
+ * registry but not the `bin`, so a default there is a default nobody vetted).
+ */
+function bandFor(tool, version) {
+  if (hasRangeBand(tool, version)) return getSpecFor(tool, version);
+  reviews.push(`${tool}@${version}: no declared \`ranges\` band covers this version`);
+  return undefined;
+}
 
 async function getJson(url) {
   const response = await fetch(url, { headers: { accept: "application/json" } });
@@ -110,12 +137,22 @@ function digest(bytes, algo) {
  * place §06.1 has no second opinion about: a machine with no
  * `lastKnownGood.json` has nothing but this literal to check its first download
  * against.
+ *
+ * The same metadata carries the release's `bin`, which is checked against the
+ * band that will run it: a JS tool's bin moving under a band is the silent
+ * breakage §16 says needs a new `ranges` entry.
  */
-async function npmDefault(packageName) {
+async function npmDefault(tool, packageName = tool) {
   const metadata = await getJson(`${NPM_REGISTRY}/${packageName}/latest`);
   const { version, dist } = metadata;
   if (dist?.integrity === undefined) {
     throw new Error(`${packageName}@${version} publishes no dist.integrity`);
+  }
+
+  const band = bandFor(tool, version);
+  const published = publishedBins(packageName, metadata.bin);
+  if (band !== undefined && published !== undefined) {
+    reviews.push(...binDrift(`${tool}@${version}`, band.bin, published, ""));
   }
 
   verifySignature({
@@ -150,12 +187,24 @@ async function npmDefault(packageName) {
  * table does not carry. The signature over each host's `dist.integrity` is
  * checked because it is free — it comes in the packument — and because it is
  * what the tool will check at install time (§06.3).
+ *
+ * The bin check is metadata-only for the same reason. A host artifact that
+ * publishes `bin` (aube, node) is compared with the band directly; one that does
+ * not (bun, deno, nub, pnpm) is compared by `dist.fileCount` against the release
+ * the table names today, on the same band — a layout change almost always moves
+ * the count, and a moved count is worth a look before it ships.
  */
-async function nativeDefault(launcher, artifactFor, pinnedVersion) {
+async function nativeDefault(tool, launcher, artifactFor, pinnedVersion) {
   const version = pinnedVersion ?? (await getJson(`${NPM_REGISTRY}/${launcher}/latest`)).version;
+  const band = bandFor(tool, version);
+  const previous = bare(readDefault(table, tool));
+  // Only a release on the *same* band is a fair baseline: across a boundary the
+  // layout is expected to differ, and the band's own `bin` is what says how.
+  const comparable =
+    band !== undefined && previous !== version && getSpecFor(tool, previous) === band;
 
   await Promise.all(
-    Object.values(artifactFor).map(async (packageName) => {
+    Object.entries(artifactFor).map(async ([host, packageName]) => {
       const metadata = await getJson(`${NPM_REGISTRY}/${packageName}/${version}`);
       const dist = metadata?.dist;
       if (dist?.integrity === undefined) {
@@ -168,6 +217,26 @@ async function nativeDefault(launcher, artifactFor, pinnedVersion) {
         version,
         registryOrigin: NPM_REGISTRY,
       });
+
+      if (band === undefined) return;
+      const label = `${tool}@${version} (${host})`;
+      const published = publishedBins(packageName, metadata.bin);
+      if (published !== undefined) {
+        const exe = host.startsWith("win32") ? ".exe" : "";
+        reviews.push(...binDrift(label, band.bin, published, exe));
+      } else if (comparable && dist.fileCount !== undefined) {
+        // A host added since `previous` has no baseline, which is not a finding.
+        const before = await getJson(`${NPM_REGISTRY}/${packageName}/${previous}`).catch(
+          () => undefined,
+        );
+        const count = before?.dist?.fileCount;
+        if (count !== undefined && count !== dist.fileCount) {
+          reviews.push(
+            `${label}: ships ${dist.fileCount} files where ${previous} shipped ${count} — ` +
+              "check the band's `bin` still matches the artifact",
+          );
+        }
+      }
     }),
   );
 
@@ -177,11 +246,10 @@ async function nativeDefault(launcher, artifactFor, pinnedVersion) {
 /**
  * The newest stable `<line>.x.y` a packument holds.
  *
- * Two entries pick a `default` from a **line** rather than from `latest`, for
- * unrelated reasons — pnpm because upstream's tag lags the line jup ships
- * ({@link PNPM_LINE}), node because npm's tags cannot name an LTS at all
- * ({@link NODE_LTS_LINE}) — and both want the same answer from the same data:
- * the highest release on that major, prereleases excluded.
+ * node is the one entry that picks its `default` from a **line** rather than
+ * from `latest`, because npm's tags cannot name an LTS at all
+ * ({@link NODE_LTS_LINE}): the answer is the highest release on that major,
+ * prereleases excluded.
  */
 function newestOnLine(packument, line, name) {
   const stable = new RegExp(`^${line}\\.(\\d+)\\.(\\d+)$`);
@@ -196,22 +264,13 @@ function newestOnLine(packument, line, name) {
 }
 
 /**
- * §02.5 — the major line jup ships as pnpm's compiled-in `default`.
- *
- * pnpm is the only entry whose `default` is not simply the `latest` dist-tag.
- * Upstream still points `latest` at the 11 line while publishing 12 under
- * `next-12`, and jup ships the 12 line deliberately, so the version is resolved
- * from the published set rather than from a tag that would drag it back. Move
- * this number to adopt a later line; delete the special case and fall back to
- * `npmDefault("pnpm")` once `latest` catches up and the line is JS again —
- * which it will not be, since 12 is where pnpm went native.
- */
-const PNPM_LINE = 12;
-
-/**
  * §02.5 — pnpm's `default`, pinned the way its **band** requires.
  *
- * This is the one tool that crosses §02.4's JS/native line at a major boundary,
+ * The version is upstream's `latest`, like every entry but node. (It used to be
+ * the newest 12.x from the packument, while `latest` still named 11; tracking a
+ * line also meant shipping `next-12` releases pnpm had not yet promoted.)
+ *
+ * pnpm is the one tool that crosses §02.4's JS/native line at a major boundary,
  * and the pin style has to cross with it. Below 12 the bytes are the `pnpm` npm
  * tarball and the default is hash-pinned like npm's and yarn's; from 12 the
  * bytes are `@pnpm/exe.<host>` and there is no single digest to write, so the
@@ -223,17 +282,13 @@ const PNPM_LINE = 12;
  * per-host artifact would be **refused**, on every machine with no
  * `lastKnownGood.json` of its own. That is precisely why `referenceWithHash`
  * refuses to attach a per-host digest at runtime (§07.6); this is the same rule
- * applied to the compiled-in literal.
+ * applied to the compiled-in literal, so the band `latest` lands on decides.
  */
 async function pnpmDefault() {
-  const packument = await getJson(`${NPM_REGISTRY}/pnpm`);
-  const version = newestOnLine(packument, PNPM_LINE, "pnpm");
-
-  // The band decides the pin, not the caller. Reading it from the table would
-  // make the check circular (see {@link NATIVE_TARGETS}), so the boundary is
-  // named here and asserted against the table by `pnpm test`.
-  return PNPM_LINE >= 12
-    ? await nativeDefault("pnpm", NATIVE_TARGETS.pnpm, version)
+  const { version } = await getJson(`${NPM_REGISTRY}/pnpm/latest`);
+  const band = getSpecFor("pnpm", version);
+  return isPerHostSpec(band)
+    ? await nativeDefault("pnpm", "pnpm", NATIVE_TARGETS.pnpm, version)
     : await npmDefault("pnpm");
 }
 
@@ -269,7 +324,10 @@ const NODE_LTS_LINE = 24;
 async function nodeDefault() {
   const packument = await getJson(`${NPM_REGISTRY}/node`);
   const version = newestOnLine(packument, NODE_LTS_LINE, "node");
-  return await nativeDefault("node", NATIVE_TARGETS.node, version);
+  // The line is a human's to move; whether it is probably time to is not.
+  const due = nodeLtsDue(packument.time ?? {}, NODE_LTS_LINE, Date.now());
+  if (due !== undefined) reviews.push(due);
+  return await nativeDefault("node", "node", NATIVE_TARGETS.node, version);
 }
 
 /**
@@ -305,7 +363,7 @@ const NATIVE_TARGETS = {
   // package that has never existed.
   // §02.5 — pnpm is the one entry that *crosses* into a per-host band at a major
   // boundary rather than having been born on one side of it, so its targets are
-  // consulted only when the tracked line is native. `@pnpm/exe.<host>` names the
+  // consulted only when `latest` lands on the native band. `@pnpm/exe.<host>` names the
   // host directly, so this map is the table's identity map with the scope added.
   pnpm: {
     "darwin-arm64": "@pnpm/exe.darwin-arm64",
@@ -634,11 +692,11 @@ const [npm, pnpm, yarn, bun, deno, aube, nub, upm, node] = await Promise.all([
   // no signature and no digest, so the pin written here rested on TLS alone, and
   // §16, Built-in table and trust keys' "do not auto-merge" existed largely
   // for that one line.
-  npmDefault("@yarnpkg/cli-dist"),
-  nativeDefault("bun", NATIVE_TARGETS.bun),
-  nativeDefault("deno", NATIVE_TARGETS.deno),
-  nativeDefault("@endevco/aube", NATIVE_TARGETS.aube),
-  nativeDefault("@nubjs/nub", NATIVE_TARGETS.nub),
+  npmDefault("yarn", "@yarnpkg/cli-dist"),
+  nativeDefault("bun", "bun", NATIVE_TARGETS.bun),
+  nativeDefault("deno", "deno", NATIVE_TARGETS.deno),
+  nativeDefault("aube", "@endevco/aube", NATIVE_TARGETS.aube),
+  nativeDefault("nub", "@nubjs/nub", NATIVE_TARGETS.nub),
   npmDefault("upm"),
   nodeDefault(),
 ]);
@@ -679,6 +737,7 @@ const configTest = stampReviewGates(table);
 console.log(
   `review: node tracks the ${NODE_LTS_LINE} line (now ${node}) — confirm against Node's LTS schedule (§02.3).`,
 );
+for (const review of reviews) console.log(`warning: ${review}`);
 
 if (changes.length === 0) {
   console.log("The embedded table and trust store are current.");
@@ -714,6 +773,9 @@ for (const [path, content] of Object.entries(written)) writeFileSync(path, conte
 console.log("\nRewritten: table, trust store, installers and the unit suite's `default` literals.");
 if (commit) console.log(`Committed ${commitRefresh(Object.keys(written))}.`);
 console.log(
-  "A bin-path change still needs a new `ranges` entry, and a new LTS line still needs\n" +
-    "`NODE_LTS_LINE` moved by hand — both are human review (§16, Built-in table and trust keys).",
+  reviews.length > 0
+    ? `${reviews.length} warning(s) above need a human decision before this merges — a new \`ranges\`\n` +
+        "entry or a new `NODE_LTS_LINE` is written by hand (§16, Built-in table and trust keys)."
+    : "No review warnings. A new `ranges` entry and a new `NODE_LTS_LINE` are still\n" +
+        "written by hand — both are human review (§16, Built-in table and trust keys).",
 );

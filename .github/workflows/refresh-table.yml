@@ -11,7 +11,9 @@
 # **It must not auto-merge**, and nothing here does: a bad `default` bricks every
 # machine that has no recorded default of its own. Two things in the diff always
 # need eyes — a bin path that moved needs a new `ranges` entry, and the line the
-# run reports for node needs confirming against Node's LTS schedule (§02.3).
+# run reports for node needs confirming against Node's LTS schedule (§02.3). The
+# script detects both from registry metadata and prints a `warning:` line for
+# each; any such line opens (or turns) the PR as a draft.
 name: refresh-table
 on:
   schedule:
@@ -67,12 +69,15 @@ jobs:
           branch=chore/refresh-table
           git push --force origin "$branch"
 
-          open=$(gh pr list --head "$branch" --state open --json number --jq '.[].number')
-          if [ -n "$open" ]; then
-            exit 0
-          fi
+          warnings=$(grep '^warning: ' refresh.log || true)
 
           {
+            if [ -n "$warnings" ]; then
+              echo '> [!WARNING]'
+              echo '> The refresh found something only a human can decide. This PR stays a'
+              echo '> draft until each `warning:` line below is resolved or dismissed.'
+              echo
+            fi
             echo 'Ran `upm refresh --commit` (§16, Built-in table and trust keys).'
             echo
             echo '```'
@@ -80,10 +85,21 @@ jobs:
             echo '```'
             echo
             echo '**Do not auto-merge.** Confirm the line node tracks against its LTS schedule'
-            echo '(§02.3), and check whether anything here moved a bin path — that needs a new'
-            echo '`ranges` entry, which this script cannot write.'
+            echo '(§02.3). A bin path the script could not check from metadata alone can still'
+            echo 'have moved — that needs a new `ranges` entry, which this script cannot write.'
           } > pr-body.md
 
-          gh pr create --head "$branch" \
+          # A run that lands on an open PR refreshes its body with this run's log,
+          # and a new warning turns it back into a draft.
+          open=$(gh pr list --head "$branch" --state open --json number --jq '.[].number')
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --body-file pr-body.md
+            if [ -n "$warnings" ]; then gh pr ready "$open" --undo; fi
+            exit 0
+          fi
+
+          draft=()
+          if [ -n "$warnings" ]; then draft=(--draft); fi
+          gh pr create --head "$branch" "${draft[@]}" \
             --title "chore: refresh the built-in table" \
             --body-file pr-body.md

@@ -169,6 +169,19 @@ and each is sanctioned because nothing hand-maintains it:
   passes against any drift — so a refresh that did not stamp them would fail the
   suite meant to review it.
 
+The script also *detects*, but never writes, the two changes that stay human
+review. From metadata it already fetches it compares each new `default`'s `bin`
+with the band that will run it — the launcher's `bin` for a JS tool, each host
+artifact's `bin` where one is published — and flags a version no declared band
+covers. Host artifacts that publish no `bin` are compared by `dist.fileCount`
+against the release the table names today, on the same band. For node it asks
+whether the next even major is probably LTS yet, from its `.0.0` release age in
+npm's `time` field. Each finding prints as a `warning:` line, and the workflow
+opens or turns the PR as a draft when there is one. The pure judgement lives in
+`scripts/refresh-review.ts` and is covered by `test/unit/refresh-review.test.ts`.
+
+Every entry's version comes from its `latest` dist-tag except node's.
+
 Node is refreshed like every other entry, with one number held back: the script
 tracks the newest release on `NODE_LTS_LINE` and writes both `default` and
 `tags.lts` from it, but which major is in LTS is a human's to move, for the reason
