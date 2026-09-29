@@ -180,6 +180,13 @@ export interface VersionCandidates {
    * matching nothing is not a reason to fail the run.
    */
   undatedSource?: string;
+  /**
+   * The dated versions the gate removed from {@link versions} for being too
+   * young, so a range they alone satisfy can say so instead of reporting that
+   * nothing matches. Undated versions are not listed: nobody can say how old
+   * they are.
+   */
+  heldBack?: string[];
 }
 
 /**
@@ -199,9 +206,24 @@ export function undatedSourceError(url: string): UsageError {
   );
 }
 
+function gateSetting(): string {
+  return `${envEntry(ENV.MINIMUM_RELEASE_AGE)?.name ?? ENV.MINIMUM_RELEASE_AGE}=${readEnv(ENV.MINIMUM_RELEASE_AGE)}`;
+}
+
 function noEligibleReleaseError(packageName: string): UsageError {
+  return new UsageError(`No release of ${packageName} is old enough for ${gateSetting()}`);
+}
+
+/**
+ * §04.1 step 6 — the range matched only releases the gate held back.
+ *
+ * Without this the run ends in §12.4's "Failed to successfully resolve", which
+ * reads as "no such release" the day a matching one ships. It is a refusal, not
+ * a `null`: §04.4's stale memo must never answer for the gate.
+ */
+export function rangeTooYoungError(name: string, range: string): UsageError {
   return new UsageError(
-    `No release of ${packageName} is old enough for ${envEntry(ENV.MINIMUM_RELEASE_AGE)?.name ?? ENV.MINIMUM_RELEASE_AGE}=${readEnv(ENV.MINIMUM_RELEASE_AGE)}`,
+    `No release of ${name} matching '${range}' is old enough for ${gateSetting()}; pin an exact version to use a newer one`,
   );
 }
 
@@ -234,12 +256,14 @@ export async function fetchResolvableVersions(spec: RegistrySpec): Promise<Versi
   }
 
   const cutoff = Date.now() - minimumAge;
-  return {
-    versions: versions.filter((version) => {
-      const published = Date.parse(asString(times[version]) ?? "");
-      return Number.isFinite(published) && published <= cutoff;
-    }),
-  };
+  const eligible: string[] = [];
+  const heldBack: string[] = [];
+  for (const version of versions) {
+    const published = Date.parse(asString(times[version]) ?? "");
+    if (!Number.isFinite(published)) continue;
+    (published <= cutoff ? eligible : heldBack).push(version);
+  }
+  return { versions: eligible, heldBack };
 }
 
 /**

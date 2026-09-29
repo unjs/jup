@@ -101,6 +101,7 @@ appear quoted.
 
 ```
 Failed to successfully resolve '<range>' to a valid <name> release
+No release of <name> matching '<range>' is old enough for JUP_MINIMUM_RELEASE_AGE=<value>; pin an exact version to use a newer one
 Tag not found (<tag>)
 Packages managers can't be referenced via tags in this context
 This package manager (<name>) isn't supported by this jup build

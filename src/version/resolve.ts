@@ -156,25 +156,30 @@ export async function resolveSpec(
   // `time`), the band reports that instead of quietly resolving from it — but
   // only a band that actually matches something refuses, so `yarn@^1.22` is
   // unaffected by the Berry band it also fans out over.
-  const { fetchResolvableVersions, undatedSourceError } = await loadRegistry();
+  const { fetchResolvableVersions, rangeTooYoungError, undatedSourceError } = await loadRegistry();
+  const matches = (version: string) =>
+    satisfiesWithPrereleases(version, range) && (wantsPrereleases || !isPrerelease(version));
   const perBand = await Promise.all(
     definition.ranges.map(async ([, spec]) => {
       const candidates = await fetchResolvableVersions(spec.registry);
-      const matched = candidates.versions.filter(
-        (version) =>
-          satisfiesWithPrereleases(version, range) && (wantsPrereleases || !isPrerelease(version)),
-      );
+      const matched = candidates.versions.filter(matches);
       if (candidates.undatedSource !== undefined && matched.length > 0) {
         throw undatedSourceError(candidates.undatedSource);
       }
-      return matched;
+      return { matched, heldBack: candidates.heldBack?.some(matches) ?? false };
     }),
   );
 
-  const candidates = [...new Set(perBand.flat())].sort(rcompare);
+  const candidates = [...new Set(perBand.flatMap((band) => band.matched))].sort(rcompare);
+  if (candidates.length > 0) return { name, reference: candidates[0]! };
+
+  // Something matched, but only releases the gate held back: say so, rather
+  // than let the caller report that nothing matches at all.
+  if (perBand.some((band) => band.heldBack)) throw rangeTooYoungError(name, descriptor.range);
+
   // `null`, not an error: the caller decides whether this is fatal, and formats
   // `messages.failedToResolve` with the range the *user* wrote.
-  return candidates.length > 0 ? { name, reference: candidates[0]! } : null;
+  return null;
 }
 
 /**
