@@ -26,6 +26,9 @@ const PIN = "pnpm@6.6.2+sha1.111";
 beforeAll(async () => {
   await registry.start();
   registry.publish("pnpm", "6.6.2", packageManagerTarball("pnpm", "6.6.2"));
+  // Row 34 resolves `10.x`: two matches, so the row shows the highest one wins.
+  registry.publish("pnpm", "10.0.0", packageManagerTarball("pnpm", "10.0.0"));
+  registry.publish("pnpm", "10.34.5", packageManagerTarball("pnpm", "10.34.5"));
 });
 
 afterAll(async () => {
@@ -218,7 +221,11 @@ describe("§13.4 devEngines", () => {
   it("34: a version-range mismatch with onFail: warn warns and continues", async () => {
     const fixture = pinnedProject({ name: "pnpm", version: "10.x", onFail: "warn" });
 
-    const result = await run(["pnpm", "--version"], fixture);
+    const result = await run(["pnpm", "--version"], {
+      ...fixture,
+      registry,
+      env: { COREPACK_INTEGRITY_KEYS: registry.trustStore() },
+    });
 
     expect(result.exitCode).toBe(0);
     expect(withoutDownloadNotices(result.stderr)).toBe(
