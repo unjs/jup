@@ -378,6 +378,7 @@ export function execPackageManager(
   fallbackBin?: BinSpec,
   execMode?: "js" | "native",
   binArgs?: readonly string[],
+  noWarnings?: boolean,
   run?: RunOptions,
 ): number | Promise<number> {
   const binPath = resolveBinPath(binName, spec, fallbackBin);
@@ -437,7 +438,9 @@ export function execPackageManager(
     return import("./interpreter.ts").then(async ({ resolveInterpreter }) => {
       const interpreter = await resolveInterpreter(binName);
       const { execNative } = await import("./native.ts");
-      return await execNative(interpreter, [binPath, ...argv], env, undefined, { reraise: false });
+      // §08.2 — the flag the band's own shebang carries; see `ToolSpec.noWarnings`.
+      const entry = noWarnings === true ? ["--no-warnings", binPath] : [binPath];
+      return await execNative(interpreter, [...entry, ...argv], env, undefined, { reraise: false });
     });
   }
 
@@ -457,6 +460,10 @@ export function execPackageManager(
 
   process.argv = [process.execPath, binPath, ...argv];
   process.execArgv = [];
+  // §08.2 — `--no-warnings` in process, and slightly broader: the flag skips
+  // Node's own printer, while this also drops a preload's listener. See
+  // `ToolSpec.noWarnings` for why that difference is accepted.
+  if (noWarnings === true) process.removeAllListeners("warning");
   // `require.main` is a live view of `process.mainModule`, and the two lines below
   // are one statement about it. Cleared first, so that whatever started *us* — a
   // CJS shim, when we were invoked through one — is never mistaken for the package

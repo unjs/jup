@@ -470,6 +470,46 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ],
   },
 
+  // §02.5 — upm's shape: one signed JavaScript tarball for every host, so
+  // `default` is sha512-pinned and `vlt` joins a bare `jup enable`. Its four
+  // other names are `vlt` subcommands chosen by the bin's own entry point, not
+  // by `argv[0]`: `vlr` is `run`, `vlx` is `exec`, `vlrx` is `run-exec` and
+  // `vlxl` is `exec-local`.
+  vlt: {
+    default:
+      "1.3.0+sha512.67876b04090e03c25e0542b27eb4e09cec790aebedb6e0fdafd4fd6141d450e391b484b6ca2566db3646abb189eea45a69feca47b15aeabd12dc7f7c3c8483a0",
+    fetchLatestFrom: { type: "npm", package: "vlt" },
+    // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
+    // `vlt x`, and reached under its own name as `vlx` — installs the package
+    // into a throwaway environment when the project lacks it, `npx`'s reason.
+    // `vlxl` runs only what the project already installed, and `vlr`/`vlrx`
+    // run its scripts, so those stay subject to §03.5.
+    transparent: {
+      commands: [["vlt", "init"], ["vlt", "create"], ["vlt", "exec"], ["vlt", "x"], ["vlx"]],
+    },
+    // §09.9 — vlt's global store lives under `cache`. `--view=inspect` is the
+    // one view that prints the bare path; the default quotes it as JSON.
+    storeCommands: [["vlt", "config", "get", "cache", "--view=inspect"]],
+    ranges: [
+      [
+        "*",
+        {
+          url: "https://registry.npmjs.org/vlt/-/vlt-{}.tgz",
+          bin: {
+            vlt: "./vlt.js",
+            vlr: "./vlr.js",
+            vlx: "./vlx.js",
+            vlrx: "./vlrx.js",
+            vlxl: "./vlxl.js",
+          },
+          registry: { type: "npm", package: "vlt" },
+          commands: { use: ["vlt", "install"], run: ["vlt", "run"] },
+          noWarnings: true,
+        },
+      ],
+    ],
+  },
+
   // §02.3 — the first entry that is not a package manager. `kind` is the only
   // field that says so, and the four things it decides all live in §03 and §10.
   node: {

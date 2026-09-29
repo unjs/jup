@@ -217,6 +217,28 @@ export interface ToolSpec {
    * one only where its artifact cannot recover the invoked name by itself.
    */
   binArgs?: Record<string, readonly string[]>;
+  /**
+   * §08.2 — this band's JavaScript entry points run with Node's warnings
+   * silenced, as `node --no-warnings` would run them.
+   *
+   * vlt publishes ESM `.js` entry points beside a `package.json` with no
+   * `type`, so Node reparses each one and warns `MODULE_TYPELESS_PACKAGE_JSON`
+   * on every load outside `node_modules` — and the store is outside it (§07.2).
+   * vlt's own shebang passes `--no-warnings` for that reason, and §08.2's
+   * handover never reads a shebang, so the band says it here instead.
+   *
+   * The spawned path (§08.3.1) passes the flag itself. The in-process path
+   * removes every `warning` listener, which is broader than the flag: that also
+   * silences a listener a `NODE_OPTIONS=--require` preload added, where the flag
+   * only skips Node's own printer. Singling out Node's listener would mean
+   * matching an internal function name. §09.9's store probe passes neither,
+   * because it discards the child's stderr anyway.
+   *
+   * A flag rather than interpreter argv, because it is the only interpreter
+   * option any row needs; `--enable-source-maps`, the other one in vlt's
+   * shebang, changes nothing for a package that ships no `.map` files.
+   */
+  noWarnings?: boolean;
 }
 
 /**

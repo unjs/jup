@@ -22,6 +22,7 @@ import {
   shimsByDefault,
   storeCommandsFor,
   SUPPORTED_NAMES,
+  warnsOnMismatch,
 } from "../../src/config/table.ts";
 import { messages, UsageError } from "../../src/errors.ts";
 import { parse, satisfiesWithPrereleases } from "../../src/version/semver.ts";
@@ -40,7 +41,7 @@ function getSpecUrl(locator: ResolvedSpec): string {
 }
 
 describe("registry table — shape (§02.5)", () => {
-  it("supports exactly npm, pnpm, yarn, bun, deno, aube, nub, upm and node", () => {
+  it("supports exactly npm, pnpm, yarn, bun, deno, aube, nub, upm, vlt and node", () => {
     expect([...SUPPORTED_NAMES]).toEqual([
       "npm",
       "pnpm",
@@ -50,6 +51,7 @@ describe("registry table — shape (§02.5)", () => {
       "aube",
       "nub",
       "upm",
+      "vlt",
       // §02.3 — the first entry that is not a package manager. It is in
       // `SUPPORTED_NAMES` like any other: the table is a table of *tools*, and
       // `kind` is read in §03 and §10 only.
@@ -57,11 +59,11 @@ describe("registry table — shape (§02.5)", () => {
     ]);
     expect(isSupportedPackageManager("yarn")).toBe(true);
     expect(isSupportedPackageManager("bun")).toBe(true);
-    // §01.7 / §03.1 — the table is closed and compiled in. `vlt` stands in for
+    // §01.7 / §03.1 — the table is closed and compiled in. `cnpm` stands in for
     // "a real package manager this build does not ship", which is what every
-    // negative assertion in this file needs and what `bun` used to be.
-    expect(isSupportedPackageManager("vlt")).toBe(false);
-    expect(getDefinition("vlt")).toBeUndefined();
+    // negative assertion in this file needs and what `bun`, then `vlt`, used to be.
+    expect(isSupportedPackageManager("cnpm")).toBe(false);
+    expect(getDefinition("cnpm")).toBeUndefined();
   });
 
   /**
@@ -97,7 +99,18 @@ describe("registry table — shape (§02.5)", () => {
       }
     }
     // The loop must actually have run over the whole table.
-    expect(seen).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "upm", "node"]);
+    expect(seen).toEqual([
+      "npm",
+      "pnpm",
+      "yarn",
+      "bun",
+      "deno",
+      "aube",
+      "nub",
+      "upm",
+      "vlt",
+      "node",
+    ]);
   });
 
   /**
@@ -358,7 +371,7 @@ describe("getSpecFor — reverse-order band lookup (§02.3)", () => {
   });
 
   it("rejects an unknown package manager with a usage error", () => {
-    expect(() => getSpecFor("vlt", "1.0.0")).toThrow(/isn't supported by this jup build/);
+    expect(() => getSpecFor("cnpm", "1.0.0")).toThrow(/isn't supported by this jup build/);
   });
 });
 
@@ -397,7 +410,7 @@ describe("getSpecFor / hasRangeBand — no matching band (§07.7)", () => {
     expect(hasRangeBand("pnpm", "11.1.2")).toBe(true);
     expect(hasRangeBand("pnpm", "5.9.0")).toBe(true);
     expect(hasRangeBand("pnpm", "12.0.0")).toBe(true);
-    expect(hasRangeBand("vlt", "1.0.0")).toBe(false);
+    expect(hasRangeBand("cnpm", "1.0.0")).toBe(false);
 
     closeTopBand();
     expect(hasRangeBand("pnpm", "13.0.0")).toBe(false);
@@ -432,7 +445,7 @@ describe("binary names (§02.4)", () => {
     expect(getBinariesFor("bun")).toEqual(["bun", "bunx"]);
     expect(getBinariesFor("deno")).toEqual(["deno"]);
     expect(getBinariesFor("nub")).toEqual(["nub", "nubx"]);
-    expect(getBinariesFor("vlt")).toEqual([]);
+    expect(getBinariesFor("cnpm")).toEqual([]);
   });
 
   it("reverse-maps a binary name to its package manager", () => {
@@ -443,7 +456,7 @@ describe("binary names (§02.4)", () => {
     expect(getPackageManagerFor("bunx")).toBe("bun");
     expect(getPackageManagerFor("deno")).toBe("deno");
     expect(getPackageManagerFor("nubx")).toBe("nub");
-    expect(getPackageManagerFor("vlt")).toBeUndefined();
+    expect(getPackageManagerFor("cnpm")).toBeUndefined();
   });
 
   it("keeps every BinSpec path relative and inside the package", () => {
@@ -1154,6 +1167,74 @@ describe("upm — a JavaScript package manager", () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* §02.5 — vlt                                                               */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * vlt takes upm's shape: one signed JavaScript tarball, a sha512-pinned
+ * `default`, and a place in the default shim set. Its four extra names are
+ * separate entry points, each calling vlt's `run` with a fixed subcommand.
+ */
+describe("vlt — a JavaScript package manager", () => {
+  it("installs one tarball for every host", () => {
+    const spec = getSpecFor("vlt", "1.3.0");
+    expect(spec.registry).toEqual({ type: "npm", package: "vlt" });
+    expect(spec.artifactRegistry).toBeUndefined();
+    expect(spec.exec).toBeUndefined();
+    expect(DEFINITIONS.vlt!.fetchLatestFrom).toEqual({ type: "npm", package: "vlt" });
+    expect(spec.commands).toEqual({ use: ["vlt", "install"], run: ["vlt", "run"] });
+    expect(isPerHost({ name: "vlt", reference: "1.3.0" })).toBe(false);
+    expect(getSpecUrl({ name: "vlt", reference: "1.3.0" })).toBe(
+      "https://registry.npmjs.org/vlt/-/vlt-1.3.0.tgz",
+    );
+    expect(DEFINITIONS.vlt!.ranges.map(([range]) => range)).toEqual(["*"]);
+  });
+
+  it("names all five entry points as the package's own `bin` does", () => {
+    expect(resolveSpecBin(getSpecFor("vlt", "1.3.0"))).toEqual({
+      vlt: "./vlt.js",
+      vlr: "./vlr.js",
+      vlx: "./vlx.js",
+      vlrx: "./vlrx.js",
+      vlxl: "./vlxl.js",
+    });
+    const names = ["vlt", "vlr", "vlx", "vlrx", "vlxl"];
+    expect(getBinariesFor("vlt")).toEqual(names);
+    for (const name of names) expect(getPackageManagerFor(name)).toBe("vlt");
+  });
+
+  it("runs without the typeless-package warning its shebang suppresses (§08.2)", () => {
+    expect(getSpecFor("vlt", "1.3.0").noWarnings).toBe(true);
+    for (const name of ["npm", "pnpm", "yarn", "upm"]) {
+      expect(getSpecFor(name, "99.0.0").noWarnings).toBeUndefined();
+    }
+  });
+
+  it("joins the default shim set, and exempts only project-independent commands (§03.5)", () => {
+    expect(shimsByDefault("vlt")).toBe(true);
+    expect(warnsOnMismatch("vlt")).toBe(false);
+    // `vlt init` and `vlt create` scaffold a project; `vlt exec`, `vlt x` and
+    // `vlx` install into a throwaway environment — `npx`'s reason. `vlxl` runs
+    // only what the project installed, and `vlr`/`vlrx` run its scripts.
+    expect(DEFINITIONS.vlt!.transparent.commands).toEqual([
+      ["vlt", "init"],
+      ["vlt", "create"],
+      ["vlt", "exec"],
+      ["vlt", "x"],
+      ["vlx"],
+    ]);
+    for (const project of [["vlr"], ["vlrx"], ["vlxl"], ["vlt", "run"], ["vlt", "exec-local"]]) {
+      expect(DEFINITIONS.vlt!.transparent.commands).not.toContainEqual(project);
+    }
+    expect(DEFINITIONS.vlt!.transparent.default).toBeUndefined();
+  });
+
+  it("reads its store from `cache`, printed bare (§09.9)", () => {
+    expect(storeCommandsFor("vlt")).toEqual([["vlt", "config", "get", "cache", "--view=inspect"]]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
 /* §02.3 — `node`, the first entry that is not a package manager             */
 /* -------------------------------------------------------------------------- */
 
@@ -1179,7 +1260,7 @@ describe("the node entry (§02.5, §02.3)", () => {
     // take the path it always took to get there.
     expect(devEnginesFieldFor("node")).toBe("runtime");
     expect(devEnginesFieldFor("pnpm")).toBe("packageManager");
-    expect(devEnginesFieldFor("vlt")).toBe("packageManager");
+    expect(devEnginesFieldFor("cnpm")).toBe("packageManager");
   });
 
   it("MUST stay out of the default shim set, being a runtime (§02.3, §10.7)", () => {

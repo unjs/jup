@@ -78,7 +78,7 @@ beforeAll(() => {
       // `bin/jup.mjs`, the two callers for whom §08.2's in-process handover is
       // correct. `runMain`'s default is the isolated path (`RunOptions`), which
       // the driver below exercises.
-      `execPackageManager(binName, { location, bin: JSON.parse(binJson), hash: "" }, args, undefined, undefined, undefined, { handover: true });`,
+      `execPackageManager(binName, { location, bin: JSON.parse(binJson), hash: "" }, args, undefined, undefined, undefined, undefined, { handover: true });`,
       ``,
     ].join("\n"),
   );
@@ -276,6 +276,50 @@ describe("execPackageManager — §08.2 handover", () => {
       [join(location, "bin", "yarn.js"), "add", "-D", "--", "x y"],
     ]);
   });
+});
+
+/*
+ * vlt's shape: ESM `.js` beside a `package.json` with no `type`, which Node
+ * loads only after warning `MODULE_TYPELESS_PACKAGE_JSON`. `ToolSpec.noWarnings`
+ * stands in for the `--no-warnings` in vlt's shebang on both JavaScript paths.
+ */
+describe("execPackageManager — §08.2 noWarnings", () => {
+  function runTypeless(handover: boolean, noWarnings: boolean) {
+    const location = fixture("typeless", {
+      "package.json": `{}\n`,
+      "vlt.js": `import process from "node:process";\nconsole.log("ran");\nprocess.emitWarning("from the tool");\n`,
+    });
+    const script = join(root, `typeless-${handover}-${noWarnings}.mjs`);
+    writeFileSync(
+      script,
+      [
+        `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
+        `const code = await execPackageManager("vlt", { location: ${JSON.stringify(location)}, bin: { vlt: "./vlt.js" }, hash: "" }, [], undefined, undefined, undefined, ${noWarnings}, { handover: ${handover} });`,
+        `if (code !== 0) process.exitCode = code;`,
+        ``,
+      ].join("\n"),
+    );
+    return spawnSync(process.execPath, [script], { encoding: "utf8" });
+  }
+
+  for (const handover of [true, false]) {
+    const path = handover ? "in process" : "spawned";
+
+    it(`silences every warning the tool would print, ${path}`, () => {
+      const result = runTypeless(handover, true);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("ran\n");
+      expect(result.stderr).toBe("");
+    });
+
+    it(`leaves warnings alone for a band that does not ask, ${path}`, () => {
+      const result = runTypeless(handover, false);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toBe("ran\n");
+      expect(result.stderr).toContain("MODULE_TYPELESS_PACKAGE_JSON");
+      expect(result.stderr).toContain("from the tool");
+    });
+  }
 });
 
 describe("execPackageManager — §08.7 environment", () => {
@@ -1326,7 +1370,7 @@ describe("§08.3 — PATH", () => {
         [
           `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
           `const [location, binJson] = process.argv.slice(2);`,
-          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], undefined, "native", undefined, { handover: ${handover} });`,
+          `await execPackageManager("bunny", { location, bin: JSON.parse(binJson), hash: "" }, [], undefined, "native", undefined, undefined, { handover: ${handover} });`,
           `console.log("parent:" + process.env.PATH);`,
           ``,
         ].join("\n"),
@@ -1412,7 +1456,7 @@ describe("§08.3 — PATH", () => {
           `import { execPackageManager } from ${JSON.stringify(EXEC_URL)};`,
           `const [location, binName] = process.argv.slice(2);`,
           `const bin = { bunny: "./bin/bunny", bunnyx: "./bin/bunny" };`,
-          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], undefined, "native", undefined, { handover: true });`,
+          `await execPackageManager(binName, { location, bin, hash: "" }, ["-e", "console.log(process.argv0)"], undefined, "native", undefined, undefined, { handover: true });`,
           ``,
         ].join("\n"),
       );

@@ -246,7 +246,7 @@ describe("buildReport — an invalid spec is diagnosed, never thrown (§09.9)", 
   const cases: Array<[label: string, manifest: unknown, expected: RegExp]> = [
     ["a missing version", { packageManager: "yarn" }, /No version specified/],
     ["a trailing @", { packageManager: "yarn@" }, /No version specified/],
-    ["an unsupported name", { packageManager: "vlt@1.0.0" }, /Unsupported package manager/],
+    ["an unsupported name", { packageManager: "cnpm@1.0.0" }, /Unsupported package manager/],
     ["a wrong type", { packageManager: 42 }, /expected a string/],
     ["a null pin", { packageManager: null }, /expected a string/],
     ["unparseable JSON", "{ not json", /Invalid package\.json/],
@@ -592,7 +592,18 @@ describe("buildReport — registries (§09.9, §05.3 seam)", () => {
 
   it("reports the registry for every supported package manager", () => {
     const names = report().packageManagers.map((entry) => entry.name);
-    expect(names).toEqual(["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "upm", "node"]);
+    expect(names).toEqual([
+      "npm",
+      "pnpm",
+      "yarn",
+      "bun",
+      "deno",
+      "aube",
+      "nub",
+      "upm",
+      "vlt",
+      "node",
+    ]);
 
     const yarn = report().packageManagers.find((entry) => entry.name === "yarn")!;
     expect(yarn.binaries).toEqual(["yarn", "yarnpkg"]);
@@ -686,13 +697,18 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
       "nubx",
       "upm",
       "upx",
+      "vlt",
+      "vlr",
+      "vlx",
+      "vlrx",
+      "vlxl",
       // §02.3 — a runtime is reported for exactly the reason `bun` is: what the
       // name currently resolves to is the interesting question, and for `node`
       // the answer is somebody else's install on essentially every machine.
       "node",
     ]);
     for (const entry of info.entries) {
-      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno|aube|nub|upm|node)$/);
+      expect(entry.packageManager).toMatch(/^(npm|pnpm|yarn|bun|deno|aube|nub|upm|vlt|node)$/);
     }
   });
 
@@ -785,7 +801,7 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
     expect(info.directory).not.toBeNull();
     expect(info.problem).toBeNull();
     // And the rest of the report is still there.
-    expect(info.entries).toHaveLength(17);
+    expect(info.entries).toHaveLength(22);
   });
 });
 

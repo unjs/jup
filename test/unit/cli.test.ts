@@ -972,15 +972,15 @@ describe("pack and cache install -g <file>.tgz (§07.10, tests 90, 92, 93)", () 
 
   it("refuses an archive naming a package manager this build doesn't support", async () => {
     const source = await tempDir("jup-cli-bogus-");
-    await mkdir(join(source, "vlt", "1.0.0"), { recursive: true });
-    await writeFile(join(source, "vlt", "1.0.0", ".jup"), "{}");
+    await mkdir(join(source, "cnpm", "1.0.0"), { recursive: true });
+    await writeFile(join(source, "cnpm", "1.0.0", ".jup"), "{}");
     const archive = join(project, "bogus.tgz");
-    await create(source, ["vlt"], archive);
+    await create(source, ["cnpm"], archive);
 
     await expect(cmdCacheInstallGlobal(["-g", archive])).rejects.toThrow(
-      `Unsupported package manager 'vlt'`,
+      `Unsupported package manager 'cnpm'`,
     );
-    expect(existsSync(join(home, "v1", "vlt"))).toBe(false);
+    expect(existsSync(join(home, "v1", "cnpm"))).toBe(false);
 
     await rm(source, { recursive: true, force: true });
   });

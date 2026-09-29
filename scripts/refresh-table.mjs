@@ -684,7 +684,7 @@ async function refreshKeys(source) {
 }
 
 let table = readFileSync(TABLE, "utf8");
-const [npm, pnpm, yarn, bun, deno, aube, nub, upm, node] = await Promise.all([
+const [npm, pnpm, yarn, bun, deno, aube, nub, upm, vlt, node] = await Promise.all([
   npmDefault("npm"),
   pnpmDefault(),
   // §02.5 — Berry is an npm package now, so it takes the same verified path as
@@ -698,6 +698,7 @@ const [npm, pnpm, yarn, bun, deno, aube, nub, upm, node] = await Promise.all([
   nativeDefault("aube", "@endevco/aube", NATIVE_TARGETS.aube),
   nativeDefault("nub", "@nubjs/nub", NATIVE_TARGETS.nub),
   npmDefault("upm"),
+  npmDefault("vlt"),
   nodeDefault(),
 ]);
 
@@ -713,6 +714,7 @@ table = rewriteDefault(table, "deno", "default", deno);
 table = rewriteDefault(table, "aube", "default", aube);
 table = rewriteDefault(table, "nub", "default", nub);
 table = rewriteDefault(table, "upm", "default", upm);
+table = rewriteDefault(table, "vlt", "default", vlt);
 // §02.3 — the LTS line is {@link NODE_LTS_LINE}'s to say and the patch is this
 // script's; `default` and `tags.lts` name the same release for the reason
 // {@link nodeDefault} gives.

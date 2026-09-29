@@ -1782,6 +1782,14 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * `config/table.ts` — the entry and the comment above it, and nothing a
    * warm run executes beyond reading one more key. Measured, `dist/index.mjs`
    * 209,974 -> 210,442, **+468 or +0.22%**. `config/table.ts` is now 40,852.
+   *
+   * Re-based to 306,000 for §02.5's `vlt`, upm's shape with five entry points,
+   * and the `noWarnings` band flag its typeless `package.json` needs (§08.2).
+   * 302,955 -> 305,300, **+2,345 or +0.77%**: `config/table.ts` +1,761 for the
+   * entry and its comments, `run/exec.ts` +479 and `main.ts` +105 for the flag,
+   * which a warm run reads once and acts on only for vlt. Measured,
+   * `dist/index.mjs` 211,580 -> 212,296, **+716 or +0.34%**. `config/table.ts`
+   * is now 42,898.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1793,7 +1801,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(303_000);
+    ).toBeLessThanOrEqual(306_000);
   });
 });
 

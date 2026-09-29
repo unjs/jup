@@ -201,6 +201,7 @@ of it. Rules:
   targets?: Record<string, string>,   // "<platform>-<arch>" → "{target}"
   exec?: "js" | "native",             // absent/"js" is §08.2's in-process load
   binArgs?: Record<string, string[]>, // argv prepended for one bin NAME
+  noWarnings?: boolean,               // run JS entries as `node --no-warnings`
 }
 ```
 
@@ -292,6 +293,23 @@ by `argv[0]`, which a spawn cannot set. pnpm's native band is the only user
 (`{pnpx: ["dlx"]}`), matching what pnpm's own POSIX `pnpx` script does. A tidier
 long-term shape would fold it into `BinSpec` (`{pnpx: {path, args}}`).
 
+### `noWarnings`
+
+`noWarnings` stands in for a `--no-warnings` that the band's own shebang
+carries and §08.2's handover never reads. vlt is the only user: its ESM `.js`
+entry points sit beside a `package.json` with no `type`, and outside
+`node_modules` Node warns `MODULE_TYPELESS_PACKAGE_JSON` on every load.
+
+The spawned path passes the flag. The in-process path removes every `warning`
+listener, which also silences one a `NODE_OPTIONS=--require` preload added; the
+flag would leave that one running (§08.2). §09.9's store probe passes neither,
+since it discards stderr.
+
+It is a flag rather than interpreter argv because no row needs another
+interpreter option. `--enable-source-maps`, the other flag in vlt's shebang,
+changes nothing for a package that ships no `.map` files. A band that ever needs
+a second one is the point to generalise it.
+
 The union of all `bin` names across all bands of all entries is the set of names
 jup answers to, and the set of shims `enable` creates (§10).
 
@@ -309,6 +327,7 @@ jup answers to, and the set of shims `enable` creates (§10).
 | aube | pm | `aube`, `aubr`, `aubx` | yes | yes | yes |
 | nub | pm | `nub`, `nubx` | yes | yes | no |
 | upm | pm | `upm`, `upx` | no | no | yes |
+| vlt | pm | `vlt`, `vlr`, `vlx`, `vlrx`, `vlxl` | no | no | yes |
 | node | runtime | `node` | yes | yes | no |
 
 Entry-specific rules that are *rules*, not values:
@@ -338,9 +357,10 @@ Entry-specific rules that are *rules*, not values:
 
 ### Fields with exactly one user
 
-`publishedFrom` (yarn), `binArgs` (pnpm), `tags` (node), `transparent.default`
-(yarn), `versionFile` (node). Each is a permanent code path serving one row. When
-touching any of them, prefer generalising or removing over adding a sixth.
+`publishedFrom` (yarn), `binArgs` (pnpm), `noWarnings` (vlt), `tags` (node),
+`transparent.default` (yarn), `versionFile` (node). Each is a permanent code path
+serving one row. When touching any of them, prefer generalising or removing over
+adding a seventh.
 
 ## 2.6 Trust store
 

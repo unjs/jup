@@ -30,6 +30,7 @@ a direct invocation:
 process.env.JUP_ROOT = process.env.COREPACK_ROOT = <jup's own root>
 process.argv     = [process.execPath, binPath, ...args]
 process.execArgv = []
+process.removeAllListeners("warning")   // only for a band declaring noWarnings
 process.mainModule = undefined
 process.nextTick(runMain, binPath)
 ```
@@ -39,6 +40,7 @@ process.nextTick(runMain, binPath)
 | `argv` | Yarn reads `process.argv[1]` to locate itself |
 | `mainModule = undefined` | pnpm checks `require.main == null` to detect its own version |
 | `execArgv = []` | the tool must not inherit jup's runtime flags |
+| `removeAllListeners` | stands in for `--no-warnings` (§02.4 `noWarnings`), and is broader: it also silences a `NODE_OPTIONS=--require` preload's listener, which the flag leaves alone; §8.3.1's spawn passes the flag itself |
 | `nextTick` | unwinds jup's frames out of any stack trace the tool prints |
 | `COREPACK_ROOT` | lets tools feature-detect that they run under a version manager |
 

@@ -233,8 +233,9 @@ revisiting when the surrounding code is next touched:
   with, which for platform availability is a trade against a 404.
 * **`node`'s compiled-in `lts` tag** (§02.3) is a version pointer to an alias that
   moves every six months.
-* **Single-user table fields** — `publishedFrom`, `binArgs`, `tags`,
-  `transparent.default`, `versionFile` — each a permanent code path for one row.
+* **Single-user table fields** — `publishedFrom`, `binArgs`, `noWarnings`,
+  `tags`, `transparent.default`, `versionFile` — each a permanent code path for
+  one row.
 * **§12.13's inherited message warts.**
 * **The agent colour-detection list** (§09.14) is vendored from another project
   and drifts.
