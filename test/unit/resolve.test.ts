@@ -95,6 +95,7 @@ const ENV_KEYS = [
   // §04.1's opt-in. Leaking it between rows would let one test silently decide
   // what the next one resolves to — precisely the hazard §04.1 is about.
   "JUP_ENABLE_PRERELEASES",
+  "JUP_MINIMUM_RELEASE_AGE",
   "XDG_CACHE_HOME",
   "LOCALAPPDATA",
 ] as const;
@@ -645,7 +646,9 @@ describe("resolveSpec step 6 — range query", () => {
       await serveYarn();
       process.env.JUP_ENABLE_PRERELEASES = "1";
 
-      await expect(resolveSpec({ name: "yarn", range: ">=4" })).resolves.toEqual({
+      // Capped below 5: Yarn 6's embedded release candidates are prereleases
+      // above 4 too, and this row is about admission, not about which major.
+      await expect(resolveSpec({ name: "yarn", range: ">=4 <5" })).resolves.toEqual({
         name: "yarn",
         reference: "4.10.0-rc.1",
       });
@@ -656,7 +659,7 @@ describe("resolveSpec step 6 — range query", () => {
 
       // The band lookup and the cache probe keep the lenient rule; what narrowed
       // is the *candidate set*, and a range that names a prerelease re-admits it.
-      await expect(resolveSpec({ name: "yarn", range: ">=4.0.0-0" })).resolves.toEqual({
+      await expect(resolveSpec({ name: "yarn", range: ">=4.0.0-0 <5" })).resolves.toEqual({
         name: "yarn",
         reference: "4.10.0-rc.1",
       });
@@ -672,6 +675,46 @@ describe("resolveSpec step 6 — range query", () => {
       // §04.1 says "discard", with no fallback: `Failed to successfully resolve`
       // names a real problem, where installing a dev build silently does not.
       await expect(resolveSpec({ name: "yarn", range: ">=5" })).resolves.toBeNull();
+    });
+  });
+});
+
+describe("resolveSpec — Yarn 6's embedded band (§02.2)", () => {
+  /** The newest release candidate the table records, whatever a refresh left it at. */
+  async function newestZpm(): Promise<string> {
+    const { embeddedVersions } = await import("../../src/config/releases.ts");
+    const { rcompare } = await import("../../src/version/semver.ts");
+    return embeddedVersions({ type: "embedded", releases: "yarnpkg/zpm" }).sort(rcompare)[0]!;
+  }
+
+  it("answers a range naming a prerelease from the compiled-in list", async () => {
+    const { npm, berry } = await startYarnServers();
+
+    await expect(resolveSpec({ name: "yarn", range: "^6.0.0-rc.0" })).resolves.toEqual({
+      name: "yarn",
+      reference: await newestZpm(),
+    });
+    // The npm bands are still asked, as §04.1 step 6 always asks every band;
+    // the embedded one costs no request, and nothing reaches GitHub.
+    expect([...npm.requests].sort()).toEqual(["/@yarnpkg/cli-dist", "/yarn"]);
+    expect(berry.requests).toEqual([]);
+  });
+
+  it("leaves a plain range on stable Berry: every Yarn 6 release is a prerelease", async () => {
+    await startYarnServers();
+    await expect(resolveSpec({ name: "yarn", range: ">=1" })).resolves.toEqual({
+      name: "yarn",
+      reference: "4.9.0",
+    });
+  });
+
+  it("exempts the list from the release-age gate, as it does the table's own tags", async () => {
+    await startYarnServers();
+    process.env.JUP_MINIMUM_RELEASE_AGE = "24";
+
+    await expect(resolveSpec({ name: "yarn", range: "^6.0.0-rc.0" })).resolves.toEqual({
+      name: "yarn",
+      reference: await newestZpm(),
     });
   });
 });

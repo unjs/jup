@@ -41,12 +41,14 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getSpecFor, hasRangeBand, isPerHostSpec } from "../src/config/table.ts";
 import { compareDigest, parseSri, verifySignature } from "../src/verify/integrity.ts";
+import { rcompare } from "../src/version/semver.ts";
 import { binDrift, nodeLtsDue, publishedBins } from "./refresh-review.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const SRC = join(ROOT, "src", "config");
 const TABLE = join(SRC, "table.ts");
 const KEYS = join(SRC, "keys.ts");
+const RELEASES = join(SRC, "releases.ts");
 
 // The unit suite's review gates. Stamped, not authored: see
 // {@link stampReviewGates}.
@@ -96,8 +98,8 @@ function bandFor(tool, version) {
   return undefined;
 }
 
-async function getJson(url) {
-  const response = await fetch(url, { headers: { accept: "application/json" } });
+async function getJson(url, headers = {}) {
+  const response = await fetch(url, { headers: { accept: "application/json", ...headers } });
   if (!response.ok) throw new Error(`GET ${url} answered ${response.status}`);
   return response.json();
 }
@@ -407,6 +409,148 @@ const NATIVE_TARGETS = {
     "win32-x64": "@nubjs/nub-win32-x64",
   },
 };
+
+/**
+ * §02.2 — the embedded bands' releases: every version the publisher lists, and
+ * the sha256 of each host's artifact, for `src/config/releases.ts`.
+ *
+ * Yarn 6 is the one band this covers. It publishes no signature, so the chain
+ * {@link npmDefault} runs is not available; what replaces it is two hosts that
+ * have to agree. GitHub publishes a sha256 for every release asset, and
+ * `repo.yarnpkg.com` — the host Yarn's own installer and Yarn Switch download
+ * from — serves the same bytes. A digest is recorded only once the bytes this
+ * script fetched from the second host match what the first one says, which is
+ * the "nothing here trusts a digest it was merely told" rule applied to a
+ * publisher with no signing key.
+ *
+ * A recorded line is never rewritten. A release whose GitHub digest no longer
+ * matches it has had its bytes replaced after the fact, and that fails the
+ * refresh rather than quietly re-pinning whatever is there now. Only new lines
+ * cost a download, so a routine refresh fetches one release's worth of zips.
+ *
+ * The hosts come from the band's own `targets`: unlike {@link NATIVE_TARGETS},
+ * this is not checking a promise against itself — a release missing one of them
+ * is recorded without it and reported, and §06.1 refuses that host by name.
+ */
+async function embeddedReleases({ tool, version, owner, mirror }, recorded) {
+  const band = getSpecFor(tool, version);
+  // The asset's file name is the band URL's last segment, placeholders filled.
+  const assetName = (release, target) =>
+    band.url
+      .slice(band.url.lastIndexOf("/") + 1)
+      .replace("{}", release)
+      .replace("{target}", target);
+  const targets = [...new Set(Object.values(band.targets))].sort();
+  const headers = {
+    accept: "application/vnd.github+json",
+    ...(process.env.GITHUB_TOKEN ? { authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}),
+  };
+
+  const listed = [];
+  for (let page = 1; ; page++) {
+    const batch = await getJson(
+      `https://api.github.com/repos/${owner}/releases?per_page=100&page=${page}`,
+      headers,
+    );
+    listed.push(...batch);
+    if (batch.length < 100) break;
+  }
+
+  const releases = {};
+  for (const release of listed) {
+    if (release.draft) continue;
+    const found = /^v(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)$/.exec(release.tag_name);
+    if (found === null || getSpecFor(tool, found[1]) !== band) continue;
+    const version = found[1];
+
+    const hosts = {};
+    await Promise.all(
+      targets.map(async (target) => {
+        const label = `${tool}@${version} (${target})`;
+        const asset = release.assets.find((entry) => entry.name === assetName(version, target));
+        if (asset === undefined) {
+          reviews.push(`${label}: the release publishes no build for this target`);
+          return;
+        }
+        const published = /^sha256:([0-9a-f]{64})$/.exec(asset.digest ?? "");
+        if (published === null) throw new Error(`${label}: GitHub publishes no sha256 digest`);
+
+        const known = recorded[version]?.[target];
+        if (known !== undefined) {
+          if (known !== `sha256.${published[1]}`) {
+            throw new Error(
+              `${label}: GitHub now publishes sha256.${published[1]}, but ${known} was recorded — the release's bytes changed after the fact`,
+            );
+          }
+          hosts[target] = known;
+          return;
+        }
+
+        const bytes = await getBytes(mirror(version, target));
+        const actual = digest(bytes, "sha256");
+        if (!compareDigest(published[1], actual)) {
+          throw new Error(
+            `${label}: ${mirror(version, target)} serves sha256.${actual}, but GitHub publishes sha256.${published[1]}`,
+          );
+        }
+        hosts[target] = `sha256.${actual}`;
+      }),
+    );
+    if (Object.keys(hosts).length > 0) releases[version] = hosts;
+  }
+
+  // A recorded release GitHub stopped listing stays: a project may pin it, and
+  // its bytes were checked when it was added. A human decides whether it goes.
+  for (const [version, hosts] of Object.entries(recorded)) {
+    if (releases[version] !== undefined) continue;
+    reviews.push(`${tool}@${version}: recorded, but ${owner} no longer lists the release`);
+    releases[version] = hosts;
+  }
+
+  return releases;
+}
+
+/** The generated block of `releases.ts`, read back as `{key: {version: {target: pin}}}`. */
+function readReleases(source) {
+  const block = /\/\/ BEGIN GENERATED RELEASES\n([\s\S]*?)\n  \/\/ END GENERATED RELEASES/.exec(
+    source,
+  );
+  if (block === null) throw new Error(`No generated block in ${RELEASES}`);
+  // The block is an object literal body this script wrote; JSON after the
+  // trailing commas are dropped.
+  return JSON.parse(`{${block[1].replace(/,(\s*[}\]])/g, "$1").replace(/,\s*$/, "")}}`);
+}
+
+/**
+ * Rewrite the generated block, newest release first, in the exact shape the
+ * formatter would leave it: every `"<target>": "sha256.<hex>"` pair is past the
+ * print width, so the value always sits on its own line.
+ */
+function rewriteReleases(source, key, releases) {
+  const versions = Object.keys(releases).sort(rcompare);
+  const body = versions
+    .map((version) => {
+      const hosts = Object.keys(releases[version])
+        .sort()
+        .map((target) => `      "${target}":\n        "${releases[version][target]}",`)
+        .join("\n");
+      return `    "${version}": {\n${hosts}\n    },`;
+    })
+    .join("\n");
+  const rendered = versions.length === 0 ? `  "${key}": {},` : `  "${key}": {\n${body}\n  },`;
+
+  const block = /(\/\/ BEGIN GENERATED RELEASES\n)([\s\S]*?)(\n  \/\/ END GENERATED RELEASES)/;
+  const found = block.exec(source);
+  if (found === null) throw new Error(`No generated block in ${RELEASES}`);
+  if (found[2] === rendered) return source;
+
+  const before = readReleases(source)[key] ?? {};
+  const added = versions.filter((version) => before[version] === undefined);
+  changes.push(
+    `releases ${key}: ${added.length > 0 ? `added ${added.join(", ")}` : "reformatted"}`,
+  );
+  return source.replace(block, (_all, open, _body, close) => open + rendered + close);
+}
 
 /** Replace one `default:` literal inside a named package manager's block. */
 function rewriteDefault(source, name, field, reference) {
@@ -721,6 +865,23 @@ table = rewriteTag(table, "node", "lts", node);
 
 const keys = await refreshKeys(readFileSync(KEYS, "utf8"));
 
+// §02.2 — Yarn 6's embedded band. `repo.yarnpkg.com` is the second host
+// {@link embeddedReleases} checks GitHub's digests against.
+let releases = readFileSync(RELEASES, "utf8");
+releases = rewriteReleases(
+  releases,
+  "yarnpkg/zpm",
+  await embeddedReleases(
+    {
+      tool: "yarn",
+      version: "6.0.0",
+      owner: "yarnpkg/zpm",
+      mirror: (version, target) => `https://repo.yarnpkg.com/releases/${version}/${target}`,
+    },
+    readReleases(releases)["yarnpkg/zpm"] ?? {},
+  ),
+);
+
 // After every rewrite, so a rotated key and a new `node.default` are stamped in
 // the same run that produced them.
 const installers = stampInstallers(table, keys);
@@ -760,6 +921,7 @@ if (check) {
 const written = {
   [TABLE]: table,
   [KEYS]: keys,
+  [RELEASES]: releases,
   [INSTALL_SH]: installers.sh,
   [INSTALL_PS1]: installers.ps1,
   [CONFIG_TEST]: configTest,
@@ -770,7 +932,9 @@ if (commit) assertCommittable(Object.keys(written));
 
 for (const [path, content] of Object.entries(written)) writeFileSync(path, content);
 
-console.log("\nRewritten: table, trust store, installers and the unit suite's `default` literals.");
+console.log(
+  "\nRewritten: table, embedded releases, trust store, installers and the unit suite's `default` literals.",
+);
 if (commit) console.log(`Committed ${commitRefresh(Object.keys(written))}.`);
 console.log(
   reviews.length > 0

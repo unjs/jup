@@ -127,6 +127,7 @@ signature over it — while `registry` keeps answering §04's "which versions ex
 tmp := <installFolder>/jup-<pid>-<random hex>     # same filesystem
 stream := GET url
 .tgz → gunzip + untar into tmp, stripping ONE leading path component
+.zip → read the whole archive (bounded), then extract from its central directory, stripping nothing
 .js  → write the bytes to tmp/<basename of the URL path>
 other → fail loudly
 ```
@@ -181,6 +182,31 @@ this is required:
 9. Ignore, do not error on, unknown PAX extended headers.
 
 One format subset is enough: ustar with GNU/PAX long-name extensions, gzipped.
+
+### Zip archives
+
+Yarn 6 (§02.2) publishes zip files, and `cache/zip.ts` reads them under the same
+rules through `tar.ts`'s own path, write and mode helpers, so the two extractors
+cannot drift apart. What the format changes:
+
+* **The index is at the end.** A zip's central directory is authoritative and
+  sits after the data, and a local header may defer its sizes to a trailing
+  descriptor. The archive is therefore buffered whole — capped at 256 MiB as the
+  bytes arrive, which is rule 7 applied to memory — and read from the central
+  directory. Every offset and size in it is checked against the buffer before it
+  is used: an entry whose data would run into the directory is refused.
+* **Rule 7 is decided from the index first.** The declared sizes are summed
+  against the output cap and the expansion ratio before anything inflates, and
+  each entry is then inflated with its declared size as a hard ceiling, so a
+  header that lies costs a refusal rather than the memory it claims not to. The
+  inflated length and the CRC-32 must both match.
+* **Types come from the Unix mode** in the external attributes: a symlink is
+  skipped (rule 3), anything but a file or directory is refused (rule 4), and only
+  the executable bit is taken (rule 6). A non-Unix entry gets the plain mode.
+* **Refused by name, not half-read:** zip64, multi-disk archives, encryption, and
+  any compression method but stored and deflate.
+
+`strip` does not apply: Yarn's entries sit at the archive root.
 
 ### The execute bit for native bands
 

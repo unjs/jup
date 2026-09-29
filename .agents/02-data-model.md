@@ -53,20 +53,47 @@ A URL reference carries the same information in its fragment.
 // `publishedFrom`: the earliest version the package carries, for a band that
 // covers a wider range than the package was published over.
 { "type": "npm", "package": "@yarnpkg/cli-dist", "publishedFrom": "2.4.1" }
+
+// A band published outside npm: its versions and per-host digests are compiled
+// into `src/config/releases.ts` under this key.
+{ "type": "embedded", "releases": "yarnpkg/zpm" }
 ```
 
-A registry spec names an npm package and nothing else. There is deliberately no
-second shape: every band answers version questions over the npm protocol, which
-is what lets §06.1's verification tier hold for the whole table without an
-opt-in. A tool published somewhere else would need a new shape designed for it.
+An `npm` spec names an npm package. Every band answers version questions over
+the npm protocol **except an `embedded` one**, and that is what lets §06.1's
+verification tier hold for the whole table without an opt-in: npm signs what it
+serves, and an embedded band's bytes are checked against a digest the table
+itself carries.
 
 `publishedFrom` takes no part in resolution. It selects which sentence an
 exact-version 404 prints (§04.1), and nothing else, so a stale value costs a less
 specific message.
 
-Every band in the table today points at the npm registry. Nothing reaches a
-vendor's own distribution host, which is what lets §06's verification tier hold
-for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
+### The embedded shape
+
+`embedded` exists for one tool — Yarn 6 — and is the only way a band may leave
+the npm registry. It is deliberately narrow:
+
+* **The list is the whole answer.** `releases.ts` maps each version to
+  `{ <target>: "sha256.<hex>" }`. §04 reads the keys and makes no request to learn
+  which versions exist; §06 reads the digest for this host's `{target}`. The
+  digests are keyed by target, not host, because hosts that share an artifact
+  (both Linux libcs, for Yarn 6's static builds) share one digest.
+* **It is table data, refreshed by script.** `scripts/refresh-table.mjs` adds a
+  line only after downloading the artifact from one host and matching it against
+  the digest another publishes (§16). It never rewrites an existing line: a
+  release whose bytes change afterwards fails the refresh.
+* **It is cold.** `releases.ts` is read only by `net/registry.ts` and
+  `cache/install.ts`; `config/table.ts` must not import it.
+* **It has no dist-tags and no mirror.** An embedded band must not be the last
+  band (the last band answers tags, §2.3), `fetchLatestFrom` stays an npm spec,
+  and neither §05.2 rewrite applies to its URL (§05.2).
+* **A version the list does not name is unverifiable**, and §06.1 refuses it
+  unless the user pins a digest or opts out — the price of not reading a vendor
+  host's version list at run time.
+
+Every other band points at the npm registry, which is what lets
+`JUP_NPM_REGISTRY` mirror them.
 
 ## 2.3 Tool definition
 
@@ -172,9 +199,12 @@ band. Bands are expected to be contiguous and exhaustive; a version no band
 covers is an internal assertion failure, not a user error, and §07.7 will not let
 such a version take a `bin` from the table.
 
-Dist-tags are a property of the newest distribution channel, so they always
+Dist-tags are a property of the main distribution channel, so they always
 resolve against the **last** band's registry — `yarn@latest` consults
 `@yarnpkg/cli-dist`, even though `yarn@1.22.22` downloads from the `yarn` package.
+"Last" means last *declared*, not highest range: bands that do not overlap may
+be declared in any order, and yarn's `>=6.0.0` band is declared before Berry's
+`>=2.0.0 <6.0.0` precisely so that it is not the one answering tags.
 
 ### `versionFile`
 
@@ -195,7 +225,7 @@ of it. Rules:
 {
   url: string,                        // download template; "{}" ← version
   bin: BinSpec,                       // { name: relative path }
-  registry: RegistrySpec,             // which versions exist
+  registry: RegistrySpec,             // which versions exist (npm or embedded)
   artifactRegistry?: NpmRegistrySpec, // where the BYTES come from
   commands?: { use?: string[] },      // argv run after `use`/`up`
   targets?: Record<string, string>,   // "<platform>-<arch>" → "{target}"
@@ -303,7 +333,7 @@ jup answers to, and the set of shims `enable` creates (§10).
 |---|---|---|---|---|---|
 | npm | pm | `npm`, `npx` | no | no | yes |
 | pnpm | pm | `pnpm`, `pnpx` | ≥12 only | ≥12 only | yes |
-| yarn | pm | `yarn`, `yarnpkg` | no | no | yes |
+| yarn | pm | `yarn`, `yarnpkg` | ≥6 only | ≥6 only | yes |
 | bun | pm | `bun`, `bunx` | yes | yes | no |
 | deno | pm | `deno` | yes | yes | no |
 | aube | pm | `aube`, `aubr`, `aubx` | yes | yes | yes |
@@ -317,9 +347,15 @@ Entry-specific rules that are *rules*, not values:
   npm package is a wrapper whose `preinstall` installs the host binary, so from
   12 jup fetches `@pnpm/exe.<host>` instead. The wrapper would put a network
   request behind a cache hit and leave a seeded store unable to run offline.
-* **yarn** resolves 1.x from the `yarn` package and 2+ from `@yarnpkg/cli-dist`,
-  whose 2.x line begins at 2.4.1 — hence `publishedFrom`. Releases below it
-  existed only on `repo.yarnpkg.com`, which jup does not read.
+* **yarn** resolves 1.x from the `yarn` package and 2–5 from
+  `@yarnpkg/cli-dist`, whose 2.x line begins at 2.4.1 — hence `publishedFrom`.
+  Releases below it existed only on `repo.yarnpkg.com`, which jup does not read.
+  6+ (zpm) is the table's one `embedded` band: native, per-host zip files from
+  GitHub releases, whose archive holds `yarn-bin` (the package manager, which jup
+  runs) beside `yarn` (Yarn Switch, which it never does). Its band is declared
+  *before* Berry's so that Berry stays last and `yarn@latest`, `default` and
+  §04.6's refresh stay on `@yarnpkg/cli-dist` while 6 is a release candidate.
+  Yarn publishes no Windows or Intel macOS build of 6.
 * **aube** ships no `darwin-x64` build, which is why its identity-shaped
   `targets` map is still a map: an Intel Mac must be told before any request.
 * **deno and node** publish no musl build, and say so by omission; an Alpine host
@@ -339,8 +375,9 @@ Entry-specific rules that are *rules*, not values:
 ### Fields with exactly one user
 
 `publishedFrom` (yarn), `binArgs` (pnpm), `tags` (node), `transparent.default`
-(yarn), `versionFile` (node). Each is a permanent code path serving one row. When
-touching any of them, prefer generalising or removing over adding a sixth.
+(yarn), `versionFile` (node), and the `embedded` registry shape (yarn 6). Each is
+a permanent code path serving one row. When touching any of them, prefer
+generalising or removing over adding a seventh.
 
 ## 2.6 Trust store
 

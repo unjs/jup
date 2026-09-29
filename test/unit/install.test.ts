@@ -11,6 +11,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { UsageError } from "../../src/errors.ts";
 import { ensureInstalled } from "../../src/cache/install.ts";
 import { create } from "../../src/cache/tar.ts";
+import { getSpecFor, hostTarget } from "../../src/config/table.ts";
+import { zpmZip } from "../_fixtures/zip.ts";
 import type { CorepackMarker, ResolvedSpec, TrustedKey } from "../../src/types.ts";
 
 /* ------------------------------------------------------------------ *
@@ -27,12 +29,16 @@ let origin: string;
 let routes: Record<string, Handler>;
 /** Every URL the tool asked for, in order, *before* the test rewrite. */
 let requested: string[];
+/** The `authorization` header of each request in {@link requested}, or `null`. */
+let authorizations: (string | null)[];
 
 /** The default origins the embedded table points at, mapped onto the mock. */
 const TABLE_ORIGINS = [
   "https://registry.npmjs.org",
   "https://repo.yarnpkg.com",
   "https://registry.yarnpkg.com",
+  // §02.2 — Yarn 6's embedded band.
+  "https://github.com",
 ];
 
 beforeAll(async () => {
@@ -82,6 +88,8 @@ const ENV_KEYS = [
   "COREPACK_DEFAULT_TO_LATEST",
   "COREPACK_ENABLE_NETWORK",
   "JUP_REQUIRE_SIGNATURES",
+  "JUP_ALLOW_UNVERIFIED",
+  "COREPACK_NPM_TOKEN",
   "CI",
 ] as const;
 
@@ -103,10 +111,12 @@ beforeEach(async () => {
 
   routes = {};
   requested = [];
+  authorizations = [];
 
   vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
     const url = String(input);
     requested.push(url);
+    authorizations.push(new Headers(init?.headers).get("authorization"));
     const table = TABLE_ORIGINS.find((candidate) => url.startsWith(candidate));
     const target = table === undefined ? url : origin + url.slice(table.length);
     return realFetch(target, init);
@@ -433,10 +443,10 @@ describe("download shapes (§07.3, §07.4)", () => {
 
   it("fails loudly on an unrecognised URL extension, before any request", async () => {
     const error = await rejection(
-      ensureInstalled({ name: "yarn", reference: `${origin}/artifact.zip` }),
+      ensureInstalled({ name: "yarn", reference: `${origin}/artifact.rar` }),
     );
 
-    expect(error.message).toContain("unsupported artifact extension '.zip'");
+    expect(error.message).toContain("unsupported artifact extension '.rar'");
     expect(requested).toEqual([]);
   });
 });
@@ -1038,5 +1048,94 @@ describe("last-known-good auto-bump (§04.8)", () => {
     await ensureInstalled({ name: "pnpm", reference: "9.1.0" }, { cacheOnly: true });
 
     expect(lastKnownGood()).toEqual({ pnpm: "9.0.0" });
+  });
+});
+
+/* ------------------------------------------------------------------ *
+ * §02.2 — Yarn 6's embedded band: a GitHub zip, checked against the
+ * table's compiled-in digest rather than a registry's signature.
+ * ------------------------------------------------------------------ */
+
+const ZPM = getSpecFor("yarn", "6.0.0-rc.22");
+const ZPM_TARGET = ZPM.targets?.[hostTarget()];
+
+describe.skipIf(ZPM_TARGET === undefined)("yarn 6 — the embedded band (§02.2, §06.1)", () => {
+  const assetPath = (version: string) =>
+    `/yarnpkg/zpm/releases/download/v${version}/yarn-${ZPM_TARGET}.zip`;
+  const artifact = zpmZip("#!/bin/sh\necho zpm\n");
+  const sha256 = hashOf(artifact, "sha256");
+
+  it("checks a recorded release against the compiled-in digest, and caches nothing on a mismatch", async () => {
+    routes[assetPath("6.0.0-rc.22")] = bytesRoute(artifact);
+
+    const error = await rejection(ensureInstalled({ name: "yarn", reference: "6.0.0-rc.22" }));
+
+    expect(error.message).toMatch(/^Mismatch hashes\. Expected [0-9a-f]{64}, got /);
+    expect(error.message).toContain(sha256);
+    // One request: the artifact. There is no registry metadata to ask for.
+    expect(requested).toEqual([`https://github.com${assetPath("6.0.0-rc.22")}`]);
+    expect(existsSync(join(home, "v1", "yarn", "6.0.0-rc.22"))).toBe(false);
+  });
+
+  it("keeps checking it with registry signatures switched off (§06.1 row 5)", async () => {
+    routes[assetPath("6.0.0-rc.22")] = bytesRoute(artifact);
+    process.env.COREPACK_INTEGRITY_KEYS = "0";
+
+    const error = await rejection(ensureInstalled({ name: "yarn", reference: "6.0.0-rc.22" }));
+    expect(error.message).toMatch(/^Mismatch hashes\./);
+  });
+
+  it("refuses a release the table does not know, before any request", async () => {
+    const error = await rejection(ensureInstalled({ name: "yarn", reference: "6.0.0-rc.99" }));
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(
+      "Refusing to install yarn@6.0.0-rc.99: https://github.com provides no signature and no hash was pinned. Pin a hash in the packageManager field, or set JUP_ALLOW_UNVERIFIED=1.",
+    );
+    expect(requested).toEqual([]);
+  });
+
+  it("installs an unknown release the user pinned, running `yarn-bin` under both names", async () => {
+    routes[assetPath("6.0.0-rc.99")] = bytesRoute(artifact);
+    const locator = { name: "yarn", reference: `6.0.0-rc.99+sha256.${sha256}` };
+
+    const spec = await ensureInstalled(locator);
+
+    expect(spec.bin).toEqual({ yarn: "./yarn-bin", yarnpkg: "./yarn-bin" });
+    expect(spec.hash).toBe(`sha256.${sha256}`);
+    expect(await readFile(join(spec.location, "yarn-bin"), "utf8")).toBe("#!/bin/sh\necho zpm\n");
+    // §02.4 — per-host, so the reference is not rewritten to carry a digest.
+    expect(locator.reference).toBe(`6.0.0-rc.99+sha256.${sha256}`);
+  });
+
+  it("installs an unknown release under the opt-out, with its warning", async () => {
+    routes[assetPath("6.0.0-rc.99")] = bytesRoute(artifact);
+    process.env.JUP_ALLOW_UNVERIFIED = "1";
+
+    const spec = await ensureInstalled({ name: "yarn", reference: "6.0.0-rc.99" });
+    expect(spec.hash).toBe(`sha512.${hashOf(artifact)}`);
+  });
+
+  it("refuses a pin in an algorithm the table cannot compare, before any request", async () => {
+    const error = await rejection(
+      ensureInstalled({ name: "yarn", reference: `6.0.0-rc.22+sha512.${hashOf(artifact)}` }),
+    );
+
+    expect(error).toBeInstanceOf(UsageError);
+    expect(error.message).toBe(
+      `Refusing to install https://github.com${assetPath("6.0.0-rc.22")}: jup verifies this artifact with sha256, but the reference pins sha512; pin a sha256 digest, or drop the pin`,
+    );
+    expect(requested).toEqual([]);
+  });
+
+  it("sends no credential to GitHub, and no registry override moves the URL (§05.1, §05.2)", async () => {
+    routes[assetPath("6.0.0-rc.99")] = bytesRoute(artifact);
+    process.env.COREPACK_NPM_TOKEN = "npm-secret";
+    process.env.COREPACK_NPM_REGISTRY = origin;
+
+    await ensureInstalled({ name: "yarn", reference: `6.0.0-rc.99+sha256.${sha256}` });
+
+    expect(requested).toEqual([`https://github.com${assetPath("6.0.0-rc.99")}`]);
+    expect(authorizations).toEqual([null]);
   });
 });

@@ -7,6 +7,9 @@
  *
  * Format subset: ustar with GNU/PAX long-name extensions, gzip-compressed. No
  * sparse files, no other compressors.
+ *
+ * The path, write and mode helpers are exported because `zip.ts` enforces the
+ * same rules for Yarn 6's archives, and must not have a second opinion on them.
  */
 
 const { once } = process.getBuiltinModule("node:events");
@@ -40,8 +43,8 @@ export interface TarEntry {
 const BLOCK_SIZE = 512;
 
 /** §07.4 rule 7 — generous ceilings for this use case. */
-const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
-const DEFAULT_MAX_ENTRIES = 200_000;
+export const DEFAULT_MAX_BYTES = 512 * 1024 * 1024;
+export const DEFAULT_MAX_ENTRIES = 200_000;
 
 /**
  * §07.4 rule 7 — zip-bomb defence. Real npm tarballs sit around 2–6×; anything
@@ -49,8 +52,8 @@ const DEFAULT_MAX_ENTRIES = 200_000;
  * bytes have been inflated for it to mean anything, so a tiny archive of highly
  * compressible text never trips it.
  */
-const DEFAULT_MAX_RATIO = 100;
-const RATIO_FLOOR = 4 * 1024 * 1024;
+export const DEFAULT_MAX_RATIO = 100;
+export const RATIO_FLOOR = 4 * 1024 * 1024;
 
 /**
  * §07.4 rule 7, applied to the *metadata* bodies too — a GNU `L`/`K` block or a
@@ -66,7 +69,7 @@ const RATIO_FLOOR = 4 * 1024 * 1024;
 const MAX_METADATA_BYTES = 64 * 1024;
 
 /** Rule 7's refusal, shared by the stream cap and the metadata cap. */
-function expansionRefusal(maxBytes: number): string {
+export function expansionRefusal(maxBytes: number): string {
   return `Refusing to extract: the archive expands past the ${maxBytes} byte limit`;
 }
 
@@ -124,7 +127,7 @@ const UNC_RE = /^[/\\]{2}/;
  * entry is inert on POSIX but lethal on Windows, and no package manager tarball
  * has a backslash in a legitimate file name.
  */
-function safePath(rawName: string): string {
+export function safePath(rawName: string): string {
   const name = rawName.replaceAll("\0", "");
   if (name.length === 0) throw new Error(messages.refusingToExtract(rawName));
   if (name.startsWith("/") || name.startsWith("\\"))
@@ -148,7 +151,7 @@ function safePath(rawName: string): string {
 }
 
 /** Belt-and-braces prefix check after the join — rule 2. */
-function isInside(root: string, target: string): boolean {
+export function isInside(root: string, target: string): boolean {
   return target === root || target.startsWith(root.endsWith(sep) ? root : root + sep);
 }
 
@@ -559,7 +562,7 @@ const FILE_MODE_EXECUTABLE = 0o755;
 const FILE_MODE_PLAIN = 0o644;
 const DIR_MODE = 0o755;
 
-function fileMode(headerMode: number): number {
+export function fileMode(headerMode: number): number {
   const executable = (headerMode & 0o111) !== 0;
   return (executable ? FILE_MODE_EXECUTABLE : FILE_MODE_PLAIN) & ~getUmask();
 }
@@ -573,7 +576,11 @@ function dirMode(): number {
  * time, refusing to walk *through* a symlink (§07.4 rule 5's sibling case): a
  * planted link is removed rather than followed.
  */
-async function ensureDir(root: string, relativeDir: string, made: Set<string>): Promise<void> {
+export async function ensureDir(
+  root: string,
+  relativeDir: string,
+  made: Set<string>,
+): Promise<void> {
   let current = root;
   for (const segment of relativeDir.split("/")) {
     if (segment.length === 0) continue;
@@ -594,7 +601,11 @@ async function ensureDir(root: string, relativeDir: string, made: Set<string>): 
   }
 }
 
-async function writeFile(target: string, mode: number, body: EntryBody): Promise<void> {
+export async function writeFile(
+  target: string,
+  mode: number,
+  body: AsyncIterable<Uint8Array> | Iterable<Uint8Array>,
+): Promise<void> {
   // §07.4 rule 5: never write *through* a symlink a prior entry — or another
   // process — could have planted here. See `O_NO_SYMLINK` for what enforces it
   // on a platform with no `O_NOFOLLOW`.
@@ -611,7 +622,7 @@ async function writeFile(target: string, mode: number, body: EntryBody): Promise
     handle = await open(target, flags, mode);
   }
   try {
-    for await (const chunk of body.chunks()) await handle.write(chunk);
+    for await (const chunk of body) await handle.write(chunk);
     // Mode is only applied by open() on creation; this is fd-based, so it cannot
     // be redirected by a racing symlink.
     await handle.chmod(mode);
@@ -663,7 +674,7 @@ export async function extract(
 
     const slash = stripped.lastIndexOf("/");
     if (slash !== -1) await ensureDir(root, stripped.slice(0, slash), made);
-    await writeFile(target, fileMode(entry.mode), body);
+    await writeFile(target, fileMode(entry.mode), body.chunks());
   });
 }
 /**

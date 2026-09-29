@@ -239,7 +239,13 @@ describe("registry table — shape (§02.5)", () => {
       ">=11.0.0",
       ">=12.0.0",
     ]);
-    expect(DEFINITIONS.yarn!.ranges.map(([range]) => range)).toEqual(["<2.0.0", ">=2.0.0"]);
+    // Yarn 6 is declared before Berry so that Berry stays last (§02.3's
+    // dist-tag rule); the ranges do not overlap, so the order decides nothing else.
+    expect(DEFINITIONS.yarn!.ranges.map(([range]) => range)).toEqual([
+      "<2.0.0",
+      ">=6.0.0",
+      ">=2.0.0 <6.0.0",
+    ]);
     expect(DEFINITIONS.npm!.ranges.map(([range]) => range)).toEqual(["*"]);
   });
 
@@ -272,30 +278,39 @@ describe("registry table — shape (§02.5)", () => {
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
       const version = parse(definition.default)!.version;
       const band = getSpecFor(name, version);
+      const bandSource = band.registry.type === "npm" ? band.registry.package : "(embedded)";
       expect(`${name}@${version} <- ${definition.fetchLatestFrom.package}`).toBe(
-        `${name}@${version} <- ${band.registry.package}`,
+        `${name}@${version} <- ${bandSource}`,
       );
     }
   });
 
   /**
-   * §02.5 — the table reaches exactly one origin.
+   * §02.2, §02.5 — an npm band names only the npm registry, and a band off npm
+   * is `embedded`.
    *
    * Written as a sweep rather than as a yarn assertion so that a band added
-   * later on a vendor's own host fails here, which is the regression §06.1
-   * lost its dedicated row to: with every source npm-signed there is no longer
-   * an entry that can demonstrate the refusal.
+   * later on a vendor's own host fails here unless it brings §06.1's tier with
+   * it: the only way off the npm registry is an `embedded` registry, whose
+   * compiled-in digests are what keep that tier holding without an opt-in.
+   * Yarn 6 is the one band that takes it today.
    */
-  it("names no origin but the npm registry (§02.5)", () => {
+  it("keeps every band off the npm registry `embedded` (§02.2, §02.5)", () => {
+    const offNpm: string[] = [];
     for (const [name, definition] of Object.entries(DEFINITIONS)) {
       for (const [range, spec] of definition.ranges) {
-        expect(`${name}@${range} -> ${new URL(spec.url).origin}`).toBe(
-          `${name}@${range} -> https://registry.npmjs.org`,
-        );
-        expect(spec.registry.type).toBe("npm");
+        if (spec.registry.type === "npm") {
+          expect(`${name}@${range} -> ${new URL(spec.url).origin}`).toBe(
+            `${name}@${range} -> https://registry.npmjs.org`,
+          );
+        } else {
+          expect(spec.targets, `${name}@${range}`).toBeDefined();
+          offNpm.push(`${name}@${range} -> ${new URL(spec.url).origin}`);
+        }
       }
       expect(definition.fetchLatestFrom.type).toBe("npm");
     }
+    expect(offNpm).toEqual(["yarn@>=6.0.0 -> https://github.com"]);
   });
 });
 
@@ -1150,6 +1165,105 @@ describe("upm — a JavaScript package manager", () => {
     expect(DEFINITIONS.upm!.transparent.commands).not.toContainEqual(["upm", "run"]);
     expect(DEFINITIONS.upm!.transparent.default).toBeUndefined();
     expect(storeCommandsFor("upm")).toEqual([]);
+  });
+});
+
+/* -------------------------------------------------------------------------- */
+/* §02.2 — Yarn 6, the one band published outside npm                         */
+/* -------------------------------------------------------------------------- */
+
+describe("yarn 6 — §02.2's embedded band", () => {
+  afterEach(() => pretendHost(REAL_PLATFORM, REAL_ARCH));
+
+  it("sends 6.x, prereleases included, to the zpm band and keeps 2–5 on Berry", () => {
+    const zpm = getSpecFor("yarn", "6.0.0-rc.22");
+    expect(zpm.registry).toEqual({ type: "embedded", releases: "yarnpkg/zpm" });
+    expect(zpm.exec).toBe("native");
+    expect(zpm.bin).toEqual({ yarn: "./yarn-bin", yarnpkg: "./yarn-bin" });
+    expect(zpm.commands).toEqual({ use: ["yarn", "install"], run: ["yarn", "run"] });
+    expect(getSpecFor("yarn", "6.2.0")).toBe(zpm);
+    expect(getSpecFor("yarn", "7.0.0")).toBe(zpm);
+
+    for (const version of ["2.4.1", "4.18.1", "5.9.9", "4.0.0-rc.1"]) {
+      expect(getSpecFor("yarn", version).registry, version).toEqual({
+        type: "npm",
+        package: "@yarnpkg/cli-dist",
+        publishedFrom: "2.4.1",
+      });
+    }
+    expect(getSpecFor("yarn", "1.22.22").registry).toEqual({ type: "npm", package: "yarn" });
+  });
+
+  it("is per-host, so no digest reaches a portable pin (§02.4)", () => {
+    expect(isPerHost({ name: "yarn", reference: "6.0.0-rc.22" })).toBe(true);
+    expect(isPerHost({ name: "yarn", reference: "4.18.1" })).toBe(false);
+  });
+
+  it("maps both libcs onto the static Linux build, and names what it lacks", () => {
+    const locator = { name: "yarn", reference: "6.0.0-rc.22" };
+    const url = (host: string) =>
+      `https://github.com/yarnpkg/zpm/releases/download/v6.0.0-rc.22/yarn-${host}.zip`;
+
+    pretendHost("linux", "x64");
+    expect(getSpecUrl(locator)).toBe(url("x86_64-unknown-linux-musl"));
+    pretendHost("linux", "arm64");
+    expect(getSpecUrl(locator)).toBe(url("aarch64-unknown-linux-musl"));
+    pretendHost("darwin", "arm64");
+    expect(getSpecUrl(locator)).toBe(url("aarch64-apple-darwin"));
+
+    const targets = getSpecFor("yarn", "6.0.0-rc.22").targets!;
+    expect(targets["linux-x64-musl"]).toBe(targets["linux-x64"]);
+    expect(targets["linux-arm64-musl"]).toBe(targets["linux-arm64"]);
+
+    // No Intel Mac and no Windows build exists: the host is named before any
+    // request rather than 404ing on a URL nobody typed.
+    for (const [platform, arch] of [
+      ["darwin", "x64"],
+      ["win32", "x64"],
+      ["win32", "arm64"],
+    ] as const) {
+      pretendHost(platform, arch);
+      expect(() => getSpecUrl(locator), `${platform}-${arch}`).toThrow(
+        messages.unsupportedTarget(
+          "yarn",
+          "6.0.0-rc.22",
+          `${platform}-${arch}`,
+          Object.keys(targets).sort(),
+        ),
+      );
+    }
+  });
+
+  it("keeps dist-tags, `latest` and the defaults on Berry (§02.3, §04.6)", () => {
+    expect(DEFINITIONS.yarn!.ranges.at(-1)![1].registry.type).toBe("npm");
+    expect(getSpecFor("yarn", parse(DEFINITIONS.yarn!.default)!.version).registry.type).toBe("npm");
+    expect(getBinariesFor("yarn")).toEqual(["yarn", "yarnpkg"]);
+  });
+
+  it("lists only releases the band serves, pinned for targets the band names", async () => {
+    const { embeddedDigest, embeddedVersions } = await import("../../src/config/releases.ts");
+    const zpm = getSpecFor("yarn", "6.0.0-rc.22");
+    const registry = zpm.registry as { type: "embedded"; releases: string };
+    const targets = new Set(Object.values(zpm.targets!));
+    const versions = embeddedVersions(registry);
+
+    expect(versions).toContain("6.0.0-rc.22");
+    for (const version of versions) {
+      expect(getSpecFor("yarn", version), version).toBe(zpm);
+      for (const target of targets) {
+        const pinned = embeddedDigest(registry, version, target);
+        if (pinned === undefined) continue;
+        expect(pinned.algo).toBe("sha256");
+        expect(pinned.hex).toMatch(/^[0-9a-f]{64}$/);
+      }
+    }
+    expect(embeddedDigest(registry, "6.0.0-rc.22", "x86_64-unknown-linux-musl")).toEqual({
+      algo: "sha256",
+      hex: "30ba4fc6740048bec70380ed33ed4cc659b6a5a1882638233b6de9cd1e4eb977",
+    });
+    expect(embeddedDigest(registry, "6.0.0-rc.22", "x86_64-pc-windows-msvc")).toBeUndefined();
+    expect(embeddedDigest(registry, "6.9.9", "x86_64-unknown-linux-musl")).toBeUndefined();
+    expect(embeddedDigest(registry, "constructor", "toString")).toBeUndefined();
   });
 });
 

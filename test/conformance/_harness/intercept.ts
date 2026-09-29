@@ -1,7 +1,8 @@
 /**
  * A `--import` preload for the spawned tool, used only by the conformance
  * harness: it points the *hardcoded* hosts in the embedded table
- * (`registry.npmjs.org`, `registry.yarnpkg.com`, `repo.yarnpkg.com`) at the mock
+ * (`registry.npmjs.org`, `registry.yarnpkg.com`, `repo.yarnpkg.com`, and
+ * `github.com` for Yarn 6) at the mock
  * registry, and tells the mock what URL was originally asked for.
  *
  * This is the spawned-process equivalent of the `fetch` spy the unit tests
@@ -13,7 +14,13 @@
 
 const target = process.env.JUP_MOCK_ORIGIN;
 
-const REWRITTEN_HOSTS = new Set(["registry.npmjs.org", "registry.yarnpkg.com", "repo.yarnpkg.com"]);
+const REWRITTEN_HOSTS = new Set([
+  "registry.npmjs.org",
+  "registry.yarnpkg.com",
+  "repo.yarnpkg.com",
+  // §02.2 — Yarn 6's embedded band downloads from GitHub releases.
+  "github.com",
+]);
 
 if (target !== undefined && target !== "") {
   const real = globalThis.fetch;
