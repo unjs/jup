@@ -997,10 +997,15 @@ describe.skipIf(IS_WINDOWS || HOST_RUNTIME_DIR === dirname(HOST_RUNTIME_DIR))(
       // recursion but exit 127, so §10.2's second condition pins the runtime
       // even though nothing claims the name — and what it names is §10.2 tier
       // 0, the runtime this very run is executing under.
+      // `allowSystemShimDirectory` because `childPath` would otherwise append a
+      // `node` whenever this suite runs under `/usr/local/bin/node` — the GitHub
+      // runner's — and this `PATH` has to reach none. It holds no
+      // `/usr/local/bin` to keep, so nothing else about the run changes.
       const bootstrapped = await run(["enable", "pnpm"], {
         ...options,
         bin: BOOTSTRAPPED,
         env: { ...options.env, PATH: shimDir },
+        allowSystemShimDirectory: true,
       });
 
       expect(bootstrapped.exitCode).toBe(0);
