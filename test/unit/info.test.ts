@@ -698,10 +698,7 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
       "upm",
       "upx",
       "vlt",
-      "vlr",
       "vlx",
-      "vlrx",
-      "vlxl",
       // §02.3 — a runtime is reported for exactly the reason `bun` is: what the
       // name currently resolves to is the interesting question, and for `node`
       // the answer is somebody else's install on essentially every machine.
@@ -801,7 +798,7 @@ describe("buildReport — shims (§10, §10.5, §09.9)", () => {
     expect(info.directory).not.toBeNull();
     expect(info.problem).toBeNull();
     // And the rest of the report is still there.
-    expect(info.entries).toHaveLength(22);
+    expect(info.entries).toHaveLength(19);
   });
 });
 

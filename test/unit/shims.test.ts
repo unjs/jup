@@ -249,10 +249,7 @@ describe("target set (§10.7)", () => {
       "upm",
       "upx",
       "vlt",
-      "vlr",
       "vlx",
-      "vlrx",
-      "vlxl",
     ]);
   });
 
@@ -268,10 +265,7 @@ describe("target set (§10.7)", () => {
       "upm",
       "upx",
       "vlt",
-      "vlr",
       "vlx",
-      "vlrx",
-      "vlxl",
     ]);
   });
 

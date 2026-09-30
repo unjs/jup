@@ -36,10 +36,7 @@ tsconfig.tsbuildinfo
 /src/upm.mjs
 /src/upx.mjs
 /src/vlt.mjs
-/src/vlr.mjs
 /src/vlx.mjs
-/src/vlrx.mjs
-/src/vlxl.mjs
 /src/node.mjs
 
 # Local recording for the ported Corepack suite (NOCK_ENV=record).

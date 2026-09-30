@@ -489,12 +489,9 @@ describe("§09.9 corepack info", () => {
       // upm is a JS package manager, so a bare `enable` claims it as it does npm.
       "upm",
       "upx",
-      // vlt too, and all five of its names.
+      // vlt too.
       "vlt",
-      "vlr",
       "vlx",
-      "vlrx",
-      "vlxl",
       // §02.3 — a runtime is never in the default set (§10.7 requires it), so
       // `node` joins the reported-but-not-installed group with bun and deno.
       "node",

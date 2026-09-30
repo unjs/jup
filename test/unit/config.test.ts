@@ -1172,8 +1172,8 @@ describe("upm — a JavaScript package manager", () => {
 
 /**
  * vlt takes upm's shape: one signed JavaScript tarball, a sha512-pinned
- * `default`, and a place in the default shim set. Its four extra names are
- * separate entry points, each calling vlt's `run` with a fixed subcommand.
+ * `default`, and a place in the default shim set. Of the five names the
+ * package publishes, jup answers to `vlt` and its `…x` runner `vlx` only.
  */
 describe("vlt — a JavaScript package manager", () => {
   it("installs one tarball for every host", () => {
@@ -1190,25 +1190,22 @@ describe("vlt — a JavaScript package manager", () => {
     expect(DEFINITIONS.vlt!.ranges.map(([range]) => range)).toEqual(["*"]);
   });
 
-  it("names all five entry points as the package's own `bin` does", () => {
+  it("answers to `vlt` and `vlx` only, like every entry but aube", () => {
     expect(resolveSpecBin(getSpecFor("vlt", "1.3.0"))).toEqual({
       vlt: "./vlt.js",
-      vlr: "./vlr.js",
       vlx: "./vlx.js",
-      vlrx: "./vlrx.js",
-      vlxl: "./vlxl.js",
     });
-    const names = ["vlt", "vlr", "vlx", "vlrx", "vlxl"];
-    expect(getBinariesFor("vlt")).toEqual(names);
-    for (const name of names) expect(getPackageManagerFor(name)).toBe("vlt");
+    expect(getBinariesFor("vlt")).toEqual(["vlt", "vlx"]);
+    for (const name of ["vlt", "vlx"]) expect(getPackageManagerFor(name)).toBe("vlt");
+    for (const name of ["vlr", "vlrx", "vlxl"]) expect(getPackageManagerFor(name)).toBeUndefined();
   });
 
   it("joins the default shim set, and exempts only project-independent commands (§03.5)", () => {
     expect(shimsByDefault("vlt")).toBe(true);
     expect(warnsOnMismatch("vlt")).toBe(false);
     // `vlt init` and `vlt create` scaffold a project; `vlt exec`, `vlt x` and
-    // `vlx` install into a throwaway environment — `npx`'s reason. `vlxl` runs
-    // only what the project installed, and `vlr`/`vlrx` run its scripts.
+    // `vlx` install into a throwaway environment — `npx`'s reason. `vlt run`,
+    // `vlt run-exec` and `vlt exec-local` act on the project.
     expect(DEFINITIONS.vlt!.transparent.commands).toEqual([
       ["vlt", "init"],
       ["vlt", "create"],
@@ -1216,7 +1213,11 @@ describe("vlt — a JavaScript package manager", () => {
       ["vlt", "x"],
       ["vlx"],
     ]);
-    for (const project of [["vlr"], ["vlrx"], ["vlxl"], ["vlt", "run"], ["vlt", "exec-local"]]) {
+    for (const project of [
+      ["vlt", "run"],
+      ["vlt", "run-exec"],
+      ["vlt", "exec-local"],
+    ]) {
       expect(DEFINITIONS.vlt!.transparent.commands).not.toContainEqual(project);
     }
     expect(DEFINITIONS.vlt!.transparent.default).toBeUndefined();

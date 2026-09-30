@@ -471,10 +471,10 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   // §02.5 — upm's shape: one signed JavaScript tarball for every host, so
-  // `default` is sha512-pinned and `vlt` joins a bare `jup enable`. Its four
-  // other names are `vlt` subcommands chosen by the bin's own entry point, not
-  // by `argv[0]`: `vlr` is `run`, `vlx` is `exec`, `vlrx` is `run-exec` and
-  // `vlxl` is `exec-local`.
+  // `default` is sha512-pinned and `vlt` joins a bare `jup enable`. The package
+  // also publishes `vlr`, `vlrx` and `vlxl`; jup answers only to `vlt` and its
+  // `…x` runner `vlx`, as it does for every other entry but aube. `vlx` is
+  // `vlt exec`, chosen by its own entry point rather than by `argv[0]`.
   //
   // Its `package.json` has no `type`, so Node prints `MODULE_TYPELESS_PACKAGE_JSON`
   // once per run on stderr: vlt's shebang passes `--no-warnings`, and §08.2
@@ -486,8 +486,8 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
     // `vlt x`, and reached under its own name as `vlx` — installs the package
     // into a throwaway environment when the project lacks it, `npx`'s reason.
-    // `vlxl` runs only what the project already installed, and `vlr`/`vlrx`
-    // run its scripts, so those stay subject to §03.5.
+    // `vlt run`, `vlt run-exec` and `vlt exec-local` act on the project, so
+    // those stay subject to §03.5.
     transparent: {
       commands: [["vlt", "init"], ["vlt", "create"], ["vlt", "exec"], ["vlt", "x"], ["vlx"]],
     },
@@ -499,13 +499,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
         "*",
         {
           url: "https://registry.npmjs.org/vlt/-/vlt-{}.tgz",
-          bin: {
-            vlt: "./vlt.js",
-            vlr: "./vlr.js",
-            vlx: "./vlx.js",
-            vlrx: "./vlrx.js",
-            vlxl: "./vlxl.js",
-          },
+          bin: { vlt: "./vlt.js", vlx: "./vlx.js" },
           registry: { type: "npm", package: "vlt" },
           commands: { use: ["vlt", "install"], run: ["vlt", "run"] },
         },
