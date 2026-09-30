@@ -190,7 +190,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.6.0",
+    default: "12.8.1",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -395,7 +395,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.5.1",
+    default: "2.6.0",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
@@ -450,7 +450,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // `npx`'s reason. upm has no store-path command, so none is declared.
   upm: {
     default:
-      "1.2.0+sha512.3cdb4e7cd2da4176fd4b2771928f84fe1468e1eb804f22823d9cd540997b8667f4d2c7f570c27669a8f5fb3c0db8f3329348a32b30d1ca265ab15a1c27d21a05",
+      "1.3.1+sha512.f163cec202190ac8b504be5c8dd23833afd3b2f67f6be0444f8eb984bc0aeaab6c7af7b0334a6d52c81c8a09b38b30909ce241e31b2ccfb755f1b93dc1ab555b",
     fetchLatestFrom: { type: "npm", package: "upm" },
     transparent: {
       commands: [["upm", "init"], ["upm", "create"], ["upx"]],
