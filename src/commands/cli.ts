@@ -904,7 +904,6 @@ function execBandCommand(
     // the same reason the two above are, so that one handover cannot drift from
     // the other.
     tableSpec.binArgs?.[command[0]!],
-    tableSpec.noWarnings,
     run,
   );
 }

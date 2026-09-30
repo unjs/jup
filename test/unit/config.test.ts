@@ -1203,13 +1203,6 @@ describe("vlt — a JavaScript package manager", () => {
     for (const name of names) expect(getPackageManagerFor(name)).toBe("vlt");
   });
 
-  it("runs without the typeless-package warning its shebang suppresses (§08.2)", () => {
-    expect(getSpecFor("vlt", "1.3.0").noWarnings).toBe(true);
-    for (const name of ["npm", "pnpm", "yarn", "upm"]) {
-      expect(getSpecFor(name, "99.0.0").noWarnings).toBeUndefined();
-    }
-  });
-
   it("joins the default shim set, and exempts only project-independent commands (§03.5)", () => {
     expect(shimsByDefault("vlt")).toBe(true);
     expect(warnsOnMismatch("vlt")).toBe(false);

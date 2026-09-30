@@ -475,6 +475,10 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // other names are `vlt` subcommands chosen by the bin's own entry point, not
   // by `argv[0]`: `vlr` is `run`, `vlx` is `exec`, `vlrx` is `run-exec` and
   // `vlxl` is `exec-local`.
+  //
+  // Its `package.json` has no `type`, so Node prints `MODULE_TYPELESS_PACKAGE_JSON`
+  // once per run on stderr: vlt's shebang passes `--no-warnings`, and §08.2
+  // never reads a shebang. Accepted until upstream declares `"type": "module"`.
   vlt: {
     default:
       "1.3.0+sha512.67876b04090e03c25e0542b27eb4e09cec790aebedb6e0fdafd4fd6141d450e391b484b6ca2566db3646abb189eea45a69feca47b15aeabd12dc7f7c3c8483a0",
@@ -504,7 +508,6 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           },
           registry: { type: "npm", package: "vlt" },
           commands: { use: ["vlt", "install"], run: ["vlt", "run"] },
-          noWarnings: true,
         },
       ],
     ],

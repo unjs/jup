@@ -265,8 +265,6 @@ export async function runProxy(
     // §08.3 — the argv this name needs in front of the user's, where the
     // artifact cannot recover the name it was invoked under (`pnpx` → `dlx`).
     tableSpec?.binArgs?.[binaryName],
-    // §08.2 — the `--no-warnings` a band's own shebang would have passed.
-    tableSpec?.noWarnings,
     // §08.2 — whether this process may be given away. Off unless the caller
     // said otherwise, which is what makes the note above true only for a shim.
     run,
