@@ -236,7 +236,14 @@ describe("§13.7 registry, auth and integrity", () => {
   it("71: HTTP_PROXY plus a CONNECT proxy tunnels the request", async () => {
     const { result, proxy } = await proxiedInstall({ NODE_USE_ENV_PROXY: "1" });
 
-    expect(withoutDownloadNotices(result.stderr)).toBe("");
+    // Node 22 announces its own `EnvHttpProxyAgent` at startup whenever
+    // `NODE_USE_ENV_PROXY` meets a proxy variable — before any of our code runs,
+    // so it is the runtime's line, not the tool's. Node 24 dropped it.
+    const stderr = withoutDownloadNotices(result.stderr).replace(
+      /^\(node:\d+\) \[UNDICI-EHPA\] Warning: .+\n\(Use `node --trace-warnings \.\.\.` .+\n/m,
+      "",
+    );
+    expect(stderr).toBe("");
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("6.6.2\n");
 
