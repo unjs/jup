@@ -1,9 +1,10 @@
 /**
  * The npm registry protocol — §05.2.
  *
- * §02.2 puts every band on the npm registry, so this is the only protocol
- * there is: a registry spec names a package, and every question below is a
- * packument read.
+ * §02.2 puts every band but one on the npm registry, so this is the only
+ * protocol there is: a registry spec names a package, and every question below
+ * is a packument read. The exception is an `embedded` spec, whose versions are a
+ * table literal — the version-list functions answer it with no request at all.
  *
  * The npm layer checks `COREPACK_ENABLE_NETWORK` itself and names the
  * *registry*; the transport layer names the *URL*. Both messages are observable
@@ -15,6 +16,7 @@ import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { isPerHost, packageManagerForRegistry } from "../config/table.ts";
 import { envDisabled, envFlag } from "../project/env.ts";
 import { advisory, messages, networkError, redactUserinfo, UsageError } from "../errors-cold.ts";
+import { embeddedVersions } from "../config/releases.ts";
 import { assertSafeArtifactUrl, httpGetJson } from "./http.ts";
 import { parseSri, shouldSkipIntegrityCheck } from "../verify/integrity.ts";
 import { registryTrustFor, registryVariableFor, resolveRegistry } from "./npmrc.ts";
@@ -243,6 +245,13 @@ export function rangeTooYoungError(name: string, range: string): UsageError {
  * silently skipped.
  */
 export async function fetchResolvableVersions(spec: RegistrySpec): Promise<VersionCandidates> {
+  // §02.2 — an embedded band's list is a table literal, and exempt from the
+  // gate for the reason `ToolDefinition.tags` is: the table chose it, not the
+  // registry. The threat the gate exists for — a freshly published compromised
+  // release chosen implicitly — cannot reach it either, because only bytes
+  // matching a digest recorded at refresh time are ever accepted (§06.1).
+  if (spec.type === "embedded") return { versions: embeddedVersions(spec) };
+
   const minimumAge = minimumReleaseAge();
   if (minimumAge === undefined) {
     return { versions: await fetchAvailableVersions(spec) };
@@ -286,7 +295,8 @@ export async function capToReleaseAge(
   spec: RegistrySpec,
   version: string | undefined,
 ): Promise<string> {
-  if (minimumReleaseAge() === undefined) {
+  // An embedded band is exempt from the gate; see `fetchResolvableVersions`.
+  if (minimumReleaseAge() === undefined || spec.type === "embedded") {
     if (version === undefined) throw new Error("capToReleaseAge: no target and no gate");
     return version;
   }
@@ -314,13 +324,16 @@ export async function capToReleaseAge(
   return capped;
 }
 
-export async function fetchAvailableVersions(spec: RegistrySpec): Promise<string[]> {
+export async function fetchAvailableVersions(spec: NpmRegistrySpec): Promise<string[]> {
   const body = asRecord(await npmGetJson(spec.package, spec));
   // Both packument shapes carry `versions` as an object keyed by version.
   return keysOrValues(body?.versions);
 }
 
 export async function fetchAvailableTags(spec: RegistrySpec): Promise<Record<string, string>> {
+  // §02.2 — an embedded band publishes no dist-tags. The table keeps one from
+  // being the last band, so this answers only a table that has drifted.
+  if (spec.type === "embedded") return {};
   const body = asRecord(await npmGetJson(spec.package, spec));
   return stringMap(body?.["dist-tags"]);
 }
@@ -351,7 +364,7 @@ export interface LatestOptions {
  * `messages.cannotDownloadLatest`.
  */
 export async function fetchLatestStableVersion(
-  spec: RegistrySpec,
+  spec: NpmRegistrySpec,
   options: LatestOptions = {},
 ): Promise<string> {
   const registryUrl = registryUrlFor(spec);

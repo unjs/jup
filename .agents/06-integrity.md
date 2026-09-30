@@ -8,8 +8,10 @@ publishing what it published yesterday.
 
 An artifact is acceptable when it clears one of:
 
-1. **A user-pinned hash** — from the reference's build suffix, a URL fragment, or
-   `devEngines.…​.integrity`. An explicit, user-chosen assertion.
+1. **A pinned hash** — from the reference's build suffix, a URL fragment, or
+   `devEngines.…​.integrity`, an explicit, user-chosen assertion; or, for an
+   `embedded` band (§02.2), the digest the table itself compiles in for this
+   host's artifact.
 2. **A verified registry signature**, whose signed `integrity` then becomes the
    expected digest.
 3. **A registry-published digest without a signature** — a soft-fail, warned once
@@ -49,7 +51,8 @@ project env file cannot set it — applies to the current run, and warns for eac
 artifact it permits.
 
 What the refusal actually closes: a registry that publishes neither signatures
-nor digests, and a custom `packageManager` URL with no `#<algo>.<hex>`
+nor digests, a Yarn 6 release the embedded list does not know (a jup built before
+it shipped), and a custom `packageManager` URL with no `#<algo>.<hex>`
 fragment (that path is already behind `JUP_ENABLE_UNSAFE_CUSTOM_URLS`, which
 permits the *host*; the fragment is how the user says what should arrive from it).
 It does not fire for the ordinary entries: the table pins a hash on `default` and
@@ -58,6 +61,25 @@ digest.
 
 `JUP_REQUIRE_SIGNATURES=1` turns tier 3 into a hard failure, for organisations
 mandating signed sources. It is deliberately not consulted on tier 1.
+
+### The embedded band
+
+Yarn 6 publishes no signature, so tier 2 cannot exist for it. Its tier is the
+compiled-in digest, and it is held harder than a user pin, because nothing else
+stands behind it:
+
+* It is checked **whatever else is configured.** `JUP_INTEGRITY_KEYS=0` switches
+  off registry signatures, not a hash the table pinned — the same standing as
+  `default`'s digest.
+* A digest in the reference is checked **beside** it, not instead of it. A
+  repository pinning a digest for bytes the table has never seen would be
+  vouching for itself. The stream is hashed once, so a pin in another algorithm
+  than the table's (sha256) is refused before any request rather than reported as
+  a mismatch between two unrelated strings.
+* A release the table does not list has no tier at all. It is refused unless the
+  reference pins a digest or `JUP_ALLOW_UNVERIFIED=1` is set; the refusal names
+  GitHub as the source that "provides no signature". Upgrading jup is the usual
+  fix, and the one the refresh workflow (§16) keeps short.
 
 Use `artifactRegistry`, where present, as the source of artifact metadata: its
 signed integrity must describe the bytes fetched **for this host**. A
@@ -73,7 +95,7 @@ mismatch → "Mismatch hashes. Expected <expected>, got <actual>"
 ```
 
 What is hashed is the bytes **as received**: the raw compressed tarball stream
-for a `.tgz`, the file bytes for a single `.js`. Hashing happens inline as bytes
+for a `.tgz`, the whole archive for a `.zip`, the file bytes for a single `.js`. Hashing happens inline as bytes
 arrive, in the same pass that writes them.
 
 At least SHA-1, SHA-224, SHA-256 and SHA-512 are supported. An unsupported or

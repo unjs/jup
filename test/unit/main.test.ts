@@ -1782,6 +1782,18 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * `config/table.ts` — the entry and the comment above it, and nothing a
    * warm run executes beyond reading one more key. Measured, `dist/index.mjs`
    * 209,974 -> 210,442, **+468 or +0.22%**. `config/table.ts` is now 40,852.
+   *
+   * Re-based to 304,000 for §02.2's embedded band, Yarn 6: the one band off
+   * npm. 302,955 -> 303,993, **+1,038 or +0.34%**, all of it
+   * `config/table.ts` — the band, its five-host `targets` map, Berry's range
+   * narrowed to `<6.0.0`, and the comments saying why the band sits before
+   * Berry. The band has to be in the table for `yarn` to find it; what it
+   * costs a warm run beyond that is one more key read. Its digests
+   * (`config/releases.ts`) and the zip reader (`cache/zip.ts`) are cold and
+   * outside this sum. Measured, `dist/index.mjs` 211,580 -> 224,234,
+   * **+12,654 or +5.98%**, nearly all of it those two cold modules; a warm
+   * `yarn --version` measured the same before and after. `config/table.ts` is
+   * now 42,175.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1793,7 +1805,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(303_000);
+    ).toBeLessThanOrEqual(304_000);
   });
 });
 

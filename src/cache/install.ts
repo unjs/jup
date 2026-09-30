@@ -19,6 +19,7 @@ import {
   resolveArtifactRegistry,
   resolveSpecBin,
   resolveSpecUrl,
+  targetFor,
 } from "../config/table.ts";
 import { envFlag } from "../project/env.ts";
 import { advisory, messages, UsageError } from "../errors-cold.ts";
@@ -53,23 +54,27 @@ import {
   writeMarker,
 } from "./store.ts";
 import { extract } from "./tar.ts";
+import { extractZip } from "./zip.ts";
+import { embeddedDigest } from "../config/releases.ts";
 import type {
   BinSpec,
   Installation,
   ResolvedSpec,
+  NpmRegistrySpec,
   RegistrySignature,
-  RegistrySpec,
 } from "../types.ts";
 
-/** §07.4 — the two artifact shapes the table can produce. */
+/** §07.4 — the three artifact shapes the table can produce. */
 const TARBALL_EXT = ".tgz";
 const SCRIPT_EXT = ".js";
+/** §07.4 — Yarn 6's release assets; entries sit at the archive root. */
+const ZIP_EXT = ".zip";
 
 /** Everything §07.3 works out before a single artifact byte is fetched. */
 interface ArtifactSource {
   url: string;
   /** The registry in force for this download; it selects §06.1's row. */
-  registry?: RegistrySpec;
+  registry?: NpmRegistrySpec;
   /**
    * The registry **base URL** in force, after §05.2's precedence.
    * Carried rather than recomputed: `getRegistryUrl()` with no arguments answers
@@ -88,6 +93,12 @@ interface ArtifactSource {
    * would double the requests on the path that can least afford them.
    */
   fetched?: boolean;
+  /**
+   * §02.2 — the band is `embedded`: there is no registry to ask, and `pinned`
+   * is the table's compiled-in digest for this host's artifact, when the table
+   * knows the release. It is the whole of §06.1's check for such a band.
+   */
+  embedded?: { pinned?: { algo: string; hex: string } };
 }
 
 /**
@@ -147,9 +158,9 @@ export async function ensureInstalled(
   // §07.4 — dispatch on the URL path's extension, never on Content-Type, and
   // fail loudly rather than guessing. Checked before the prompt so an
   // unrecognised artifact costs no bandwidth and asks no questions.
-  if (ext !== TARBALL_EXT && ext !== SCRIPT_EXT) {
+  if (ext !== TARBALL_EXT && ext !== SCRIPT_EXT && ext !== ZIP_EXT) {
     throw new Error(
-      `Refusing to download ${source.url}: unsupported artifact extension '${ext}' (expected '${TARBALL_EXT}' or '${SCRIPT_EXT}')`,
+      `Refusing to download ${source.url}: unsupported artifact extension '${ext}' (expected '${TARBALL_EXT}', '${ZIP_EXT}' or '${SCRIPT_EXT}')`,
     );
   }
 
@@ -170,10 +181,15 @@ export async function ensureInstalled(
     const streamDigest = await streamArtifact(source.url, {
       algo: streamAlgo,
       registryUrl: source.registryUrl,
+      // §05.1 — an embedded band's host is no registry, so no credential of
+      // any tier is one it was configured for.
+      anonymous: source.embedded !== undefined,
       write: (stream) =>
         ext === TARBALL_EXT
           ? extract(stream, tmp, { strip: 1 })
-          : writeStreamToFile(stream, join(tmp, posix.basename(pathname))),
+          : ext === ZIP_EXT
+            ? extractZip(stream, tmp)
+            : writeStreamToFile(stream, join(tmp, posix.basename(pathname))),
     });
 
     // A `.js` URL is a single-file artifact; tarballs are installed whole.
@@ -281,10 +297,15 @@ export async function streamArtifact(
   options: {
     algo: string;
     registryUrl: string;
+    /** Send no credentials at all — for a source that is not a registry. */
+    anonymous?: boolean;
     write: (stream: ReadableStream<Uint8Array>) => Promise<unknown>;
   },
 ): Promise<string> {
-  const response = await httpGet(url, { registryOrigin: options.registryUrl });
+  const response = await httpGet(url, {
+    registryOrigin: options.registryUrl,
+    anonymous: options.anonymous,
+  });
   const body = response.body;
   if (body === null) {
     throw new Error(messages.requestFailed(url));
@@ -323,6 +344,21 @@ async function chooseSource(
   }
 
   const spec = getSpecFor(locator.name, version);
+
+  // §02.2 — an embedded band's artifact lives on its publisher's own host, and
+  // the table is its only authority. No metadata is fetched because there is
+  // none, and neither of §05.2's rewrites applies: `JUP_REGISTRY_<NAME>` and
+  // `COREPACK_NPM_REGISTRY` name npm registries, and moving this URL onto one
+  // would ask a mirror for a path it cannot serve. Resolving the URL first also
+  // means an unsupported host fails here, naming the host, before any request.
+  if (spec.registry.type === "embedded") {
+    const url = resolveSpecUrl(spec, locator, version);
+    return {
+      url,
+      registryUrl: new URL(url).origin,
+      embedded: { pinned: embeddedDigest(spec.registry, version, targetFor(spec, locator)) },
+    };
+  }
 
   // §02.4 — a native band answers version questions and artifact questions from
   // two different npm packages, and it is the **artifact** one that governs
@@ -561,6 +597,26 @@ async function resolveExpectedIntegrity(
   pin: HashPin,
   version: string | undefined,
 ): Promise<{ algo: string; hex: string } | undefined> {
+  // §02.2 — an embedded band has no registry claim to weigh: the table's
+  // compiled-in digest is the check. It is a hash the table pinned, like
+  // `default`'s, so it holds whatever else is configured — row 5's switch is
+  // about registry *signatures*, and a pin in the reference is checked beside
+  // it rather than instead of it. Letting a project's own pin replace it would
+  // be a repository vouching for bytes the table has never seen (§06.1).
+  //
+  // Both are compared with the one digest the stream is hashed with, so a pin
+  // in another algorithm cannot be honoured; it is refused up front rather than
+  // failing as a mismatch naming two unrelated hex strings.
+  if (source.embedded !== undefined) {
+    const pinned = source.embedded.pinned;
+    if (pinned !== undefined && pin.digest !== undefined && pin.algo !== pinned.algo) {
+      throw new UsageError(
+        `Refusing to install ${source.url}: jup verifies this artifact with ${pinned.algo}, but the reference pins ${pin.algo}; pin a ${pinned.algo} digest, or drop the pin`,
+      );
+    }
+    return pinned;
+  }
+
   // Row 5: `COREPACK_INTEGRITY_KEYS` in {"", "0"} disables the whole mechanism.
   // A source with no registry, or none resolved to a version, has no claim to
   // check against.

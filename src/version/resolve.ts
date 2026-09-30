@@ -51,10 +51,10 @@ function loadRegistry(): Promise<typeof import("../net/registry.ts")> {
  * query fans out over every band **in parallel** and unions, because a range
  * like `>=1` legitimately spans Yarn Classic (npm) and Yarn Berry.
  *
- * Every registry this hands to the client is the band's own `registry`, which
- * §02.2 guarantees is an npm one. Where that package is actually *fetched*
- * from — §05.2's variables, §05.3's `.npmrc` — is resolved inside the fetchers,
- * not here.
+ * Every registry this hands to the client is the band's own `registry` — an npm
+ * package, or §02.2's `embedded` list, which the client answers without a
+ * request. Where an npm package is actually *fetched* from — §05.2's variables,
+ * §05.3's `.npmrc` — is resolved inside the fetchers, not here.
  */
 export async function resolveSpec(
   descriptor: Spec,

@@ -131,6 +131,26 @@ which would normalise nothing and could match an unrelated URL:
 
 Both are idempotent, and the result must pass the tarball-host validation above.
 
+### The embedded band
+
+Yarn 6 (§02.2's `embedded` shape) is the one table URL that is not on the npm
+registry: `github.com/yarnpkg/zpm/releases/download/…`, which redirects to
+GitHub's asset host. None of this section applies to it, and each exception is
+deliberate:
+
+* **No metadata request.** Versions come from the compiled-in list (§04.1 step
+  6) and the expected digest from the same table (§06.1), so the artifact is the
+  only request an install makes.
+* **No override rewriting.** Neither `JUP_REGISTRY_YARN` nor `JUP_NPM_REGISTRY`
+  moves the URL: both name npm registries, and a mirror asked for a GitHub
+  release path would 404 or, worse, answer. A network that cannot reach GitHub
+  cannot install Yarn 6 by name; a URL reference with a `#sha256.<hex>` fragment
+  behind `JUP_ENABLE_UNSAFE_CUSTOM_URLS=1` is the escape hatch.
+* **No credentials, from any tier.** The request is sent anonymously, so no
+  `JUP_NPM_TOKEN`, registry userinfo or `.npmrc` entry is attached — GitHub is
+  not a registry anyone configured, and the compiled-in digest does not depend
+  on who is asking.
+
 ## 5.3 `.npmrc`
 
 Read lowest precedence to highest:

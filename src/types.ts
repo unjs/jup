@@ -121,12 +121,30 @@ export interface NpmRegistrySpec {
 }
 
 /**
- * §02.2 — every band answers version questions over the npm protocol, so this
- * is {@link NpmRegistrySpec} and nothing else. The alias survives the collapse
- * because it reads as the role ("where versions come from") at the ~40 sites
- * that take one, where the concrete name reads as the wire format.
+ * §02.2 — a band published **outside** npm, whose versions and per-host
+ * digests are compiled into `src/config/releases.ts` instead of asked for.
+ *
+ * Yarn 6 is the one user: it ships only as per-host zip files on GitHub and
+ * `repo.yarnpkg.com`, with no signature and no registry to hold one. The npm
+ * shape's guarantee — §06.1's tier holds without an opt-in — survives only if
+ * the digest the download is checked against is a table literal, written by
+ * `scripts/refresh-table.mjs` from bytes it fetched and compared across both
+ * hosts. So the list is the whole answer: no request is made to learn which
+ * versions exist, and a version the list does not name is one jup cannot vouch
+ * for (§06.1's refusal, unless the user opts out).
  */
-export type RegistrySpec = NpmRegistrySpec;
+export interface EmbeddedRegistrySpec {
+  type: "embedded";
+  /** The key this band's releases are listed under in `RELEASES`. */
+  releases: string;
+}
+
+/**
+ * §02.2 — where a band's versions come from. Every band but one answers over
+ * the npm protocol; {@link EmbeddedRegistrySpec} is the exception, and every
+ * site that needs a package name narrows on `type` first.
+ */
+export type RegistrySpec = NpmRegistrySpec | EmbeddedRegistrySpec;
 /** §02.4 — how to download and run one version band of a tool. */
 export interface ToolSpec {
   /**
@@ -306,8 +324,8 @@ export interface ToolDefinition {
    * overriding an answer.
    */
   tags?: Record<string, string>;
-  /** Where "what's the newest stable?" is answered. */
-  fetchLatestFrom: RegistrySpec;
+  /** Where "what's the newest stable?" is answered. Always an npm package. */
+  fetchLatestFrom: NpmRegistrySpec;
   transparent: {
     /** Fallback version for transparent commands only (§01.4). */
     default?: string;

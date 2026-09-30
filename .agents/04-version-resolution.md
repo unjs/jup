@@ -36,9 +36,12 @@ Order matters in ways that are easy to get wrong. Step 4 comes **before** step 5
 for an exact version both return the same reference, so the probe is one `stat`,
 and shedding a `+<hash>` suffix on a cache hit is what lets §07.2 re-attach the
 marker's own hash instead of demanding a pin-qualified directory. Step 3 resolves
-tags against the last band because dist-tags belong to the newest distribution
-channel. Step 6 fans out over **every** band because one range may cross package
-channels.
+tags against the last *declared* band because dist-tags belong to the main
+distribution channel (§02.3). Step 6 fans out over **every** band because one range
+may cross package channels; an `embedded` band (§02.2) contributes its compiled-in
+list there with no request, so `yarn@^6.0.0-rc.0` resolves from the table while
+`yarn@>=1` still asks the two npm packages — and, every Yarn 6 release so far being
+a release candidate, still lands on stable Berry.
 
 Step 5 returns without checking that the version exists, so a typo surfaces later
 as a 404 on a tarball URL the user never typed. That 404 is mapped back to
@@ -55,7 +58,10 @@ already installed.
 `JUP_MINIMUM_RELEASE_AGE` (hours) filters implicit choices: step 6's candidates
 and step 3's dist-tag target, which is the registry choosing on the user's
 behalf. An exact pin and a compiled-in tag are exempt — those are the user, or
-this table, choosing. So is §09.13's lookup for **jup's own** release: it is not
+this table, choosing. So is an `embedded` band's version list (§02.2), for the
+same reason and one more: the gate guards against a freshly published,
+compromised release being chosen implicitly, and an embedded band accepts only
+bytes matching a digest recorded when the table was refreshed. So is §09.13's lookup for **jup's own** release: it is not
 a table entry, `install.sh` bootstraps the same `latest` ungated, and the gated
 selector — the newest eligible release, not a cap on the running one — would
 downgrade a machine whose cooldown outlives a release. `self-upgrade` refuses to

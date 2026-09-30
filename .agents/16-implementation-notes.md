@@ -182,6 +182,19 @@ opens or turns the PR as a draft when there is one. The pure judgement lives in
 
 Every entry's version comes from its `latest` dist-tag except node's.
 
+Yarn 6's embedded band (§02.2) is refreshed differently, because there is no
+signature to verify. The script lists `yarnpkg/zpm`'s GitHub releases (with
+`GITHUB_TOKEN` when set, for the rate limit), and for each release and each
+target the band maps a host onto, downloads the zip from `repo.yarnpkg.com` —
+the host Yarn's installer and Yarn Switch use — and records its sha256 in
+`src/config/releases.ts` only if it matches the digest GitHub publishes for the
+same asset. Two independent hosts agreeing is the check. Lines already recorded
+cost no download and are never rewritten: a GitHub digest that no longer matches
+one fails the run, since a release's bytes changing after the fact is exactly
+what review is for. A release missing a target, or recorded but no longer
+listed, is a `warning:` line. The file's generated block sits between
+`BEGIN`/`END GENERATED RELEASES` markers.
+
 Node is refreshed like every other entry, with one number held back: the script
 tracks the newest release on `NODE_LTS_LINE` and writes both `default` and
 `tags.lts` from it, but which major is in LTS is a human's to move, for the reason

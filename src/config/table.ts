@@ -10,10 +10,9 @@
  * which is why `yarn@latest` reads `@yarnpkg/cli-dist`'s tags even though
  * `yarn@1.22.22` comes from the `yarn` package.
  *
- * §02.2 — every `url` and every `registry` here names the npm registry. Nothing
- * in this table reaches a vendor's own distribution host, which is what lets
- * §06.1's verification tier hold for every entry without an opt-in, and what
- * lets `COREPACK_NPM_REGISTRY` mirror all of it.
+ * §02.2 — every `url` and `registry` here names the npm registry, which lets
+ * §06.1's tier hold without an opt-in and `COREPACK_NPM_REGISTRY` mirror it all.
+ * The one exception, Yarn 6, is `embedded`: its digests are compiled in.
  */
 
 const { existsSync } = process.getBuiltinModule("node:fs");
@@ -165,6 +164,15 @@ const PNPM_EXE_TARGETS = {
   "win32-x64": "win32-x64",
 } as const;
 
+/** Yarn 6's Linux builds are static, so one serves both libcs. No Windows or Intel Mac. */
+const YARN_ZPM_TARGETS = {
+  "darwin-arm64": "aarch64-apple-darwin",
+  "linux-arm64": "aarch64-unknown-linux-musl",
+  "linux-arm64-musl": "aarch64-unknown-linux-musl",
+  "linux-x64": "x86_64-unknown-linux-musl",
+  "linux-x64-musl": "x86_64-unknown-linux-musl",
+} as const;
+
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default:
@@ -289,8 +297,22 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
           commands: { use: ["yarn", "install"], run: ["yarn", "run"] },
         },
       ],
+      // §02.2 — Yarn 6 is not on npm; see `releases.ts`. `yarn-bin` is the
+      // package manager (`yarn` in the zip is Yarn Switch). Declared before
+      // Berry so Berry stays last and keeps answering dist-tags (§02.3).
       [
-        ">=2.0.0",
+        ">=6.0.0",
+        {
+          url: "https://github.com/yarnpkg/zpm/releases/download/v{}/yarn-{target}.zip",
+          bin: { yarn: "./yarn-bin", yarnpkg: "./yarn-bin" },
+          registry: { type: "embedded", releases: "yarnpkg/zpm" },
+          targets: YARN_ZPM_TARGETS,
+          exec: "native",
+          commands: { use: ["yarn", "install"], run: ["yarn", "run"] },
+        },
+      ],
+      [
+        ">=2.0.0 <6.0.0",
         {
           // Yarn Berry uses its signed npm tarball and standard registry overrides.
           // `publishedFrom` is the one place the band is wider than the package:
@@ -747,8 +769,9 @@ const EXE = process.platform === "win32" ? ".exe" : "";
  * build" — and it is worth more than the 404 the alternative produces. The set
  * is listed in the message because it is short and because the user's next move
  * depends on it.
+ * Exported for §02.2's embedded digests, which are keyed by target.
  */
-function targetFor(spec: ToolSpec, locator: ResolvedSpec): string {
+export function targetFor(spec: ToolSpec, locator: ResolvedSpec): string {
   const host = hostTarget();
   const target = spec.targets?.[host];
   if (target === undefined) {
