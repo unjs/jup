@@ -1782,6 +1782,12 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * `config/table.ts` — the entry and the comment above it, and nothing a
    * warm run executes beyond reading one more key. Measured, `dist/index.mjs`
    * 209,974 -> 210,442, **+468 or +0.22%**. `config/table.ts` is now 40,852.
+   *
+   * Re-based to 306,000 for §02.5's `vlt`, upm's shape.
+   * 302,955 -> 304,839, **+1,884 or +0.62%**, all of it `config/table.ts` —
+   * the entry and its comments, nothing a warm run executes beyond reading one
+   * more key. Measured, `dist/index.mjs` 211,937 -> 212,484, **+547 or +0.26%**.
+   * `config/table.ts` is now 43,021.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1793,7 +1799,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(303_000);
+    ).toBeLessThanOrEqual(306_000);
   });
 });
 

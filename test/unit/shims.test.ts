@@ -233,7 +233,7 @@ describe("§08.3.3 — the execve addon", () => {
 
 describe("target set (§10.7)", () => {
   // §10.7 redirected this row: npm used to be excluded by default. Its
-  // `aube` and `upm` join it — package managers, so they are in the default set;
+  // `aube`, `upm` and `vlt` join it — package managers, so they are in the default set;
   // `bun` and `deno` are runtimes and stay out (`shimByDefault: false`).
   it("117: defaults to every package manager, npm included", () => {
     expect(targetBinaries([])).toEqual([
@@ -248,6 +248,8 @@ describe("target set (§10.7)", () => {
       "aubx",
       "upm",
       "upx",
+      "vlt",
+      "vlx",
     ]);
   });
 
@@ -262,6 +264,8 @@ describe("target set (§10.7)", () => {
       "aubx",
       "upm",
       "upx",
+      "vlt",
+      "vlx",
     ]);
   });
 

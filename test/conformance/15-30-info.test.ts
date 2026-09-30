@@ -172,7 +172,7 @@ describe("§09.9 corepack info", () => {
     const cases: Array<[label: string, manifest: unknown, expected: RegExp]> = [
       ["a missing version", { packageManager: "pnpm" }, /No version specified/],
       ["a malformed field", { packageManager: "pnpm@" }, /No version specified/],
-      ["an unsupported name", { packageManager: "vlt@1.0.0" }, /Unsupported package manager/],
+      ["an unsupported name", { packageManager: "cnpm@1.0.0" }, /Unsupported package manager/],
       ["a wrong type", { packageManager: 42 }, /expected a string/],
       ["a null pin", { packageManager: null }, /expected a string/],
       ["unparseable JSON", "{ not json", /Invalid package\.json/],
@@ -194,7 +194,7 @@ describe("§09.9 corepack info", () => {
       ],
       [
         "an unsupported package manager in devEngines",
-        { devEngines: { packageManager: { name: "vlt", version: "1.x" } } },
+        { devEngines: { packageManager: { name: "cnpm", version: "1.x" } } },
         /Unsupported package manager/,
       ],
     ];
@@ -489,6 +489,9 @@ describe("§09.9 corepack info", () => {
       // upm is a JS package manager, so a bare `enable` claims it as it does npm.
       "upm",
       "upx",
+      // vlt too.
+      "vlt",
+      "vlx",
       // §02.3 — a runtime is never in the default set (§10.7 requires it), so
       // `node` joins the reported-but-not-installed group with bun and deno.
       "node",
@@ -703,23 +706,23 @@ describe("§09.9 info --store-path", () => {
   it("refuses a name the table does not know", async () => {
     const fixture = createFixture({ packageManager: "pnpm@11.1.2" });
 
-    const result = await run(["info", "--store-path", "vlt"], { ...fixture, registry });
+    const result = await run(["info", "--store-path", "cnpm"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toContain(
-      `Usage Error: This package manager (vlt) isn't supported by this jup build`,
+      `Usage Error: This package manager (cnpm) isn't supported by this jup build`,
     );
   });
 
   it("gives a bare --store-path the pin's own diagnosis when it cannot be read", async () => {
     // Not "the project features no packageManager field": it features one, and
     // §12.2's sentence is what says why it cannot be used.
-    const fixture = createFixture({ packageManager: "vlt@1.0.0" });
+    const fixture = createFixture({ packageManager: "cnpm@1.0.0" });
 
     const result = await run(["info", "--store-path"], { ...fixture, registry });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toContain(`Unsupported package manager specification (vlt@1.0.0)`);
+    expect(result.stdout).toContain(`Unsupported package manager specification (cnpm@1.0.0)`);
   });
 
   it("refuses a bare --store-path with no project, and with no pin (§09.1)", async () => {

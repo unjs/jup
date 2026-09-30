@@ -470,6 +470,43 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     ],
   },
 
+  // §02.5 — upm's shape: one signed JavaScript tarball for every host, so
+  // `default` is sha512-pinned and `vlt` joins a bare `jup enable`. The package
+  // also publishes `vlr`, `vlrx` and `vlxl`; jup answers only to `vlt` and its
+  // `…x` runner `vlx`, as it does for every other entry but aube. `vlx` is
+  // `vlt exec`, chosen by its own entry point rather than by `argv[0]`.
+  //
+  // Its `package.json` has no `type`, so Node prints `MODULE_TYPELESS_PACKAGE_JSON`
+  // once per run on stderr: vlt's shebang passes `--no-warnings`, and §08.2
+  // never reads a shebang. Accepted until upstream declares `"type": "module"`.
+  vlt: {
+    default:
+      "1.3.0+sha512.67876b04090e03c25e0542b27eb4e09cec790aebedb6e0fdafd4fd6141d450e391b484b6ca2566db3646abb189eea45a69feca47b15aeabd12dc7f7c3c8483a0",
+    fetchLatestFrom: { type: "npm", package: "vlt" },
+    // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
+    // `vlt x`, and reached under its own name as `vlx` — installs the package
+    // into a throwaway environment when the project lacks it, `npx`'s reason.
+    // `vlt run`, `vlt run-exec` and `vlt exec-local` act on the project, so
+    // those stay subject to §03.5.
+    transparent: {
+      commands: [["vlt", "init"], ["vlt", "create"], ["vlt", "exec"], ["vlt", "x"], ["vlx"]],
+    },
+    // §09.9 — vlt's global store lives under `cache`. `--view=inspect` is the
+    // one view that prints the bare path; the default quotes it as JSON.
+    storeCommands: [["vlt", "config", "get", "cache", "--view=inspect"]],
+    ranges: [
+      [
+        "*",
+        {
+          url: "https://registry.npmjs.org/vlt/-/vlt-{}.tgz",
+          bin: { vlt: "./vlt.js", vlx: "./vlx.js" },
+          registry: { type: "npm", package: "vlt" },
+          commands: { use: ["vlt", "install"], run: ["vlt", "run"] },
+        },
+      ],
+    ],
+  },
+
   // §02.3 — the first entry that is not a package manager. `kind` is the only
   // field that says so, and the four things it decides all live in §03 and §10.
   node: {

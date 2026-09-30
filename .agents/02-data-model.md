@@ -309,6 +309,7 @@ jup answers to, and the set of shims `enable` creates (§10).
 | aube | pm | `aube`, `aubr`, `aubx` | yes | yes | yes |
 | nub | pm | `nub`, `nubx` | yes | yes | no |
 | upm | pm | `upm`, `upx` | no | no | yes |
+| vlt | pm | `vlt`, `vlx` | no | no | yes |
 | node | runtime | `node` | yes | yes | no |
 
 Entry-specific rules that are *rules*, not values:
@@ -335,6 +336,11 @@ Entry-specific rules that are *rules*, not values:
   (`init`, `create`, `dlx`, `x`, and the `…x` binaries). Commands that act on the
   project the user is standing in (`deno run`, `nub run`, `aube exec`) stay
   subject to §03.5.
+* **vlt** ships a `package.json` with no `type`, so Node prints a
+  `MODULE_TYPELESS_PACKAGE_JSON` warning on stderr once per run. vlt's shebang
+  hides it with `--no-warnings`, but §08.2 never reads a shebang. jup accepts the
+  warning rather than add a table field for it; it goes away once upstream
+  declares `"type": "module"`.
 
 ### Fields with exactly one user
 
