@@ -556,12 +556,12 @@ describe.skipIf(process.platform === "win32")("the PATH preference (§10.5)", ()
     // mtime. Backdating it makes "was this directory written to?" observable —
     // and the answer must be no, because `--install-directory` was given and
     // succeeded, so the alternate is never a candidate for anything.
-    const past = new Date(Date.now() - 60_000);
+    const past = new Date(Math.floor(Date.now() / 1000) * 1000 - 60_000);
     utimesSync(homeBin, past, past);
 
     expect(await cmdEnable([`--install-directory=${binDir}`, "yarn"], dist)).toBe(0);
 
-    expect(statSync(homeBin).mtimeMs).toBe(past.getTime());
+    expect(statSync(homeBin).mtime.getTime()).toBe(past.getTime());
     expect(existsSync(join(binDir, "yarn"))).toBe(true);
   });
 
