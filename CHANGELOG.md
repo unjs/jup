@@ -1,6 +1,28 @@
 # Changelog
 
 
+## v0.6.4
+
+[compare changes](https://github.com/unjs/jup/compare/v0.6.3...v0.6.4)
+
+### 🚀 Enhancements
+
+- Support vlt ([#13](https://github.com/unjs/jup/pull/13))
+
+### 🏡 Chore
+
+- Pin upm ([e5747e1](https://github.com/unjs/jup/commit/e5747e1))
+
+### ✅ Tests
+
+- Tolerate Node 22's env-proxy warning and keep row 250's PATH node-free ([df8f5aa](https://github.com/unjs/jup/commit/df8f5aa))
+- Backdate to a whole second so row 250's mtime compares exactly ([9e2b820](https://github.com/unjs/jup/commit/9e2b820))
+
+### ❤️ Contributors
+
+- Pi0x <x@pi0.io>
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.3
 
 [compare changes](https://github.com/unjs/jup/compare/v0.6.2...v0.6.3)
