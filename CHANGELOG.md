@@ -1,6 +1,26 @@
 # Changelog
 
 
+## v0.6.3
+
+[compare changes](https://github.com/unjs/jup/compare/v0.6.2...v0.6.3)
+
+### 🩹 Fixes
+
+- Name the release-age gate when it holds back every range match ([e5c8434](https://github.com/unjs/jup/commit/e5c8434))
+
+### 🏡 Chore
+
+- Refresh the built-in table ([82644ea](https://github.com/unjs/jup/commit/82644ea))
+
+### ✅ Tests
+
+- Resolve devEngines row 34 against the mock registry ([8597fc4](https://github.com/unjs/jup/commit/8597fc4))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.2
 
 [compare changes](https://github.com/unjs/jup/compare/v0.6.1...v0.6.2)

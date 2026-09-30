@@ -890,7 +890,7 @@ describe("aube — §03.1's third per-host entry", () => {
     // The literal is stamped by `scripts/refresh-table.mjs`; see nub's row below
     // for what it is for and why it is not derived from the table.
     expect(parse(DEFINITIONS.aube!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.aube!.default).toBe("2.5.1");
+    expect(DEFINITIONS.aube!.default).toBe("2.6.0");
   });
 
   it("gives all three names one file, for argv[0] dispatch", () => {

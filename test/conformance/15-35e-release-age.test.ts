@@ -156,6 +156,40 @@ describe("§04.1 JUP_MINIMUM_RELEASE_AGE", () => {
     expect(pinOf(fixture)).toContain(`pnpm@${FRESH}`);
   });
 
+  it("203: a range only held-back releases satisfy names the gate, not a missing release", async () => {
+    // `^11.2.0` is satisfied by FRESH alone. Reporting §12.4's "Failed to
+    // successfully resolve" would read as "no such release" the day one ships.
+    const fixture = createFixture({ name: "app", packageManager: `pnpm@^${FRESH}` });
+
+    const result = await run(["pnpm", "--version"], {
+      ...fixture,
+      registry,
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      `No release of pnpm matching '^${FRESH}' is old enough for JUP_MINIMUM_RELEASE_AGE=24; pin an exact version to use a newer one`,
+    );
+    expect(result.stderr).not.toContain("Failed to successfully resolve");
+    expect(result.stdout).toBe("");
+  });
+
+  it("203: a range nothing satisfies still reports §12.4's resolution failure", async () => {
+    const fixture = createFixture({ name: "app", packageManager: "pnpm@^99.0.0" });
+
+    const result = await run(["pnpm", "--version"], {
+      ...fixture,
+      registry,
+      env: env({ JUP_MINIMUM_RELEASE_AGE: "24" }),
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(
+      "Failed to successfully resolve '^99.0.0' to a valid pnpm release",
+    );
+  });
+
   it("203: `use` and `up` obey it too — they are implicit resolution", async () => {
     const fixture = createFixture({ name: "app" });
 

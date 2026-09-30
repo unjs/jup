@@ -27,7 +27,9 @@ resolver those first three steps skip.
 5. range is exact → ResolvedSpec {name, reference: range}, unverified
 6. query every band in parallel, union the versions satisfying the range under
    §4.2 semantics, drop prereleases unless named or JUP_ENABLE_PRERELEASES=1,
-   apply JUP_MINIMUM_RELEASE_AGE, sort descending, take the highest, else null
+   apply JUP_MINIMUM_RELEASE_AGE, sort descending, take the highest;
+   nothing left but the gate held a match back → UsageError "No release of <name>
+   matching '<range>' is old enough …"; else null
 ```
 
 Order matters in ways that are easy to get wrong. Step 4 comes **before** step 5:
@@ -73,6 +75,11 @@ no dates at all is **refused** rather than silently resolved from — a security
 control that reports success without having been applied is worse than one that
 stops. Only a band that actually matched something refuses, so a range confined
 to another band is unaffected.
+
+A range that only held-back releases satisfy is refused by name, not returned
+as `null`: "Failed to successfully resolve" would read as "no such release" on
+the day a matching one ships, and a `null` would let §04.4's stale memo answer
+for a security control.
 
 Unparseable or negative values are refused, not defaulted. Every other numeric
 variable falls back on garbage because a mistyped timeout costs latency; this one
