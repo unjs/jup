@@ -1,6 +1,23 @@
 # Changelog
 
 
+## v0.6.5
+
+[compare changes](https://github.com/unjs/jup/compare/v0.6.4...v0.6.5)
+
+### 🚀 Enhancements
+
+- Add `cwd`, `env` and `stdio` options to `runMain` ([#20](https://github.com/unjs/jup/pull/20))
+
+### 🏡 Chore
+
+- Refresh default versions table ([1eaf12c](https://github.com/unjs/jup/commit/1eaf12c))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+- Pi0x <x@pi0.io>
+
 ## v0.6.4
 
 [compare changes](https://github.com/unjs/jup/compare/v0.6.3...v0.6.4)
