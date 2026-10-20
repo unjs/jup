@@ -18,7 +18,7 @@ const {
   sep,
 } = process.getBuiltinModule("node:path");
 const { Readable } = process.getBuiltinModule("node:stream");
-import { ENV, envSpellings, writeEnv } from "../config/env-vars.ts";
+import { ENV, writeEnv } from "../config/env-vars.ts";
 import {
   getTableSpec,
   isPerHost,
@@ -86,6 +86,7 @@ const COREPACK_ARCHIVE_NAME = "corepack.tgz";
 
 import { formatHelp } from "./usage.ts";
 import { getOwnVersion } from "../utils/self.ts";
+import { runCwd } from "../utils/context.ts";
 import { out, outColors } from "../utils/log.ts";
 
 async function resolveOrThrow(descriptor: Spec, options: ResolveOptions): Promise<ResolvedSpec> {
@@ -238,7 +239,7 @@ function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
  * The byte-compatible messages say "to pack" in all four commands.
  */
 export function resolvePatternsToDescriptors(patterns: string[]): Spec[] {
-  const cwd = process.cwd();
+  const cwd = runCwd();
 
   if (patterns.length > 0) {
     // Explicit patterns mean the project is irrelevant — but the env file is
@@ -266,7 +267,7 @@ function resolveProjectSpec(options?: { mutating?: boolean; here?: boolean }): {
 } {
   // §03.1 — a command that is about to *write* must read the spec from the file
   // it will write, or `up` refreshes one manifest and pins another.
-  const lookup = findProjectSpec(process.cwd(), options);
+  const lookup = findProjectSpec(runCwd(), options);
   switch (lookup.type) {
     case "NoProject": {
       throw new UsageError(messages.couldntFindProject());
@@ -522,7 +523,7 @@ async function installFromArchive(
   file: string,
   options: { activate: boolean; announce: (name: string, reference: string) => string },
 ): Promise<void> {
-  const filePath = resolvePath(process.cwd(), file);
+  const filePath = resolvePath(runCwd(), file);
   const found = await readArchiveEntries(filePath);
 
   const installFolder = getInstallFolder();
@@ -768,7 +769,7 @@ function pinRangeToProject(
     locator,
     (_reference, spec) => {
       const { previousPackageManager, target, written } = writePin(
-        process.cwd(),
+        runCwd(),
         // §02.4 — the digest is per-host for a native tool, so it never reaches
         // the manifest; for a range it never does anyway, since the field holds no
         // version for a digest to describe. `jup.lock` below is where it lands.
@@ -843,20 +844,13 @@ async function applyToProject(
   // §09.5 — what the package manager's own `use` command is told to migrate
   // from; the literal `unknown` when the project had no previous value.
   //
-  // §08.7 puts this in the *child's* environment, and `process.env` is only that
-  // when this process is the tool's. Without handover there is a caller above
-  // whose environment outlives the run, so the variable is put back afterwards:
-  // the child's block is a copy taken at spawn time, so it still carries the
-  // value, and nothing of ours reads it after the handover returns.
-  const restore = restoreEnvAfter(run, ENV.MIGRATE_FROM);
+  // §08.7 puts this in the *child's* environment. Without handover that is the
+  // run's own copy (`utils/context.ts`), which the child's block is taken from
+  // and which ends with the run, so the caller above never sees it.
   writeEnv(ENV.MIGRATE_FROM, previousPackageManager);
   out(`\n`);
 
-  try {
-    return await execBandCommand(use, spec, [], run);
-  } finally {
-    restore();
-  }
+  return await execBandCommand(use, spec, [], run);
 }
 
 /**
@@ -908,26 +902,6 @@ function execBandCommand(
   );
 }
 
-/**
- * A no-op under handover, and otherwise a function that puts every spelling of
- * `name` back the way it was.
- *
- * Both spellings, because {@link writeEnv} sets both (§11.6) and restoring one
- * would leave the compatibility name standing — which for
- * `COREPACK_MIGRATE_FROM` is the one a package manager actually reads.
- */
-function restoreEnvAfter(run: RunOptions | undefined, name: string): () => void {
-  if (run?.handover === true) return () => {};
-
-  const before = envSpellings(name).map((spelling) => [spelling, process.env[spelling]] as const);
-  return () => {
-    for (const [spelling, value] of before) {
-      if (value === undefined) delete process.env[spelling];
-      else process.env[spelling] = value;
-    }
-  };
-}
-
 /** §09.5 / §03.7 — write the exact pin, and retire the range it replaced. */
 function pinToProject(
   locator: ResolvedSpec,
@@ -947,7 +921,7 @@ function pinToProject(
     locator,
     (reference, spec) => {
       const { previousPackageManager, target, written } = writePin(
-        process.cwd(),
+        runCwd(),
         { name: locator.name, reference, hash: perHost ? undefined : spec.hash },
         options,
       );
@@ -985,7 +959,7 @@ function pinToProject(
  * manifest read here is the manifest the caller is about to write.
  */
 function recordedPinToRetire(here: boolean, tool: string): Spec | undefined {
-  const lookup = findProjectSpec(process.cwd(), { mutating: true, here, tool });
+  const lookup = findProjectSpec(runCwd(), { mutating: true, here, tool });
   if (lookup.type !== "Found") return undefined;
 
   const dir = dirname(lookup.target);
@@ -1010,7 +984,7 @@ function recordedPinToRetire(here: boolean, tool: string): Spec | undefined {
  */
 function commitsResolution(here: boolean, tool: string, create: boolean): boolean {
   if (create) return true;
-  const lookup = findProjectSpec(process.cwd(), { mutating: true, here, tool });
+  const lookup = findProjectSpec(runCwd(), { mutating: true, here, tool });
   return hasLockfile(dirname(lookup.target));
 }
 
@@ -1054,7 +1028,7 @@ export async function cmdPack(args: string[]): Promise<number> {
   }
 
   const output = resolvePath(
-    process.cwd(),
+    runCwd(),
     firstValue(parsed, "-o", "--output") ?? DEFAULT_ARCHIVE_NAME,
   );
   await writeArchive(locations, output, json);
@@ -1136,11 +1110,7 @@ export async function cmdPrepare(args: string[]): Promise<number> {
   }
 
   if (wantsArchive) {
-    await writeArchive(
-      locations,
-      resolvePath(process.cwd(), output ?? COREPACK_ARCHIVE_NAME),
-      json,
-    );
+    await writeArchive(locations, resolvePath(runCwd(), output ?? COREPACK_ARCHIVE_NAME), json);
   }
   return 0;
 }

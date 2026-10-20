@@ -135,7 +135,8 @@ Before reading each directory's manifest, until one is found:
   together).
 * **Filter** to keys carrying `JUP_` or `COREPACK_`. Everything else is dropped.
   This prefix filter is the entire sandbox against a hostile repository.
-* **Merge** as `{...fileVars, ...process.env}` — the real environment wins.
+* **Merge** as `{...fileVars, ...process.env}` — the real environment wins. A
+  run without handover merges into its own copy instead (§8.3.4).
   For a setting in §11.7's compatibility set, "has not set" means *neither*
   spelling: drop a file variable whose pair is present in the real environment
   before merging, or a file's `JUP_HOME` would out-rank a real `COREPACK_HOME`.

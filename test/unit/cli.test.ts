@@ -81,6 +81,7 @@ import { readInstalledSpec } from "../../src/cache/store.ts";
 import type { CorepackMarker } from "../../src/types.ts";
 import { COREPACK_USAGE_LINES, USAGE_LINES } from "../../src/commands/usage.ts";
 import { runMain } from "../../src/main.ts";
+import { runEnv } from "../../src/utils/context.ts";
 import { getOwnVersion } from "../../src/utils/self.ts";
 
 /* ------------------------------------------------------------------ *
@@ -354,7 +355,7 @@ const execMock = vi.mocked(execPackageManager);
 function captureMigrateFrom(): { readonly value: string | undefined } {
   const seen: { value: string | undefined } = { value: undefined };
   execMock.mockImplementationOnce(() => {
-    seen.value = process.env.COREPACK_MIGRATE_FROM;
+    seen.value = runEnv().COREPACK_MIGRATE_FROM;
     return 0;
   });
   return seen;
@@ -1216,7 +1217,8 @@ describe("use (§09.5, tests 105-110)", () => {
     await manifest({ name: "demo" });
 
     const migrateFrom = captureMigrateFrom();
-    await cmdUse(["yarn@1.22.4"]);
+    // Through `runMain`, so it is a run of its own rather than a bare call.
+    await runMain(["use", "yarn@1.22.4"]);
 
     expect(migrateFrom.value).toBe("unknown");
     // §08.7 — and it does not outlive the run it was set for.

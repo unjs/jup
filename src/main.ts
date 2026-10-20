@@ -15,6 +15,7 @@ import {
 } from "./config/table.ts";
 import { envDisabled, envFlag } from "./project/env.ts";
 import { advisory, messages, UsageError } from "./errors.ts";
+import { runCwd } from "./utils/context.ts";
 import { err, out, outColors } from "./utils/log.ts";
 import { execPackageManager } from "./run/exec.ts";
 import {
@@ -147,9 +148,9 @@ export async function runProxy(
   const requestedName = name ?? binaryName;
 
   // Step 3 — one `package.json` read plus at most two env-file opens per
-  // directory walked. The env file it loads is applied to `process.env` here,
-  // before anything reads a `COREPACK_*` variable below.
-  const cwd = process.cwd();
+  // directory walked. The env file it loads is applied to the run's environment
+  // here, before anything reads a `COREPACK_*` variable below.
+  const cwd = runCwd();
   // `projectSpecFlag` — §03.5's "never look at the project at all" has to mean
   // the manifest is never parsed either, or a malformed `package.json` still
   // fails the very run `COREPACK_ENABLE_PROJECT_SPEC=0` was set to rescue. The
@@ -272,17 +273,33 @@ export async function runProxy(
 }
 
 /**
+ * A run under handover uses the process's own cwd, environment and streams, so
+ * `RunOptions`' three fields for them are a contradiction there. Without it the
+ * run gets copies of its own (`run/scoped.ts`, cold: no shipped entry goes there).
+ */
+export async function runMain(argv: string[], run?: RunOptions): Promise<RunResult> {
+  if (run?.handover !== true) {
+    const { runScoped } = await import("./run/scoped.ts");
+    return await runScoped(run, () => dispatch(argv, run));
+  }
+  if (run.cwd !== undefined || run.env !== undefined || run.stdio !== undefined) {
+    throw new TypeError("RunOptions.cwd, env and stdio cannot be combined with handover.");
+  }
+  return { code: await dispatch(argv, run) };
+}
+
+/**
  * §08.4, §12.1 — a `UsageError` in proxy mode prints bare on stderr; in
  * management mode it prints `Usage Error: …` on **stdout**, then a blank line,
  * then the usage line. Anything else prints with a stack, because a stack trace
  * is the correct output for a bug.
  */
-export async function runMain(argv: string[], run?: RunOptions): Promise<RunResult> {
+async function dispatch(argv: string[], run: RunOptions | undefined): Promise<number> {
   const invocation = parseArgs(argv);
 
   try {
     if (invocation.mode === "proxy") {
-      return { code: await runProxy(invocation, run) };
+      return await runProxy(invocation, run);
     }
     // §09.11 — corepack's `install` / `install -g`, rewritten to the `cache`
     // spelling. Above the dispatch switch so `presentError` reads the same
@@ -293,9 +310,9 @@ export async function runMain(argv: string[], run?: RunOptions): Promise<RunResu
     // Loaded lazily: the proxy path is the hot one and must not pay for the
     // command surface it never touches (§16, Build shape).
     const { runManagementCommand } = await import("./commands/cli.ts");
-    return { code: await runManagementCommand(invocation.args, run) };
+    return await runManagementCommand(invocation.args, run);
   } catch (error) {
-    return { code: await presentError(error, invocation, run) };
+    return await presentError(error, invocation, run);
   }
 }
 

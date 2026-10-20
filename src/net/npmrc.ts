@@ -12,6 +12,7 @@ import { ENV, envSpellings, registryVariableFor, SYSTEM_ENV } from "../config/en
 import { DEFAULT_REGISTRY } from "../config/keys.ts";
 import { advisory } from "../errors.ts";
 import { loadEnvFileFrom } from "../project/env.ts";
+import { runContext, runCwd, runEnv } from "../utils/context.ts";
 /** §05.3's three tiers, lowest precedence first. */
 export type NpmrcLevel = "global" | "user" | "project";
 
@@ -145,7 +146,7 @@ function warnOnce(message: string, seen: string): void {
 
 /** Test seam: forget both the parse cache and the warning log. */
 export function resetNpmrcCache(): void {
-  cache.clear();
+  processCache.clear();
   warned.clear();
 }
 /**
@@ -168,7 +169,8 @@ const SCOPED_REGISTRY = /^@[^\s:@]+:registry$/;
  * lifecycle script — overrides it, with a bare `PREFIX` as the fallback.
  */
 export function globalNpmrcPath(): string {
-  const configured = process.env[SYSTEM_ENV.NPM_CONFIG_PREFIX] ?? process.env[SYSTEM_ENV.PREFIX];
+  const env = runEnv();
+  const configured = env[SYSTEM_ENV.NPM_CONFIG_PREFIX] ?? env[SYSTEM_ENV.PREFIX];
   const prefix =
     configured !== undefined && configured !== ""
       ? configured
@@ -191,9 +193,7 @@ export function globalNpmrcPath(): string {
  */
 function homeDirectory(): string {
   const configured =
-    process.platform === "win32"
-      ? process.env[SYSTEM_ENV.USERPROFILE]
-      : process.env[SYSTEM_ENV.HOME];
+    process.platform === "win32" ? runEnv()[SYSTEM_ENV.USERPROFILE] : runEnv()[SYSTEM_ENV.HOME];
   if (configured !== undefined && configured !== "") return configured;
   return homedir();
 }
@@ -358,7 +358,7 @@ export function expandVariables(value: string): { value: string } | { missing: s
   let missing: string | undefined;
 
   const expanded = value.replace(/\$\{([^}]+)\}/g, (_match, name: string) => {
-    const found = process.env[name];
+    const found = runEnv()[name];
     if (found === undefined) {
       missing ??= name;
       return "";
@@ -368,7 +368,15 @@ export function expandVariables(value: string): { value: string } | { missing: s
 
   return missing === undefined ? { value: expanded } : { missing };
 }
-const cache = new Map<string, NpmrcConfig>();
+const processCache = new Map<string, NpmrcConfig>();
+
+/**
+ * The memo for this run. A run without handover keeps its own: its files expand
+ * `${VAR}` against that run's environment, which the next run need not share.
+ */
+function npmrcCache(): Map<string, NpmrcConfig> {
+  return (runContext()?.npmrc as Map<string, NpmrcConfig> | undefined) ?? processCache;
+}
 
 /** The auth key suffixes §05.3 lists, and nothing else. */
 const AUTH_SUFFIXES = [":_authToken", ":_auth", ":username", ":_password"] as const;
@@ -399,8 +407,9 @@ function isHonouredKey(key: string): boolean {
  * for credentials, and re-reading three files per request would put filesystem
  * I/O on a path §01.3 measures.
  */
-export function loadNpmrc(cwd: string = process.cwd()): NpmrcConfig {
+export function loadNpmrc(cwd: string = runCwd()): NpmrcConfig {
   const key = resolvePath(cwd);
+  const cache = npmrcCache();
   const hit = cache.get(key);
   if (hit !== undefined) return hit;
 
@@ -728,7 +737,7 @@ export { registryVariableFor };
  */
 function envSetting(name: string): { name: string; value: string } | undefined {
   for (const spelling of envSpellings(name)) {
-    const value = process.env[spelling];
+    const value = runEnv()[spelling];
     if (value !== undefined && value !== "") return { name: spelling, value };
   }
   return undefined;
@@ -905,7 +914,7 @@ function envRegistryOrigins(config: NpmrcConfig): { user: Set<string>; project: 
   const user = new Set<string>();
   const project = new Set<string>();
 
-  for (const [name, raw] of Object.entries(process.env)) {
+  for (const [name, raw] of Object.entries(runEnv())) {
     if (raw === undefined || raw === "" || !REGISTRY_VARIABLE.test(name)) continue;
     const registry = registryValue(raw);
     if (registry === undefined) continue;

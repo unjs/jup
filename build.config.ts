@@ -82,6 +82,7 @@ export const WARM_MODULES = [
   "project/pm-lockfile.ts",
   "project/version-file.ts",
   "run/exec.ts",
+  "utils/context.ts",
   "utils/json.ts",
   "utils/log.ts",
   "utils/self.ts",

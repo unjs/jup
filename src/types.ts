@@ -554,8 +554,43 @@ export interface RunOptions {
    * comes back as `128 + N` rather than killing the caller, an IPC channel of
    * the caller's stays the caller's (§08.3.2), and the returned number is the
    * tool's real exit code rather than §08.4's placeholder `0`.
+   *
+   * `true` cannot be combined with {@link cwd}, {@link env} or {@link stdio}:
+   * a run that becomes the process has only the process's own to use, and the
+   * combination rejects with a `TypeError`.
    */
   handover?: boolean;
+
+  /**
+   * Directory the run behaves as if started from (default `process.cwd()`),
+   * resolved against `process.cwd()` when relative.
+   *
+   * Project discovery (manifest, `jup.lock`, env file, `.npmrc`), every write a
+   * command makes relative to the cwd, and the tool's own working directory all
+   * use it. `process.chdir()` is never called.
+   */
+  cwd?: string;
+
+  /**
+   * Environment the run reads its settings from and hands the tool (default
+   * `process.env`).
+   *
+   * The run works on a copy, so §03.2's env-file values, `COREPACK_ROOT` and
+   * every other variable jup sets for the tool stay in that run. This holds
+   * without the option too: a run without handover never writes `process.env`.
+   */
+  env?: Record<string, string | undefined>;
+
+  /**
+   * The run's standard streams, as `child_process.spawn` spells them (default
+   * `"inherit"`): one mode for all three, or `[stdin, stdout, stderr]`.
+   *
+   * Applies to the tool and to jup's own output alike, so a `"pipe"`d stderr
+   * collects advisories and download notices together with the tool's own, in
+   * order, into {@link RunResult.stderr}. A `"pipe"`d stdin is closed at once,
+   * so the tool reads end-of-file.
+   */
+  stdio?: StdioOption;
 
   /**
    * Answer to corepack's command spellings as well as jup's (default `false`).
@@ -612,4 +647,16 @@ export interface RunOptions {
  */
 export interface RunResult {
   code: number;
+  /** Everything written to stdout, present only when {@link RunOptions.stdio} piped it. */
+  stdout?: string;
+  /** Everything written to stderr, present only when {@link RunOptions.stdio} piped it. */
+  stderr?: string;
 }
+
+/** One stream's {@link RunOptions.stdio} mode. */
+export type StdioMode = "inherit" | "pipe" | "ignore";
+
+/** {@link RunOptions.stdio}: one mode for all three streams, or one each. */
+export type StdioOption =
+  | StdioMode
+  | readonly [stdin: StdioMode, stdout: StdioMode, stderr: StdioMode];

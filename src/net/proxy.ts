@@ -6,6 +6,7 @@ import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type { Readable } from "node:stream";
 import { PROXY_ENV } from "../config/env-vars.ts";
+import { runEnv } from "../utils/context.ts";
 import { NetworkError, networkError } from "../errors-cold.ts";
 import { classifyTlsFailure, tlsConnectOptions, tlsTransportRequired } from "./tls.ts";
 
@@ -38,9 +39,9 @@ export interface ProxySelection {
  * command (`HTTPS_PROXY= cmd`).
  */
 function fromEnv(name: string): string | undefined {
-  const lower = process.env[name.toLowerCase()];
+  const lower = runEnv()[name.toLowerCase()];
   if (lower !== undefined && lower !== "") return lower;
-  const upper = process.env[name.toUpperCase()];
+  const upper = runEnv()[name.toUpperCase()];
   if (upper !== undefined && upper !== "") return upper;
   return undefined;
 }
