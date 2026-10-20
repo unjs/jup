@@ -888,7 +888,7 @@ describe("aube — §03.1's third per-host entry", () => {
     // The literal is stamped by `scripts/refresh-table.mjs`; see nub's row below
     // for what it is for and why it is not derived from the table.
     expect(parse(DEFINITIONS.aube!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.aube!.default).toBe("2.6.0");
+    expect(DEFINITIONS.aube!.default).toBe("2.8.0");
   });
 
   it("gives all three names one file, for argv[0] dispatch", () => {
@@ -913,6 +913,17 @@ describe("aube — §03.1's third per-host entry", () => {
       aubr: `./bin/aubr${EXE}`,
       aubx: `./bin/aubx${EXE}`,
     });
+  });
+
+  it("points all three names at one file from 2.7.0, when the artifact stopped shipping three", () => {
+    pretendHost("linux", "x64");
+    const single = { aube: `./bin/aube${EXE}`, aubr: `./bin/aube${EXE}`, aubx: `./bin/aube${EXE}` };
+    expect(resolveSpecBin(getSpecFor("aube", "2.7.0"))).toEqual(single);
+    expect(resolveSpecBin(getSpecFor("aube", DEFINITIONS.aube!.default))).toEqual(single);
+    expect(getBinariesFor("aube")).toEqual(["aube", "aubr", "aubx"]);
+
+    pretendHost("win32", "x64");
+    expect(resolveSpecBin(getSpecFor("aube", "2.7.0"))).toEqual(single);
   });
 
   it("resolves `{target}` straight through, because the names already match", () => {
@@ -945,12 +956,13 @@ describe("aube — §03.1's third per-host entry", () => {
     );
   });
 
-  it("declares one band, because its one host change is unexpressible", () => {
+  it("draws no band at its host change, because that boundary is unexpressible", () => {
     // aube gained its musl artifacts in `1.0.0-beta.12`, and §02.3's band lookup
     // strips prereleases from both sides — so `>=1.0.0-beta.12` would also admit
     // `1.0.0-beta.2` and promise an artifact that does not exist. bun's bands
-    // work because its boundaries (1.1.0, 1.1.39, 1.3.10) are releases.
-    expect(DEFINITIONS.aube!.ranges.map(([range]) => range)).toEqual(["*"]);
+    // work because its boundaries (1.1.0, 1.1.39, 1.3.10) are releases, as
+    // aube's one band boundary, the 2.7.0 bin layout, is.
+    expect(DEFINITIONS.aube!.ranges.map(([range]) => range)).toEqual(["*", ">=2.7.0"]);
     expect(Object.keys(getSpecFor("aube", "2.2.0").targets!)).toContain("linux-arm64-musl");
     expect(satisfiesWithPrereleases("1.0.0-beta.2", ">=1.0.0-beta.12")).toBe(true);
   });
@@ -1013,7 +1025,7 @@ describe("nub — §03.1's fourth per-host entry", () => {
     // beside it is the invariant a refresh must never break, and it is the one
     // this row is actually about.
     expect(parse(DEFINITIONS.nub!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.nub!.default).toBe("0.9.5");
+    expect(DEFINITIONS.nub!.default).toBe("0.9.7");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {

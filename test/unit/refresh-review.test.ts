@@ -25,11 +25,10 @@ describe("refresh review: bin drift", () => {
     expect(
       binDrift("npm", lastBand("npm").bin, { npm: "bin/npm-cli.js", npx: "bin/npx-cli.js" }, ""),
     ).toEqual([]);
-    // Per-host metadata, `{exe}` substituted per host.
-    const aube = { aube: "bin/aube", aubr: "bin/aubr", aubx: "bin/aubx" };
-    expect(binDrift("aube", lastBand("aube").bin, aube, "")).toEqual([]);
-    const aubeWin = { aube: "bin/aube.exe", aubr: "bin/aubr.exe", aubx: "bin/aubx.exe" };
-    expect(binDrift("aube", lastBand("aube").bin, aubeWin, ".exe")).toEqual([]);
+    // Per-host metadata, `{exe}` substituted per host. From 2.7.0 aube publishes
+    // one bin, and the band's `aubr` and `aubx` alias its path.
+    expect(binDrift("aube", lastBand("aube").bin, { aube: "bin/aube" }, "")).toEqual([]);
+    expect(binDrift("aube", lastBand("aube").bin, { aube: "bin/aube.exe" }, ".exe")).toEqual([]);
   });
 
   it("allows a band-only alias of a published path", () => {

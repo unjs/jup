@@ -168,7 +168,7 @@ const PNPM_EXE_TARGETS = {
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default:
-      "12.1.0+sha512.17286eeb6a4dc7bd180acff9f9d1262504c556648ac2fa39080d2abc19060d1a686f8d8c27a1b6450dad77178a3389d89c8643aa4600c4482ab687a39fd406b5",
+      "12.2.0+sha512.66c2632a94e796649738b2d7894d710c2cc2e1696893823066687f6b0d8a52e5f2b54eeaeaa32ffdc513ecca1e49ff794a5c2ec3f9515d879f1b3182b291cf35",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
       commands: [["npm", "init"], ["npx"]],
@@ -190,7 +190,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.8.1",
+    default: "12.14.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -308,7 +308,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // §02.4 — the entries the table's per-host machinery exists for;
   // `BUN_BAND` above explains the launcher-versus-artifact split they share.
   bun: {
-    default: "1.4.2",
+    default: "1.4.3",
     fetchLatestFrom: { type: "npm", package: "bun" },
     transparent: {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
@@ -395,7 +395,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.6.0",
+    default: "2.8.0",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
@@ -412,11 +412,22 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // The musl boundary at `1.0.0-beta.12` is unexpressible: §02.3
     // matches bands with `satisfiesWithPrereleases`, which strips the prerelease
     // from both sides, so `>=1.0.0-beta.12` and `>=1.0.0` are the same range and
-    // neither excludes `1.0.0-beta.2`. Declaring a second band would therefore
-    // be a promise the lookup cannot keep, and the honest alternative is this
-    // one: the eleven prereleases before Alpine support 404 on Alpine, and every
-    // release since is covered.
-    ranges: [["*", { ...AUBE_BAND, targets: { ...AUBE_TARGETS, ...AUBE_MUSL_TARGETS } }]],
+    // neither excludes `1.0.0-beta.2`. A band there would be a promise the
+    // lookup cannot keep, and the honest alternative is this one: the eleven
+    // prereleases before Alpine support 404 on Alpine, and every release since
+    // is covered. From 2.7.0 the artifact ships one `bin/aube`, which the
+    // launcher hardlinks to all three names.
+    ranges: [
+      ["*", { ...AUBE_BAND, targets: { ...AUBE_TARGETS, ...AUBE_MUSL_TARGETS } }],
+      [
+        ">=2.7.0",
+        {
+          ...AUBE_BAND,
+          bin: { aube: "./bin/aube{exe}", aubr: "./bin/aube{exe}", aubx: "./bin/aube{exe}" },
+          targets: { ...AUBE_TARGETS, ...AUBE_MUSL_TARGETS },
+        },
+      ],
+    ],
   },
 
   // §02.5 — a package manager *and* a runtime, which is what this entry adds to
@@ -424,7 +435,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // file. Being a package manager is not what earns a place in the default shim
   // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
-    default: "0.9.5",
+    default: "0.9.7",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
     // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
     // reached under its own name as `nubx` — fetches into a throwaway
@@ -450,7 +461,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // `npx`'s reason. upm has no store-path command, so none is declared.
   upm: {
     default:
-      "1.3.1+sha512.f163cec202190ac8b504be5c8dd23833afd3b2f67f6be0444f8eb984bc0aeaab6c7af7b0334a6d52c81c8a09b38b30909ce241e31b2ccfb755f1b93dc1ab555b",
+      "1.5.0+sha512.04ce9736588aef1eaebdd4aeba5f5622b855c6a6502f558d48bb186b2ac3fcaf18039505e3e7fdef6f570293c1726349ccda74f5259ef993ac9d0a799d7d2223",
     fetchLatestFrom: { type: "npm", package: "upm" },
     transparent: {
       commands: [["upm", "init"], ["upm", "create"], ["upx"]],
@@ -481,7 +492,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // never reads a shebang. Accepted until upstream declares `"type": "module"`.
   vlt: {
     default:
-      "1.3.0+sha512.67876b04090e03c25e0542b27eb4e09cec790aebedb6e0fdafd4fd6141d450e391b484b6ca2566db3646abb189eea45a69feca47b15aeabd12dc7f7c3c8483a0",
+      "1.5.0+sha512.c12d108a96d6cd99172d9b95970df66a74aaf42a426de9fd67401b49c23b6fc1c9acc88e968be2c3951fef75b1652ae5f972c36d9a74ef8b105bfc49557bdbae",
     fetchLatestFrom: { type: "npm", package: "vlt" },
     // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
     // `vlt x`, and reached under its own name as `vlx` — installs the package
@@ -514,7 +525,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // The current LTS line, bare per §02.3: node's artifact is per-host, so
     // there is no portable digest to pin and the registry signature over this
     // host's own `node-<target>` is what clears §06.1's tier.
-    default: "24.21.0",
+    default: "24.22.0",
     // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
     //
     // The `node` package's dist-tags are `v4-lts` … `v20-lts` plus `latest`:
@@ -532,7 +543,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // `lts` tag naming another would install a second Node. Bare, for the reason
     // `default` is bare — node's artifact is per-host, so there is no portable
     // digest.
-    tags: { lts: "24.21.0" },
+    tags: { lts: "24.22.0" },
     fetchLatestFrom: { type: "npm", package: "node" },
     // Empty, and not an oversight: §01.4's transparency exists to let a
     // bootstrapping command escape §03.5's enforcement, and a runtime is never
