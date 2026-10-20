@@ -98,6 +98,7 @@ import {
   STUB_FOLDER_NAME,
 } from "../utils/self.ts";
 import { getHomeFolder, isInsideInstallFolder } from "../cache/store.ts";
+import { runCwd, runEnv } from "../utils/context.ts";
 import { extractAddon } from "../run/addon.ts";
 
 /** Our own binary name — what §10.5's `PATH` verification and lookup search for. */
@@ -801,10 +802,10 @@ function isExecutableFile(file: string): boolean {
  * passes two further tests. Neither should stat the tail of `PATH` to get it.
  */
 function* whichAll(name: string): Generator<string> {
-  const pathValue = process.env[SYSTEM_ENV.PATH] ?? "";
+  const pathValue = runEnv()[SYSTEM_ENV.PATH] ?? "";
   const extensions =
     process.platform === "win32"
-      ? (process.env[SYSTEM_ENV.PATHEXT] ?? ".COM;.EXE;.BAT;.CMD").split(";")
+      ? (runEnv()[SYSTEM_ENV.PATHEXT] ?? ".COM;.EXE;.BAT;.CMD").split(";")
       : [""];
 
   for (const entry of pathValue.split(delimiter)) {
@@ -909,7 +910,9 @@ function namedDirectory(options: ShimOptions): string | undefined {
     return directory;
   }
   const configured = options.installDirectory ?? readEnv(ENV.SHIM_DIRECTORY);
-  return configured === undefined || configured === "" ? undefined : resolvePath(configured);
+  return configured === undefined || configured === ""
+    ? undefined
+    : resolvePath(runCwd(), configured);
 }
 
 /**
@@ -2263,7 +2266,7 @@ type Shell = "posix" | "fish" | "csh" | "powershell" | "cmd";
 
 /** Which shell is the user most likely typing into right now? */
 export function detectShell(): Shell {
-  const shell = process.env[SYSTEM_ENV.SHELL];
+  const shell = runEnv()[SYSTEM_ENV.SHELL];
   if (shell !== undefined && shell !== "") {
     const name = basename(shell).replace(/\.exe$/i, "");
     if (name === "fish") return "fish";
@@ -2274,7 +2277,7 @@ export function detectShell(): Shell {
 
   if (process.platform === "win32") {
     // PowerShell exports this; `cmd.exe` does not.
-    return process.env[SYSTEM_ENV.PSMODULEPATH] !== undefined ? "powershell" : "cmd";
+    return runEnv()[SYSTEM_ENV.PSMODULEPATH] !== undefined ? "powershell" : "cmd";
   }
 
   return "posix";
@@ -2306,7 +2309,7 @@ export function pathExportLine(directory: string, shell: Shell = detectShell()):
  * as on `PATH` for any process that happened to be sitting in `$HOME`.
  */
 function directoryOnPath(directory: string): boolean {
-  for (const entry of (process.env[SYSTEM_ENV.PATH] ?? "").split(delimiter)) {
+  for (const entry of (runEnv()[SYSTEM_ENV.PATH] ?? "").split(delimiter)) {
     if (entry !== "" && isAbsolute(entry) && samePath(entry, directory)) return true;
   }
   return false;

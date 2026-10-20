@@ -8,6 +8,7 @@ const { constants } = process.getBuiltinModule("node:os");
 import { isInsideInstallFolder } from "../cache/store.ts";
 import { ENV, writeEnvInto } from "../config/env-vars.ts";
 import { messages } from "../errors-cold.ts";
+import { runContext, runCwd, runEnv, type Sink } from "../utils/context.ts";
 import { openedStreams } from "../utils/log.ts";
 import { willExecute } from "../utils/program-image.ts";
 import { encodeExecBlock, loadAddon } from "./addon.ts";
@@ -49,6 +50,7 @@ export function captureNative(
     windowsHide: true,
     env: forwardHostRuntime(env),
     argv0,
+    cwd: runCwd(),
     timeout: timeoutMs,
   });
 
@@ -67,6 +69,13 @@ export function captureNative(
       }),
     );
   });
+}
+
+/** Append everything a piped `stream` produces to its `sink`. */
+function collectInto(stream: NodeJS.ReadableStream | null, sink: Sink): void {
+  if (stream !== null && Array.isArray(sink)) {
+    stream.on("data", (chunk: Buffer) => sink.push(chunk));
+  }
 }
 
 /**
@@ -467,7 +476,7 @@ function replacement(
 export async function execNative(
   binPath: string,
   args: string[],
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = runEnv(),
   argv0?: string,
   options?: { reraise?: boolean; ipc?: boolean; replace?: boolean },
 ): Promise<number> {
@@ -494,20 +503,34 @@ export async function execNative(
   // channel there is what left `process.send` undefined in the runtime.
   const ipc = options?.ipc === true && hasParentChannel();
 
-  // No `detached`, no `shell`, no `cwd` override: the caller's cwd is the
-  // package manager's cwd (§08.3), and the child stays in our process group so
-  // terminal job control keeps working.
+  // A run without handover may have asked for its own directory and streams
+  // (`RunOptions`); under handover there is no such scope and both are ours.
+  const context = runContext();
+
+  // No `detached`, no `shell`: the run's cwd is the package manager's cwd
+  // (§08.3), and the child stays in our process group so terminal job control
+  // keeps working.
   // Loaded only now: a replaced process never reaches this line, and the 37
   // modules behind `node:child_process` are the largest thing it would skip.
   const { spawn } = process.getBuiltinModule("node:child_process");
   const child = spawn(binPath, args, {
     // Still fds 0, 1 and 2 unmodified (§08.3): the `ipc` slot is fd 3 and is
     // added, never substituted, so nothing about the terminal changes.
-    stdio: ipc ? ["inherit", "inherit", "inherit", "ipc"] : "inherit",
+    stdio: ipc ? ["inherit", "inherit", "inherit", "ipc"] : (context?.stdio ?? "inherit"),
     windowsHide: false,
     env: childEnv,
     argv0,
+    cwd: context?.cwd,
   });
+
+  // Collected into the sinks jup's own writes go to, so a piped stream reads in
+  // the order things happened. A piped stdin has nothing to say and is closed.
+  const piped = context?.stdio.includes("pipe") === true;
+  if (piped) {
+    child.stdin?.end();
+    collectInto(child.stdout, context.stdout);
+    collectInto(child.stderr, context.stderr);
+  }
 
   // A §10.1 stub stopped the read in case the tool could take the channel
   // itself (§08.3.3). It could not, so the relay reads it.
@@ -548,7 +571,9 @@ export async function execNative(
       reject(new Error(messages.cannotExecute(binPath, error.code ?? error.message)));
     });
 
-    child.on("exit", (code, signal) => {
+    // `close` once anything is piped, so the pipes are drained before the run
+    // reads them; `exit` otherwise, as before.
+    child.on(piped ? "close" : "exit", (code: number | null, signal: NodeJS.Signals | null) => {
       release();
 
       if (signal !== null) {

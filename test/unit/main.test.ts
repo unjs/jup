@@ -1788,6 +1788,14 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * the entry and its comments, nothing a warm run executes beyond reading one
    * more key. Measured, `dist/index.mjs` 211,937 -> 212,484, **+547 or +0.26%**.
    * `config/table.ts` is now 43,021.
+   *
+   * Re-based to 309,000 for `RunOptions`' `cwd`, `env` and `stdio` (unjs/jup#19).
+   * 304,839 -> 308,599, **+3,760 or +1.23%**: `utils/context.ts` (2,310), the
+   * accessors every warm read of `process.env` and `process.cwd()` now goes
+   * through; `main.ts` +742 for the handover check and the cold `run/scoped.ts`
+   * branch; `utils/log.ts` +469 for the sinks. The option parsing and the scope
+   * itself are cold. Measured, `dist/index.mjs` 212,484 -> 214,197, **+1,713 or
+   * +0.81%**.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1799,7 +1807,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(306_000);
+    ).toBeLessThanOrEqual(309_000);
   });
 });
 
@@ -1849,5 +1857,115 @@ describe("runMain — the default is not to take the process (§08.2)", () => {
     expect(result.stdout).toContain("argv:[]");
     // Nothing set the caller's own status, so it is the caller's to set.
     expect(result.status).toBe(0);
+  });
+
+  /** A project of its own under `root`, with a `.jup.env` when `envFile` is given. */
+  function sibling(root: string, name: string, pin: string, envFile?: string): string {
+    const dir = join(root, name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name, packageManager: pin }));
+    if (envFile !== undefined) writeFileSync(join(dir, ".jup.env"), envFile);
+    return dir;
+  }
+
+  /** A fake whose output names its version, cwd, and the env-file variable it saw. */
+  function reporter(version: string): string {
+    return [
+      `console.log("yarn ${version} in " + process.cwd());`,
+      `console.error("strict=" + process.env.JUP_ENABLE_STRICT + " mark=" + process.env.MARK);`,
+      `process.exitCode = 3;`,
+      ``,
+    ].join("\n");
+  }
+
+  it("runs concurrently in other directories and environments, and collects output", () => {
+    const { cwd, home } = makeProject(undefined);
+    const one = sibling(dirname(cwd), "one", "yarn@1.0.0", "JUP_ENABLE_STRICT=0\n");
+    const two = sibling(dirname(cwd), "two", "yarn@1.22.19");
+    installFake(home, "yarn", "1.0.0", reporter("1.0.0"));
+    installFake(home, "yarn", "1.22.19", reporter("1.22.19"));
+
+    const driver = join(home, "api-driver.mjs");
+    writeFileSync(
+      driver,
+      [
+        `const { runMain } = await import(${JSON.stringify(INDEX_URL)});`,
+        `const env = { ...process.env, MARK: "given" };`,
+        `const [a, b] = await Promise.all([`,
+        `  runMain(["yarn"], { cwd: ${JSON.stringify(one)}, env, stdio: ["ignore", "pipe", "pipe"] }),`,
+        `  runMain(["yarn"], { cwd: ${JSON.stringify(two)}, stdio: "pipe" }),`,
+        `]);`,
+        `const version = await runMain(["--version"], { stdio: "pipe" });`,
+        `const quiet = await runMain(["yarn"], { cwd: ${JSON.stringify(one)}, stdio: "ignore" });`,
+        `console.log(JSON.stringify({`,
+        `  a, b, version, quiet, cwd: process.cwd(),`,
+        `  leaked: process.env.JUP_ENABLE_STRICT ?? env.JUP_ENABLE_STRICT ?? process.env.COREPACK_ROOT ?? null,`,
+        `}));`,
+        ``,
+      ].join("\n"),
+    );
+
+    const result = run(cwd, home, [], {}, driver);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+
+    // One line: every byte the runs produced went to them, not to this process.
+    const report = JSON.parse(result.stdout);
+    expect(report.a).toEqual({
+      code: 3,
+      stdout: `yarn 1.0.0 in ${one}\n`,
+      stderr: "strict=0 mark=given\n",
+    });
+    expect(report.b).toEqual({
+      code: 3,
+      stdout: `yarn 1.22.19 in ${two}\n`,
+      stderr: "strict=undefined mark=undefined\n",
+    });
+    expect(report.version).toEqual({
+      code: 0,
+      stdout: expect.stringMatching(/^\d+\.\d+\.\d+\n$/),
+      stderr: "",
+    });
+    expect(report.quiet).toEqual({ code: 3 });
+    expect(report.cwd).toBe(cwd);
+    expect(report.leaked).toBeNull();
+  });
+
+  it("collects jup's own errors with the tool's stream", () => {
+    const { cwd, home } = makeProject({ name: "demo", packageManager: "yarn@1.0.0" });
+    const driver = join(home, "api-driver.mjs");
+    writeFileSync(
+      driver,
+      [
+        `const { runMain } = await import(${JSON.stringify(INDEX_URL)});`,
+        `const proxy = await runMain(["pnpm"], { stdio: "pipe" });`,
+        `const management = await runMain(["use"], { stdio: "pipe" });`,
+        `console.log(JSON.stringify({ proxy, management }));`,
+        ``,
+      ].join("\n"),
+    );
+
+    const result = run(cwd, home, [], {}, driver);
+    expect(result.stderr).toBe("");
+    const { proxy, management } = JSON.parse(result.stdout);
+    // §08.4 — proxy mode's `UsageError` is bare on stderr, management mode's on stdout.
+    expect(proxy).toMatchObject({ code: 1, stdout: "" });
+    expect(proxy.stderr).toContain("This project is configured to use yarn");
+    expect(management).toMatchObject({ code: 1, stderr: "" });
+    expect(management.stdout).toMatch(/^Usage Error: /);
+  });
+
+  it("rejects `cwd`, `env` and `stdio` under handover, and malformed stdio", async () => {
+    const { runMain } = await import("../../src/main.ts");
+    await expect(runMain(["--version"], { handover: true, cwd: "." })).rejects.toThrow(TypeError);
+    await expect(runMain(["--version"], { handover: true, stdio: "pipe" })).rejects.toThrow(
+      TypeError,
+    );
+    await expect(
+      runMain(["--version"], { stdio: ["pipe", "pipe"] as unknown as "pipe" }),
+    ).rejects.toThrow(TypeError);
+    await expect(runMain(["--version"], { stdio: "inherits" as "inherit" })).rejects.toThrow(
+      TypeError,
+    );
   });
 });

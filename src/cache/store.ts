@@ -23,6 +23,7 @@ import { ENV, readEnv, SYSTEM_ENV } from "../config/env-vars.ts";
 import { isPerHost, isSupportedPackageManager } from "../config/table.ts";
 import { envDisabled } from "../project/env.ts";
 import { messages, UsageError } from "../errors.ts";
+import { runEnv, runPath } from "../utils/context.ts";
 import {
   compare,
   isValidVersion,
@@ -75,12 +76,12 @@ function randomSuffix(): string {
  */
 export function getHomeFolder(): string {
   const home = readEnv(ENV.HOME);
-  if (home !== undefined) return home;
+  if (home !== undefined) return runPath(home);
 
   const isWindows = process.platform === "win32";
   const cacheRoot =
-    process.env[SYSTEM_ENV.XDG_CACHE_HOME] ??
-    (isWindows ? process.env[SYSTEM_ENV.LOCALAPPDATA] : undefined) ??
+    runEnv()[SYSTEM_ENV.XDG_CACHE_HOME] ??
+    (isWindows ? runEnv()[SYSTEM_ENV.LOCALAPPDATA] : undefined) ??
     join(homedir(), isWindows ? join("AppData", "Local") : ".cache");
 
   return join(cacheRoot, "jup");

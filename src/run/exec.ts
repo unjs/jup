@@ -14,6 +14,7 @@ import { ENV, readEnv, SYSTEM_ENV, writeEnv, writeEnvInto } from "../config/env-
 import { getPackageManagerFor } from "../config/table.ts";
 import { messages } from "../errors.ts";
 import type { BinSpec, Installation, RunOptions } from "../types.ts";
+import { runCwd, runEnv } from "../utils/context.ts";
 import { entryNameFor, getOwnRoot as resolveOwnRoot } from "../utils/self.ts";
 
 /**
@@ -38,7 +39,7 @@ function getOwnRoot(): string {
  */
 export function perUserShimDirectory(): string | undefined {
   if (process.platform === "win32") {
-    const localAppData = process.env[SYSTEM_ENV.LOCALAPPDATA];
+    const localAppData = runEnv()[SYSTEM_ENV.LOCALAPPDATA];
     if (localAppData !== undefined && localAppData !== "") {
       return join(localAppData, "jup", "bin");
     }
@@ -54,8 +55,8 @@ export function perUserShimDirectory(): string | undefined {
   // package manager into every directory it happens to chdir into. The XDG base
   // directory specification requires an absolute path anyway.
   if (process.platform !== "darwin") {
-    const xdg = process.env[SYSTEM_ENV.XDG_BIN_HOME];
-    if (xdg !== undefined && xdg !== "") return resolve(xdg);
+    const xdg = runEnv()[SYSTEM_ENV.XDG_BIN_HOME];
+    if (xdg !== undefined && xdg !== "") return resolve(runCwd(), xdg);
   }
 
   const home = homedir();
@@ -71,7 +72,7 @@ export function perUserShimDirectory(): string | undefined {
  */
 export function systemShimDirectory(): string | undefined {
   if (process.platform !== "win32") return "/usr/local/bin";
-  const programData = process.env[SYSTEM_ENV.PROGRAMDATA];
+  const programData = runEnv()[SYSTEM_ENV.PROGRAMDATA];
   return programData === undefined || programData === ""
     ? undefined
     : join(programData, "jup", "bin");
@@ -96,8 +97,8 @@ export function shimDirectoryCandidates(): string[] {
 
   // `XDG_BIN_HOME` is an alternate on macOS though never its default: no XDG
   // convention to default to, but a user who set it has still named a directory.
-  const xdg = process.env[SYSTEM_ENV.XDG_BIN_HOME];
-  if (xdg !== undefined && xdg !== "") add(resolve(xdg));
+  const xdg = runEnv()[SYSTEM_ENV.XDG_BIN_HOME];
+  if (xdg !== undefined && xdg !== "") add(resolve(runCwd(), xdg));
   const home = homedir();
   if (home !== "") {
     add(join(home, ".local", "bin"));
@@ -239,7 +240,7 @@ export function shimDirectoryFor(binName: string): string | undefined {
   const configured = readEnv(ENV.SHIM_DIRECTORY);
   const candidates =
     configured !== undefined && configured !== ""
-      ? [resolve(configured)]
+      ? [resolve(runCwd(), configured)]
       : shimDirectoryCandidates();
 
   const self = process.argv[1];
@@ -341,11 +342,12 @@ export function childEnvironment(
   prepend: string | undefined,
   handover: boolean,
 ): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+  const ambient = runEnv();
+  const env = { ...ambient };
   if (!handover) writeEnvInto(env, ENV.ROOT, getOwnRoot());
 
   if (prepend !== undefined) {
-    const path = pathWith(prepend, process.env[SYSTEM_ENV.PATH]);
+    const path = pathWith(prepend, ambient[SYSTEM_ENV.PATH]);
     if (path !== undefined) setPath(env, path);
   }
   return env;

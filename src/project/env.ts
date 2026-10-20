@@ -14,6 +14,7 @@ import {
   readEnv,
 } from "../config/env-vars.ts";
 import { advisory, messages } from "../errors.ts";
+import { runEnv, setRunEnv } from "../utils/context.ts";
 
 /**
  * §03.2 — the prefix filter is the entire sandbox against a hostile repository.
@@ -420,12 +421,12 @@ export function applyEnvFile(vars: Record<string, string>, path: string): void {
     eligible[name] = value;
   }
 
-  process.env = { ...eligible, ...process.env };
+  setRunEnv({ ...eligible, ...runEnv() });
 }
 
 /** Whether any spelling `name` answers to is set in the real process environment. */
 function isSetInEnvironment(name: string): boolean {
-  return envSpellings(name).some((spelling) => process.env[spelling] !== undefined);
+  return envSpellings(name).some((spelling) => runEnv()[spelling] !== undefined);
 }
 
 export function isEnvFileEligible(name: string): boolean {

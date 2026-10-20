@@ -68,15 +68,19 @@ cwd  := unchanged — the caller's cwd, not the project root
 stdio: inherit all three, unmodified
 ```
 
+Without handover, "the caller" is the run rather than the process: an embedder
+may give `runMain` its own `cwd`, `env` and `stdio` (§8.3.4), and the spawn uses
+those. Under handover none of the three may be given.
+
 * **`argv[0]` is the name the user typed**, not the artifact's path. That is how
   `bun` and `bunx` — literally one file — behave differently, and the same for
   `nub`/`nubx` and aube's three names. Where an artifact instead dispatches on
   its own file name, `binArgs` supplies the words that recover the intent
   (`pnpx` → `pnpm dlx`). Absent an invoked name — a `commands.use` handover,
   where nothing was invoked — the path is used.
-* **stdio is inherited, never piped.** Tools detect TTYs to decide on colour,
-  progress bars and prompts. An IPC channel is fd 3 rather than one of the three
-  and is handled by §8.3.2.
+* **stdio is inherited, never piped**, unless an embedder asked for a pipe
+  (§8.3.4). Tools detect TTYs to decide on colour, progress bars and prompts. An
+  IPC channel is fd 3 rather than one of the three and is handled by §8.3.2.
 * **No new process group or session.** That would detach the child from terminal
   job control and break Ctrl-C.
 * `JUP_HOST_RUNTIME` carries the realpath of the runtime hosting a chain that has
@@ -274,6 +278,38 @@ Either way:
   closed pipe.
 * **Extra fds are lost**, as §8.3.2 records: only the channel is handed through.
 
+### 8.3.4 A run of its own (`runMain` without handover)
+
+An embedder's process is not the tool's, may outlive the run, and may run
+several at once. So a run without handover reads no process-wide state that it
+would have to change: it takes a snapshot of `cwd`, `env` and `stdio` — each
+from `RunOptions` when given, from the process otherwise — and everything jup
+does reads that snapshot. `src/utils/context.ts` holds it in an
+`AsyncLocalStorage` scope, so concurrent runs cannot see each other's.
+
+* **`cwd`** is where discovery starts, what relative command paths resolve
+  against (`use` and `up` pins, the archive `cache install` reads, the one
+  corepack's `prepare -o` writes), and the tool's working directory. A relative
+  value is resolved against `process.cwd()`. `process.chdir()` is never called.
+* **`env`** is copied, never adopted. §3.2's merge, `COREPACK_ROOT` and
+  `COREPACK_MIGRATE_FROM` land in the copy, so neither the caller's object nor
+  `process.env` changes, and nothing carries over to the next run.
+* **`stdio`** is `spawn`'s spelling: one mode or `[stdin, stdout, stderr]`, each
+  `"inherit"`, `"pipe"` or `"ignore"`. It covers jup's own output as well as the
+  tool's, so a piped stderr collects advisories, download notices and usage
+  errors in the order they happened. A piped stream comes back as text in
+  `RunResult.stdout` / `stderr` and is never coloured. A piped stdin is closed at
+  once. With anything piped the run waits for `close` rather than `exit`, so the
+  pipes are drained.
+
+Handover with any of the three rejects with a `TypeError`. Under handover the
+process *is* the tool's, so it has no other directory, environment or streams to
+use. jup's own entry points never make a scoped run, so the scope costs the
+warm path only the accessor calls (§16, Build shape).
+
+Some state is still process-wide: the CA bundle §5.1 installs with
+`tls.setDefaultCACertificates`, and the advisories that print once per process.
+
 ## 8.4 Exit codes
 
 | The tool does | jup exits with |
@@ -349,7 +385,7 @@ path builds the child's environment block by hand so its additions cannot flow
 back.
 
 Under §8.2's handover there is no parent to protect, and `process.env` *is* the
-child's environment, so `COREPACK_ROOT` is written there. Without handover both
-additions go into the spawned block alone and this process's environment is
-unchanged by the run. What jup does not undo either way is §3.2's env-file load,
-which happens during discovery and is documented as such.
+child's environment, so `COREPACK_ROOT` and §3.2's env-file values are written
+there. Without handover the run works on its own copy of the environment
+(§8.3.4): both additions, the env-file values and §9.5's `COREPACK_MIGRATE_FROM`
+go into that copy and the spawned block, and `process.env` is unchanged by the run.

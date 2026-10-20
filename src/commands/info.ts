@@ -67,6 +67,7 @@ import { resolveInstallDirectory } from "./shims.ts";
 import { isOurShim } from "../run/exec.ts";
 import { capturePackageManager } from "../run/capture.ts";
 import { tlsSettings } from "../net/tls.ts";
+import { runCwd, runEnv } from "../utils/context.ts";
 import {
   defaultTtlMs,
   findInstalledVersion,
@@ -350,7 +351,7 @@ export interface InfoReport {
  * afterwards there is no way to tell a variable the user exported from one the
  * project supplied — which is exactly the distinction §09.9 asks for.
  */
-export function buildReport(cwd: string = process.cwd()): InfoReport {
+export function buildReport(cwd: string = runCwd()): InfoReport {
   const realEnvironment = snapshotEnvironment();
 
   // The env-file walk (§03.2), which also *applies* the file — the same thing
@@ -1063,9 +1064,10 @@ function hashOfIntegrity(integrity: string): string | null {
 /** Every `COREPACK_*` variable in the real environment, credentials masked. */
 function snapshotEnvironment(): Record<string, string> {
   const snapshot: Record<string, string> = {};
-  for (const name of Object.keys(process.env).sort()) {
+  const env = runEnv();
+  for (const name of Object.keys(env).sort()) {
     if (!isToolEnvName(name)) continue;
-    const value = process.env[name];
+    const value = env[name];
     if (value === undefined) continue;
     snapshot[name] = displayValue(name, value);
   }
@@ -1313,10 +1315,10 @@ function samePath(left: string, right: string): boolean {
 function lookupOnPath(name: string): string | null {
   const extensions =
     process.platform === "win32"
-      ? (process.env[SYSTEM_ENV.PATHEXT] ?? ".COM;.EXE;.BAT;.CMD").split(";")
+      ? (runEnv()[SYSTEM_ENV.PATHEXT] ?? ".COM;.EXE;.BAT;.CMD").split(";")
       : [""];
 
-  for (const entry of (process.env[SYSTEM_ENV.PATH] ?? "").split(delimiter)) {
+  for (const entry of (runEnv()[SYSTEM_ENV.PATH] ?? "").split(delimiter)) {
     if (entry === "") continue;
     for (const extension of extensions) {
       const candidate = join(entry, `${name}${extension}`);
@@ -1793,7 +1795,7 @@ function storePathAnswer(stdout: string): string | null {
 
 /** §09.1 — the project's spec, with the two sentences it fails with. */
 function requiredProjectLookup(): Extract<ProjectSpec, { type: "Found" }> {
-  const lookup = findProjectSpec(process.cwd());
+  const lookup = findProjectSpec(runCwd());
   if (lookup.type === `NoProject`) throw new UsageError(messages.couldntFindProject());
   if (lookup.type === `NoSpec`) throw new UsageError(messages.noSpecInProject());
   return lookup;
@@ -1808,7 +1810,7 @@ function requiredProjectLookup(): Extract<ProjectSpec, { type: "Found" }> {
  */
 function optionalProjectLookup(): Extract<ProjectSpec, { type: "Found" }> | null {
   try {
-    const lookup = findProjectSpec(process.cwd());
+    const lookup = findProjectSpec(runCwd());
     return lookup.type === `Found` ? lookup : null;
   } catch {
     return null;

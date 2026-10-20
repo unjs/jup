@@ -30,6 +30,7 @@
 // why they stay behind a function.
 const { styleText } = process.getBuiltinModule("node:util");
 import { SYSTEM_ENV } from "../config/env-vars.ts";
+import { runContext, runEnv } from "./context.ts";
 
 type Format = Parameters<typeof styleText>[0];
 
@@ -101,7 +102,7 @@ export const isAgent: boolean =
 
 /** §11.5 — the one way to ask for colour over every heuristic above. */
 function forcedOn(): boolean {
-  const forced = process.env["FORCE_COLOR"];
+  const forced = runEnv()["FORCE_COLOR"];
   return forced !== undefined && forced !== "0";
 }
 
@@ -128,7 +129,7 @@ function paletteFor(target: Target): Palette {
   const paint =
     (format: Format) =>
     (text: string): string =>
-      isAgent && !forcedOn()
+      (isAgent && !forcedOn()) || runContext()?.[target] !== undefined
         ? text
         : styleText(format, text, { stream: streamOf(target), validateStream: true });
 
@@ -193,12 +194,19 @@ function markers(text: string, colors: Palette): string {
 
 /** §09.14 — informational output is stdout, unbuffered, unprefixed. */
 export function out(text: string): void {
-  streamOf("stdout").write(markers(text, outColors));
+  write("stdout", text, outColors);
 }
 
 /** The same, on stderr: notices that must not corrupt a piped stdout (§09.14). */
 export function err(text: string): void {
-  streamOf("stderr").write(markers(text, errColors));
+  write("stderr", text, errColors);
+}
+
+/** The stream, or a scoped run's sink for it (`utils/context.ts`), which is never painted. */
+function write(target: Target, text: string, colors: Palette): void {
+  const sink = runContext()?.[target];
+  if (sink === undefined) streamOf(target).write(markers(text, colors));
+  else sink?.push(text);
 }
 
 /**
@@ -210,6 +218,11 @@ export function err(text: string): void {
  * runs with colour off.
  */
 export function warn(message: string): void {
+  const sink = runContext()?.stderr;
+  if (sink !== undefined) {
+    sink?.push(`${message}\n`);
+    return;
+  }
   openedStreams.add("stderr");
   console.warn(markers(message, errColors));
 }
@@ -226,7 +239,7 @@ export function warn(message: string): void {
  * and the more specific ask wins over §11.3's blanket mute.
  */
 export function debugNote(message: string): void {
-  const debug = process.env[SYSTEM_ENV.DEBUG];
+  const debug = runEnv()[SYSTEM_ENV.DEBUG];
   if (
     debug === "*" ||
     (debug !== undefined && (debug.includes("jup") || debug.includes("corepack")))

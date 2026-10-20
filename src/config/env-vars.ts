@@ -26,6 +26,8 @@
  * CI scripts, and reading one should not require resolving an identifier.
  */
 
+import { runEnv } from "../utils/context.ts";
+
 /**
  * §03.2 — the prefix filter that is the entire sandbox against a hostile
  * repository: an env file's keys without it (`HTTP_PROXY`, `PATH`,
@@ -254,7 +256,7 @@ export function envEntry<N extends string>(
   name: N,
 ): { name: N | JupSpelling<N>; value: string } | undefined {
   for (const spelling of envSpellings(name)) {
-    const value = process.env[spelling];
+    const value = runEnv()[spelling];
     if (value !== undefined) return { name: spelling as N | JupSpelling<N>, value };
   }
   return undefined;
@@ -272,7 +274,7 @@ export function envEntry<N extends string>(
  * invention and travels under its own name alone.
  */
 export function writeEnv(name: string, value: string): void {
-  writeEnvInto(process.env, name, value);
+  writeEnvInto(runEnv(), name, value);
 }
 
 /**
