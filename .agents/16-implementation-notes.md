@@ -189,6 +189,13 @@ tracks the newest release on `NODE_LTS_LINE` and writes both `default` and
 second source §02.2 refuses. Every run prints the line it tracked, so confirming
 it against Node's release schedule is part of reviewing the PR.
 
+npm's copies of Node — the `node` launcher and its `node-<target>` packages —
+are republished after each release and can trail nodejs.org by a day or more.
+The script reads `nodejs.org/dist/index.json` only to notice that: a newer
+release on the tracked line that npm does not carry yet prints a `warning:`,
+and the fix is to re-run once npm has it. Nothing from that index is written,
+and an outage there costs only the check.
+
 Refresh npm trust keys from `https://registry.npmjs.org/-/npm/v1/keys` and check
 origin, key IDs, SPKI bytes, expiry and rollover. The refresh script removes
 expired keys, so confirm that ending verification for signatures needing those

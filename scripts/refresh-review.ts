@@ -3,12 +3,13 @@
  * *ask* but must not answer.
  *
  * A moved bin path needs a new `ranges` entry and a new LTS line needs
- * `NODE_LTS_LINE` moved; both are human review, and the script writes neither.
+ * `NODE_LTS_LINE` moved; both are human review, and the script writes neither. A
+ * Node release npm has not mirrored yet needs a re-run, not an edit.
  * What it can do is notice, from registry metadata it already fetched, that one
  * of them is due — so the review is prompted by evidence rather than by a
  * reminder a reviewer has learned to skim past.
  *
- * Pure functions over npm metadata, kept out of the script so the suite can
+ * Pure functions over fetched metadata, kept out of the script so the suite can
  * pin their judgement without a network.
  */
 
@@ -91,7 +92,7 @@ export const NODE_LTS_AFTER_DAYS = 170;
  * §02.3 — a nudge, from npm's own `time` field, that the next even major is
  * probably LTS by now.
  *
- * Not an answer: nodejs.org's schedule is the source §02.2 refuses, and moving
+ * Not an answer: nodejs.org is never a source of table values (§02.2), and moving
  * `NODE_LTS_LINE` stays a human's call. Release age is the one signal npm does
  * carry, and Node's cadence is regular enough for it to be worth asking.
  */
@@ -109,5 +110,52 @@ export function nodeLtsDue(
   return (
     `node ${next}.0.0 was published ${days} days ago and even majors enter LTS about six ` +
     `months after release — check whether \`NODE_LTS_LINE\` should move to ${next} (§02.3).`
+  );
+}
+
+/** A row of `nodejs.org/dist/index.json`, as far as {@link nodeMirrorLag} reads it. */
+export interface NodeDistRelease {
+  version: string;
+  date: string;
+}
+
+/**
+ * §02.3 — a warning that npm's copy of Node has not caught up with a release
+ * nodejs.org already ships on the tracked line.
+ *
+ * node's `default` is the newest release on `NODE_LTS_LINE` that *npm* carries,
+ * because npm is where jup downloads it from (§02.2). The `node` launcher and its
+ * `node-<target>` packages are republished after each release, usually within
+ * hours but not always, and until they are, every refresh reports the table
+ * current while a release — often a security one — sits unshipped.
+ *
+ * Detection only: nodejs.org never supplies a value. The table cannot name a
+ * version npm does not serve, so the answer is to re-run once it does.
+ */
+export function nodeMirrorLag(
+  releases: NodeDistRelease[],
+  line: number,
+  mirrored: string,
+): string | undefined {
+  // `[minor, patch]` on the line, or `undefined` for a prerelease or another line.
+  const stable = new RegExp(`^v?${line}\\.(\\d+)\\.(\\d+)$`);
+  const onLine = (version: string) => {
+    const match = stable.exec(version);
+    return match === null ? undefined : [Number(match[1]), Number(match[2])];
+  };
+  const newer = (a: number[], b: number[]) => a[0]! > b[0]! || (a[0] === b[0] && a[1]! > b[1]!);
+
+  let newest = onLine(mirrored) ?? [-1, -1];
+  let ahead: NodeDistRelease | undefined;
+  for (const release of releases) {
+    const found = onLine(release.version);
+    if (found !== undefined && newer(found, newest)) [newest, ahead] = [found, release];
+  }
+
+  if (ahead === undefined) return undefined;
+  return (
+    `node ${ahead.version.slice(1)} is out on nodejs.org (${ahead.date}) but npm's ` +
+    `\`node\` packages stop at ${mirrored} — the table follows npm (§02.2), so re-run once ` +
+    "npm publishes it."
   );
 }

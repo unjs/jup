@@ -41,7 +41,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getSpecFor, hasRangeBand, isPerHostSpec } from "../src/config/table.ts";
 import { compareDigest, parseSri, verifySignature } from "../src/verify/integrity.ts";
-import { binDrift, nodeLtsDue, publishedBins } from "./refresh-review.ts";
+import { binDrift, nodeLtsDue, nodeMirrorLag, publishedBins } from "./refresh-review.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const SRC = join(ROOT, "src", "config");
@@ -59,6 +59,8 @@ const INSTALL_SH = join(PUBLIC, "install.sh");
 const INSTALL_PS1 = join(PUBLIC, "install.ps1");
 
 const NPM_REGISTRY = "https://registry.npmjs.org";
+// Read for {@link nodeMirrorLag} alone; nothing from it is written (§02.2).
+const NODE_DIST_INDEX = "https://nodejs.org/dist/index.json";
 const check = process.argv.includes("--check");
 const commit = process.argv.includes("--commit");
 
@@ -74,7 +76,8 @@ const changes = [];
 
 /**
  * Every question this run found for a human: a bin that moved under a band, a
- * version no band declares, a Node major that is probably LTS by now. Printed as
+ * version no band declares, a Node major that is probably LTS by now, a Node
+ * release npm has not mirrored yet. Printed as
  * `warning:` lines, which the workflow turns into a draft PR. Never written into
  * the table — each is a decision §16 keeps for review.
  */
@@ -299,8 +302,9 @@ async function pnpmDefault() {
  * This is the one number in this file a release cannot compute, and the reason
  * is npm's, not ours: the `node` package's dist-tags stop at `v20-lts` (20.11.1)
  * while the same package publishes 22.x and 24.x, so every reading of them names
- * a line two majors stale. `nodejs.org/dist/index.json` knows the answer and is
- * exactly the second source §02.2 refuses.
+ * a line two majors stale. `nodejs.org/dist/index.json` knows the answer, but
+ * §02.2 refuses it as a source of table values; the script reads it only to
+ * notice npm lagging ({@link nodeMirrorLag}).
  *
  * So the *line* is the review gate and the *patch* is not: a human moves this
  * number when Node's release schedule moves LTS, and the script keeps the table
@@ -322,11 +326,23 @@ const NODE_LTS_LINE = 24;
  * name would mean `jup use node` and `jup use node@lts` installing two Nodes.
  */
 async function nodeDefault() {
-  const packument = await getJson(`${NPM_REGISTRY}/node`);
+  const [packument, releases] = await Promise.all([
+    getJson(`${NPM_REGISTRY}/node`),
+    // Advisory, so an outage costs the lag check and not the refresh.
+    getJson(NODE_DIST_INDEX).catch((error) => {
+      reviews.push(
+        `could not read ${NODE_DIST_INDEX} to check npm's node mirror: ${error.message}`,
+      );
+      return [];
+    }),
+  ]);
   const version = newestOnLine(packument, NODE_LTS_LINE, "node");
   // The line is a human's to move; whether it is probably time to is not.
   const due = nodeLtsDue(packument.time ?? {}, NODE_LTS_LINE, Date.now());
   if (due !== undefined) reviews.push(due);
+  // npm is the only place `version` can come from, and it can trail nodejs.org.
+  const lag = nodeMirrorLag(releases, NODE_LTS_LINE, version);
+  if (lag !== undefined) reviews.push(lag);
   return await nativeDefault("node", "node", NATIVE_TARGETS.node, version);
 }
 
