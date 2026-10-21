@@ -395,7 +395,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.8.0",
+    default: "2.8.1",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
