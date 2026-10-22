@@ -168,7 +168,7 @@ const PNPM_EXE_TARGETS = {
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default:
-      "12.2.0+sha512.66c2632a94e796649738b2d7894d710c2cc2e1696893823066687f6b0d8a52e5f2b54eeaeaa32ffdc513ecca1e49ff794a5c2ec3f9515d879f1b3182b291cf35",
+      "12.2.1+sha512.6ca0a6151553fc107e60f1186d9c10d57508dcde6de31292a54d4cc4e8e8ef3de25b3281274657442d7115d10df930bb3794ddcb0681cdfd9d317189abf7b63d",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
       commands: [["npm", "init"], ["npx"]],
@@ -525,7 +525,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // The current LTS line, bare per §02.3: node's artifact is per-host, so
     // there is no portable digest to pin and the registry signature over this
     // host's own `node-<target>` is what clears §06.1's tier.
-    default: "24.22.0",
+    default: "24.22.1",
     // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
     //
     // The `node` package's dist-tags are `v4-lts` … `v20-lts` plus `latest`:
@@ -543,7 +543,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // `lts` tag naming another would install a second Node. Bare, for the reason
     // `default` is bare — node's artifact is per-host, so there is no portable
     // digest.
-    tags: { lts: "24.22.0" },
+    tags: { lts: "24.22.1" },
     fetchLatestFrom: { type: "npm", package: "node" },
     // Empty, and not an oversight: §01.4's transparency exists to let a
     // bootstrapping command escape §03.5's enforcement, and a runtime is never
