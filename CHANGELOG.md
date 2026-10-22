@@ -1,6 +1,20 @@
 # Changelog
 
 
+## v0.6.6
+
+[compare changes](https://github.com/unjs/jup/compare/v0.6.5...v0.6.6)
+
+### 🏡 Chore
+
+- Refresh default versions table ([1145558](https://github.com/unjs/jup/commit/1145558))
+- **refresh:** Warn when npm's node mirror lags nodejs.org ([ddaf099](https://github.com/unjs/jup/commit/ddaf099))
+- Refresh default versions table ([733dc18](https://github.com/unjs/jup/commit/733dc18))
+
+### ❤️ Contributors
+
+- Pooya Parsa ([@pi0](https://github.com/pi0))
+
 ## v0.6.5
 
 [compare changes](https://github.com/unjs/jup/compare/v0.6.4...v0.6.5)
