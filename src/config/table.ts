@@ -190,7 +190,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.14.0",
+    default: "12.15.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -308,7 +308,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // §02.4 — the entries the table's per-host machinery exists for;
   // `BUN_BAND` above explains the launcher-versus-artifact split they share.
   bun: {
-    default: "1.4.3",
+    default: "1.4.4",
     fetchLatestFrom: { type: "npm", package: "bun" },
     transparent: {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
@@ -395,7 +395,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.8.1",
+    default: "2.8.3",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
@@ -461,7 +461,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // `npx`'s reason. upm has no store-path command, so none is declared.
   upm: {
     default:
-      "1.5.0+sha512.04ce9736588aef1eaebdd4aeba5f5622b855c6a6502f558d48bb186b2ac3fcaf18039505e3e7fdef6f570293c1726349ccda74f5259ef993ac9d0a799d7d2223",
+      "1.5.1+sha512.a19c24465eb4771f071398c7fad07f27c9de36f81908f27944dff9a16d51058ef95578987a3d934de16f35acdc357dcc35cedc7172af64785ccb5ad1d9a902d2",
     fetchLatestFrom: { type: "npm", package: "upm" },
     transparent: {
       commands: [["upm", "init"], ["upm", "create"], ["upx"]],
@@ -492,7 +492,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // never reads a shebang. Accepted until upstream declares `"type": "module"`.
   vlt: {
     default:
-      "1.5.0+sha512.c12d108a96d6cd99172d9b95970df66a74aaf42a426de9fd67401b49c23b6fc1c9acc88e968be2c3951fef75b1652ae5f972c36d9a74ef8b105bfc49557bdbae",
+      "1.6.0+sha512.c301c6d01cd7b9effa077bc13cdd0712676d5973827b1b62bf4e3df034fd5344714a2b88d440dd33f8c33589774a5f46c1ab22a1ae75fcd5e2e248075106298a",
     fetchLatestFrom: { type: "npm", package: "vlt" },
     // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
     // `vlt x`, and reached under its own name as `vlx` — installs the package
