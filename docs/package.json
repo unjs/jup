@@ -6,6 +6,6 @@
     "build": "undocs build"
   },
   "devDependencies": {
-    "undocs": "npm:undocs-nightly@0.10.1-20261018-132015-5644035"
+    "undocs": "npm:undocs-nightly@0.10.1-20261028-065350-de6a161"
   }
 }
