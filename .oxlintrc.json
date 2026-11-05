@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/oxlint/configuration_schema.json",
   "plugins": ["unicorn", "typescript", "oxc"],
-  "ignorePatterns": ["bin/**"],
+  "ignorePatterns": ["bin/**", ".scriptc-work/**"],
   "rules": {}
 }
