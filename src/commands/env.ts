@@ -21,7 +21,7 @@ import { parse } from "../version/semver.ts";
 import { out } from "../utils/log.ts";
 import { runCwd, runEnv } from "../utils/context.ts";
 import { materialise, resolutionDirFor, resolveExactPin } from "../main.ts";
-import { firstValue, hasFlag, parseArgs } from "./cli.ts";
+import { firstValue, hasFlag, parseArgs } from "./args.ts";
 
 /**
  * One runtime's answer. `reference: null` is a failed resolution, carried as a

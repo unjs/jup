@@ -307,6 +307,11 @@ async function dispatch(argv: string[], run: RunOptions | undefined): Promise<nu
     if (run?.corepackCompat === true && invocation.args[0] === "install") {
       invocation.args = ["cache", ...invocation.args];
     }
+    // §09.18 — `--use-on-cd` runs `env` on every `cd`: skip `cli.ts`'s install graph.
+    if (invocation.args[0] === "env") {
+      const { cmdEnv } = await import("./commands/env.ts");
+      return await cmdEnv(invocation.args.slice(1), run?.handover === true);
+    }
     // Loaded lazily: the proxy path is the hot one and must not pay for the
     // command surface it never touches (§16, Build shape).
     const { runManagementCommand } = await import("./commands/cli.ts");
