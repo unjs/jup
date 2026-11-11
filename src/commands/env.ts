@@ -1,69 +1,41 @@
 /**
  * `jup env` — shell integration for the runtimes, §09.18.
  *
- * A shim resolves the tool on every invocation, which is correct and costs a
- * process start each time. This command answers the same resolution once, for
- * the shell, so the runtime's own `bin` directory can be put on `PATH` ahead of
- * the shims and the common case stops paying the trampoline at all (§10.7's
- * "living beside a version manager" is the opt-in this is).
- *
- * The resolution here composes the same primitives the proxy path composes, in
- * §01.3's own order — the same precedent `info`'s report follows — because the
- * one property this command cannot violate is agreement: the `node` a
- * `jup env` puts on `PATH` must be the `node` `jup node` would hand over. Where
- * the two may differ it is documented below, and the difference is always in
- * the direction of the shims staying authoritative.
+ * The one property this command cannot violate is agreement: the `node` it puts
+ * on `PATH` must be the `node` `jup node` would hand over. The resolution
+ * therefore reuses the proxy path's own primitives from `main.ts`, in §01.3's
+ * order, rather than restating them.
  */
 
-const { basename, delimiter, dirname, join } = process.getBuiltinModule("node:path");
+const { basename, delimiter, dirname, isAbsolute, join } = process.getBuiltinModule("node:path");
 const { realpathSync } = process.getBuiltinModule("node:fs");
-import { SYSTEM_ENV } from "../config/env-vars.ts";
+import { ENV, envSpellings, SYSTEM_ENV } from "../config/env-vars.ts";
 import { getTableSpec, isRuntime, resolveSpecBin, SUPPORTED_NAMES } from "../config/table.ts";
 import { findProjectSpec, reconcile } from "../project/manifest.ts";
 import { getFallbackLocator, resolveSpec } from "../version/resolve.ts";
-import { readKnownResolution, usesLockfile } from "../project/lockfile.ts";
-import { findInstalledVersion, isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
+import { readKnownResolution } from "../project/lockfile.ts";
+import { isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
 import { messages, UsageError } from "../errors-cold.ts";
-import { parse, isValidVersion } from "../version/semver.ts";
+import { parse } from "../version/semver.ts";
 import { out } from "../utils/log.ts";
+import { runCwd, runEnv, setRunEnv } from "../utils/context.ts";
+import { materialise, resolutionDirFor, resolveExactPin } from "../main.ts";
 import { firstValue, hasFlag, parseArgs } from "./cli.ts";
-import type { LazyResolvedSpec, ResolvedSpec, Spec } from "../types.ts";
 
 /**
- * What `jup env` resolves for one runtime entry: the reference §01.3 would
- * settle on, and where its executables are, when they are already in the store.
- *
- * `reference: null` is a failed resolution, carried as a value rather than
- * thrown because both views of this data degrade rather than die — the shell
- * line because a hook must not break the prompt (§09.18), the JSON because a
- * report that cannot say "no answer" is not a report.
+ * One runtime's answer. `reference: null` is a failed resolution, carried as a
+ * value because both views degrade rather than die (§09.18).
  */
 export interface RuntimeEnvironment {
   name: string;
-  /** The resolved reference, exactly as a locator carries it (§04.1). */
   reference: string | null;
-  /**
-   * The directory holding the runtime's own executables, or `null` when the
-   * resolved version is not installed — this command installs nothing, and a
-   * missing version is the shims' business, not a failure here.
-   */
+  /** The runtime's own executables, or `null` when the version is not installed. */
   binDir: string | null;
   installed: boolean;
-  /** Why the resolution failed, in the throwing error's own words. */
   error?: string;
 }
 
-/**
- * Resolve every runtime the table declares (§02.3 — `node` is the only one
- * today), as a run of that runtime from `cwd` would resolve it.
- *
- * Deliberately narrower than the proxy path in the one place it may be: an
- * expired memo does **not** stand in when the registry is unreachable (§04.4's
- * availability fallback). The shim would answer from it, and this command would
- * rather say nothing than guess where the store cannot confirm — a `PATH` that
- * falls back to the shims is slow and correct, which is the failure mode this
- * command already has.
- */
+/** Resolve every runtime in the table as a run of it from `cwd` would. */
 export async function resolveRuntimeEnvironments(cwd: string): Promise<RuntimeEnvironment[]> {
   const resolved: RuntimeEnvironment[] = [];
   for (const name of SUPPORTED_NAMES) {
@@ -84,70 +56,27 @@ export async function resolveRuntimeEnvironments(cwd: string): Promise<RuntimeEn
 }
 
 /**
- * §01.3 steps 3–6 for one runtime, minus the install and the handover.
- *
- * The mirror is line-for-line where it can be — the same walk options, the same
- * reconcile, the same lockfile-then-memo-then-pin-then-registry order — and the
- * divergences are two, both about writing: nothing is installed on a miss (the
- * shims download on demand), and no memo is recorded when the registry answers
- * (the next shim run records it, from the same resolution this one made). The
- * one derived-state write that can still happen is inside the shared resolver
- * itself (§04.6's default refresh), which is the same write any run makes.
+ * §01.3 steps 3–6 for one runtime, minus auto-pin, the install and the
+ * handover. The expired memo is deliberately not used as a stale answer
+ * (§09.18): where the store cannot confirm, the shims stay authoritative.
  */
 async function resolveRuntimeEnvironment(cwd: string, name: string): Promise<RuntimeEnvironment> {
-  // Step 3 — the same walk the proxy makes for this tool: `projectSpecFlag`
-  // because §03.5's escape must mean the manifest is never parsed here either,
-  // and `tool` because a runtime reads `devEngines.runtime` and the version
-  // file, not the package manager's pair (§02.3).
   const specResult = findProjectSpec(cwd, { projectSpecFlag: true, tool: name });
-
-  // The fallback thunk, unforced: forcing it reads `lastKnownGood.json` and
-  // may reach the network, and a pinned project never needs it.
-  const fallback: LazyResolvedSpec = getFallbackLocator(name, {
-    transparent: false,
-    project: specResult,
-  });
-
-  // Step 4 — reconcile. A runtime is never enforced against (§03.5), so the
-  // only inputs that matter are the project's own runtime spec and the
-  // fallback; there is no CLI version override to carry.
+  const fallback = getFallbackLocator(name, { transparent: false, project: specResult });
   const reconciled = reconcile(specResult, fallback, { requestedName: name, transparent: false });
-  const descriptor: Spec =
-    "range" in reconciled ? reconciled : { name, range: await reconciled.reference() };
+  const descriptor = await materialise(reconciled);
 
-  // §04.4 — the directory whose `jup.lock` files govern, under the same three
-  // conditions the proxy applies: the spec came from the project (a fallback
-  // descriptor is the machine's default, not the project's statement), and the
-  // spec is not already exact.
-  const projectDir =
-    specResult.type === "Found" && "range" in reconciled && usesLockfile(descriptor)
-      ? dirname(specResult.target)
-      : undefined;
+  const projectDir = resolutionDirFor(specResult, reconciled, descriptor, undefined);
+  const known =
+    (projectDir === undefined ? null : readKnownResolution(projectDir, descriptor).locator) ??
+    resolveExactPin(descriptor);
+  const locator = known ?? (await resolveSpec(descriptor, { allowTags: true }));
+  if (locator === null) throw new UsageError(messages.failedToResolve(descriptor.range, name));
 
-  // Step 5 — recorded resolution, memo, exact pin, in that order. The expired
-  // memo is read and deliberately dropped: see {@link resolveRuntimeEnvironments}.
-  const files: { locator: ResolvedSpec | null } =
-    projectDir === undefined ? { locator: null } : readKnownResolution(projectDir, descriptor);
-  const known = files.locator ?? exactPin(descriptor);
-  const resolved = known ?? (await resolveSpec(descriptor, { allowTags: true }));
-  // `null`, not an error, is §04.1's "the range matches nothing" answer, and
-  // the sentence for it is the one the proxy path prints (§12.4) — the caller
-  // swallows it, but a swallowed failure should still say what failed.
-  if (resolved === null) throw new UsageError(messages.failedToResolve(descriptor.range, name));
-  const locator: ResolvedSpec = resolved;
-
-  // Step 6, halved — one `.jup` read to learn what is installed, and no
-  // download for what is not.
-  //
-  // A reference that is not a version — a custom URL pin (§04.1 step 1) — is
-  // left unaccelerated rather than probed: the store has no marker keyed by the
-  // URL, and the shims already own fetching what a URL names.
+  // A custom URL pin (§04.1 step 1) has no store marker to probe; the shims own it.
   const installed = parse(locator.reference) === null ? null : readInstalledSpec(locator);
 
-  // §08.1 — the marker's own `bin` map, with the table's entry standing in for
-  // a marker that carries none (§07.10). `binDir` is the directory of the
-  // runtime's own entry, which for a native band is where every name it
-  // dispatches on lives.
+  // §08.1 — the marker's `bin` map, with the table's entry standing in (§07.10).
   const tableSpec = getTableSpec(locator);
   const bin = installed?.bin ?? (tableSpec === undefined ? undefined : resolveSpecBin(tableSpec));
   const entry = bin?.[name];
@@ -161,176 +90,136 @@ async function resolveRuntimeEnvironment(cwd: string, name: string): Promise<Run
   };
 }
 
-/**
- * §04.1 step 4 before step 5, exactly as the proxy's own `resolveExactPin`:
- * the store answers an exact pin with the bare version — shedding any digest
- * suffix, so the marker's hash is re-attached rather than demanded as a
- * directory name — and a miss is the version the user wrote, unchecked.
- */
-function exactPin(descriptor: Spec): ResolvedSpec | null {
-  if (!isValidVersion(descriptor.range)) return null;
-  const cached = findInstalledVersion(descriptor.name, descriptor.range);
-  return { name: descriptor.name, reference: cached ?? descriptor.range };
-}
-
-/**
- * §09.18 — the dialects `--shell` names. `bash` and `zsh` share the POSIX
- * `export` spelling, so the dialect a user names and the bytes it produces are
- * free to differ; what the dialect decides is quoting and list shape only.
- *
- * `csh` and `cmd` are not here on purpose: `cmd` has no eval, and a session
- * `set` is not an integration — the error names the four that are.
- *
- * A `PATH` value's list separator belongs to the platform, not to the shell:
- * PowerShell on macOS and Linux uses `:`, the same as `sh`. Every dialect
- * therefore joins with `path.delimiter`, which is this host's separator.
- */
-type ShellDialect = "bash" | "zsh" | "fish" | "powershell";
-
-const SHELL_DIALECTS: Record<ShellDialect, (entries: string[]) => string> = {
-  bash: posixExport,
-  zsh: posixExport,
-  fish: (entries) => `set -gx PATH ${entries.map(shQuote).join(" ")}`,
-  powershell: (entries) => `$env:PATH = ${psQuote(entries.join(delimiter))}`,
-};
-
-function posixExport(entries: string[]): string {
-  return `export PATH=${shQuote(entries.join(delimiter))}`;
-}
-
-/** Single-quote a string for sh-family shells; no expansion, no splitting. */
+/** Single-quote for sh-family shells: no expansion, no splitting. */
 function shQuote(value: string): string {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-/** Single-quote a string for PowerShell, where the escape is a doubled quote. */
+/** Single-quote for fish, where `\\` and `\'` are the two escapes inside quotes. */
+function fishQuote(value: string): string {
+  return `'${value.replace(/[\\']/g, "\\$&")}'`;
+}
+
+/** Single-quote for PowerShell, which also ends a string on the typographic quotes. */
 function psQuote(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
+  return `'${value.replace(/['‘’‚‛]/g, "$&$&")}'`;
 }
 
 /**
- * §11.5 — `SHELL`'s basename, when the flag is absent. Anything POSIX-shaped
- * (`sh`, `dash`, `ksh`, a login `-zsh`) answers `bash`, the dialect whose
- * spelling it runs; only a shell nobody can eval for — none — is an error.
+ * §09.18 — each dialect's `PATH` line, and its `--use-on-cd` registration given
+ * the command that prints that line. The list separator is the host's
+ * (`path.delimiter`) in every dialect: PowerShell on POSIX uses `:` too.
+ *
+ * Each hook calls the base command (no `--use-on-cd`), runs once per directory
+ * change, and registers idempotently, so evaluating the block twice hooks once.
  */
-function inferDialect(): ShellDialect | undefined {
-  const shell = process.env[SYSTEM_ENV.SHELL];
-  if (shell === undefined || shell === "") return undefined;
-
-  const name = basename(shell)
-    .replace(/^[-]+/, "")
-    .replace(/\.exe$/i, "")
-    .toLowerCase();
-  if (name === "fish") return "fish";
-  if (name === "pwsh" || name === "powershell") return "powershell";
-  if (name === "zsh") return "zsh";
-  return "bash";
+interface Dialect {
+  quote: (value: string) => string;
+  line: (entries: string[]) => string;
+  hook: (jup: string) => string;
 }
 
-/**
- * §09.18 — `--use-on-cd`: the registration block that re-runs the line above
- * every time the directory changes.
- *
- * Every dialect's hook body calls the **base** command — `jup env --shell
- * <dialect>`, the flag deliberately dropped — so what the hook evaluates is one
- * `PATH` line and nothing else: no registration, no second resolution at
- * startup, no recursion. Registration itself is idempotent per dialect, so
- * evaluating `--use-on-cd` output twice registers the hook once.
- *
- * The per-dialect mechanics, each the canonical mechanism for that shell:
- *
- * * zsh — `add-zsh-hook chpwd`, deleted before it is added, which is the
- *   idempotency (the same pair fnm's hook uses);
- * * bash — a `PROMPT_COMMAND` entry, appended only when absent. Scalar
- *   `PROMPT_COMMAND` semantics: a bash ≥5.1 *array* assignment would need its
- *   own dedup dance, and converting one silently is worse than the documented
- *   scalar behaviour;
- * * fish — `--on-variable PWD`, which the shell fires on every directory
- *   change; redefining the function is the idempotency;
- * * powershell — no directory-change hook exists, so the `prompt` function is
- *   wrapped: it runs once per prompt, gated on the location having moved. The
- *   original prompt is captured under a sentinel global the first time only,
- *   which is what keeps a re-evaluation from wrapping the wrapper.
- */
-function useOnCdBlock(dialect: ShellDialect): string {
-  switch (dialect) {
-    case "zsh": {
-      return [
-        "_jup_env() {",
-        `  eval "$(jup env --shell zsh 2>/dev/null)"`,
-        "}",
-        "autoload -Uz add-zsh-hook",
-        "add-zsh-hook -D chpwd _jup_env",
-        "add-zsh-hook chpwd _jup_env",
-        "",
-      ].join("\n");
-    }
-    case "bash": {
-      return [
-        "_jup_env() {",
-        `  eval "$(jup env --shell bash 2>/dev/null)"`,
-        "}",
-        'case ";${PROMPT_COMMAND:-};" in',
-        '*";_jup_env;"*) ;;',
-        '*) PROMPT_COMMAND="${PROMPT_COMMAND:+$PROMPT_COMMAND;}_jup_env" ;;',
-        "esac",
-        "",
-      ].join("\n");
-    }
-    case "fish": {
-      return [
-        "function _jup_env --on-variable PWD",
-        "  jup env --shell fish 2>/dev/null | source",
-        "end",
-        "",
-      ].join("\n");
-    }
-    case "powershell": {
-      return [
-        "if ($null -eq $global:__JUP_ORIG_PROMPT) {",
-        "  $global:__JUP_ORIG_PROMPT = $function:prompt",
-        "}",
-        "function global:prompt {",
-        "  if ($global:__JUP_PWD -ne $PWD.Path) {",
-        "    $global:__JUP_PWD = $PWD.Path",
-        "    jup env --shell powershell 2>$null | Out-String | Invoke-Expression",
-        "  }",
-        "  & $global:__JUP_ORIG_PROMPT",
-        "}",
-        "",
-      ].join("\n");
-    }
+const posixLine = (entries: string[]) => `export PATH=${shQuote(entries.join(delimiter))}`;
+
+const DIALECTS: Record<ShellDialect, Dialect> = {
+  zsh: {
+    quote: shQuote,
+    line: posixLine,
+    hook: (jup) => `_jup_env() {
+  eval "$(${jup} env --shell zsh 2>/dev/null)"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook -D chpwd _jup_env
+add-zsh-hook chpwd _jup_env
+`,
+  },
+  // `PROMPT_COMMAND` runs before every prompt, so the function gates on the
+  // directory having changed. The entry is appended on its own line: a value
+  // ending in `;` would otherwise become `;;`, a syntax error on every prompt.
+  bash: {
+    quote: shQuote,
+    line: posixLine,
+    hook: (jup) => `_jup_env() {
+  [[ $PWD == "\${_JUP_ENV_PWD-}" ]] && return
+  _JUP_ENV_PWD=$PWD
+  eval "$(${jup} env --shell bash 2>/dev/null)"
+}
+_JUP_ENV_PWD=$PWD
+case \${PROMPT_COMMAND-} in
+*_jup_env*) ;;
+*) PROMPT_COMMAND="\${PROMPT_COMMAND:+$PROMPT_COMMAND
+}_jup_env" ;;
+esac
+`,
+  },
+  fish: {
+    quote: fishQuote,
+    line: (entries) => `set -gx PATH ${entries.map(fishQuote).join(" ")}`,
+    hook: (jup) => `function _jup_env --on-variable PWD
+  ${jup} env --shell fish 2>/dev/null | source
+end
+`,
+  },
+  // No directory-change hook exists, so `prompt` is wrapped, gated on the
+  // location having moved; the sentinel keeps a re-evaluation from wrapping
+  // the wrapper.
+  powershell: {
+    quote: psQuote,
+    line: (entries) => `$env:PATH = ${psQuote(entries.join(delimiter))}`,
+    hook: (jup) => `if ($null -eq $global:__JUP_ORIG_PROMPT) {
+  $global:__JUP_ORIG_PROMPT = $function:prompt
+}
+$global:__JUP_PWD = $PWD.Path
+function global:prompt {
+  if ($global:__JUP_PWD -ne $PWD.Path) {
+    $global:__JUP_PWD = $PWD.Path
+    & ${jup} env --shell powershell 2>$null | Out-String | Invoke-Expression
   }
+  & $global:__JUP_ORIG_PROMPT
+}
+`,
+  },
+};
+
+type ShellDialect = "bash" | "zsh" | "fish" | "powershell";
+
+function isDialect(name: string): name is ShellDialect {
+  return Object.hasOwn(DIALECTS, name);
+}
+
+/** Shells that run the POSIX `export` spelling, answered as `bash`. */
+const POSIX_SHELLS = new Set(["sh", "bash", "dash", "ksh", "mksh", "ash"]);
+
+/**
+ * §11.5 — the dialect `SHELL` names when `--shell` is absent, and on Windows
+ * PowerShell by `PSModulePath`, as `enable`'s hint detects it. A name outside
+ * the four (csh, nu, …) comes back as itself, for the caller to refuse.
+ */
+function inferShell(): string | undefined {
+  const env = runEnv();
+  const shell = env[SYSTEM_ENV.SHELL];
+  if (shell !== undefined && shell !== "") {
+    const name = basename(shell)
+      .replace(/^-+/, "")
+      .replace(/\.exe$/i, "")
+      .toLowerCase();
+    if (POSIX_SHELLS.has(name)) return "bash";
+    return name === "pwsh" ? "powershell" : name;
+  }
+  if (process.platform === "win32" && env[SYSTEM_ENV.PSMODULEPATH] !== undefined) {
+    return "powershell";
+  }
+  return undefined;
 }
 
 /**
- * §09.18 — print, for `eval`, the one `PATH` assignment that accelerates this
- * directory's runtimes.
- *
- * The value is computed here rather than by shell code, so the strip-and-prepend
- * rule has one implementation: every `PATH` entry inside the install folder is
- * dropped (§10.2's boundary — the shims jup itself installed elsewhere are not
- * store entries and survive), and the resolved `bin` directories go in front.
- * Evaluating the output twice therefore changes nothing, and a store directory a
- * previous directory-selection put there never outlives the one that replaced it.
- *
- * `--json` prints the resolution itself instead — the same answer, for a
- * program rather than a shell — shape-versioned the way `info`'s report is, so
- * a field may be added without breaking a reader that ignores it.
- */
-export const ENV_REPORT_VERSION = 1;
-
-/**
- * §09.18 — is this `PATH` entry one this command (or a previous line of its
- * output) put there, and therefore one the strip owns?
- *
- * {@link isInsideInstallFolder} compares against the **realpath** of the
- * install folder, and an entry can be spelled the way this command prepends it
- * — literally, through a symlinked home, which is what `$TMPDIR` on macOS and
- * an `XDG_CACHE_HOME` behind a link both are. The entry's own realpath settles
- * the two spellings; a missing entry is simply not ours.
+ * Is this `PATH` entry inside the install folder, spelled literally or through
+ * a symlinked home? Only absolute entries are candidates: a relative one (`.`,
+ * `node_modules/.bin`) means something different in every directory and was
+ * never put there by this command.
  */
 function isStorePathEntry(entry: string): boolean {
+  if (!isAbsolute(entry)) return false;
   if (isInsideInstallFolder(entry)) return true;
   try {
     return isInsideInstallFolder(realpathSync(entry));
@@ -339,7 +228,31 @@ function isStorePathEntry(entry: string): boolean {
   }
 }
 
-export async function cmdEnv(args: string[]): Promise<number> {
+/**
+ * The words that run this jup, for the hook body: the §10.2 host runtime and
+ * this entry's realpath. A bare `jup` would start under whatever `node` the
+ * line just put on `PATH`, which may be too old to run jup at all. Falls back
+ * to `jup` when this is not the CLI (an embedder's `runMain`) or no runtime
+ * outside the store can be named.
+ */
+async function selfCommand(handover: boolean): Promise<string[] | undefined> {
+  const entry = process.argv[1];
+  if (!handover || entry === undefined) return undefined;
+  const { interpreterPath } = await import("./shims.ts");
+  const runtime = interpreterPath();
+  if (runtime === undefined) return undefined;
+  try {
+    return [runtime, realpathSync(entry)];
+  } catch {
+    return undefined;
+  }
+}
+
+/** The `--json` document's shape version, as `info`'s report has one (§09.9). */
+const ENV_REPORT_VERSION = 1;
+
+/** §09.18 — print, for `eval`, the one `PATH` assignment for this directory. */
+export async function cmdEnv(args: string[], handover = false): Promise<number> {
   const parsed = parseArgs(args, {
     booleans: ["--json", "--use-on-cd"],
     strings: ["--shell"],
@@ -351,11 +264,6 @@ export async function cmdEnv(args: string[]): Promise<number> {
   const json = hasFlag(parsed, "--json");
   const useOnCd = hasFlag(parsed, "--use-on-cd");
   const requested = firstValue(parsed, "--shell");
-  // The two views are different documents: JSON is for programs, the line is
-  // for eval. A script parsing one while asking for the other would be parsing
-  // output that never came, which is the same reason `cache clean` refuses
-  // `--json` (§09.7). `--use-on-cd` is shell code by definition, so it is
-  // refused the same way.
   if (json && requested !== undefined) {
     throw new UsageError(`The 'jup env' command cannot take --json and --shell together`);
   }
@@ -363,52 +271,48 @@ export async function cmdEnv(args: string[]): Promise<number> {
     throw new UsageError(`The 'jup env' command cannot take --json and --use-on-cd together`);
   }
 
-  // Resolved and validated before any resolution work: a mistyped flag should
-  // fail fast, not after the network. `undefined` is the JSON view, and it is
-  // what keeps the rendering below out of that branch's type.
-  let render: ((entries: string[]) => string) | undefined;
-  let hook: string | undefined;
-  if (!json) {
-    if (requested !== undefined && !Object.hasOwn(SHELL_DIALECTS, requested)) {
-      throw new UsageError(
-        `Unsupported shell "${requested}"; jup env supports bash, zsh, fish and powershell`,
-      );
-    }
-    const dialect = (requested ?? inferDialect()) as ShellDialect | undefined;
-    if (dialect === undefined) {
-      throw new UsageError(
-        `jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)`,
-      );
-    }
-    render = SHELL_DIALECTS[dialect];
-    if (useOnCd) hook = useOnCdBlock(dialect);
-  }
-
-  // The failure policy lives in the resolver (§09.18): a shell hook runs this
-  // on every directory change, and a hook that breaks the prompt is worse than
-  // a `PATH` without the acceleration. Failure still prints the strip, so
-  // whatever a previous directory put on `PATH` comes off and the shims — the
-  // correctness layer — answer instead.
-  const runtimes = await resolveRuntimeEnvironments(process.cwd());
-
   if (json) {
+    const runtimes = await resolveRuntimeEnvironments(runCwd());
     out(`${JSON.stringify({ version: ENV_REPORT_VERSION, runtimes })}\n`);
     return 0;
   }
 
-  const binDirs = runtimes
-    .map((runtime) => runtime.binDir)
-    .filter((binDir): binDir is string => binDir !== null);
+  // Validated before any resolution work, so a typo fails fast.
+  const shell = requested ?? inferShell();
+  if (shell === undefined) {
+    throw new UsageError(
+      `jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)`,
+    );
+  }
+  if (!isDialect(shell)) {
+    throw new UsageError(
+      `Unsupported shell "${shell}"; jup env supports bash, zsh, fish and powershell`,
+    );
+  }
+  const dialect = DIALECTS[shell];
 
-  const kept = (process.env[SYSTEM_ENV.PATH] ?? "")
-    .split(delimiter)
-    .filter((entry) => entry !== "" && !isStorePathEntry(entry));
+  // The line runs from a shell hook on every directory change, so it never
+  // waits on the registry: a version only the network could name is not in
+  // the store either, and the shims answer it on demand (§09.18).
+  const env = { ...runEnv() };
+  for (const spelling of envSpellings(ENV.ENABLE_NETWORK)) env[spelling] = "0";
+  setRunEnv(env);
+
+  // A failed resolution still prints the strip, so whatever a previous
+  // directory put on `PATH` comes off and the shims answer instead.
+  const runtimes = await resolveRuntimeEnvironments(runCwd());
+  const binDirs = runtimes.flatMap((runtime) => (runtime.binDir === null ? [] : [runtime.binDir]));
+
+  const path = env[SYSTEM_ENV.PATH];
+  const kept = path ? path.split(delimiter).filter((entry) => !isStorePathEntry(entry)) : [];
   const entries = [...binDirs, ...kept];
-  // An empty value would export an empty `PATH`, which is not the strip — it
-  // is the shell with nothing left to run. Where there is nothing to say, the
-  // command says nothing; the hook below is still registered, because the
-  // directory the user moves to next is the point of it.
-  if (render !== undefined && entries.length > 0) out(`${render(entries)}\n`);
-  if (hook !== undefined) out(hook);
+  // `export PATH=''` would leave the shell with nothing to run, so an empty
+  // result prints nothing; the hook is still registered.
+  if (entries.length > 0) out(`${dialect.line(entries)}\n`);
+
+  if (useOnCd) {
+    const self = await selfCommand(handover);
+    out(dialect.hook(self === undefined ? "jup" : self.map(dialect.quote).join(" ")));
+  }
   return 0;
 }

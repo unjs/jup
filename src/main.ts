@@ -364,7 +364,7 @@ async function ensureInstalledLazily(locator: ResolvedSpec, range: string): Prom
   }
 }
 
-function resolveExactPin(descriptor: Spec): ResolvedSpec | null {
+export function resolveExactPin(descriptor: Spec): ResolvedSpec | null {
   // A name outside the table has no §04.1 step 2 definition, and the error for
   // it belongs to the full path. Step 1's URL branch is unreachable from here,
   // since a URL is never a valid version.
@@ -569,7 +569,7 @@ async function resolveWithFallback(
  * The directory is the manifest's own, not the cwd: in a monorepo those differ,
  * and §03.7 already places project-level writes beside the selected manifest.
  */
-function resolutionDirFor(
+export function resolutionDirFor(
   specResult: ProjectSpec,
   reconciled: Spec | LazyResolvedSpec,
   descriptor: Spec,
@@ -587,7 +587,7 @@ function resolutionDirFor(
  * This is the *only* place the fallback thunk is forced, which is what keeps the
  * warm path free of `lastKnownGood.json` reads and network requests.
  */
-async function materialise(value: Spec | LazyResolvedSpec): Promise<Spec> {
+export async function materialise(value: Spec | LazyResolvedSpec): Promise<Spec> {
   if ("range" in value) return value;
   return { name: value.name, range: await value.reference() };
 }

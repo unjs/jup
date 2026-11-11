@@ -575,53 +575,45 @@ order, steps 3–6, composed from the same primitives the proxy composes them
 from — and prints, for `eval`, **one complete `PATH` assignment**:
 
 * The value is computed in jup, not by generated shell code, from the `PATH`
-  the invocation inherited: every entry inside the install folder (§10.2's
-  boundary) is dropped, and the resolved `bin` directories go in front. One
-  implementation of the rule, and the output is idempotent however often it is
-  evaluated — a store directory a previous directory-selection put on `PATH`
-  never outlives the one that replaced it.
-* Nothing is installed and no project file is written. The one derived-state
-  write that can happen is §04.6's default refresh inside the shared resolver,
-  which is the same write any run makes. A pin whose version is not in the
-  store prints the strip alone: the shims download on demand, and a `PATH`
-  entry jup cannot confirm against the store would be a guess.
-* A resolution that fails — an unresolvable range, the network down — is
-  **not an error**: the same strip-only line prints and the command exits 0,
-  so a shell hook can run it on every directory change without breaking the
-  prompt. The expired memo does **not** stand in the way it does for a run
-  (§04.4): wherever this command cannot agree with what the shims would answer,
-  the shims stay authoritative and `PATH` falls back to them.
-* `--json` prints the resolution itself instead of the shell line — the same
-  answer, for a program: `{"version":1,"runtimes":[{name, reference, binDir,
-  installed}]}`, shape-versioned the way `info`'s report is (§09.9) so a field
-  may be added without breaking a reader that ignores it. A failed resolution
-  is reported there as `reference: null` with the failure's own sentence in an
-  `error` field, because a report that cannot say "no answer" is not a report.
-  The flag refuses `--shell`: one output, not two that a script would have to
-  tell apart.
-* `--use-on-cd` appends the registration block that re-runs the line every
-  directory change, so each project directory gets its own runtime — the
-  issue #11 shape, official. The hook body calls the **base** command with the
-  flag dropped, so what it evaluates is one `PATH` line and nothing else: no
-  registration, no recursion, no second resolution at startup. Registration is
-  idempotent per dialect — `add-zsh-hook -D` before `add` on zsh, an
-  absent-only `PROMPT_COMMAND` append on bash (scalar semantics, documented),
-  function redefinition on fish's `--on-variable PWD`, and a sentinel-guarded
-  `prompt` wrapper on powershell, which has no directory-change hook of its
-  own. A hook costs one jup run per directory change; that is the trade the
-  flag's user has made.
-* `--shell` selects the dialect — `bash`, `zsh` (one POSIX `export` spelling),
-  `fish` (a `set -gx` list) and `powershell`. `SHELL`'s basename infers it when
-  the flag is absent (§11.5), with anything POSIX-shaped answering `bash`. A
-  name outside the four, or no `SHELL` and no flag, is a `UsageError` naming
-  them. Every dialect joins the entries with the host's `PATH` separator:
-  PowerShell on macOS and Linux uses `:`, exactly as `sh` does, so the
-  separator comes from the platform rather than from the shell's name. `csh`
-  and `cmd` are refused on purpose: `cmd` has no eval, and a session `set` is
-  not an integration.
-* An empty result — nothing to prepend and nothing to strip — prints nothing
-  at all, because `export PATH=''` would be the shell with nothing left to run
-  rather than the strip.
+  the invocation inherited: every **absolute** entry inside the install folder
+  (§10.2's boundary, either spelling of a symlinked home) is dropped, and the
+  resolved `bin` directories go in front. Relative and empty entries are kept
+  as written — they mean something different in every directory and were never
+  put there by this command. Evaluating the output again changes nothing.
+* Nothing is installed and no project file is written. A pin whose version is
+  not in the store prints the strip alone: the shims download on demand.
+* The line **never reaches the network**: it resolves as if
+  `COREPACK_ENABLE_NETWORK=0` were set, because a hook runs it on every
+  directory change and must not wait on a registry. A range the store cannot
+  answer could only name a version that is not installed anyway; a tag or a
+  stale default the network would refresh is left to the shims. The expired
+  memo does **not** stand in either (§04.4): wherever this command cannot agree
+  with what the shims would answer, `PATH` falls back to them.
+* A resolution that fails is **not an error**: the strip-only line prints and
+  the command exits 0, so a hook cannot break the prompt.
+* `--json` prints the resolution itself instead — `{"version":1,"runtimes":
+  [{name, reference, binDir, installed}]}`, shape-versioned like `info`'s
+  report (§09.9). It may ask the registry, since it is not run from a hook. A
+  failed resolution is `reference: null` with the failure's sentence in an
+  `error` field. It refuses `--shell` and `--use-on-cd`.
+* `--use-on-cd` appends a block that re-runs the line on every directory
+  change. The hook body names this jup by absolute path — §10.2's host runtime
+  and the entry's realpath — rather than a bare `jup`, which would start under
+  whichever `node` the line just put on `PATH`, possibly one too old to run jup.
+  It calls the base command with the flag dropped, so it evaluates one `PATH`
+  line and never re-registers. Registration is idempotent per dialect:
+  `add-zsh-hook -D` before `add` on zsh; on bash a `PROMPT_COMMAND` entry
+  appended once, on its own line, whose function returns early unless `$PWD`
+  changed; function redefinition on fish's `--on-variable PWD`; and a
+  sentinel-guarded `prompt` wrapper on powershell, gated the same way.
+* `--shell` selects the dialect: `bash`, `zsh`, `fish` or `powershell`. Absent,
+  `SHELL`'s basename infers it (§11.5) — `sh`, `dash`, `ksh`, `mksh` and `ash`
+  answer `bash` — and on Windows `PSModulePath` answers `powershell`. Any other
+  name (`csh`, `nu`, …), or nothing to infer from, is a `UsageError`. Every
+  dialect joins with the host's `PATH` separator, and quotes for its own
+  escapes: fish's `\\` and `\'`, and PowerShell's typographic single quotes.
+* An empty result prints nothing, because `export PATH=''` would leave the
+  shell with nothing to run.
 
 The agreement the whole feature rests on is test-asserted: the `node` this
 command puts on `PATH` is the `node` the shim hands over. A custom-URL runtime

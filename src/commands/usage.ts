@@ -236,17 +236,10 @@ never chooses a directory merely because it is writable and on PATH. For root,
 and never falls back elsewhere. Use --system with disable for shims installed
 that way.
 
-env prints one line for the shell's startup file — eval "$(jup env --shell
-zsh)" — that puts the project's node on PATH directly, ahead of the shims, so
-it starts as fast as a native install. It resolves the same version a shim
-would and installs nothing: a pin that is not in the store leaves the shims
-answering, and a resolution that fails strips what an earlier line added rather
-than guessing. Each line replaces what a previous one put there, so it is safe
-to evaluate again on every directory change. --shell names the dialect; the
-basename of $SHELL infers it when the flag is absent. --use-on-cd adds the
-hook that re-evaluates the line on every directory change, so each project
-directory gets its own node. --json prints the same resolution as JSON for
-programs instead of the shell line, and cannot be combined with --shell.
+env prints a PATH line for eval — eval "$(jup env --shell zsh --use-on-cd)" —
+that puts the project's node ahead of the shims. It installs nothing and uses
+no network; --use-on-cd re-evaluates it on every directory change, and --json
+prints the resolution for programs instead.
 
 Configuration uses environment variables only. Every artifact download prints a
 notice to stderr naming the URL it is about to fetch, and asks nothing.

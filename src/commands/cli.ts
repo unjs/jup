@@ -1435,10 +1435,10 @@ export async function runManagementCommand(args: string[], run?: RunOptions): Pr
     case "disable": {
       return import("./shims.ts").then(({ cmdDisable }) => cmdDisable(rest));
     }
-    // §09.18 — lazily, like `enable`/`disable`: the shell rendering and the
-    // resolution behind it are this command's alone, and nothing else pays.
+    // §09.18 — lazily, like `enable`/`disable`. `handover` says this is the
+    // CLI, whose own entry the `--use-on-cd` hook may name.
     case "env": {
-      return import("./env.ts").then(({ cmdEnv }) => cmdEnv(rest));
+      return import("./env.ts").then(({ cmdEnv }) => cmdEnv(rest, run?.handover === true));
     }
     // §09.15, §09.16 — runs, not mutations: they write nothing and forward
     // everything after the command word to the package manager. Under the
