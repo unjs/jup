@@ -10,7 +10,13 @@
 const { basename, delimiter, dirname, isAbsolute, join } = process.getBuiltinModule("node:path");
 const { realpathSync } = process.getBuiltinModule("node:fs");
 import { ENV, envSpellings, SYSTEM_ENV } from "../config/env-vars.ts";
-import { getTableSpec, isRuntime, resolveSpecBin, SUPPORTED_NAMES } from "../config/table.ts";
+import {
+  getTableSpec,
+  isRuntime,
+  resolveSpecBin,
+  runsAsRuntime,
+  SUPPORTED_NAMES,
+} from "../config/table.ts";
 import { findProjectSpec, reconcile } from "../project/manifest.ts";
 import { getFallbackLocator, resolveSpec } from "../version/resolve.ts";
 import { readKnownResolution } from "../project/lockfile.ts";
@@ -22,6 +28,7 @@ import { out } from "../utils/log.ts";
 import { runCwd, runEnv } from "../utils/context.ts";
 import { materialise, resolutionDirFor, resolveExactPin } from "../main.ts";
 import { firstValue, hasFlag, parseArgs } from "./args.ts";
+import type { ProjectSpec } from "../types.ts";
 
 /**
  * One runtime's answer. `reference: null` is a failed resolution, carried as a
@@ -37,7 +44,9 @@ export interface RuntimeEnvironment {
 }
 
 /**
- * Resolve every runtime in the table as a run of it from `cwd` would.
+ * Resolve every runtime in the table as a run of it from `cwd` would: `node`
+ * always, and the package managers that also run files (bun, deno, nub) where
+ * the project pins them.
  *
  * `staleDefault` says whether a global default due for its §04.6 re-check may
  * still be accelerated. Only when the shim would answer with it too: offline,
@@ -48,11 +57,21 @@ export async function resolveRuntimeEnvironments(
   cwd: string,
   staleDefault = true,
 ): Promise<RuntimeEnvironment[]> {
+  // bun, deno and nub are not shimmed by default (§10), so a user's own install
+  // may own the name: only a project that pins the entry claims it for jup. All
+  // three read the same package-manager fields, so one walk answers for them.
+  const capable = SUPPORTED_NAMES.filter((name) => runsAsRuntime(name) && !isRuntime(name));
+  const managerSpec = capable.length === 0 ? undefined : managerSpecFrom(cwd, capable[0]!);
+  const pinned = managerSpec === undefined ? undefined : pinnedName(managerSpec);
+
   const resolved: RuntimeEnvironment[] = [];
   for (const name of SUPPORTED_NAMES) {
-    if (!isRuntime(name)) continue;
+    if (!isRuntime(name) && !(name === pinned && capable.includes(name))) continue;
     try {
-      resolved.push(await resolveRuntimeEnvironment(cwd, name, staleDefault));
+      const specResult = isRuntime(name)
+        ? findProjectSpec(cwd, { projectSpecFlag: true, tool: name })
+        : managerSpec!;
+      resolved.push(await resolveRuntimeEnvironment(name, specResult, staleDefault));
     } catch (error) {
       resolved.push({
         name,
@@ -72,11 +91,10 @@ export async function resolveRuntimeEnvironments(
  * (§09.18): where the store cannot confirm, the shims stay authoritative.
  */
 async function resolveRuntimeEnvironment(
-  cwd: string,
   name: string,
+  specResult: ProjectSpec,
   staleDefault: boolean,
 ): Promise<RuntimeEnvironment> {
-  const specResult = findProjectSpec(cwd, { projectSpecFlag: true, tool: name });
   const fallback = getFallbackLocator(name, { transparent: false, project: specResult });
   const reconciled = reconcile(specResult, fallback, { requestedName: name, transparent: false });
   const descriptor = await materialise(reconciled);
@@ -110,6 +128,31 @@ async function resolveRuntimeEnvironment(
         : null,
     installed: installed !== null,
   };
+}
+
+/**
+ * The project's package-manager spec, or `undefined` when the walk itself fails
+ * — a malformed `package.json` — which `node`'s own walk reports instead.
+ */
+function managerSpecFrom(cwd: string, tool: string): ProjectSpec | undefined {
+  try {
+    return findProjectSpec(cwd, { projectSpecFlag: true, tool });
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The entry the project's package-manager pin names, if any. A pin that cannot
+ * be read is not this command's to report: its own shim will say so when it runs.
+ */
+function pinnedName(specResult: ProjectSpec): string | undefined {
+  if (specResult.type !== "Found" || envDisabled(ENV.ENABLE_PROJECT_SPEC)) return undefined;
+  try {
+    return specResult.getSpec({ requireVersion: false }).name;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Single-quote for sh-family shells: no expansion, no splitting. */

@@ -580,6 +580,13 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
   resolved `bin` directories go in front. Relative and empty entries are kept
   as written — they mean something different in every directory and were never
   put there by this command. Evaluating the output again changes nothing.
+* bun, deno and nub run files as well as installing packages (§02.3's
+  `alsoRuntime`), and are covered **only where the project's package-manager
+  pin names them**. None of the three is shimmed by default (§10), so elsewhere
+  the name may belong to the user's own install, which this command must not
+  shadow; their store entries are still stripped. One walk answers for all
+  three, since they read the same fields. `bunx` and `nubx` are not files in
+  those entries and keep reaching their shims.
 * Nothing is installed and no project file is written. A pin whose version is
   not in the store prints the strip alone: the shims download on demand.
 * The line **never reaches the network**: it resolves as if

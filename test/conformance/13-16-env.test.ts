@@ -19,6 +19,7 @@ import {
   seedPackageManager,
   type Fixture,
 } from "./_harness/index.ts";
+import { DEFINITIONS } from "../../src/config/table.ts";
 
 const registry = new MockRegistry();
 beforeAll(() => registry.start());
@@ -288,6 +289,77 @@ describe("jup env", () => {
 
 // §09.18 — the line runs from a hook on every directory change, so it never
 // waits on a registry. `--json` is the control: same fixture, and it does ask.
+describe("jup env and the package managers that run files", () => {
+  /**
+   * bun, deno and nub, at their table defaults so a refresh cannot leave the
+   * seeded version outside a band. The last column is where each puts its
+   * executable inside the store entry.
+   */
+  const CAPABLE = (["bun", "deno", "nub"] as const).map(
+    (name) => [name, DEFINITIONS[name]!.default, name === "deno" ? "" : "bin"] as const,
+  );
+
+  it.each(CAPABLE)("puts a pinned %s first, as its shim would", async (name, version, sub) => {
+    const fixture = createFixture({ packageManager: `${name}@${version}` });
+    const location = seedPackageManager(fixture.home, name, version);
+
+    const result = await env(fixture, ["--shell", HOST]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(line([join(location, sub), "/usr/bin"]));
+  });
+
+  // None of the three is shimmed by default (§10), so outside a project that
+  // pins it the name may be a user's own install: the line only strips.
+  it.each([
+    ["pins another package manager", { packageManager: "pnpm@10.0.0" }],
+    ["pins nothing", undefined],
+  ])("leaves bun alone in a project that %s", async (_, manifest) => {
+    const version = DEFINITIONS.bun!.default;
+    const fixture = createFixture(manifest);
+    const location = seedPackageManager(fixture.home, "bun", version);
+    writeFileSync(join(fixture.home, "lastKnownGood.json"), JSON.stringify({ bun: version }));
+    const stale = join(location, "bin");
+
+    const result = await env(fixture, ["--shell", HOST], {
+      PATH: [stale, "/usr/bin"].join(delimiter),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(line(["/usr/bin"]));
+  });
+
+  it("still exits 0 with the strip alone when package.json is malformed", async () => {
+    const fixture = createFixture();
+    fixture.write("package.json", `{"packageManager": `);
+
+    const result = await env(fixture, ["--shell", HOST]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe(line(["/usr/bin"]));
+  });
+
+  it("reports the pinned entry beside node in --json", async () => {
+    const version = DEFINITIONS.bun!.default;
+    const fixture = createFixture({ packageManager: `bun@${version}` });
+    const location = seedPackageManager(fixture.home, "bun", version);
+
+    const result = await env(fixture, ["--json"], { SHELL: undefined });
+    const report = JSON.parse(result.stdout) as { runtimes: Array<{ name: string }> };
+
+    expect(result.exitCode).toBe(0);
+    expect(report.runtimes.map(({ name }) => name).sort()).toEqual(["bun", "node"]);
+    expect(report.runtimes).toContainEqual({
+      name: "bun",
+      reference: version,
+      binDir: join(location, "bin"),
+      installed: true,
+    });
+  });
+});
+
 describe("jup env and the network", () => {
   it("answers a range the store cannot without asking the registry", async () => {
     const fixture = unresolvable();
