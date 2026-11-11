@@ -390,10 +390,15 @@ end
 }
 $global:__JUP_PWD = $PWD.Path
 function global:prompt {
+  $ok = $?
+  $code = $global:LASTEXITCODE
   if ($global:__JUP_PWD -ne $PWD.Path) {
     $global:__JUP_PWD = $PWD.Path
-    & ${sh} env --shell powershell 2>$null | Out-String | Invoke-Expression
+    try { $line = & ${sh} env --shell powershell 2>$null | Out-String } catch { $line = $null }
+    if ($line) { Invoke-Expression $line }
+    $global:LASTEXITCODE = $code
   }
+  if (-not $ok) { Write-Error '' -ErrorAction Ignore }
   & $global:__JUP_ORIG_PROMPT
 }
 `,

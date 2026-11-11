@@ -184,7 +184,9 @@ end
   },
   // No directory-change hook exists, so `prompt` is wrapped, gated on the
   // location having moved; the sentinel keeps a re-evaluation from wrapping
-  // the wrapper.
+  // the wrapper. `$?` and `$LASTEXITCODE` are restored for the original
+  // prompt, and a jup that cannot start (or prints nothing) is skipped
+  // silently rather than erroring on every `cd`.
   powershell: {
     quote: psQuote,
     line: (entries) => `$env:PATH = ${psQuote(entries.join(delimiter))}`,
@@ -193,10 +195,15 @@ end
 }
 $global:__JUP_PWD = $PWD.Path
 function global:prompt {
+  $ok = $?
+  $code = $global:LASTEXITCODE
   if ($global:__JUP_PWD -ne $PWD.Path) {
     $global:__JUP_PWD = $PWD.Path
-    & ${jup} env --shell powershell 2>$null | Out-String | Invoke-Expression
+    try { $line = & ${jup} env --shell powershell 2>$null | Out-String } catch { $line = $null }
+    if ($line) { Invoke-Expression $line }
+    $global:LASTEXITCODE = $code
   }
+  if (-not $ok) { Write-Error '' -ErrorAction Ignore }
   & $global:__JUP_ORIG_PROMPT
 }
 `,
