@@ -18,7 +18,7 @@ import { isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
 import { messages, UsageError } from "../errors-cold.ts";
 import { parse } from "../version/semver.ts";
 import { out } from "../utils/log.ts";
-import { runCwd, runEnv, setRunEnv } from "../utils/context.ts";
+import { runCwd, runEnv } from "../utils/context.ts";
 import { materialise, resolutionDirFor, resolveExactPin } from "../main.ts";
 import { firstValue, hasFlag, parseArgs } from "./cli.ts";
 
@@ -294,16 +294,21 @@ export async function cmdEnv(args: string[], handover = false): Promise<number> 
   // The line runs from a shell hook on every directory change, so it never
   // waits on the registry: a version only the network could name is not in
   // the store either, and the shims answer it on demand (§09.18).
-  const env = { ...runEnv() };
+  //
+  // Set in place, never on a spread copy: under the CLI this is `process.env`,
+  // whose keys are case-insensitive on Windows, where `PATH` is spelled `Path`
+  // and a plain copy would answer `undefined` for it. A scoped run's
+  // environment is already its own copy (`run/scoped.ts`). `PATH` is read
+  // first, before the env-file merge (§03.2) replaces the object.
+  const env = runEnv();
+  const path = env[SYSTEM_ENV.PATH];
   for (const spelling of envSpellings(ENV.ENABLE_NETWORK)) env[spelling] = "0";
-  setRunEnv(env);
 
   // A failed resolution still prints the strip, so whatever a previous
   // directory put on `PATH` comes off and the shims answer instead.
   const runtimes = await resolveRuntimeEnvironments(runCwd());
   const binDirs = runtimes.flatMap((runtime) => (runtime.binDir === null ? [] : [runtime.binDir]));
 
-  const path = env[SYSTEM_ENV.PATH];
   const kept = path ? path.split(delimiter).filter((entry) => !isStorePathEntry(entry)) : [];
   const entries = [...binDirs, ...kept];
   // `export PATH=''` would leave the shell with nothing to run, so an empty

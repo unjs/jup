@@ -53,7 +53,7 @@ describe("jup env", () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`export PATH='${binDir}:/usr/bin'\n`);
+    expect(result.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
   });
 
   it("renders each dialect in its own shape", async () => {
@@ -88,7 +88,17 @@ describe("jup env", () => {
       PATH: [older, binDir, "/usr/bin"].join(delimiter),
     });
 
-    expect(result.stdout).toBe(`export PATH='${binDir}:/usr/bin'\n`);
+    expect(result.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
+  });
+
+  // Windows spells the variable `Path`; reading it as `PATH` from a plain copy
+  // of the environment would find nothing and replace the whole value.
+  it.runIf(!POSIX)("reads PATH whatever case Windows spells it in", async () => {
+    const { fixture, binDir } = pinned();
+
+    const result = await env(fixture, ["--shell", "powershell"], { Path: "C:\\Windows" });
+
+    expect(result.stdout).toBe(`$env:PATH = '${binDir};C:\\Windows'\n`);
   });
 
   it.skipIf(!POSIX)("keeps relative and empty entries, even inside the store", async () => {
@@ -126,7 +136,7 @@ describe("jup env", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe(`export PATH='${binDir}:/usr/bin'\n`);
+    expect(result.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
   });
 
   it("prints the strip alone for a pin that is not installed", async () => {
@@ -159,7 +169,8 @@ describe("jup env", () => {
     expect(result.stdout).toBe("");
   });
 
-  it("puts the same node on PATH that the shim runs", async () => {
+  // POSIX only: the seeded `node.exe` is a script, not a runnable executable.
+  it.skipIf(!POSIX)("puts the same node on PATH that the shim runs", async () => {
     const { fixture, binDir } = pinned();
 
     const shim = await run(["node", "--version"], {
@@ -170,7 +181,7 @@ describe("jup env", () => {
     const line = await env(fixture, ["--shell", "zsh"]);
 
     expect(shim.stdout).toBe("24.21.0\n");
-    expect(line.stdout).toBe(`export PATH='${binDir}:/usr/bin'\n`);
+    expect(line.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
   });
 
   it.each([
@@ -200,7 +211,8 @@ describe("jup env", () => {
   });
 
   it("asks for --shell when SHELL names nothing", async () => {
-    const result = await env(createFixture(), [], { SHELL: undefined });
+    // `PSModulePath` too: on Windows it is what names PowerShell.
+    const result = await env(createFixture(), [], { SHELL: undefined, PSModulePath: undefined });
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe(
