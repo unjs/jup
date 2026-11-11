@@ -47,6 +47,11 @@ function unresolvable() {
 /**
  * Every row runs against the mock registry, so a request the line was not
  * supposed to make is recorded rather than sent to the internet.
+ *
+ * `allowSystemShimDirectory` because these rows assert the printed `PATH` byte
+ * for byte, and `childPath` would otherwise append a `node` directory whenever
+ * the suite runs under `/usr/local/bin/node` — the GitHub runner's. No row's
+ * `PATH` holds `/usr/local/bin`, so nothing else about the run changes.
  */
 function env(fixture: Fixture, args: string[], vars: Record<string, string | undefined> = {}) {
   return run(["env", ...args], {
@@ -54,6 +59,7 @@ function env(fixture: Fixture, args: string[], vars: Record<string, string | und
     home: fixture.home,
     registry,
     env: { PATH: "/usr/bin", ...vars },
+    allowSystemShimDirectory: true,
   });
 }
 
@@ -172,6 +178,7 @@ describe("jup env", () => {
       cwd: inside,
       home: fixture.home,
       env: { PATH: ["node_modules/.bin", ".", "", "/usr/bin"].join(delimiter) },
+      allowSystemShimDirectory: true, // see `env` above
     });
 
     expect(result.stdout).toBe(`export PATH='node_modules/.bin:.::/usr/bin'\n`);
@@ -193,6 +200,7 @@ describe("jup env", () => {
       cwd: fixture.cwd,
       home: linked,
       env: { PATH: [stale, "/usr/bin"].join(delimiter) },
+      allowSystemShimDirectory: true, // see `env` above
     });
 
     expect(result.exitCode).toBe(0);
