@@ -340,7 +340,10 @@ Entry-specific rules that are *rules*, not values:
   `MODULE_TYPELESS_PACKAGE_JSON` warning on stderr once per run. vlt's shebang
   hides it with `--no-warnings`, but §08.2 never reads a shebang. jup accepts the
   warning rather than add a table field for it; it goes away once upstream
-  declares `"type": "module"`.
+  declares `"type": "module"`. jup exposes only `vlt` and `vlx`; the other `vl*`
+  bins upstream ships (`vlr`, `vlrx`, `vlxl`, …) stay out on purpose, so the
+  refresh's "upstream adds … which the band does not expose" warning for them
+  can be skipped.
 
 ### Fields with exactly one user
 

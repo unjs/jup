@@ -888,7 +888,7 @@ describe("aube — §03.1's third per-host entry", () => {
     // The literal is stamped by `scripts/refresh-table.mjs`; see nub's row below
     // for what it is for and why it is not derived from the table.
     expect(parse(DEFINITIONS.aube!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.aube!.default).toBe("2.8.1");
+    expect(DEFINITIONS.aube!.default).toBe("2.10.0");
   });
 
   it("gives all three names one file, for argv[0] dispatch", () => {
@@ -1025,7 +1025,7 @@ describe("nub — §03.1's fourth per-host entry", () => {
     // beside it is the invariant a refresh must never break, and it is the one
     // this row is actually about.
     expect(parse(DEFINITIONS.nub!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.nub!.default).toBe("0.9.7");
+    expect(DEFINITIONS.nub!.default).toBe("0.10.0");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {

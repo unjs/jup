@@ -311,7 +311,7 @@ async function pnpmDefault() {
  * on that line's newest release in between. {@link reviewNodeLine} prints the
  * question on every run.
  */
-const NODE_LTS_LINE = 24;
+const NODE_LTS_LINE = 26;
 
 /**
  * §02.3 — node's `default`, and the `lts` tag that names the same release.
