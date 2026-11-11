@@ -585,10 +585,12 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
 * The line **never reaches the network**: it resolves as if
   `COREPACK_ENABLE_NETWORK=0` were set, because a hook runs it on every
   directory change and must not wait on a registry. A range the store cannot
-  answer could only name a version that is not installed anyway; a tag or a
-  stale default the network would refresh is left to the shims. The expired
-  memo does **not** stand in either (§04.4): wherever this command cannot agree
-  with what the shims would answer, `PATH` falls back to them.
+  answer could only name a version that is not installed anyway, and a tag is
+  left to the shims. A global default due for its §04.6 re-check is left to
+  them too, unless the user's own environment already has the network off —
+  the one case where the shim would answer with the same stale entry. The
+  expired memo does **not** stand in either (§04.4): wherever this command
+  cannot agree with what the shims would answer, `PATH` falls back to them.
 * A resolution that fails is **not an error**: the strip-only line prints and
   the command exits 0, so a hook cannot break the prompt.
 * `--json` prints the resolution itself instead — `{"version":1,"runtimes":
@@ -609,7 +611,10 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
 * `--shell` selects the dialect: `bash`, `zsh`, `fish` or `powershell`. Absent,
   `SHELL`'s basename infers it (§11.5) — `sh`, `dash`, `ksh`, `mksh` and `ash`
   answer `bash` — and on Windows `PSModulePath` answers `powershell`. Any other
-  name (`csh`, `nu`, …), or nothing to infer from, is a `UsageError`. Every
+  name (`csh`, `nu`, …), or nothing to infer from, is a `UsageError`. On
+  Windows only `powershell` is accepted, whether named or inferred: Git Bash
+  and Cygwin set `SHELL` there but split `PATH` on `:` and spell drives `/c/`,
+  so the host's `;`-joined value would leave them nothing to run. Every
   dialect joins with the host's `PATH` separator, and quotes for its own
   escapes: fish's `\\` and `\'`, and PowerShell's typographic single quotes.
 * An empty result prints nothing, because `export PATH=''` would leave the

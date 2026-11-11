@@ -14,7 +14,8 @@ import { getTableSpec, isRuntime, resolveSpecBin, SUPPORTED_NAMES } from "../con
 import { findProjectSpec, reconcile } from "../project/manifest.ts";
 import { getFallbackLocator, resolveSpec } from "../version/resolve.ts";
 import { readKnownResolution } from "../project/lockfile.ts";
-import { isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
+import { isDefaultFresh, isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
+import { envDisabled } from "../project/env.ts";
 import { messages, UsageError } from "../errors-cold.ts";
 import { parse } from "../version/semver.ts";
 import { out } from "../utils/log.ts";
@@ -35,13 +36,23 @@ export interface RuntimeEnvironment {
   error?: string;
 }
 
-/** Resolve every runtime in the table as a run of it from `cwd` would. */
-export async function resolveRuntimeEnvironments(cwd: string): Promise<RuntimeEnvironment[]> {
+/**
+ * Resolve every runtime in the table as a run of it from `cwd` would.
+ *
+ * `staleDefault` says whether a global default due for its §04.6 re-check may
+ * still be accelerated. Only when the shim would answer with it too: offline,
+ * it keeps the stale entry; online, it refreshes it, and the line — which never
+ * asks the registry — must then leave that answer to the shims.
+ */
+export async function resolveRuntimeEnvironments(
+  cwd: string,
+  staleDefault = true,
+): Promise<RuntimeEnvironment[]> {
   const resolved: RuntimeEnvironment[] = [];
   for (const name of SUPPORTED_NAMES) {
     if (!isRuntime(name)) continue;
     try {
-      resolved.push(await resolveRuntimeEnvironment(cwd, name));
+      resolved.push(await resolveRuntimeEnvironment(cwd, name, staleDefault));
     } catch (error) {
       resolved.push({
         name,
@@ -60,11 +71,20 @@ export async function resolveRuntimeEnvironments(cwd: string): Promise<RuntimeEn
  * handover. The expired memo is deliberately not used as a stale answer
  * (§09.18): where the store cannot confirm, the shims stay authoritative.
  */
-async function resolveRuntimeEnvironment(cwd: string, name: string): Promise<RuntimeEnvironment> {
+async function resolveRuntimeEnvironment(
+  cwd: string,
+  name: string,
+  staleDefault: boolean,
+): Promise<RuntimeEnvironment> {
   const specResult = findProjectSpec(cwd, { projectSpecFlag: true, tool: name });
   const fallback = getFallbackLocator(name, { transparent: false, project: specResult });
   const reconciled = reconcile(specResult, fallback, { requestedName: name, transparent: false });
   const descriptor = await materialise(reconciled);
+  const shimsOwnDefault =
+    !staleDefault &&
+    !("range" in reconciled) &&
+    !envDisabled(ENV.DEFAULT_TO_LATEST) &&
+    !isDefaultFresh(name);
 
   const projectDir = resolutionDirFor(specResult, reconciled, descriptor, undefined);
   const known =
@@ -85,7 +105,9 @@ async function resolveRuntimeEnvironment(cwd: string, name: string): Promise<Run
     name,
     reference: locator.reference,
     binDir:
-      installed !== null && entry !== undefined ? dirname(join(installed.location, entry)) : null,
+      installed !== null && entry !== undefined && !shimsOwnDefault
+        ? dirname(join(installed.location, entry))
+        : null,
     installed: installed !== null,
   };
 }
@@ -289,6 +311,14 @@ export async function cmdEnv(args: string[], handover = false): Promise<number> 
       `Unsupported shell "${shell}"; jup env supports bash, zsh, fish and powershell`,
     );
   }
+  // MSYS and Cygwin shells set `SHELL` on Windows, but split `PATH` on `:` and
+  // spell drives `/c/`; the host's `;`-joined `C:\` value would leave them
+  // with nothing to run. PowerShell is the one dialect the host value fits.
+  if (process.platform === "win32" && shell !== "powershell") {
+    throw new UsageError(
+      `Unsupported shell "${shell}" on Windows; jup env supports powershell there`,
+    );
+  }
   const dialect = DIALECTS[shell];
 
   // The line runs from a shell hook on every directory change, so it never
@@ -302,11 +332,12 @@ export async function cmdEnv(args: string[], handover = false): Promise<number> 
   // first, before the env-file merge (§03.2) replaces the object.
   const env = runEnv();
   const path = env[SYSTEM_ENV.PATH];
+  const offline = envDisabled(ENV.ENABLE_NETWORK);
   for (const spelling of envSpellings(ENV.ENABLE_NETWORK)) env[spelling] = "0";
 
   // A failed resolution still prints the strip, so whatever a previous
   // directory put on `PATH` comes off and the shims answer instead.
-  const runtimes = await resolveRuntimeEnvironments(runCwd());
+  const runtimes = await resolveRuntimeEnvironments(runCwd(), offline);
   const binDirs = runtimes.flatMap((runtime) => (runtime.binDir === null ? [] : [runtime.binDir]));
 
   const kept = path ? path.split(delimiter).filter((entry) => !isStorePathEntry(entry)) : [];

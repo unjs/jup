@@ -8,18 +8,25 @@
  */
 
 import { delimiter, join } from "node:path";
-import { mkdirSync, realpathSync, symlinkSync } from "node:fs";
-import { afterAll, describe, expect, it } from "vitest";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   BIN,
   cleanupFixtures,
   createFixture,
+  MockRegistry,
   run,
   seedPackageManager,
   type Fixture,
 } from "./_harness/index.ts";
 
-afterAll(cleanupFixtures);
+const registry = new MockRegistry();
+beforeAll(() => registry.start());
+beforeEach(() => registry.reset());
+afterAll(async () => {
+  cleanupFixtures();
+  await registry.stop();
+});
 
 const POSIX = process.platform !== "win32";
 const USAGE = `$ jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]\n`;
@@ -37,33 +44,64 @@ function unresolvable() {
   return createFixture({ devEngines: { runtime: { name: "node", version: "^99.0.0" } } });
 }
 
+/**
+ * Every row runs against the mock registry, so a request the line was not
+ * supposed to make is recorded rather than sent to the internet.
+ */
 function env(fixture: Fixture, args: string[], vars: Record<string, string | undefined> = {}) {
   return run(["env", ...args], {
     cwd: fixture.cwd,
     home: fixture.home,
+    registry,
     env: { PATH: "/usr/bin", ...vars },
   });
+}
+
+/** The dialect this host runs: Windows has only PowerShell (§09.18). */
+const HOST = POSIX ? "zsh" : "powershell";
+
+/** The line {@link HOST} prints for these entries. */
+function line(entries: string[]): string {
+  const value = entries.join(delimiter);
+  return POSIX ? `export PATH='${value}'\n` : `$env:PATH = '${value}'\n`;
+}
+
+/**
+ * No project, a seeded node, and that node recorded as the §04.6 default —
+ * stamped `age` ms ago, or unstamped, which reads as due for its re-check.
+ */
+function defaulted(age?: number) {
+  const fixture = createFixture();
+  const location = seedPackageManager(fixture.home, "node", "24.21.0");
+  const stamps = age === undefined ? {} : { "#stamps": { node: Date.now() - age } };
+  writeFileSync(
+    join(fixture.home, "lastKnownGood.json"),
+    JSON.stringify({ node: "24.21.0", ...stamps }),
+  );
+  return { fixture, binDir: join(location, "bin") };
 }
 
 describe("jup env", () => {
   it("prepends the resolved runtime's bin directory", async () => {
     const { fixture, binDir } = pinned();
 
-    const result = await env(fixture, ["--shell", "zsh"]);
+    const result = await env(fixture, ["--shell", HOST]);
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
+    expect(result.stdout).toBe(line([binDir, "/usr/bin"]));
   });
 
-  it("renders each dialect in its own shape", async () => {
+  it.skipIf(!POSIX)("renders each dialect in its own shape", async () => {
     const { fixture, binDir } = pinned();
     const PATH = ["/usr/bin", "/bin"].join(delimiter);
 
     const fish = await env(fixture, ["--shell", "fish"], { PATH });
     const powershell = await env(fixture, ["--shell", "powershell"], { PATH });
 
-    expect(fish.stdout).toBe(`set -gx PATH '${binDir}' '/usr/bin' '/bin'\n`);
+    // fish doubles a backslash, which a temp directory may well contain.
+    const fishBin = binDir.replaceAll("\\", "\\\\");
+    expect(fish.stdout).toBe(`set -gx PATH '${fishBin}' '/usr/bin' '/bin'\n`);
     expect(powershell.stdout).toBe(
       `$env:PATH = '${[binDir, "/usr/bin", "/bin"].join(delimiter)}'\n`,
     );
@@ -84,11 +122,11 @@ describe("jup env", () => {
     const { fixture, binDir } = pinned();
     const older = join(seedPackageManager(fixture.home, "node", "24.20.0"), "bin");
 
-    const result = await env(fixture, ["--shell", "bash"], {
+    const result = await env(fixture, ["--shell", HOST], {
       PATH: [older, binDir, "/usr/bin"].join(delimiter),
     });
 
-    expect(result.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
+    expect(result.stdout).toBe(line([binDir, "/usr/bin"]));
   });
 
   // Windows spells the variable `Path`; reading it as `PATH` from a plain copy
@@ -99,6 +137,28 @@ describe("jup env", () => {
     const result = await env(fixture, ["--shell", "powershell"], { Path: "C:\\Windows" });
 
     expect(result.stdout).toBe(`$env:PATH = '${binDir};C:\\Windows'\n`);
+  });
+
+  // Git Bash and Cygwin set `SHELL` on Windows but cannot read a `;`-joined
+  // `C:\` value: refusing is what keeps a startup file from emptying `PATH`.
+  it.runIf(!POSIX).each([
+    [["--shell", "bash"], {}, "bash"],
+    [[], { SHELL: "/usr/bin/bash" }, "bash"],
+  ])("refuses POSIX dialects on Windows: %j %j", async (args, vars, name) => {
+    const result = await env(createFixture(), args, vars);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe(
+      `Usage Error: Unsupported shell "${name}" on Windows; jup env supports powershell there\n\n${USAGE}`,
+    );
+  });
+
+  it.runIf(!POSIX)("infers PowerShell from PSModulePath on Windows", async () => {
+    const { fixture, binDir } = pinned();
+
+    const result = await env(fixture, [], { SHELL: undefined, PSModulePath: "C:\\Modules" });
+
+    expect(result.stdout).toBe(line([binDir, "/usr/bin"]));
   });
 
   it.skipIf(!POSIX)("keeps relative and empty entries, even inside the store", async () => {
@@ -143,27 +203,17 @@ describe("jup env", () => {
     const fixture = createFixture();
     fixture.write(".nvmrc", "22.11.0\n");
 
-    const result = await env(fixture, ["--shell", "zsh"]);
+    const result = await env(fixture, ["--shell", HOST]);
 
     // Exit 0 and stderr empty: an uninstalled pin is the shims' business, and
     // this command must be safe to evaluate from a shell hook.
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`export PATH='/usr/bin'\n`);
-  });
-
-  it("prints the strip alone when resolution fails, without the network", async () => {
-    // Network left on: the line must not ask the registry, so a range the
-    // store cannot answer fails at once rather than after a timeout.
-    const result = await env(unresolvable(), ["--shell", "zsh"]);
-
-    expect(result.exitCode).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(`export PATH='/usr/bin'\n`);
+    expect(result.stdout).toBe(line(["/usr/bin"]));
   });
 
   it("prints nothing at all when there is nothing to say", async () => {
-    const result = await env(unresolvable(), ["--shell", "zsh"], { PATH: "" });
+    const result = await env(unresolvable(), ["--shell", HOST], { PATH: "" });
 
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe("");
@@ -178,13 +228,13 @@ describe("jup env", () => {
       home: fixture.home,
       env: { PATH: "/usr/bin" },
     });
-    const line = await env(fixture, ["--shell", "zsh"]);
+    const printed = await env(fixture, ["--shell", HOST]);
 
     expect(shim.stdout).toBe("24.21.0\n");
-    expect(line.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
+    expect(printed.stdout).toBe(line([binDir, "/usr/bin"]));
   });
 
-  it.each([
+  it.skipIf(!POSIX).each([
     ["/usr/local/bin/fish", "fish"],
     ["-zsh", "zsh"],
     ["/bin/dash", "bash"],
@@ -225,6 +275,42 @@ describe("jup env", () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stdout).toBe(`Usage Error: The 'jup env' command takes no arguments\n\n${USAGE}`);
+  });
+});
+
+// §09.18 — the line runs from a hook on every directory change, so it never
+// waits on a registry. `--json` is the control: same fixture, and it does ask.
+describe("jup env and the network", () => {
+  it("answers a range the store cannot without asking the registry", async () => {
+    const fixture = unresolvable();
+
+    const result = await env(fixture, ["--shell", HOST]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(line(["/usr/bin"]));
+    expect(registry.requests).toEqual([]);
+
+    await env(fixture, ["--json"]);
+    expect(registry.requests.length).toBeGreaterThan(0);
+  });
+
+  it("leaves a default due for its re-check to the shims", async () => {
+    const { fixture } = defaulted();
+
+    // Online, the shim would refresh the default, so the line cannot vouch for it.
+    const result = await env(fixture, ["--shell", HOST], { COREPACK_DEFAULT_TO_LATEST: "1" });
+    expect(result.stdout).toBe(line(["/usr/bin"]));
+    expect(registry.requests).toEqual([]);
+  });
+
+  it.each([
+    ["fresh", { COREPACK_DEFAULT_TO_LATEST: "1" }, 60_000],
+    ["offline", { COREPACK_DEFAULT_TO_LATEST: "1", COREPACK_ENABLE_NETWORK: "0" }, undefined],
+  ] as const)("accelerates a recorded default the shim agrees with: %s", async (_, vars, age) => {
+    const { fixture, binDir } = defaulted(age);
+
+    const result = await env(fixture, ["--shell", HOST], vars);
+    expect(result.stdout).toBe(line([binDir, "/usr/bin"]));
+    expect(registry.requests).toEqual([]);
   });
 });
 
@@ -326,10 +412,12 @@ function global:prompt {
   });
 
   it("registers the hook even when there is no line to print", async () => {
-    const result = await env(unresolvable(), ["--shell", "zsh", "--use-on-cd"], { PATH: "" });
+    const result = await env(unresolvable(), ["--shell", HOST, "--use-on-cd"], { PATH: "" });
 
     expect(result.exitCode).toBe(0);
-    expect(result.stdout).not.toContain("export PATH=");
-    expect(result.stdout).toContain("add-zsh-hook chpwd _jup_env");
+    expect(result.stdout).not.toContain("PATH");
+    expect(result.stdout).toContain(
+      POSIX ? "add-zsh-hook chpwd _jup_env" : "function global:prompt",
+    );
   });
 });
