@@ -199,6 +199,55 @@ import { entryNameFor,`,
 `,
   ],
 
+  // --- §10: a shim is a symlink to this executable ---------------------------
+
+  // Ownership (§10.6) is "resolves to us" (`run/self-link.ts`). A Node build's
+  // marker-bearing stub still counts, so this build takes over those shims; the
+  // Node build sees ours as foreign links, which §10.3 displaces and records.
+  // `isOurShim` is §08.7's promotion test and `info`'s; `isOurEntry` is
+  // `enable`'s and `disable`'s.
+  [
+    "run/exec.ts",
+    `import { messages } from "../errors.ts";\n`,
+    `import { messages } from "../errors.ts";\nimport { isSelfLink } from "./self-link.ts";\n`,
+  ],
+  [
+    "run/exec.ts",
+    "export function isOurShim(file: string, binName: string): boolean {\n",
+    "export function isOurShim(file: string, binName: string): boolean {\n  if (isSelfLink(file)) return true;\n",
+  ],
+  [
+    "commands/shims.ts",
+    `import { extractAddon } from "../run/addon.ts";\n`,
+    `import { extractAddon } from "../run/addon.ts";\nimport { isSelfLink, selfExecutable } from "../run/self-link.ts";\n`,
+  ],
+  [
+    "commands/shims.ts",
+    "async function isOurEntry(file: string, binName: string, stats?: Stats): Promise<boolean> {\n",
+    "async function isOurEntry(file: string, binName: string, stats?: Stats): Promise<boolean> {\n  if (isSelfLink(file)) return true;\n",
+  ],
+  // §10.3 unchanged — `lstat`, the relative link, Yarn Switch, displacement, the
+  // idempotent no-write — but the link names the executable, not a stub.
+  [
+    "commands/shims.ts",
+    `  return linkPosixEntry(
+    installDirectory,
+    await ensureStub(distFolder, binName, interpreter),
+    binName,
+    options,
+  );`,
+    `  void distFolder;
+  void interpreter;
+  return linkPosixEntry(installDirectory, selfExecutable(), binName, options);`,
+  ],
+  // §10.2 pins a shebang, and a symlink to a native executable has none.
+  [
+    "commands/shims.ts",
+    `  return claimsName || (process.platform !== "win32" && !envFindsInterpreter());`,
+    `  void claimsName;
+  return false;`,
+  ],
+
   // --- HTTP proxies: transport not lowered yet -------------------------------
 
   [
