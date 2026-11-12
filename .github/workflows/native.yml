@@ -53,4 +53,6 @@ jobs:
         with:
           name: jup-native-${{ runner.os }}-${{ runner.arch }}
           path: .native/jup-*
+          # `.native/` is a dot-directory, which the action skips by default.
+          include-hidden-files: true
           if-no-files-found: error
