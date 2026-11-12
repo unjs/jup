@@ -86,6 +86,36 @@ stream only inside the call that writes, never at module load. `node:util` itsel
 is free (it is in Node's startup snapshot), and `styleText` adds one module when a
 line is actually coloured.
 
+## Native build (experimental)
+
+`pnpm build:native` (`scripts/build-native.mjs`) compiles jup to a single native
+executable with [scriptc](https://scriptc.dev). It is for a host that has no Node
+yet, and for shims that cost a process exec rather than a runtime start. `src/`
+is not written for it. The script copies `src/` to `node_modules/.cache/jup-native/`
+and transforms the copy:
+
+- **Overrides.** `native/scriptc/overrides/` replaces whole modules whose native
+  form is a different design: the `argv0`-dispatching entry, and an exec layer
+  that calls `execve(2)` through `native/scriptc/jupexec.c` over scriptc's FFI.
+- **Patches.** Anchored edits cover what scriptc cannot compile yet. Each must
+  match exactly once, so a change in `src/` breaks this build rather than being
+  patched around silently. When one breaks, fix the anchor. Prefer a `src/`
+  change only where it is neutral for the Node build.
+- **Builtins.** `process.getBuiltinModule` calls become static imports.
+
+The behaviour differs from the Node build in the following ways:
+
+- **Exec-only.** Every run replaces the process: a native artifact directly, a
+  JavaScript entry point as `node <bin> …`. That `node` may be our own shim, which
+  is how a JavaScript tool gets the project's `devEngines.runtime`.
+- **Not used:** in-process handover (§08.2), the addon, the IPC relay (§08.3.2)
+  and scoped `runMain` runs. The channel and every other inherited fd survive
+  `execve` whole.
+- **Shims are symlinks** to the executable. `enable` does not write them yet.
+- **No proxy transport.** HTTP proxies and `JUP_STRICT_SSL=0` are refused: §05.1's
+  `node:http`/`node:tls` transport is beyond scriptc's current lowering.
+- **POSIX only.**
+
 ## Published GitHub action
 
 `setup-jup` lives in [unjs/setup-jup](https://github.com/unjs/setup-jup) and is

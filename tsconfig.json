@@ -17,5 +17,6 @@
     "noImplicitOverride": true,
     "noEmit": true,
     "types": ["node"]
-  }
+  },
+  "exclude": ["node_modules", "native/scriptc/overrides"]
 }

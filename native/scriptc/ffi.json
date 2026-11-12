@@ -1,0 +1,13 @@
+{
+  "ffi_format": 1,
+  "functions": [
+    {
+      "name": "jupExecve",
+      "symbol": "jup_execve",
+      "params": ["bytes", "i32", "i32"],
+      "returns": "i32"
+    }
+  ],
+  "libraries": ["./libjupexec.a"],
+  "system_libraries": []
+}

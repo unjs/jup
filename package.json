@@ -38,6 +38,7 @@
     "bench": "node scripts/bench.mjs",
     "build": "obuild",
     "build:addon": "node scripts/build-addon.mjs",
+    "build:native": "node scripts/build-native.mjs",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
