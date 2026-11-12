@@ -21,6 +21,7 @@ import { findProjectSpec, reconcile } from "../project/manifest.ts";
 import { getFallbackLocator, resolveSpec } from "../version/resolve.ts";
 import { readKnownResolution } from "../project/lockfile.ts";
 import { isDefaultFresh, isInsideInstallFolder, readInstalledSpec } from "../cache/store.ts";
+import { shimDirectoryFor } from "../run/exec.ts";
 import { envDisabled } from "../project/env.ts";
 import { messages, UsageError } from "../errors-cold.ts";
 import { parse } from "../version/semver.ts";
@@ -44,9 +45,14 @@ export interface RuntimeEnvironment {
 }
 
 /**
- * Resolve every runtime in the table as a run of it from `cwd` would: `node`
- * always, and the package managers that also run files (bun, deno, nub) where
- * the project pins them.
+ * Resolve each entry that runs files — `node`, and the package managers that
+ * also do (bun, deno, nub) — as a run of it from `cwd` would, wherever jup
+ * owns the name (§09.18): its shim is enabled, or the project pins it.
+ *
+ * None of them is shimmed by default (§10.7), so elsewhere the name belongs to
+ * the user's own install — nvm's `node`, `~/.bun/bin/bun` — which a global
+ * default must not shadow. Where the shim is enabled, the line mirrors it,
+ * global default included.
  *
  * `staleDefault` says whether a global default due for its §04.6 re-check may
  * still be accelerated. Only when the shim would answer with it too: offline,
@@ -57,22 +63,24 @@ export async function resolveRuntimeEnvironments(
   cwd: string,
   staleDefault = true,
 ): Promise<RuntimeEnvironment[]> {
-  // bun, deno and nub are not shimmed by default (§10), so a user's own install
-  // may own the name: only a project that pins the entry claims it for jup. All
-  // three read the same package-manager fields, so one walk answers for them.
-  const capable = SUPPORTED_NAMES.filter((name) => runsAsRuntime(name) && !isRuntime(name));
-  const managerSpec = capable.length === 0 ? undefined : managerSpecFrom(cwd, capable[0]!);
-  const pinned = managerSpec === undefined ? undefined : pinnedName(managerSpec);
-
+  // bun, deno and nub read the same package-manager fields: one walk serves all three.
+  let managerSpec: ProjectSpec | undefined;
   const resolved: RuntimeEnvironment[] = [];
   for (const name of SUPPORTED_NAMES) {
-    if (!isRuntime(name) && !(name === pinned && capable.includes(name))) continue;
+    if (!runsAsRuntime(name)) continue;
+    let walked = false;
     try {
       const specResult = isRuntime(name)
         ? findProjectSpec(cwd, { projectSpecFlag: true, tool: name })
-        : managerSpec!;
+        : (managerSpec ??= findProjectSpec(cwd, { projectSpecFlag: true, tool: name }));
+      walked = true;
+      if (pinnedName(specResult) !== name && shimDirectoryFor(name) === undefined) continue;
       resolved.push(await resolveRuntimeEnvironment(name, specResult, staleDefault));
     } catch (error) {
+      // A walk that failed — a malformed `package.json` — cannot say whether the
+      // project pins the name: `node` reports it, the others only where their
+      // own shim would meet the same failure.
+      if (!walked && !isRuntime(name) && shimDirectoryFor(name) === undefined) continue;
       resolved.push({
         name,
         reference: null,
@@ -131,20 +139,9 @@ async function resolveRuntimeEnvironment(
 }
 
 /**
- * The project's package-manager spec, or `undefined` when the walk itself fails
- * — a malformed `package.json` — which `node`'s own walk reports instead.
- */
-function managerSpecFrom(cwd: string, tool: string): ProjectSpec | undefined {
-  try {
-    return findProjectSpec(cwd, { projectSpecFlag: true, tool });
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * The entry the project's package-manager pin names, if any. A pin that cannot
- * be read is not this command's to report: its own shim will say so when it runs.
+ * The entry the project pins, if any: `devEngines.runtime` or `.nvmrc` for
+ * `node`, the package-manager fields for the rest. A pin that cannot be read is
+ * not this command's to report: its own shim will say so when it runs.
  */
 function pinnedName(specResult: ProjectSpec): string | undefined {
   if (specResult.type !== "Found" || envDisabled(ENV.ENABLE_PROJECT_SPEC)) return undefined;
@@ -165,9 +162,18 @@ function fishQuote(value: string): string {
   return `'${value.replace(/[\\']/g, "\\$&")}'`;
 }
 
-/** Single-quote for PowerShell, which also ends a string on the typographic quotes. */
+/**
+ * Quote for PowerShell. Its hook reads a native command's output through
+ * `[Console]::OutputEncoding` — the OEM code page on Windows, not UTF-8 — so
+ * anything outside printable ASCII would come back mangled, and be written
+ * into `PATH` on every `cd`. Such a value travels as base64 of its UTF-8 bytes,
+ * which every code page reads alike; the typographic quotes PowerShell also
+ * ends a string on are among them.
+ */
 function psQuote(value: string): string {
-  return `'${value.replace(/['‘’‚‛]/g, "$&$&")}'`;
+  if (/^[\x20-\x7e]*$/.test(value)) return `'${value.replaceAll("'", "''")}'`;
+  const base64 = Buffer.from(value, "utf8").toString("base64");
+  return `([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${base64}')))`;
 }
 
 /**
@@ -259,13 +265,16 @@ function isDialect(name: string): name is ShellDialect {
   return Object.hasOwn(DIALECTS, name);
 }
 
-/** Shells that run the POSIX `export` spelling, answered as `bash`. */
+/**
+ * Shells that run the POSIX `export` spelling, answered as `bash`. Only bash
+ * itself runs the `--use-on-cd` block, which needs `[[` and `PROMPT_COMMAND`.
+ */
 const POSIX_SHELLS = new Set(["sh", "bash", "dash", "ksh", "mksh", "ash"]);
 
 /**
- * §11.5 — the dialect `SHELL` names when `--shell` is absent, and on Windows
- * PowerShell by `PSModulePath`, as `enable`'s hint detects it. A name outside
- * the four (csh, nu, …) comes back as itself, for the caller to refuse.
+ * §11.5 — the shell `SHELL` names when `--shell` is absent, and on Windows
+ * PowerShell by `PSModulePath`, as `enable`'s hint detects it. The name comes
+ * back as itself, for the caller to map or refuse.
  */
 function inferShell(): string | undefined {
   const env = runEnv();
@@ -275,7 +284,6 @@ function inferShell(): string | undefined {
       .replace(/^-+/, "")
       .replace(/\.exe$/i, "")
       .toLowerCase();
-    if (POSIX_SHELLS.has(name)) return "bash";
     return name === "pwsh" ? "powershell" : name;
   }
   if (process.platform === "win32" && env[SYSTEM_ENV.PSMODULEPATH] !== undefined) {
@@ -285,18 +293,42 @@ function inferShell(): string | undefined {
 }
 
 /**
+ * The inherited `PATH`. A scoped run's environment (`run/scoped.ts`) is a plain
+ * copy, whose keys are case-sensitive even on Windows, where the variable is
+ * spelled `Path`: reading `PATH` from it would find nothing and the line would
+ * replace the whole value.
+ */
+function inheritedPath(env: Record<string, string | undefined>): string | undefined {
+  if (process.platform !== "win32") return env[SYSTEM_ENV.PATH];
+  const key = Object.keys(env).find((name) => name.toUpperCase() === SYSTEM_ENV.PATH);
+  return key === undefined ? undefined : env[key];
+}
+
+/**
  * Is this `PATH` entry inside the install folder, spelled literally or through
- * a symlinked home? Only absolute entries are candidates: a relative one (`.`,
+ * a symlink? Only absolute entries are candidates: a relative one (`.`,
  * `node_modules/.bin`) means something different in every directory and was
  * never put there by this command.
+ *
+ * An entry that no longer exists — a version since removed — cannot be
+ * resolved whole, so its deepest existing ancestor is, and the rest appended:
+ * spelled through a link to the home, it would otherwise outlive the directory
+ * it named. Every entry that exists resolves on the first try.
  */
 function isStorePathEntry(entry: string): boolean {
   if (!isAbsolute(entry)) return false;
   if (isInsideInstallFolder(entry)) return true;
-  try {
-    return isInsideInstallFolder(realpathSync(entry));
-  } catch {
-    return false;
+  let head = entry;
+  let tail = "";
+  for (;;) {
+    try {
+      return isInsideInstallFolder(join(realpathSync(head), tail));
+    } catch {
+      const parent = dirname(head);
+      if (parent === head) return false;
+      tail = join(basename(head), tail);
+      head = parent;
+    }
   }
 }
 
@@ -350,7 +382,14 @@ export async function cmdEnv(args: string[], handover = false): Promise<number> 
   }
 
   // Validated before any resolution work, so a typo fails fast.
-  const shell = requested ?? inferShell();
+  const inferred = requested === undefined ? inferShell() : undefined;
+  if (useOnCd && inferred !== undefined && inferred !== "bash" && POSIX_SHELLS.has(inferred)) {
+    throw new UsageError(
+      `jup env --use-on-cd cannot hook ${inferred}; pass --shell (bash, zsh, fish or powershell)`,
+    );
+  }
+  const shell =
+    inferred !== undefined && POSIX_SHELLS.has(inferred) ? "bash" : (requested ?? inferred);
   if (shell === undefined) {
     throw new UsageError(
       `jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)`,
@@ -376,12 +415,11 @@ export async function cmdEnv(args: string[], handover = false): Promise<number> 
   // the store either, and the shims answer it on demand (§09.18).
   //
   // Set in place, never on a spread copy: under the CLI this is `process.env`,
-  // whose keys are case-insensitive on Windows, where `PATH` is spelled `Path`
-  // and a plain copy would answer `undefined` for it. A scoped run's
-  // environment is already its own copy (`run/scoped.ts`). `PATH` is read
-  // first, before the env-file merge (§03.2) replaces the object.
+  // whose keys are case-insensitive on Windows. A scoped run's environment is
+  // already its own copy (`run/scoped.ts`). `PATH` is read first, before the
+  // env-file merge (§03.2) replaces the object.
   const env = runEnv();
-  const path = env[SYSTEM_ENV.PATH];
+  const path = inheritedPath(env);
   const offline = envDisabled(ENV.ENABLE_NETWORK);
   for (const spelling of envSpellings(ENV.ENABLE_NETWORK)) env[spelling] = "0";
 

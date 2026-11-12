@@ -9,6 +9,7 @@
  * seeded the way the conformance rows seed it.
  */
 
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveRuntimeEnvironments } from "../../src/commands/env.ts";
@@ -70,11 +71,22 @@ describe("resolveRuntimeEnvironments", () => {
     ]);
   });
 
-  it("falls back to the built-in default outside any project", async () => {
+  it("falls back to the built-in default outside any project, once node is shimmed", async () => {
     const created = fixture();
+    const shims = join(created.root, "shims");
+    mkdirSync(shims);
+    writeFileSync(join(shims, "node"), "#!/bin/sh\n# @jup-shim\n");
+    vi.stubEnv("JUP_SHIM_DIRECTORY", shims);
 
     await expect(resolveRuntimeEnvironments(created.cwd)).resolves.toEqual([
       { name: "node", reference: NODE_DEFAULT, binDir: null, installed: false },
     ]);
+  });
+
+  // §10.7 — without its shim, `node` outside a pinned project is the user's own.
+  it("claims nothing outside any project while nothing is shimmed", async () => {
+    const created = fixture();
+
+    await expect(resolveRuntimeEnvironments(created.cwd)).resolves.toEqual([]);
   });
 });

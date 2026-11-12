@@ -16,7 +16,7 @@ import {
 import { envDisabled, envFlag } from "./project/env.ts";
 import { advisory, messages, UsageError } from "./errors.ts";
 import { runCwd } from "./utils/context.ts";
-import { err, out, outColors } from "./utils/log.ts";
+import { err, errColors, out, outColors } from "./utils/log.ts";
 import { execPackageManager } from "./run/exec.ts";
 import {
   type CachedResolution,
@@ -338,8 +338,12 @@ export async function presentError(
     // line underneath. The stream split between the two modes is test-asserted.
     // Only the label is coloured; the message and the usage block underneath it
     // are §12.1's verbatim shape.
+    // §09.18 — except where stdout is shell code: a shell evaluates `jup env`'s,
+    // and would run the usage line as a command.
     const usage = await usageLineFor(invocation.args[0], run);
-    out(`${outColors.red("Usage Error:")} ${error.message}\n\n${usage}\n`);
+    const shell = invocation.args[0] === "env" && !invocation.args.includes("--json");
+    const [write, colors] = shell ? [err, errColors] : [out, outColors];
+    write(`${colors.red("Usage Error:")} ${error.message}\n\n${usage}\n`);
     return 1;
   }
 

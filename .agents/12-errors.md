@@ -32,7 +32,7 @@ mutes the download notice, auto-pin, validation warnings or errors.
 
 | Class | Meaning | Presentation |
 |---|---|---|
-| `UsageError` | The user asked for something impossible or contradictory | proxy: message on stderr, no stack, exit 1. management: `Usage Error: <message>` on **stdout**, a blank line, then the command's usage line, exit 1 |
+| `UsageError` | The user asked for something impossible or contradictory | proxy: message on stderr, no stack, exit 1. management: `Usage Error: <message>` on **stdout**, a blank line, then the command's usage line, exit 1 — on stderr instead for `jup env` without `--json`, whose stdout a shell evaluates (§09.18) |
 | `Error` | Anything else, internal assertions included | stderr with a stack, exit 1 |
 
 Only `UsageError` gets friendly treatment; a stack trace is the correct output

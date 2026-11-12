@@ -576,17 +576,24 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
 
 * The value is computed in jup, not by generated shell code, from the `PATH`
   the invocation inherited: every **absolute** entry inside the install folder
-  (§10.2's boundary, either spelling of a symlinked home) is dropped, and the
+  (§10.2's boundary, spelled directly or through a symlink — for an entry whose
+  version is gone, its deepest existing ancestor is resolved) is dropped, and the
   resolved `bin` directories go in front. Relative and empty entries are kept
   as written — they mean something different in every directory and were never
   put there by this command. Evaluating the output again changes nothing.
-* bun, deno and nub run files as well as installing packages (§02.3's
-  `alsoRuntime`), and are covered **only where the project's package-manager
-  pin names them**. None of the three is shimmed by default (§10), so elsewhere
-  the name may belong to the user's own install, which this command must not
-  shadow; their store entries are still stripped. One walk answers for all
-  three, since they read the same fields. `bunx` and `nubx` are not files in
-  those entries and keep reaching their shims.
+* It covers every entry that runs files: `node`, and bun, deno and nub, which
+  run files as well as installing packages (§02.3's `alsoRuntime`). Each is
+  covered **only where jup owns the name**: its shim is enabled (§10.6's
+  marker, in §08.7's shim directory), and the line then mirrors the shim,
+  global default included; or the project pins it — `devEngines.runtime` or
+  `.nvmrc` for `node`, the package-manager fields for the rest. None of them is
+  shimmed by default (§10.7), so elsewhere the name belongs to the user's own
+  install (nvm's `node`, `~/.bun/bin/bun`), which a global default must not
+  shadow; their store entries are still stripped. One walk answers for bun,
+  deno and nub, since they read the same fields. `bunx` and `nubx` are not
+  files in those entries and keep reaching their shims. Without the shim, a
+  pinned version that is not installed has nothing to install it on demand:
+  `jup cache install` does.
 * Nothing is installed and no project file is written. A pin whose version is
   not in the store prints the strip alone: the shims download on demand.
 * The line **never reaches the network**: it resolves as if
@@ -599,7 +606,9 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
   expired memo does **not** stand in either (§04.4): wherever this command
   cannot agree with what the shims would answer, `PATH` falls back to them.
 * A resolution that fails is **not an error**: the strip-only line prints and
-  the command exits 0, so a hook cannot break the prompt.
+  the command exits 0, so a hook cannot break the prompt. A usage error goes
+  to **stderr**, unlike every other management command's (§12.1): a shell
+  evaluates this stdout, and would run the usage line as a command.
 * `--json` prints the resolution itself instead — `{"version":1,"runtimes":
   [{name, reference, binDir, installed}]}`, shape-versioned like `info`'s
   report (§09.9). It may ask the registry, since it is not run from a hook. A
@@ -617,13 +626,18 @@ from — and prints, for `eval`, **one complete `PATH` assignment**:
   sentinel-guarded `prompt` wrapper on powershell, gated the same way.
 * `--shell` selects the dialect: `bash`, `zsh`, `fish` or `powershell`. Absent,
   `SHELL`'s basename infers it (§11.5) — `sh`, `dash`, `ksh`, `mksh` and `ash`
-  answer `bash` — and on Windows `PSModulePath` answers `powershell`. Any other
+  answer `bash` for the line, but refuse `--use-on-cd`, whose block needs bash's
+  `[[` and `PROMPT_COMMAND` — and on Windows `PSModulePath` answers `powershell`. Any other
   name (`csh`, `nu`, …), or nothing to infer from, is a `UsageError`. On
   Windows only `powershell` is accepted, whether named or inferred: Git Bash
   and Cygwin set `SHELL` there but split `PATH` on `:` and spell drives `/c/`,
   so the host's `;`-joined value would leave them nothing to run. Every
   dialect joins with the host's `PATH` separator, and quotes for its own
-  escapes: fish's `\\` and `\'`, and PowerShell's typographic single quotes.
+  escapes: fish's `\\` and `\'`, and PowerShell's `''`. A PowerShell value
+  outside printable ASCII is emitted as base64 of its UTF-8 bytes, decoded in
+  the shell: its hook reads jup's output through `[Console]::OutputEncoding`,
+  which is the OEM code page on Windows, and would otherwise write a mangled
+  `PATH` on every `cd`.
 * An empty result prints nothing, because `export PATH=''` would leave the
   shell with nothing to run.
 

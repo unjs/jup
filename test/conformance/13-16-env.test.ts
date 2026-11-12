@@ -74,8 +74,22 @@ function line(entries: string[]): string {
 }
 
 /**
+ * A shim directory holding jup's own `name` shim, as `jup enable <name>` leaves
+ * it, returned as the variable that points jup at it. §10.6 recognises a shim
+ * by its marker, so the stub's body is the marker alone.
+ */
+function shimmed(fixture: Fixture, ...names: string[]): Record<string, string> {
+  const directory = join(fixture.root, "shims");
+  mkdirSync(directory, { recursive: true });
+  for (const name of names) writeFileSync(join(directory, name), "#!/bin/sh\n# @jup-shim\n");
+  return { JUP_SHIM_DIRECTORY: directory };
+}
+
+/**
  * No project, a seeded node, and that node recorded as the §04.6 default —
  * stamped `age` ms ago, or unstamped, which reads as due for its re-check.
+ * `vars` enables jup's `node` shim, without which the default is not jup's to
+ * put on `PATH`.
  */
 function defaulted(age?: number) {
   const fixture = createFixture();
@@ -85,7 +99,7 @@ function defaulted(age?: number) {
     join(fixture.home, "lastKnownGood.json"),
     JSON.stringify({ node: "24.21.0", ...stamps }),
   );
-  return { fixture, binDir: join(location, "bin") };
+  return { fixture, binDir: join(location, "bin"), vars: shimmed(fixture, "node") };
 }
 
 describe("jup env", () => {
@@ -122,7 +136,15 @@ describe("jup env", () => {
     const powershell = await env(fixture, ["--shell", "powershell"], { PATH });
 
     expect(fish.stdout).toBe(`set -gx PATH '/opt/a\\\\b' '/opt/O’Brien\\'s' '/opt/x\\\\'\n`);
-    expect(powershell.stdout).toBe(`$env:PATH = '/opt/a\\b:/opt/O’’Brien''s:/opt/x\\'\n`);
+    // Outside printable ASCII, PowerShell gets base64: its hook decodes jup's
+    // output with the console code page, which is not UTF-8 on Windows.
+    const base64 = Buffer.from(PATH, "utf8").toString("base64");
+    expect(powershell.stdout).toBe(
+      `$env:PATH = ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${base64}')))\n`,
+    );
+
+    const ascii = await env(fixture, ["--shell", "powershell"], { PATH: "/opt/O'Brien" });
+    expect(ascii.stdout).toBe(`$env:PATH = '/opt/O''Brien'\n`);
   });
 
   it("drops a store entry a previous line added, so it is idempotent", async () => {
@@ -155,7 +177,8 @@ describe("jup env", () => {
     const result = await env(createFixture(), args, vars);
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe(
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
       `Usage Error: Unsupported shell "${name}" on Windows; jup env supports powershell there\n\n${USAGE}`,
     );
   });
@@ -207,6 +230,29 @@ describe("jup env", () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toBe(`export PATH='${[binDir, "/usr/bin"].join(delimiter)}'\n`);
   });
+
+  // The removed version's entry cannot be resolved whole, and the home is
+  // named by its real path: only resolving what is left of the entry — the
+  // link — shows it was inside the store.
+  it.skipIf(!POSIX)(
+    "strips a removed version's entry spelled through a link to the home",
+    async () => {
+      const fixture = createFixture();
+      const linked = join(fixture.root, "linked");
+      symlinkSync(fixture.home, linked);
+      mkdirSync(join(fixture.home, "v1"), { recursive: true });
+      const gone = join(linked, "v1", "node", "20.0.0", "bin");
+
+      const result = await run(["env", "--shell", "zsh"], {
+        cwd: fixture.cwd,
+        home: fixture.home,
+        env: { PATH: [gone, "/usr/bin"].join(delimiter) },
+        allowSystemShimDirectory: true, // see `env` above
+      });
+
+      expect(result.stdout).toBe(`export PATH='/usr/bin'\n`);
+    },
+  );
 
   it("prints the strip alone for a pin that is not installed", async () => {
     const fixture = createFixture();
@@ -262,9 +308,10 @@ describe("jup env", () => {
   ])("refuses a shell it does not speak: %j %j", async (args, vars, name) => {
     const result = await env(createFixture(), args, vars);
 
+    // On stderr: stdout is evaluated, and the usage line would run as a command.
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toBe("");
-    expect(result.stdout).toBe(
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
       `Usage Error: Unsupported shell "${name}"; jup env supports bash, zsh, fish and powershell\n\n${USAGE}`,
     );
   });
@@ -274,8 +321,21 @@ describe("jup env", () => {
     const result = await env(createFixture(), [], { SHELL: undefined, PSModulePath: undefined });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe(
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
       `Usage Error: jup env cannot tell which shell to target; pass --shell (bash, zsh, fish or powershell)\n\n${USAGE}`,
+    );
+  });
+
+  // dash, ksh and the rest take the line, but the hook needs bash's `[[` and
+  // `PROMPT_COMMAND`: registering it there would silently do nothing.
+  it.skipIf(!POSIX)("refuses --use-on-cd for a POSIX shell that is not bash", async () => {
+    const result = await env(createFixture(), ["--use-on-cd"], { SHELL: "/bin/dash" });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(
+      `Usage Error: jup env --use-on-cd cannot hook dash; pass --shell (bash, zsh, fish or powershell)\n\n${USAGE}`,
     );
   });
 
@@ -283,7 +343,8 @@ describe("jup env", () => {
     const result = await env(createFixture(), ["zsh"]);
 
     expect(result.exitCode).toBe(1);
-    expect(result.stdout).toBe(`Usage Error: The 'jup env' command takes no arguments\n\n${USAGE}`);
+    expect(result.stdout).toBe("");
+    expect(result.stderr).toBe(`Usage Error: The 'jup env' command takes no arguments\n\n${USAGE}`);
   });
 });
 
@@ -330,6 +391,22 @@ describe("jup env and the package managers that run files", () => {
     expect(result.stdout).toBe(line(["/usr/bin"]));
   });
 
+  // With the shim enabled the name is jup's, and the line mirrors the shim,
+  // global default included.
+  it("puts bun's global default first once its shim is enabled", async () => {
+    const version = DEFINITIONS.bun!.default;
+    const fixture = createFixture();
+    const location = seedPackageManager(fixture.home, "bun", version);
+    writeFileSync(
+      join(fixture.home, "lastKnownGood.json"),
+      JSON.stringify({ bun: version, "#stamps": { bun: Date.now() } }),
+    );
+
+    const result = await env(fixture, ["--shell", HOST], shimmed(fixture, "bun"));
+
+    expect(result.stdout).toBe(line([join(location, "bin"), "/usr/bin"]));
+  });
+
   it("still exits 0 with the strip alone when package.json is malformed", async () => {
     const fixture = createFixture();
     fixture.write("package.json", `{"packageManager": `);
@@ -341,7 +418,7 @@ describe("jup env and the package managers that run files", () => {
     expect(result.stdout).toBe(line(["/usr/bin"]));
   });
 
-  it("reports the pinned entry beside node in --json", async () => {
+  it("reports the pinned entry, and only what jup owns, in --json", async () => {
     const version = DEFINITIONS.bun!.default;
     const fixture = createFixture({ packageManager: `bun@${version}` });
     const location = seedPackageManager(fixture.home, "bun", version);
@@ -350,7 +427,8 @@ describe("jup env and the package managers that run files", () => {
     const report = JSON.parse(result.stdout) as { runtimes: Array<{ name: string }> };
 
     expect(result.exitCode).toBe(0);
-    expect(report.runtimes.map(({ name }) => name).sort()).toEqual(["bun", "node"]);
+    // No node pin and no node shim: `node` is the user's, so it is not reported.
+    expect(report.runtimes.map(({ name }) => name)).toEqual(["bun"]);
     expect(report.runtimes).toContainEqual({
       name: "bun",
       reference: version,
@@ -374,10 +452,13 @@ describe("jup env and the network", () => {
   });
 
   it("leaves a default due for its re-check to the shims", async () => {
-    const { fixture } = defaulted();
+    const { fixture, vars } = defaulted();
 
     // Online, the shim would refresh the default, so the line cannot vouch for it.
-    const result = await env(fixture, ["--shell", HOST], { COREPACK_DEFAULT_TO_LATEST: "1" });
+    const result = await env(fixture, ["--shell", HOST], {
+      ...vars,
+      COREPACK_DEFAULT_TO_LATEST: "1",
+    });
     expect(result.stdout).toBe(line(["/usr/bin"]));
     expect(registry.requests).toEqual([]);
   });
@@ -386,11 +467,26 @@ describe("jup env and the network", () => {
     ["fresh", { COREPACK_DEFAULT_TO_LATEST: "1" }, 60_000],
     ["offline", { COREPACK_DEFAULT_TO_LATEST: "1", COREPACK_ENABLE_NETWORK: "0" }, undefined],
   ] as const)("accelerates a recorded default the shim agrees with: %s", async (_, vars, age) => {
-    const { fixture, binDir } = defaulted(age);
+    const { fixture, binDir, vars: shim } = defaulted(age);
 
-    const result = await env(fixture, ["--shell", HOST], vars);
+    const result = await env(fixture, ["--shell", HOST], { ...shim, ...vars });
     expect(result.stdout).toBe(line([binDir, "/usr/bin"]));
     expect(registry.requests).toEqual([]);
+  });
+
+  // §10.7 — `node` is not shimmed by default, so without the shim the name is
+  // the user's own install's (nvm, a distro package), and a default recorded by
+  // some earlier `jup node` run must not shadow it.
+  it("leaves node's global default alone while its shim is not enabled", async () => {
+    const { fixture, binDir } = defaulted(60_000);
+
+    const result = await env(fixture, ["--shell", HOST], {
+      COREPACK_DEFAULT_TO_LATEST: "1",
+      PATH: [binDir, "/usr/bin"].join(delimiter),
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe(line(["/usr/bin"]));
   });
 });
 
