@@ -1187,6 +1187,21 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     }
   });
 
+  it("keeps the install pipeline out of jup env's graph", () => {
+    // §09.18 — `--use-on-cd` runs `env` on every directory change, so it is
+    // routed past `cli.ts`, whose graph loads `node:crypto`, `node:zlib` and
+    // `node:fs/promises` on the way in (~6 ms a run).
+    const graph = staticGraph("commands/env.ts");
+    for (const heavy of [
+      "commands/cli.ts",
+      "cache/install.ts",
+      "cache/tar.ts",
+      "verify/integrity.ts",
+    ]) {
+      expect(graph).not.toContain(heavy);
+    }
+  });
+
   /**
    * The invariant the single-file build rests on (§16).
    *
@@ -1796,6 +1811,15 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
    * branch; `utils/log.ts` +469 for the sinks. The option parsing and the scope
    * itself are cold. Measured, `dist/index.mjs` 212,484 -> 214,197, **+1,713 or
    * +0.81%**.
+   *
+   * Re-based to 310,000 for §09.18's `jup env` (unjs/jup#25). 308,933 ->
+   * 309,227, **+294 or +0.10%**, all of it `main.ts`: `export` on the three
+   * resolution helpers `env.ts` shares with the proxy, and the branch that routes
+   * `env` past `cli.ts` — `--use-on-cd` runs it on every directory change, and
+   * `cli.ts`'s static graph loads `node:crypto`, `node:zlib` and
+   * `node:fs/promises` (~6 ms a run). A warm run executes one string comparison
+   * more. Measured, `dist/index.mjs` 214,222 -> 219,219, **+4,997 or +2.33%**,
+   * nearly all of it `env.ts` itself, which is cold.
    */
   it("stays inside the warm set's byte ceiling", () => {
     const sizes = ["index.ts", ...WARM_MODULES]
@@ -1807,7 +1831,7 @@ describe("the warm fast path — the emitted chunk (§16)", () => {
     expect(
       total,
       `warm source is ${(total / 1024).toFixed(1)} kB: ${breakdown}`,
-    ).toBeLessThanOrEqual(309_000);
+    ).toBeLessThanOrEqual(310_000);
   });
 });
 

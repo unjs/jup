@@ -16,7 +16,7 @@ import {
 import { envDisabled, envFlag } from "./project/env.ts";
 import { advisory, messages, UsageError } from "./errors.ts";
 import { runCwd } from "./utils/context.ts";
-import { err, out, outColors } from "./utils/log.ts";
+import { err, errColors, out, outColors } from "./utils/log.ts";
 import { execPackageManager } from "./run/exec.ts";
 import {
   type CachedResolution,
@@ -307,6 +307,11 @@ async function dispatch(argv: string[], run: RunOptions | undefined): Promise<nu
     if (run?.corepackCompat === true && invocation.args[0] === "install") {
       invocation.args = ["cache", ...invocation.args];
     }
+    // §09.18 — `--use-on-cd` runs `env` on every `cd`: skip `cli.ts`'s install graph.
+    if (invocation.args[0] === "env") {
+      const { cmdEnv } = await import("./commands/env.ts");
+      return await cmdEnv(invocation.args.slice(1), run?.handover === true);
+    }
     // Loaded lazily: the proxy path is the hot one and must not pay for the
     // command surface it never touches (§16, Build shape).
     const { runManagementCommand } = await import("./commands/cli.ts");
@@ -333,8 +338,12 @@ export async function presentError(
     // line underneath. The stream split between the two modes is test-asserted.
     // Only the label is coloured; the message and the usage block underneath it
     // are §12.1's verbatim shape.
+    // §09.18 — except where stdout is shell code: a shell evaluates `jup env`'s,
+    // and would run the usage line as a command.
     const usage = await usageLineFor(invocation.args[0], run);
-    out(`${outColors.red("Usage Error:")} ${error.message}\n\n${usage}\n`);
+    const shell = invocation.args[0] === "env" && !invocation.args.includes("--json");
+    const [write, colors] = shell ? [err, errColors] : [out, outColors];
+    write(`${colors.red("Usage Error:")} ${error.message}\n\n${usage}\n`);
     return 1;
   }
 
@@ -364,7 +373,7 @@ async function ensureInstalledLazily(locator: ResolvedSpec, range: string): Prom
   }
 }
 
-function resolveExactPin(descriptor: Spec): ResolvedSpec | null {
+export function resolveExactPin(descriptor: Spec): ResolvedSpec | null {
   // A name outside the table has no §04.1 step 2 definition, and the error for
   // it belongs to the full path. Step 1's URL branch is unreachable from here,
   // since a URL is never a valid version.
@@ -569,7 +578,7 @@ async function resolveWithFallback(
  * The directory is the manifest's own, not the cwd: in a monorepo those differ,
  * and §03.7 already places project-level writes beside the selected manifest.
  */
-function resolutionDirFor(
+export function resolutionDirFor(
   specResult: ProjectSpec,
   reconciled: Spec | LazyResolvedSpec,
   descriptor: Spec,
@@ -587,7 +596,7 @@ function resolutionDirFor(
  * This is the *only* place the fallback thunk is forced, which is what keeps the
  * warm path free of `lastKnownGood.json` reads and network requests.
  */
-async function materialise(value: Spec | LazyResolvedSpec): Promise<Spec> {
+export async function materialise(value: Spec | LazyResolvedSpec): Promise<Spec> {
   if ("range" in value) return value;
   return { name: value.name, range: await value.reference() };
 }

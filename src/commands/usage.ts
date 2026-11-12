@@ -14,6 +14,7 @@ export const USAGE_LINES: Record<string, string> = {
   disable: "$ jup disable [--install-directory <path>|--system] [--exclude <name>] ...",
   enable:
     "$ jup enable [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] ...",
+  env: "$ jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]",
   info: "$ jup info [--json] | jup info --store-path [<name>]",
   install: "$ jup install [...args]",
   pack: "$ jup pack [--json] [-o,--output <path>] ...",
@@ -172,6 +173,7 @@ export const HELP_TEXT = `Usage: jup <command>
   jup cache list [--json]
   jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
   jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
+  jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]
   jup info [--json]
   jup info --store-path [<name>]
   jup install [...args]
@@ -233,6 +235,11 @@ never chooses a directory merely because it is writable and on PATH. For root,
 --system explicitly selects /usr/local/bin, or %ProgramData%\\jup\\bin on Windows,
 and never falls back elsewhere. Use --system with disable for shims installed
 that way.
+
+env prints a PATH line for eval — eval "$(jup env --shell zsh --use-on-cd)" —
+that puts the project's node ahead of the shims. It installs nothing and uses
+no network; --use-on-cd re-evaluates it on every directory change, and --json
+prints the resolution for programs instead.
 
 Configuration uses environment variables only. Every artifact download prints a
 notice to stderr naming the URL it is about to fetch, and asks nothing.

@@ -14,6 +14,7 @@ jup cache install -g|--global [--cache-only] [...name[@<version>] | <file>.tgz]
 jup cache list [--json]
 jup disable [--install-directory <path>|--system] [--exclude <name>] [...name]
 jup enable  [--install-directory <path>|--system] [--all] [--exclude <name>] [--force] [...name]
+jup env [--shell <bash|zsh|fish|powershell>] [--json] [--use-on-cd]
 jup info [--json]
 jup info --store-path [<name>]
 jup install [...args]
@@ -561,3 +562,86 @@ project error. The word is a script name, not a command jup has usage for.
 `jup <script>` never shadows §01.2's proxy mode: `parseArgs` classifies argv[0]
 first, so a word the table knows as a binary — or any word with an `@` in it —
 is a tool invocation and never reaches this switch.
+
+## 9.18 `env`
+
+Shell integration for the runtimes (§02.3), and the feature §10.7's "no shell
+hooks" was written before: this command is the explicit opt-in that puts a
+runtime's own `bin` directory on `PATH` ahead of the shims, so a warm `node`
+costs what a native install costs instead of a trampoline.
+
+It resolves what a run of each runtime from `cwd` would use — §01.3's own
+order, steps 3–6, composed from the same primitives the proxy composes them
+from — and prints, for `eval`, **one complete `PATH` assignment**:
+
+* The value is computed in jup, not by generated shell code, from the `PATH`
+  the invocation inherited: every **absolute** entry inside the install folder
+  (§10.2's boundary, spelled directly or through a symlink — for an entry whose
+  version is gone, its deepest existing ancestor is resolved) is dropped, and the
+  resolved `bin` directories go in front. Relative and empty entries are kept
+  as written — they mean something different in every directory and were never
+  put there by this command. Evaluating the output again changes nothing.
+* It covers every entry that runs files: `node`, and bun, deno and nub, which
+  run files as well as installing packages (§02.3's `alsoRuntime`). Each is
+  covered **only where jup owns the name**: its shim is enabled (§10.6's
+  marker, in §08.7's shim directory), and the line then mirrors the shim,
+  global default included; or the project pins it — `devEngines.runtime` or
+  `.nvmrc` for `node`, the package-manager fields for the rest. None of them is
+  shimmed by default (§10.7), so elsewhere the name belongs to the user's own
+  install (nvm's `node`, `~/.bun/bin/bun`), which a global default must not
+  shadow; their store entries are still stripped. One walk answers for bun,
+  deno and nub, since they read the same fields. `bunx` and `nubx` are not
+  files in those entries and keep reaching their shims. Without the shim, a
+  pinned version that is not installed has nothing to install it on demand:
+  `jup cache install` does.
+* Nothing is installed and no project file is written. A pin whose version is
+  not in the store prints the strip alone: the shims download on demand.
+* The line **never reaches the network**: it resolves as if
+  `COREPACK_ENABLE_NETWORK=0` were set, because a hook runs it on every
+  directory change and must not wait on a registry. A range the store cannot
+  answer could only name a version that is not installed anyway, and a tag is
+  left to the shims. A global default due for its §04.6 re-check is left to
+  them too, unless the user's own environment already has the network off —
+  the one case where the shim would answer with the same stale entry. The
+  expired memo does **not** stand in either (§04.4): wherever this command
+  cannot agree with what the shims would answer, `PATH` falls back to them.
+* A resolution that fails is **not an error**: the strip-only line prints and
+  the command exits 0, so a hook cannot break the prompt. A usage error goes
+  to **stderr**, unlike every other management command's (§12.1): a shell
+  evaluates this stdout, and would run the usage line as a command.
+* `--json` prints the resolution itself instead — `{"version":1,"runtimes":
+  [{name, reference, binDir, installed}]}`, shape-versioned like `info`'s
+  report (§09.9). It may ask the registry, since it is not run from a hook. A
+  failed resolution is `reference: null` with the failure's sentence in an
+  `error` field. It refuses `--shell` and `--use-on-cd`.
+* `--use-on-cd` appends a block that re-runs the line on every directory
+  change. The hook body names this jup by absolute path — §10.2's host runtime
+  and the entry's realpath — rather than a bare `jup`, which would start under
+  whichever `node` the line just put on `PATH`, possibly one too old to run jup.
+  It calls the base command with the flag dropped, so it evaluates one `PATH`
+  line and never re-registers. Registration is idempotent per dialect:
+  `add-zsh-hook -D` before `add` on zsh; on bash a `PROMPT_COMMAND` entry
+  appended once, on its own line, whose function returns early unless `$PWD`
+  changed; function redefinition on fish's `--on-variable PWD`; and a
+  sentinel-guarded `prompt` wrapper on powershell, gated the same way.
+* `--shell` selects the dialect: `bash`, `zsh`, `fish` or `powershell`. Absent,
+  `SHELL`'s basename infers it (§11.5) — `sh`, `dash`, `ksh`, `mksh` and `ash`
+  answer `bash` for the line, but refuse `--use-on-cd`, whose block needs bash's
+  `[[` and `PROMPT_COMMAND` — and on Windows `PSModulePath` answers `powershell`. Any other
+  name (`csh`, `nu`, …), or nothing to infer from, is a `UsageError`. On
+  Windows only `powershell` is accepted, whether named or inferred: Git Bash
+  and Cygwin set `SHELL` there but split `PATH` on `:` and spell drives `/c/`,
+  so the host's `;`-joined value would leave them nothing to run. Every
+  dialect joins with the host's `PATH` separator, and quotes for its own
+  escapes: fish's `\\` and `\'`, and PowerShell's `''`. A PowerShell value
+  outside printable ASCII is emitted as base64 of its UTF-8 bytes, decoded in
+  the shell: its hook reads jup's output through `[Console]::OutputEncoding`,
+  which is the OEM code page on Windows, and would otherwise write a mangled
+  `PATH` on every `cd`.
+* An empty result prints nothing, because `export PATH=''` would leave the
+  shell with nothing to run.
+
+The agreement the whole feature rests on is test-asserted: the `node` this
+command puts on `PATH` is the `node` the shim hands over. A custom-URL runtime
+pin (§04.1 step 1) is the one reference left unaccelerated — the store has no
+marker keyed by the URL, and the shims own fetching what a URL names.

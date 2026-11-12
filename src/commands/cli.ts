@@ -29,6 +29,7 @@ import { isFrozenLockfile } from "../project/env.ts";
 import { advisory, explainFetchFailure, messages, UsageError } from "../errors-cold.ts";
 import { execPackageManager } from "../run/exec.ts";
 import { ensureInstalled } from "../cache/install.ts";
+import { firstValue, hasFlag, parseArgs } from "./args.ts";
 import {
   hasLockfile,
   LOCKFILE_NAME,
@@ -151,82 +152,6 @@ function setLastKnownGood(name: string, reference: string): void {
 
 function fileStream(path: string): ReadableStream<Uint8Array> {
   return Readable.toWeb(createReadStream(path)) as unknown as ReadableStream<Uint8Array>;
-}
-interface ArgSpec {
-  booleans?: string[];
-  strings?: string[];
-}
-
-interface ParsedArgs {
-  flags: Set<string>;
-  values: Map<string, string>;
-  positionals: string[];
-}
-
-/**
- * A deliberately tiny parser: `--flag`, `--flag value`, `--flag=value`, `-o
- * value`, `-o=value`, and `--` to end option parsing. Anything unrecognised is a
- * usage error rather than a silently-ignored typo.
- */
-function parseArgs(args: string[], spec: ArgSpec): ParsedArgs {
-  const booleans = new Set(spec.booleans ?? []);
-  const strings = new Set(spec.strings ?? []);
-
-  const flags = new Set<string>();
-  const values = new Map<string, string>();
-  const positionals: string[] = [];
-  let literal = false;
-
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index]!;
-
-    if (literal || arg === "-" || !arg.startsWith("-")) {
-      positionals.push(arg);
-      continue;
-    }
-    if (arg === "--") {
-      literal = true;
-      continue;
-    }
-
-    const equals = arg.indexOf("=");
-    const name = equals === -1 ? arg : arg.slice(0, equals);
-
-    if (equals === -1 && booleans.has(name)) {
-      flags.add(name);
-      continue;
-    }
-
-    if (strings.has(name)) {
-      if (equals !== -1) {
-        values.set(name, arg.slice(equals + 1));
-        continue;
-      }
-      const next = args[index + 1];
-      if (next !== undefined && (next === "-" || !next.startsWith("-"))) {
-        values.set(name, next);
-        index++;
-        continue;
-      }
-      throw new UsageError(`Option "${name}" requires a value`);
-    }
-
-    throw new UsageError(`Unsupported option name ("${arg}")`);
-  }
-
-  return { flags, values, positionals };
-}
-
-function firstValue(parsed: ParsedArgs, ...names: string[]): string | undefined {
-  for (const name of names) {
-    const value = parsed.values.get(name);
-    if (value !== undefined) return value;
-  }
-  return undefined;
-}
-
-function hasFlag(parsed: ParsedArgs, ...names: string[]): boolean {
-  return names.some((name) => parsed.flags.has(name));
 }
 /**
  * §09.1 — shared by `cache install`, `pack`, `up`, and `use`.
