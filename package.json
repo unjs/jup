@@ -36,6 +36,7 @@
   },
   "scripts": {
     "bench": "node scripts/bench.mjs",
+    "bench:native": "node scripts/bench-native.mjs",
     "build": "obuild",
     "build:addon": "node scripts/build-addon.mjs",
     "build:native": "node scripts/build-native.mjs",

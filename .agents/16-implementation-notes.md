@@ -130,6 +130,10 @@ tool versions, so it needs the network. `.github/workflows/native.yml` builds an
 smoke-tests on Linux and macOS for pull requests that touch `src/` or the native
 files, and uploads the binary. The check is advisory.
 
+`pnpm bench:native` (`scripts/bench-native.mjs`, Linux x64) measures the shims'
+per-call wall time, CPU, memory and size against raw Node and other Node version
+managers, at pinned versions; setup needs the network.
+
 ## Published GitHub action
 
 `setup-jup` lives in [unjs/setup-jup](https://github.com/unjs/setup-jup) and is
