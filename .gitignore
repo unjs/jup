@@ -14,6 +14,10 @@ tsconfig.tsbuildinfo
 # `files` in the manifest, which `prepack` fills in.
 /bin
 
+# `pnpm build:native` output (scripts/build-native.mjs). Its working copy of
+# `src/` lives under `node_modules/.cache/jup-native/`.
+/.native
+
 # Shim stubs `enable` writes beside `src/index.ts` when it runs from a source
 # checkout (§10.1). The first is the POSIX one and serves every binary name
 # (§14.15). The per-name list below it is §10.3's, written only when `enable` runs

@@ -86,6 +86,54 @@ stream only inside the call that writes, never at module load. `node:util` itsel
 is free (it is in Node's startup snapshot), and `styleText` adds one module when a
 line is actually coloured.
 
+## Native build (experimental)
+
+`pnpm build:native` (`scripts/build-native.mjs`) compiles jup to a single native
+executable with [scriptc](https://scriptc.dev). It is for a host that has no Node
+yet, and for shims that cost a process exec rather than a runtime start. `src/`
+is not written for it. The script copies `src/` to `node_modules/.cache/jup-native/`
+and transforms the copy:
+
+- **Overrides.** `native/scriptc/overrides/` replaces whole modules whose native
+  form is a different design: the `argv0`-dispatching entry, an exec layer that
+  calls `execve(2)` through `native/scriptc/jupexec.c` over scriptc's FFI, and the
+  test for what a shim of ours is.
+- **Patches.** Anchored edits cover what scriptc cannot compile yet. Each must
+  match exactly once, so a change in `src/` breaks this build rather than being
+  patched around silently. When one breaks, fix the anchor. Prefer a `src/`
+  change only where it is neutral for the Node build.
+- **Builtins.** `process.getBuiltinModule` calls become static imports.
+
+The behaviour differs from the Node build in the following ways:
+
+- **Exec-only.** Every run replaces the process: a native artifact directly, a
+  JavaScript entry point as `node <bin> …`. That `node` may be our own shim, which
+  is how a JavaScript tool gets the project's `devEngines.runtime`.
+- **Not used:** in-process handover (§08.2), the addon, the IPC relay (§08.3.2)
+  and scoped `runMain` runs. The channel and every other inherited fd survive
+  `execve` whole.
+- **Shims are symlinks** to the executable's realpath, which dispatches on the
+  invoked name. `enable` and `disable` otherwise keep §10: directory choice,
+  `--exclude`/`--all`, `--force` displacement and `PATH` verification. A shim is
+  ours when it is a symlink that resolves to this executable. A Node build's
+  marked stub still counts, so this build takes over those shims. §10.2's
+  interpreter pin does not apply.
+- **No `self-install`.** It refuses, because it copies a published package's
+  `dist/` and `bin/`, and this build has neither.
+- **No proxy transport.** HTTP proxies and `JUP_STRICT_SSL=0` are refused: §05.1's
+  `node:http`/`node:tls` transport is beyond scriptc's current lowering.
+- **POSIX only.**
+
+`pnpm test:native` (`scripts/test-native.mjs`) is the smoke test. It runs a built
+binary through the shims `enable` writes, with a minimal environment and pinned
+tool versions, so it needs the network. `.github/workflows/native.yml` builds and
+smoke-tests on Linux and macOS for pull requests that touch `src/` or the native
+files, and uploads the binary. The check is advisory.
+
+`pnpm bench:native` (`scripts/bench-native.mjs`, Linux x64) measures the shims'
+per-call wall time, CPU, memory and size against raw Node and other Node version
+managers, at pinned versions; setup needs the network.
+
 ## Published GitHub action
 
 `setup-jup` lives in [unjs/setup-jup](https://github.com/unjs/setup-jup) and is

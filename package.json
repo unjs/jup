@@ -36,8 +36,10 @@
   },
   "scripts": {
     "bench": "node scripts/bench.mjs",
+    "bench:native": "node scripts/bench-native.mjs",
     "build": "obuild",
     "build:addon": "node scripts/build-addon.mjs",
+    "build:native": "node scripts/build-native.mjs",
     "dev": "vitest dev",
     "fmt": "automd && oxlint . --fix && oxfmt .",
     "lint": "oxlint . && oxfmt --check .",
@@ -46,7 +48,8 @@
     "release": "upm test && upm build && changelogen --release && upm publish && git push --follow-tags",
     "test": "upm lint && upm typecheck && vitest run --coverage",
     "typecheck": "tsc --noEmit --skipLibCheck",
-    "test:corepack": "JUP_COREPACK_COMPAT=1 vitest run --config test/corepack/vitest.config.ts"
+    "test:corepack": "JUP_COREPACK_COMPAT=1 vitest run --config test/corepack/vitest.config.ts",
+    "test:native": "node scripts/test-native.mjs"
   },
   "devDependencies": {
     "@types/node": "latest",
