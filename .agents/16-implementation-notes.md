@@ -95,8 +95,9 @@ is not written for it. The script copies `src/` to `node_modules/.cache/jup-nati
 and transforms the copy:
 
 - **Overrides.** `native/scriptc/overrides/` replaces whole modules whose native
-  form is a different design: the `argv0`-dispatching entry, and an exec layer
-  that calls `execve(2)` through `native/scriptc/jupexec.c` over scriptc's FFI.
+  form is a different design: the `argv0`-dispatching entry, an exec layer that
+  calls `execve(2)` through `native/scriptc/jupexec.c` over scriptc's FFI, and the
+  test for what a shim of ours is.
 - **Patches.** Anchored edits cover what scriptc cannot compile yet. Each must
   match exactly once, so a change in `src/` breaks this build rather than being
   patched around silently. When one breaks, fix the anchor. Prefer a `src/`
@@ -111,10 +112,23 @@ The behaviour differs from the Node build in the following ways:
 - **Not used:** in-process handover (§08.2), the addon, the IPC relay (§08.3.2)
   and scoped `runMain` runs. The channel and every other inherited fd survive
   `execve` whole.
-- **Shims are symlinks** to the executable. `enable` does not write them yet.
+- **Shims are symlinks** to the executable's realpath, which dispatches on the
+  invoked name. `enable` and `disable` otherwise keep §10: directory choice,
+  `--exclude`/`--all`, `--force` displacement and `PATH` verification. A shim is
+  ours when it is a symlink that resolves to this executable. A Node build's
+  marked stub still counts, so this build takes over those shims. §10.2's
+  interpreter pin does not apply.
+- **No `self-install`.** It refuses, because it copies a published package's
+  `dist/` and `bin/`, and this build has neither.
 - **No proxy transport.** HTTP proxies and `JUP_STRICT_SSL=0` are refused: §05.1's
   `node:http`/`node:tls` transport is beyond scriptc's current lowering.
 - **POSIX only.**
+
+`pnpm test:native` (`scripts/test-native.mjs`) is the smoke test. It runs a built
+binary through the shims `enable` writes, with a minimal environment and pinned
+tool versions, so it needs the network. `.github/workflows/native.yml` builds and
+smoke-tests on Linux and macOS for pull requests that touch `src/` or the native
+files, and uploads the binary. The check is advisory.
 
 ## Published GitHub action
 
