@@ -1,0 +1,56 @@
+# §16, Native build (experimental) — build jup with scriptc and smoke-test the
+# binary through its own shims (`scripts/test-native.mjs`).
+#
+# Advisory: nothing requires this check, and the native build is not released.
+# It runs where the native build can break — its own sources, the build and test
+# scripts, and `src/`, which its anchored patches are written against — so a
+# `src/` change that moves an anchor shows up on the PR rather than the next time
+# someone builds by hand. POSIX only: the binary execs through `execve(2)`.
+name: native
+on:
+  pull_request:
+    paths:
+      - "native/scriptc/**"
+      - "scripts/build-native.mjs"
+      - "scripts/test-native.mjs"
+      - "src/**"
+      - ".github/workflows/native.yml"
+  workflow_dispatch: {}
+permissions: { contents: read }
+jobs:
+  native:
+    name: native (experimental, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Set up the pinned tools and install dependencies.
+      - name: Setup jup
+        uses: unjs/setup-jup@85aa1e9e4cd2995fba3bee414cde74bf88637a2c # v1.0.0
+      # Outside the checkout. scriptc's postinstall is what puts the platform's
+      # compiler at `bin/scriptc.exe`, and it is run by hand: whether npm runs it
+      # depends on the npm version's install-script policy (npm 12 blocks scripts
+      # not covered by `allow-scripts`). The version is the one
+      # `scripts/build-native.mjs` was last verified against (`SCRIPTC_VERSION`).
+      - name: Install scriptc
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/scriptc"
+          mkdir -p "$dir"
+          cd "$dir"
+          echo '{ "private": true }' > package.json
+          npm install --ignore-scripts --no-audit --no-fund scriptc@0.4.12
+          node node_modules/scriptc/scripts/install-native.mjs
+          echo "SCRIPTC=$dir/node_modules/.bin/scriptc" >> "$GITHUB_ENV"
+          node_modules/.bin/scriptc --version
+      - run: upm run build:native
+      # Downloads node, pnpm and yarn at pinned versions into a temporary JUP_HOME.
+      - run: upm run test:native
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: jup-native-${{ runner.os }}-${{ runner.arch }}
+          path: .native/jup-*
+          if-no-files-found: error
