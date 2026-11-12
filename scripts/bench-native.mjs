@@ -1,7 +1,8 @@
 /**
  * Experimental — benchmark the native build's shims against other Node version
- * managers: per-call wall time, CPU time (user + sys), memory overhead and size
- * on disk, against raw Node. It regenerates the tables in the native-build PR.
+ * managers: per-call wall time and CPU time (user + sys) over raw Node, each
+ * tool's own peak memory, the memory it keeps resident beside Node, and size on
+ * disk. It regenerates the tables in the native-build PR.
  *
  * Usage (`pnpm bench:native` runs the same thing):
  *   node scripts/bench-native.mjs [<binary>] [--jup-node=<dir>] [--quick]
@@ -18,7 +19,8 @@
  *
  * Requirements: Linux x64 only — the pinned artifacts are linux-x64 builds and
  * the wrapper-memory probe reads `/proc`. macOS is unverified and refused.
- * Needs `tar` (with xz), `unzip`, `git`, `bash` and `curl` (nvm and asdf call it).
+ * Needs `tar` (with xz), `unzip`, `git`, `bash`, `curl` (nvm and asdf call it)
+ * and `strace` (5.3+, for the own-peak measurement).
  * Setup needs the network: every tool installs Node 22.21.1 into its own home,
  * and every download is checked against a pinned sha256. Timed runs are warm
  * and local, each tool in an `env -i`-style environment whose PATH has no node.
@@ -27,12 +29,12 @@
  * flagged ⚠ in its table.
  *
  * Runtime: about 8 minutes for a full run on a warm work tree (first setup adds
- * one to two, mostly downloads); about 2 with `--quick`. Results depend on the
+ * one to two, mostly downloads); about 3 with `--quick`. Results depend on the
  * machine and its load: use a quiet one, and read differences under about
  * 1.5 ms on the pnpm and npm rows as noise.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   copyFileSync,
@@ -40,12 +42,14 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 
 /* ---------------------------------- pins ---------------------------------- */
 
@@ -95,9 +99,11 @@ function fail(message) {
 }
 if (native !== "jup-linux-x64") fail("linux-x64 only (see the header).");
 if (!existsSync(binary)) fail(`No native build at ${binary} — run \`pnpm build:native\` first.`);
-for (const tool of ["tar", "unzip", "git", "bash", "curl"]) {
-  if (spawnSync("sh", ["-c", `command -v ${tool}`]).status !== 0) fail(`\`${tool}\` is required.`);
+const which = (tool) => spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" });
+for (const tool of ["tar", "unzip", "git", "bash", "curl", "strace"]) {
+  if (which(tool).status !== 0) fail(`\`${tool}\` is required.`);
 }
+const STRACE = which("strace").stdout.trim();
 
 /* --------------------------------- helpers -------------------------------- */
 
@@ -286,7 +292,11 @@ const NO_PNPM = ["s1", "s2", "s3b"];
  * [id, label, env, project, scenarios, argv transform]. Raw Node is the baseline
  * and goes into each table's heading. Shell-hook modes (fnm `--use-on-cd`, mise
  * activate, nvm use, n) put Node itself on PATH, so per call they are raw Node.
+ * Corepack, and the Node-hosted jup for pnpm and npm, run the tool inside the
+ * node process they start: they have no own process to measure ("in-process").
  */
+const inProcess = (sc, id) =>
+  id === "corepack" || (id === "jupnode" && (sc === "s3" || sc === "s3b"));
 const MODES = [
   ["raw", "raw node", "raw", "raw", ALL, ([bin, ...a]) => [...RAW[bin], ...a]],
   [
@@ -353,9 +363,91 @@ while (pid !== process.env.BENCH_STOP_PID && pid !== "1" && pid !== "0") {
 process.stderr.write("[probe] " + process.version + " " + kib + "\\n");
 `;
 
+/* Own peak: the tool's peak RSS (VmHWM) at the moment it hands over to Node.
+ * A traced run lists the images the final node process passed through (and
+ * which pid became node). Then, per hop, strace makes exactly that execve fail
+ * and stops the caller (`inject=…:error=ENOENT:signal=SIGSTOP`), so its image is
+ * intact; VmHWM is read from /proc for it and for every ancestor still waiting
+ * on it (spawn-and-wait wrappers), up to strace. strace's own memory never
+ * enters the number. */
+const proc = (pid) => readFileSync(`/proc/${pid}/status`, "utf8");
+const field = (status, key) => Number(status.match(new RegExp(`^${key}:\\s+(\\d+)`, "m"))[1]);
+
+/** Successful execve calls in an `strace -f -e trace=execve` log, in order. */
+function parseExecs(log) {
+  const execs = [];
+  const pending = new Map();
+  for (const [, pid, rest] of log.matchAll(/^(\d+) (.*)$/gm)) {
+    const call = rest.match(/^execve\("([^"]*)"/);
+    if (call) {
+      const moved = rest.match(/<pid changed to (\d+) \.\.\.>$/);
+      if (moved || rest.endsWith("<unfinished ...>")) pending.set(moved?.[1] ?? pid, call[1]);
+      else if (rest.endsWith(" = 0")) execs.push({ pid, path: call[1] });
+    } else if (rest.startsWith("<... execve resumed>") && pending.has(pid)) {
+      if (rest.endsWith(" = 0")) execs.push({ pid, path: pending.get(pid) });
+      pending.delete(pid);
+    }
+  }
+  return execs;
+}
+
+/** One run stopped just before `target` is exec'd: [{ name, hwmKiB }] from that process up. */
+async function stopBefore(argv, env, cwd, target) {
+  const log = join(DIR, "inject.log");
+  write(log, "");
+  const inject = ["-e", "inject=execve:error=ENOENT:signal=SIGSTOP", "-P", target];
+  const flags = ["-f", "-qq", "-o", log, "-e", "trace=execve", ...inject, "--"];
+  const tracer = spawn(STRACE, [...flags, ...argv], { env, cwd, stdio: "ignore" });
+  const exited = new Promise((done) => tracer.on("exit", done));
+  let pid;
+  for (let i = 0; i < 2000 && !pid; i++) {
+    const injected = /^(\d+) (?:execve\(|<\.\.\. execve resumed>).*\(INJECTED\)$/m;
+    pid = readFileSync(log, "utf8").match(injected)?.[1];
+    if (!pid) await sleep(5);
+  }
+  const chain = [];
+  for (let p = pid; p && p !== String(tracer.pid) && p !== "1";) {
+    const status = proc(p);
+    let name = "?";
+    try {
+      name = basename(readlinkSync(`/proc/${p}/exe`));
+    } catch {}
+    chain.push({ pid: p, name, hwmKiB: field(status, "VmHWM") });
+    p = String(field(status, "PPid"));
+  }
+  for (const { pid: p } of chain) process.kill(Number(p), "SIGKILL");
+  if (!pid) tracer.kill("SIGKILL");
+  await exited;
+  if (!pid) throw new Error(`${argv.join(" ")}: never reached the exec of ${target}`);
+  return chain;
+}
+
+/** Median over runs of the largest tool process seen across the hops to Node. */
+async function ownPeak(argv, env, cwd) {
+  const log = join(DIR, "trace.log");
+  spawnSync(STRACE, ["-f", "-qq", "-o", log, "-e", "trace=execve", "--", ...argv], { env, cwd });
+  const execs = parseExecs(readFileSync(log, "utf8"));
+  const final = execs.findLast((e) => basename(e.path) === "node");
+  // every image the final pid passed through, minus strace's own exec of argv[0]
+  const hops = execs.filter((e) => e.pid === final.pid && e !== execs[0]).map((e) => e.path);
+  const best = { kib: 0, name: "?", hops: [] };
+  for (const target of new Set(hops)) {
+    const tops = [];
+    for (let i = 0; i < (quick ? 5 : 30); i++) {
+      const chain = await stopBefore(argv, env, cwd, target);
+      tops.push(chain.reduce((a, b) => (b.hwmKiB > a.hwmKiB ? b : a)));
+    }
+    const kib = median(tops.map((t) => t.hwmKiB));
+    const name = tops.find((t) => t.hwmKiB === kib).name;
+    best.hops.push({ before: target, kib, name });
+    if (kib > best.kib) Object.assign(best, { kib, name });
+  }
+  return best;
+}
+
 const quote = (a) => (/^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replaceAll("'", `'\\''`)}'`);
 
-function measure(sc, [id, label, envName, project, , transform = (a) => a]) {
+async function measure(sc, [id, label, envName, project, , transform = (a) => a]) {
   const [, base, expect, fullRuns, fullWarmup] = SCENARIOS[sc];
   const env = envFor(envName);
   const cwd = PROJ(id.startsWith("jupn") && sc === "s3b" ? "jup-npm" : project);
@@ -383,7 +475,9 @@ function measure(sc, [id, label, envName, project, , transform = (a) => a]) {
     }
     wrapperKiB = median(kib);
   }
-  // 2. hyperfine, warm
+  // 2. own peak, unless the tool runs inside node
+  const own = id === "raw" || inProcess(sc, id) ? null : await ownPeak(argv, env, cwd);
+  // 3. hyperfine, warm
   const slow = id === "nvm" || (id === "jupnode" && sc === "s1");
   const runs = Math.ceil((slow ? Math.min(fullRuns, 150) : fullRuns) / (quick ? 5 : 1));
   const warmup = quick || slow ? Math.min(fullWarmup, 3) : fullWarmup;
@@ -396,6 +490,7 @@ function measure(sc, [id, label, envName, project, , transform = (a) => a]) {
     label,
     version,
     wrapperKiB,
+    own,
     runs: measurements.length,
     wall: summary.time_wall_clock.mean * 1000,
     sd: summary.time_wall_clock.stddev * 1000,
@@ -424,11 +519,12 @@ setup();
 
 const results = {};
 for (const sc of Object.keys(SCENARIOS)) {
-  results[sc] = MODES.filter((m) => m[4].includes(sc)).map((mode) => {
-    const row = measure(sc, mode);
+  results[sc] = [];
+  for (const mode of MODES.filter((m) => m[4].includes(sc))) {
+    const row = await measure(sc, mode);
     console.error(`  ${sc}/${row.id}: ${row.wall.toFixed(2)} ms`);
-    return row;
-  });
+    results[sc].push(row);
+  }
 }
 for (const row of results.s1) {
   row.wrapperKiB = results.s2.find((r) => r.id === row.id)?.wrapperKiB ?? 0;
@@ -447,12 +543,11 @@ for (const [sc, rows] of Object.entries(results)) {
   const raw = rows.find((r) => r.id === "raw");
   const rawPeak = median(raw.peaksKiB);
   lines.push("", `**${SCENARIOS[sc][0]} — raw Node ${raw.wall.toFixed(2)} ms**`);
-  lines.push("| Tool / mode | Wall | CPU overhead | Memory overhead | Tool size |");
-  lines.push("|---|---|---|---|---|");
+  lines.push("| Tool / mode | Wall | CPU overhead | Own peak | Resident with Node | Tool size |");
+  lines.push("|---|---|---|---|---|---|");
   report[sc] = [];
   for (const r of [raw, ...rows.filter((x) => x !== raw).sort((a, b) => a.wall - b.wall)]) {
     const peakDiffKiB = median(r.peaksKiB) - rawPeak;
-    const memKiB = peakDiffKiB + r.wrapperKiB;
     const ci95KiB = bootstrap(r.peaksKiB, raw.peaksKiB);
     report[sc].push({
       ...r,
@@ -460,24 +555,25 @@ for (const [sc, rows] of Object.entries(results)) {
       peakKiB: median(r.peaksKiB),
       peakDiffKiB,
       ci95KiB,
-      memKiB,
     });
     if (r === raw) continue;
-    let mem = signed(memKiB / 1024, "MiB");
-    if (r.wrapperKiB > 0) {
-      const wrapper = (r.wrapperKiB / 1024).toFixed(2);
-      mem += Math.abs(peakDiffKiB) < 512 ? " (wrapper)" : ` (incl. ${wrapper} MiB wrapper)`;
-    }
+    const mib = (kib) => `${(kib / 1024).toFixed(2)} MiB`;
+    const own = r.own ? `${mib(r.own.kib)} (${r.own.name})` : "— (in-process)";
+    const resident = inProcess(sc, r.id)
+      ? `${signed(peakDiffKiB / 1024, "MiB")} (in-process)`
+      : r.wrapperKiB > 0
+        ? mib(r.wrapperKiB)
+        : "0 MiB";
     const label = r.version === `v${NODE}` ? r.label : `${r.label} ⚠ ran on Node ${r.version}`;
     const wall = `${r.wall.toFixed(2)} ± ${r.sd.toFixed(2)} ms (${signed(r.wall - raw.wall, "ms")})`;
     lines.push(
-      `| ${label} | ${wall} | ${signed(r.cpu - raw.cpu, "ms")} | ${mem} | ${sizes[r.id]} |`,
+      `| ${label} | ${wall} | ${signed(r.cpu - raw.cpu, "ms")} | ${own} | ${resident} | ${sizes[r.id]} |`,
     );
   }
 }
 lines.push(
   "",
-  "Memory overhead = median peak RSS minus raw Node's, plus the median RSS of a wrapper that stays resident while Node runs. Values within about ±0.5 MiB are environment noise (env block, argv) and effectively zero; 95% bootstrap CIs are in `summary.json`.",
+  "Own peak = the version manager's own peak RSS (VmHWM) when it hands over to Node: the largest of its exec hops, or of the wrappers that spawn Node and wait (process named in brackets; every hop is in `summary.json`); median of 30 runs, each stopped by strace at that exec. Short-lived helpers a tool runs first are not counted: proto's `ldd --version`, and the `npm --version` that `nvm exec` runs. Resident with Node = RSS of those waiting wrappers while Node runs; 0 MiB for a chain of execs. For in-process tools it is peak RSS minus raw Node's; within about ±0.5 MiB that is noise (95% bootstrap CIs in `summary.json`).",
   `Node ${NODE} itself, ${MiB(size(nodeBin)).toFixed(1)} MiB, is the same for every tool and not counted in Tool size.`,
   "Shell-hook tools (fnm `--use-on-cd`, mise activate, nvm use, n) put Node itself on `PATH`, so they cost nothing per call — each call is raw Node — but run a hook on every prompt or `cd`, and do not help callers that never ran it (IDEs, CI steps, `child_process` without that `PATH`). This script does not time the hooks.",
   "",
