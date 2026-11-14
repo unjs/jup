@@ -871,16 +871,45 @@ describe("buildReport — the project inputs (§09.9)", () => {
     ]);
   });
 
-  it("reports an absent version file as a candidate", async () => {
+  it("reports absent version files as candidates", async () => {
     await manifest({ packageManager: "pnpm@11.1.2" });
 
     expect(inputs("version-file")).toEqual([
       {
         kind: "version-file",
-        path: join(project, VERSION_FILE),
+        path: join(project, ".nvmrc"),
         present: false,
         tool: "node",
         selected: false,
+      },
+      {
+        kind: "version-file",
+        path: join(project, ".node-version"),
+        present: false,
+        tool: "node",
+        selected: false,
+      },
+    ]);
+  });
+
+  it("reports .node-version when it is present and selected", async () => {
+    await manifest({ packageManager: "pnpm@11.1.2" });
+    writeFileSync(join(project, ".node-version"), "22.21.1\n");
+
+    expect(inputs("version-file")).toEqual([
+      {
+        kind: "version-file",
+        path: join(project, ".nvmrc"),
+        present: false,
+        tool: "node",
+        selected: false,
+      },
+      {
+        kind: "version-file",
+        path: join(project, ".node-version"),
+        present: true,
+        tool: "node",
+        selected: true,
       },
     ]);
   });

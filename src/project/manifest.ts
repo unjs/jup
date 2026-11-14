@@ -14,7 +14,7 @@ import {
   isRuntime,
   isSupportedPackageManager,
   runsAsRuntime,
-  versionFileFor,
+  versionFilesFor,
   warnsOnMismatch,
 } from "../config/table.ts";
 import { applyEnvFile, envDisabled, envFlag, loadEnvFileFrom } from "./env.ts";
@@ -219,9 +219,9 @@ export function findProjectSpec(
   const tool = options?.tool;
   const field = tool === undefined ? "packageManager" : devEnginesFieldFor(tool);
   const fields = mutating ? MUTATING_MANIFEST_FIELDS : MANIFEST_FIELDS;
-  // §03.1 — `undefined` for every entry that declares no version file, which is
+  // §03.1 — empty for every entry that declares no version file, which is
   // every package manager, and the walk then costs exactly what it always did.
-  const versionFileSpec = tool === undefined || mutating ? undefined : versionFileFor(tool);
+  const versionFilesSpecs = tool === undefined || mutating ? [] : versionFilesFor(tool);
 
   let currentDir = "";
   let nextDir = initialCwd;
@@ -305,8 +305,16 @@ export function findProjectSpec(
     // §03.1 — before the manifest read, because that read `continue`s on ENOENT
     // and a directory holding a version file and no `package.json` is an
     // ordinary shape. Only the nearest one is kept, as with the env file above.
-    if (versionFileSpec !== undefined && versionFile === undefined) {
-      versionFile = loadVersionFile(currentDir, versionFileSpec) ?? undefined;
+    // When multiple version files are declared (e.g. .nvmrc > .node-version),
+    // they are probed in precedence order.
+    if (versionFilesSpecs.length > 0 && versionFile === undefined) {
+      for (const spec of versionFilesSpecs) {
+        const found = loadVersionFile(currentDir, spec);
+        if (found !== null) {
+          versionFile = found;
+          break;
+        }
+      }
     }
 
     // Step 3 — read the manifest.

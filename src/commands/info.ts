@@ -27,7 +27,7 @@ import {
   resolveSpecBin,
   storeCommandsFor,
   SUPPORTED_NAMES,
-  versionFileFor,
+  versionFilesFor,
 } from "../config/table.ts";
 import {
   DEFAULT_ENV_FILE_NAME,
@@ -691,8 +691,8 @@ function describeInputs(
   // `devEngines.runtime` beside it outranks it, and then the manifest already
   // listed below is the whole answer for that tool.
   const versionFiles = SUPPORTED_NAMES.flatMap((name) => {
-    const spec = versionFileFor(name);
-    return spec === undefined ? [] : [{ name, file: spec.path, target: toolTarget(cwd, name) }];
+    const specs = versionFilesFor(name);
+    return specs.map((spec) => ({ name, file: spec.path, target: toolTarget(cwd, name) }));
   });
   const pendingVersionFiles = new Set(versionFiles.map((entry) => entry.name));
 
