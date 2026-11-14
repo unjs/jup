@@ -12,7 +12,8 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { versionFileFor } from "../../src/config/table.ts";
+import { versionFileFor, versionFilesFor } from "../../src/config/table.ts";
+import { findProjectSpec } from "../../src/project/manifest.ts";
 import {
   loadVersionFile,
   readVersionFile,
@@ -144,15 +145,93 @@ describe("§03.1 version files", () => {
     });
   });
 
+  describe("loadVersionFile with .node-version", () => {
+    const spec = { path: ".node-version", format: NVM } as const;
+
+    it("returns null when .node-version is absent", () => {
+      expect(loadVersionFile(dir, spec)).toBeNull();
+    });
+
+    it("returns content and path when .node-version is present", () => {
+      writeFileSync(join(dir, ".node-version"), "22.21.1\n");
+      expect(loadVersionFile(dir, spec)).toEqual({
+        path: join(dir, ".node-version"),
+        content: "22.21.1\n",
+        format: NVM,
+      });
+    });
+  });
+
   describe("the table is the authority", () => {
-    it("declares the file on `node` and on nothing else", () => {
-      // §02.3 — one entry in the table, no code. If a second tool ever declares
-      // one, this is the only line that has to change.
+    it("declares candidate files on `node` in precedence order and on nothing else", () => {
       expect(versionFileFor("node")).toEqual({ path: ".nvmrc", format: "nvm" });
+      expect(versionFilesFor("node")).toEqual([
+        { path: ".nvmrc", format: "nvm" },
+        { path: ".node-version", format: "nvm" },
+      ]);
       for (const name of ["npm", "pnpm", "yarn", "bun", "deno", "aube", "nub", "upm", "vlt"]) {
         expect(versionFileFor(name)).toBeUndefined();
+        expect(versionFilesFor(name)).toEqual([]);
       }
       expect(versionFileFor("nonesuch")).toBeUndefined();
+      expect(versionFilesFor("nonesuch")).toEqual([]);
+    });
+  });
+
+  describe("§03.1 upward walk with .node-version", () => {
+    it("recognizes .node-version as a runtime pin when .nvmrc is absent", () => {
+      writeFileSync(join(dir, "package.json"), "{}\n");
+      writeFileSync(join(dir, ".node-version"), "22.21.1\n");
+
+      const result = findProjectSpec(dir, { tool: "node" });
+      expect(result.type).toBe("Found");
+      if (result.type === "Found") {
+        expect(result.target).toBe(join(dir, ".node-version"));
+        expect(result.hasPin).toBe(false);
+        expect(result.getSpec().range).toBe("22.21.1");
+      }
+    });
+
+    it("prefers .nvmrc over .node-version in the same directory", () => {
+      writeFileSync(join(dir, "package.json"), "{}\n");
+      writeFileSync(join(dir, ".nvmrc"), "20.10.0\n");
+      writeFileSync(join(dir, ".node-version"), "22.21.1\n");
+
+      const result = findProjectSpec(dir, { tool: "node" });
+      expect(result.type).toBe("Found");
+      if (result.type === "Found") {
+        expect(result.target).toBe(join(dir, ".nvmrc"));
+        expect(result.getSpec().range).toBe("20.10.0");
+      }
+    });
+
+    it("lets a nearer .node-version in a subdirectory win over a parent .nvmrc", () => {
+      const sub = join(dir, "sub");
+      mkdirSync(sub);
+      writeFileSync(join(dir, ".nvmrc"), "20.10.0\n");
+      writeFileSync(join(sub, ".node-version"), "22.21.1\n");
+
+      const result = findProjectSpec(sub, { tool: "node" });
+      expect(result.type).toBe("Found");
+      if (result.type === "Found") {
+        expect(result.target).toBe(join(sub, ".node-version"));
+        expect(result.getSpec().range).toBe("22.21.1");
+      }
+    });
+
+    it("allows devEngines.runtime to outrank .node-version", () => {
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ devEngines: { runtime: { name: "node", version: "24.x" } } }),
+      );
+      writeFileSync(join(dir, ".node-version"), "22.21.1\n");
+
+      const result = findProjectSpec(dir, { tool: "node" });
+      expect(result.type).toBe("Found");
+      if (result.type === "Found") {
+        expect(result.target).toBe(join(dir, "package.json"));
+        expect(result.getSpec().range).toBe("24.x");
+      }
     });
   });
 });

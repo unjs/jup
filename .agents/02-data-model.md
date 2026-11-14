@@ -81,6 +81,7 @@ for every entry without an opt-in, and lets `JUP_NPM_REGISTRY` mirror all of it.
   transparent: { default?: string, commands: string[][] },
   ranges: [range, ToolSpec][],            // ORDERED, matched last-to-first
   shimByDefault?: boolean,                // absent means true
+  versionFiles?: { path: string, format: "nvm" }[],
   versionFile?: { path: string, format: "nvm" },
 }
 ```
@@ -176,14 +177,16 @@ Dist-tags are a property of the newest distribution channel, so they always
 resolve against the **last** band's registry — `yarn@latest` consults
 `@yarnpkg/cli-dist`, even though `yarn@1.22.22` downloads from the `yarn` package.
 
-### `versionFile`
+### `versionFiles` / `versionFile`
 
-Names a file the tool's own ecosystem already writes the wanted version into
-(`.nvmrc` for node), so jup answers correctly in a repository that has never heard
+Names candidate files the tool's own ecosystem already writes the wanted version into
+(`.nvmrc` and `.node-version` for node, in precedence order), so jup answers correctly in a repository that has never heard
 of it. Rules:
 
 * It is per-entry table data. §03's walk does not know what it is looking for, so
   adding one is a data-only change.
+* When multiple files are declared (`versionFiles`), they are probed in declaration
+  order within each walked directory.
 * It is not a property of `kind`. `format` is the grammar of the contents, not
   the file name.
 * It ranks strictly below the manifest and strictly above §03.5's fallback, and

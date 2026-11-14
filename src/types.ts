@@ -323,6 +323,7 @@ export interface ToolDefinition {
    * strictly below the manifest — §03.1 consults it only where the manifest
    * declared nothing — and is never written back.
    */
+  versionFiles?: readonly VersionFileSpec[];
   versionFile?: VersionFileSpec;
   /**
    * §09.9 — how to ask this entry where **its own** dependency store lives.

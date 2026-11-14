@@ -61,8 +61,10 @@ package manager the variable was set to override.
 ### Version files
 
 Step 3 is skipped entirely — no `stat`, no open — unless the requested tool's
-entry declares a `versionFile`, which no package manager does. The nearest file
-found wins, it never stops the walk, and it is used **only** when the walk's
+entry declares a version file, which no package manager does. When multiple candidate
+version files are declared (such as `.nvmrc` and `.node-version` for `node`), they
+are probed in precedence order (`.nvmrc` > `.node-version`) within each directory walked.
+The nearest file found wins, it never stops the walk, and it is used **only** when the walk's
 result would otherwise be `NoSpec` or `NoProject` for the requested tool. A
 `Found` is never displaced: `devEngines.runtime` is jup's own field, and it is
 what a user edits to override a version file they are not free to delete.

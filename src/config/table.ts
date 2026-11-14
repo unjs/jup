@@ -552,11 +552,15 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // Required of a runtime (§02.3, §10.7), not a judgement call: `node` means
     // something outside a project on every machine that has ever had one.
     shimByDefault: false,
-    // §03.1 — the file node's own ecosystem already writes the wanted version
-    // into. `devEngines.runtime` outranks it and is the only field jup writes;
-    // this is read, in the directories §03.1 was walking anyway, and only where
-    // the manifest said nothing about the runtime.
-    versionFile: { path: ".nvmrc", format: "nvm" },
+    // §03.1 — the files node's own ecosystem already writes the wanted version
+    // into, in precedence order (.nvmrc > .node-version). `devEngines.runtime`
+    // outranks them and is the only field jup writes; these are read, in the
+    // directories §03.1 was walking anyway, and only where the manifest said
+    // nothing about the runtime.
+    versionFiles: [
+      { path: ".nvmrc", format: "nvm" },
+      { path: ".node-version", format: "nvm" },
+    ],
     // One band. See {@link NODE_TARGETS} for why the map has not had to move.
     ranges: [["*", { ...NODE_BAND, targets: NODE_TARGETS }]],
   },
@@ -605,13 +609,24 @@ export function warnsOnMismatch(name: string): boolean {
 }
 
 /**
+ * §03.1 — the candidate version files this entry declares, in precedence order.
+ */
+export function versionFilesFor(name: string): readonly VersionFileSpec[] {
+  const definition = getDefinition(name);
+  if (definition === undefined) return [];
+  if (definition.versionFiles !== undefined) return definition.versionFiles;
+  if (definition.versionFile !== undefined) return [definition.versionFile];
+  return [];
+}
+
+/**
  * §03.1 — the version file this entry declares, if it declares one.
  *
- * The only reader of the field, and the reason §03.1 can consult `.nvmrc`
- * without the string `.nvmrc` appearing outside this file.
+ * The reader of the primary version file, and the reason §03.1 can consult
+ * `.nvmrc` without the string `.nvmrc` appearing outside this file.
  */
 export function versionFileFor(name: string): VersionFileSpec | undefined {
-  return getDefinition(name)?.versionFile;
+  return versionFilesFor(name)[0];
 }
 
 /**
