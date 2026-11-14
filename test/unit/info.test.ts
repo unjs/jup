@@ -914,6 +914,25 @@ describe("buildReport — the project inputs (§09.9)", () => {
     ]);
   });
 
+  it("reports a version file selected from an ancestor directory", async () => {
+    await manifest({ packageManager: "pnpm@11.1.2" });
+    writeFileSync(join(project, ".node-version"), "22.21.1\n");
+    const nested = join(project, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+    await manifest({ name: "app", packageManager: "pnpm@11.1.2" }, nested);
+    cwdSpy.mockReturnValue(nested);
+
+    const versionInputs = inputs("version-file");
+    const selected = versionInputs.find((input) => input.selected);
+    expect(selected).toEqual({
+      kind: "version-file",
+      path: join(project, ".node-version"),
+      present: true,
+      tool: "node",
+      selected: true,
+    });
+  });
+
   it("stops selecting the version file when devEngines.runtime speaks (§03.1)", async () => {
     await manifest({ devEngines: { runtime: { name: "node", version: "22.x" } } });
     writeFileSync(join(project, VERSION_FILE), "20.11.0\n");

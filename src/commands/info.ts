@@ -695,11 +695,12 @@ function describeInputs(
     return specs.map((spec) => ({ name, file: spec.path, target: toolTarget(cwd, name) }));
   });
   const pendingVersionFiles = new Set(versionFiles.map((entry) => entry.name));
+  const versionTargets = versionFiles.map((entry) => entry.target);
 
   const envNames = envFileNames();
   let envSearchOver = envNames.length === 0;
 
-  for (const dir of walkedDirectories(cwd, project, envFile)) {
+  for (const dir of walkedDirectories(cwd, project, envFile, versionTargets)) {
     // §03.1 step 1 — a vendored package speaks for nothing, so its files are not
     // inputs either.
     if (NODE_MODULES_RE.test(dir)) continue;
@@ -802,6 +803,7 @@ function walkedDirectories(
   cwd: string,
   project: ProjectInfo,
   envFile: EnvFileInfo | null,
+  versionTargets: (string | null)[] = [],
 ): string[] {
   const chain: string[] = [];
   let currentDir = "";
@@ -816,6 +818,7 @@ function walkedDirectories(
     0,
     project.manifest === null ? 0 : chain.indexOf(dirname(project.manifest)),
     envFile === null ? 0 : chain.indexOf(dirname(envFile.path)),
+    ...versionTargets.map((target) => (target === null ? -1 : chain.indexOf(dirname(target)))),
   );
   return chain.slice(0, end + 1);
 }
