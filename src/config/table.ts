@@ -190,7 +190,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.18.0",
+    default: "12.21.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -435,7 +435,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // file. Being a package manager is not what earns a place in the default shim
   // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
-    default: "0.10.0",
+    default: "0.11.1",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
     // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
     // reached under its own name as `nubx` — fetches into a throwaway
@@ -492,7 +492,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // never reads a shebang. Accepted until upstream declares `"type": "module"`.
   vlt: {
     default:
-      "1.7.0+sha512.325626e907680f8502998ad59216267cd332b3541270bcc0fa28e1cf901ef0cbf722d0c91744ea9a2059fcbc3f078757c41901c7a442fbff07c5d32eca0eff47",
+      "1.8.0+sha512.4d5e82170891c39dfe1feb28f7a2f854f93c3acdeacf3a23942d5d31ee64c3dbc18b3ed43bad9cd4a5bed4f4ab8fc53a17c4ac84939834d6c557783871d9be51",
     fetchLatestFrom: { type: "npm", package: "vlt" },
     // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
     // `vlt x`, and reached under its own name as `vlx` — installs the package
@@ -525,7 +525,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // The current LTS line, bare per §02.3: node's artifact is per-host, so
     // there is no portable digest to pin and the registry signature over this
     // host's own `node-<target>` is what clears §06.1's tier.
-    default: "26.13.0",
+    default: "26.13.1",
     // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
     //
     // The `node` package's dist-tags are `v4-lts` … `v20-lts` plus `latest`:
@@ -543,7 +543,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // `lts` tag naming another would install a second Node. Bare, for the reason
     // `default` is bare — node's artifact is per-host, so there is no portable
     // digest.
-    tags: { lts: "26.13.0" },
+    tags: { lts: "26.13.1" },
     fetchLatestFrom: { type: "npm", package: "node" },
     // Empty, and not an oversight: §01.4's transparency exists to let a
     // bootstrapping command escape §03.5's enforcement, and a runtime is never

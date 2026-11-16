@@ -1025,7 +1025,7 @@ describe("nub — §03.1's fourth per-host entry", () => {
     // beside it is the invariant a refresh must never break, and it is the one
     // this row is actually about.
     expect(parse(DEFINITIONS.nub!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.nub!.default).toBe("0.10.0");
+    expect(DEFINITIONS.nub!.default).toBe("0.11.1");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {
