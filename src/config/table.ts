@@ -168,7 +168,7 @@ const PNPM_EXE_TARGETS = {
 export const DEFINITIONS: Record<string, ToolDefinition> = {
   npm: {
     default:
-      "12.2.2+sha512.2a09606d9c9a71fee31fe147b8d46a56e0b3422f15848d9aec9f3b231e3716c3d3b99a065a62175c6759b4150e03bf6fc0bf8825112a511573ba903b3ec41370",
+      "12.2.3+sha512.a2f98d4517bbe89bdca7513a88e78f43a1fd66be1730eaea81f69e18d86d46f3f75d29762e8fdaf42d4de7f8d194b2ebb2a09e9bfa268067591e96796baca7d5",
     fetchLatestFrom: { type: "npm", package: "npm" },
     transparent: {
       commands: [["npm", "init"], ["npx"]],
@@ -190,7 +190,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   },
 
   pnpm: {
-    default: "12.18.0",
+    default: "12.23.0",
     fetchLatestFrom: { type: "npm", package: "pnpm" },
     transparent: {
       commands: [["pnpm", "init"], ["pnpx"], ["pnpm", "dlx"]],
@@ -257,7 +257,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // major but remain separate fields. The SHA-1 digest covers the signed npm
     // tarball and is refreshed by `scripts/refresh-table.mjs`.
     default:
-      "4.18.1+sha512.107f80e13c40b41597284d03190c56f41a3d72b5c72c9ef799fc634d026ebfc5e89cd5964e97a2f014392637331c9354f4644e4f27303059fc88ebd12195d470",
+      "4.19.0+sha512.8e3bf83483e5cfdef8094c4621d403b8aee645bd5fdba04521d90292e15c33feb82d3f6d4d1563eff52a12ff5b701f03285bed530ebcd02568ef56c406c1e3b8",
     // §04.6 — the package `default` above is refreshed from, and the one the
     // band that covers it downloads. Corepack asks the legacy `yarn` package,
     // whose `latest` is Classic's 1.22.x: self-consistent for its Classic
@@ -265,7 +265,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     fetchLatestFrom: { type: "npm", package: "@yarnpkg/cli-dist" },
     transparent: {
       default:
-        "4.18.1+sha512.107f80e13c40b41597284d03190c56f41a3d72b5c72c9ef799fc634d026ebfc5e89cd5964e97a2f014392637331c9354f4644e4f27303059fc88ebd12195d470",
+        "4.19.0+sha512.8e3bf83483e5cfdef8094c4621d403b8aee645bd5fdba04521d90292e15c33feb82d3f6d4d1563eff52a12ff5b701f03285bed530ebcd02568ef56c406c1e3b8",
       commands: [
         ["yarn", "init"],
         ["yarn", "dlx"],
@@ -308,7 +308,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // §02.4 — the entries the table's per-host machinery exists for;
   // `BUN_BAND` above explains the launcher-versus-artifact split they share.
   bun: {
-    default: "1.4.4",
+    default: "1.4.5",
     fetchLatestFrom: { type: "npm", package: "bun" },
     transparent: {
       commands: [["bun", "init"], ["bun", "create"], ["bun", "x"], ["bunx"]],
@@ -395,7 +395,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // part in a bare `jup enable`: `aube`, `aubr` and `aubx` are names that mean
   // nothing outside a project, which is exactly what §10.7's default set is for.
   aube: {
-    default: "2.10.0",
+    default: "2.10.1",
     fetchLatestFrom: { type: "npm", package: "@endevco/aube" },
     // `aube init` scaffolds a `package.json` and `aube create` runs a `create-*`
     // starter kit through dlx; both are how a project comes to exist, so §03.5
@@ -435,7 +435,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // file. Being a package manager is not what earns a place in the default shim
   // set; meaning nothing outside a project is, and `nub` means plenty (§10.7).
   nub: {
-    default: "0.10.0",
+    default: "0.11.2",
     fetchLatestFrom: { type: "npm", package: "@nubjs/nub" },
     // `nub init` scaffolds a project, and `nub dlx` — spelled `nub x`, and
     // reached under its own name as `nubx` — fetches into a throwaway
@@ -492,7 +492,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
   // never reads a shebang. Accepted until upstream declares `"type": "module"`.
   vlt: {
     default:
-      "1.7.0+sha512.325626e907680f8502998ad59216267cd332b3541270bcc0fa28e1cf901ef0cbf722d0c91744ea9a2059fcbc3f078757c41901c7a442fbff07c5d32eca0eff47",
+      "1.8.2+sha512.2809314fd52bd15efcffc4da71219e6d60ab6aeabb39e9bb00d980ecba54313ab5029eedd1fab7dca9ca3137616df0ab1770a2ab0fad50f58def95c5ec5bd377",
     fetchLatestFrom: { type: "npm", package: "vlt" },
     // `vlt init` and `vlt create` scaffold a project. `vlt exec` — spelled
     // `vlt x`, and reached under its own name as `vlx` — installs the package
@@ -525,7 +525,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // The current LTS line, bare per §02.3: node's artifact is per-host, so
     // there is no portable digest to pin and the registry signature over this
     // host's own `node-<target>` is what clears §06.1's tier.
-    default: "26.13.0",
+    default: "26.13.1",
     // §04.1 step 3 — `lts` is ours to answer, because npm's tags cannot.
     //
     // The `node` package's dist-tags are `v4-lts` … `v20-lts` plus `latest`:
@@ -543,7 +543,7 @@ export const DEFINITIONS: Record<string, ToolDefinition> = {
     // `lts` tag naming another would install a second Node. Bare, for the reason
     // `default` is bare — node's artifact is per-host, so there is no portable
     // digest.
-    tags: { lts: "26.13.0" },
+    tags: { lts: "26.13.1" },
     fetchLatestFrom: { type: "npm", package: "node" },
     // Empty, and not an oversight: §01.4's transparency exists to let a
     // bootstrapping command escape §03.5's enforcement, and a runtime is never

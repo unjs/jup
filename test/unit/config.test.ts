@@ -127,7 +127,7 @@ describe("registry table — shape (§02.5)", () => {
   it("puts yarn's default on the supported major, hash-pinned (§02.5)", () => {
     const yarn = DEFINITIONS.yarn!;
     const supported =
-      "4.18.1+sha512.107f80e13c40b41597284d03190c56f41a3d72b5c72c9ef799fc634d026ebfc5e89cd5964e97a2f014392637331c9354f4644e4f27303059fc88ebd12195d470";
+      "4.19.0+sha512.8e3bf83483e5cfdef8094c4621d403b8aee645bd5fdba04521d90292e15c33feb82d3f6d4d1563eff52a12ff5b701f03285bed530ebcd02568ef56c406c1e3b8";
     expect(yarn.default).toBe(supported);
     expect(yarn.transparent.default).toBe(supported);
     // §06.1's asymmetry is gone, and the classic line is what it is gone *from*.
@@ -888,7 +888,7 @@ describe("aube — §03.1's third per-host entry", () => {
     // The literal is stamped by `scripts/refresh-table.mjs`; see nub's row below
     // for what it is for and why it is not derived from the table.
     expect(parse(DEFINITIONS.aube!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.aube!.default).toBe("2.10.0");
+    expect(DEFINITIONS.aube!.default).toBe("2.10.1");
   });
 
   it("gives all three names one file, for argv[0] dispatch", () => {
@@ -1025,7 +1025,7 @@ describe("nub — §03.1's fourth per-host entry", () => {
     // beside it is the invariant a refresh must never break, and it is the one
     // this row is actually about.
     expect(parse(DEFINITIONS.nub!.default)?.build).toEqual([]);
-    expect(DEFINITIONS.nub!.default).toBe("0.10.0");
+    expect(DEFINITIONS.nub!.default).toBe("0.11.2");
   });
 
   it("gives `nub` and `nubx` one file, for argv[0] dispatch", () => {
